@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ProcedureBrowser</class>
+ <widget class="QWidget" name="ProcedureBrowser">
+  <property name="windowTitle">
+   <string>Script browser</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QTreeWidget" name="tree"/>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonLayout">
+     <item>
+      <widget class="QPushButton" name="open_button">
+       <property name="text">
+        <string>Open In Editor</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="run_button">
+       <property name="text">
+        <string>Run</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

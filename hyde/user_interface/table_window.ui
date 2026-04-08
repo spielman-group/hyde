@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TableWindowWidget</class>
+ <widget class="QWidget" name="TableWindowWidget">
+  <layout class="QVBoxLayout" name="table_layout">
+   <item>
+    <layout class="QHBoxLayout" name="editor_layout">
+     <item>
+      <widget class="QLabel" name="selection_label">
+       <property name="text">
+        <string>0R X 0C</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="edit_bar"/>
+     </item>
+     <item>
+      <widget class="QToolButton" name="options_button">
+       <property name="text">
+        <string>...</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QVBoxLayout" name="table_frame_layout"/>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

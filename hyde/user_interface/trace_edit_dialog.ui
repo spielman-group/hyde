@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TraceEditDialog</class>
+ <widget class="QDialog" name="TraceEditDialog">
+  <property name="windowTitle">
+   <string>Modify Trace Appearance</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="mainLayout">
+     <item>
+      <widget class="QGroupBox" name="traces_group">
+       <property name="title">
+        <string>Traces</string>
+       </property>
+       <layout class="QVBoxLayout" name="tracesLayout">
+        <item>
+         <widget class="QComboBox" name="trace_combo"/>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="trace_filter_edit">
+          <property name="placeholderText">
+           <string>Trace name filter</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+     <item>
+      <widget class="QGroupBox" name="properties_group">
+       <property name="title">
+        <string>Properties</string>
+       </property>
+       <layout class="QFormLayout" name="propertiesForm">
+        <item row="0" column="0">
+         <widget class="QLabel" name="labelName">
+          <property name="text">
+           <string>Name</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLineEdit" name="label_edit"/>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="labelColor">
+          <property name="text">
+           <string>Color</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="color_combo"/>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="labelHide">
+          <property name="text">
+           <string>Hide trace</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QCheckBox" name="visible_checkbox"/>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="labelMode">
+          <property name="text">
+           <string>Mode</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QComboBox" name="mode_combo"/>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="labelMarker">
+          <property name="text">
+           <string>Marker</string>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QComboBox" name="marker_combo"/>
+        </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="labelSize">
+          <property name="text">
+           <string>Size</string>
+          </property>
+         </widget>
+        </item>
+        <item row="5" column="1">
+         <widget class="QDoubleSpinBox" name="marker_size_spin"/>
+        </item>
+        <item row="6" column="0">
+         <widget class="QLabel" name="labelThickness">
+          <property name="text">
+           <string>Thickness</string>
+          </property>
+         </widget>
+        </item>
+        <item row="6" column="1">
+         <widget class="QDoubleSpinBox" name="line_width_spin"/>
+        </item>
+        <item row="7" column="0">
+         <widget class="QLabel" name="labelGaps">
+          <property name="text">
+           <string>Gaps</string>
+          </property>
+        </widget>
+        </item>
+        <item row="7" column="1">
+         <widget class="QCheckBox" name="gaps_checkbox"/>
+        </item>
+       </layout>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow">
+     <item>
+      <widget class="QPushButton" name="do_it_button">
+       <property name="text">
+        <string>Do It</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="to_cmd_button">
+       <property name="text">
+        <string>To Cmd Line</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="to_clip_button">
+       <property name="text">
+        <string>To Clip</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="traceSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="cancel_button">
+       <property name="text">
+        <string>Cancel</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

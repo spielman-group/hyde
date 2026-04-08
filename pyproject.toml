@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+zip-safe = false
+include-package-data = true
+
+[tool.setuptools.packages]
+find = {namespaces = false}
+
+[tool.setuptools.package-data]
+hyde = ["*.json", "*.svg", "user_interface/*.ui"]
+
+[project]
+name = "hyde"
+description = "Pythonic analysis and plotting application for the labscript suite"
+authors = [
+    {name = "The labscript suite community", email = "labscriptsuite@googlegroups.com"},
+]
+keywords = ["analysis", "plotting", "labscript suite"]
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "desktop-app>=0.1.2",
+    "h5py",
+    "IPython",
+    "labscript_utils>=3.4.2",
+    "lmfit",
+    "matplotlib",
+    "numpy",
+    "pandas>=1.5",
+    "qtutils>=4.1.3",
+    "zprocess>=2.18.0",
+]
+dynamic = ["version"]
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[project.scripts]
+hyde = "desktop_app:entry_point"
+
+[project.gui-scripts]
+hyde-gui = "desktop_app:entry_point"
+
+[tool.setuptools.dynamic]
+version = {attr = "hyde.__version__"}

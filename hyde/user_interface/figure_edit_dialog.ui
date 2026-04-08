@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FigureEditDialog</class>
+ <widget class="QDialog" name="FigureEditDialog">
+  <property name="windowTitle">
+   <string>Modify Axis</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="topLayout">
+     <item>
+      <widget class="QLabel" name="axis_name_label">
+       <property name="text">
+        <string>Axis:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="axis_combo"/>
+     </item>
+     <item>
+      <widget class="QCheckBox" name="live_update_checkbox">
+       <property name="text">
+        <string>Live Update</string>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QTabWidget" name="tabs">
+     <widget class="QWidget" name="axis_tab">
+      <attribute name="title">
+       <string>Axis</string>
+      </attribute>
+      <layout class="QFormLayout" name="axisForm">
+       <item row="0" column="0">
+        <widget class="QLabel" name="scale_label">
+         <property name="text">
+          <string>Scale</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QComboBox" name="scale_combo"/>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="grid_label">
+         <property name="text">
+          <string>Grid</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QCheckBox" name="grid_checkbox"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="ticks_tab">
+      <attribute name="title">
+       <string>Auto/Man Ticks</string>
+      </attribute>
+      <layout class="QFormLayout" name="ticksForm">
+       <item row="0" column="0">
+        <widget class="QLabel" name="major_ticks_label">
+         <property name="text">
+          <string>Major Ticks</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLineEdit" name="major_ticks_edit"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="ticks_grid_tab">
+      <attribute name="title">
+       <string>Ticks and Grids</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="ticksGridLayout">
+       <item>
+        <widget class="QCheckBox" name="minor_grid_checkbox">
+         <property name="text">
+          <string>Show Minor Grid</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tick_options_tab">
+      <attribute name="title">
+       <string>Tick Options</string>
+      </attribute>
+      <layout class="QFormLayout" name="tickOptionsForm">
+       <item row="0" column="0">
+        <widget class="QLabel" name="tick_rotation_label">
+         <property name="text">
+          <string>Tick Rotation</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLineEdit" name="tick_rotation_edit"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="axis_label_tab">
+      <attribute name="title">
+       <string>Axis Label</string>
+      </attribute>
+      <layout class="QFormLayout" name="labelForm">
+       <item row="0" column="0">
+        <widget class="QLabel" name="title_label">
+         <property name="text">
+          <string>Title</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLineEdit" name="title_edit"/>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="axis_label">
+         <property name="text">
+          <string>Label</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QLineEdit" name="axis_label_edit"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="label_options_tab">
+      <attribute name="title">
+       <string>Label Options</string>
+      </attribute>
+      <layout class="QFormLayout" name="labelOptionsForm">
+       <item row="0" column="0">
+        <widget class="QLabel" name="font_size_label">
+         <property name="text">
+          <string>Font Size</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLineEdit" name="font_size_edit"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="range_tab">
+      <attribute name="title">
+       <string>Axis Range</string>
+      </attribute>
+      <layout class="QFormLayout" name="rangeForm">
+       <item row="0" column="0">
+        <widget class="QLabel" name="minimum_label">
+         <property name="text">
+          <string>Min</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLineEdit" name="minimum_edit"/>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="maximum_label">
+         <property name="text">
+          <string>Max</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QLineEdit" name="maximum_edit"/>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow">
+     <item>
+      <widget class="QPushButton" name="do_it_button">
+       <property name="text">
+        <string>Do It</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="to_cmd_button">
+       <property name="text">
+        <string>To Cmd Line</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="to_clip_button">
+       <property name="text">
+        <string>To Clip</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="axisButtonSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="help_button">
+       <property name="text">
+        <string>Help</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="cancel_button">
+       <property name="text">
+        <string>Cancel</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
