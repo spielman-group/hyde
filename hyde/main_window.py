@@ -588,9 +588,12 @@ class PanelWindow(QtWidgets.QMdiSubWindow):
 
 
 class TableWindow(QtWidgets.QMdiSubWindow):
+    close_requested = QtCore.Signal(str)
+
     def __init__(self, table_snapshot, edit_callback, delete_callback, parent=None):
         super().__init__(parent)
         self.table_id = table_snapshot["id"]
+        self._allow_close = False
         self.ui = load_ui("table_window.ui")
         self.selection_label = self.ui.selection_label
         self.edit_bar = self.ui.edit_bar
@@ -676,6 +679,16 @@ class TableWindow(QtWidgets.QMdiSubWindow):
             if object_name not in names:
                 names.append(object_name)
         return names
+
+    def close_from_sync(self):
+        self._allow_close = True
+        self.close()
+
+    def closeEvent(self, event):
+        if self._allow_close:
+            return super().closeEvent(event)
+        self.close_requested.emit(self.table_id)
+        event.ignore()
 
 
 class FigureWindow(QtWidgets.QMdiSubWindow):
@@ -1091,7 +1104,7 @@ class CloseFigureDialog(QtWidgets.QDialog):
         QtWidgets.QMessageBox.information(
             self,
             "Close Window",
-            "Save stores a replayable figure script in the current Hyde project. No Save closes the figure without writing a script.",
+            "Save stores a replayable Hyde function in procedures/master.py. No Save closes the window without writing a function.",
         )
 
 
@@ -1545,6 +1558,7 @@ class HydeMainWindow(QtWidgets.QMainWindow):
                     self.app.edit_table_value,
                     self.app.delete_table_values,
                 )
+                window.close_requested.connect(self.app.close_table_requested)
                 self.table_windows[table_id] = window
                 self.mdi.addSubWindow(window)
                 self._restore_subwindow_geometry(f"table:{table_id}", window)
@@ -1553,7 +1567,7 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         for table_id in list(self.table_windows):
             if table_id not in active_ids:
                 window = self.table_windows.pop(table_id)
-                window.close()
+                window.close_from_sync()
 
     def current_figure_id(self):
         active = self.mdi.activeSubWindow()

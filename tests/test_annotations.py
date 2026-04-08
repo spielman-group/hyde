@@ -17,5 +17,5 @@ def test_discover_script_entries(tmp_path):
     )
     entries = discover_script_entries(script)
     assert [entry.kind for entry in entries] == ["figure", "fit_function"]
+    assert entries[0].parameters == ("x", "amplitude")
     assert entries[1].parameters == ("amp", "center", "sigma")
-

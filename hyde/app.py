@@ -115,8 +115,13 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
             self.script_entries = self.project.scan_scripts()
         self.window.apply_snapshot(snapshot, self.script_entries)
 
-    def execute_command(self, command, echo=True, record_history=True, mark_dirty=True):
-        request_id = self.controller.execute(command, echo=echo, record_history=record_history)
+    def execute_command(self, command, echo=True, record_history=True, mark_dirty=True, silent=False):
+        request_id = self.controller.execute(
+            command,
+            echo=echo,
+            record_history=record_history,
+            silent=silent,
+        )
         if mark_dirty:
             self._dirty_request_ids.add(request_id)
         return request_id
@@ -136,6 +141,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         show_in_terminal=True,
         echo=True,
         record_history=True,
+        silent=False,
     ):
         if show_in_terminal and not execute:
             self.window.terminal.insert_command(command)
@@ -145,6 +151,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
                 echo=echo,
                 record_history=record_history,
                 mark_dirty=record_history,
+                silent=silent,
             )
 
     def new_project(self):
@@ -514,6 +521,18 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
     def run_script_entry(self, path, function_name):
         if self.project is None:
             return
+        entry = next(
+            (
+                item
+                for item in self.script_entries
+                if item.path == path and item.function_name == function_name
+            ),
+            None,
+        )
+        if entry is not None and Path(path).resolve() == self.project.master_path.resolve():
+            arguments = ", ".join(entry.parameters)
+            self.generated_command(f"{function_name}({arguments})")
+            return
         relative_path = os.path.relpath(path, self.project_path)
         self.generated_command(f"run_hyde_script({relative_path!r}, entry_point={function_name!r})")
 
@@ -563,11 +582,61 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
     def _write_figure_script_and_close(self, figure_id, function_name, response):
         if self.project is None:
             return
-        script_path = self.project.root / "figures" / f"{function_name}.py"
-        script_path.write_text(response["script_source"], encoding="utf-8")
-        self.generated_command(f"close_figure({figure_id!r})", show_in_terminal=False, echo=False)
+        self.project.upsert_master_entry(function_name, response["script_source"])
+        request_id = self.controller.send("set_project_root", self.project_path)
+        self.pending_callbacks[request_id] = lambda _response: self._finalize_saved_master_entry(
+            f"close_figure({figure_id!r})"
+        )
+
+    def close_table_requested(self, table_id):
+        if table_id not in self.window.table_windows:
+            return
+        snapshot = next((item for item in (self.last_snapshot or {}).get("tables", []) if item["id"] == table_id), None)
+        suggested_name = snapshot["title"] if snapshot is not None else table_id
+        suggested_name = re.sub(r"\W|^(?=\d)", "_", suggested_name) or "table"
+        dialog = CloseFigureDialog(suggested_name, self.window)
+        if self.project is not None:
+            dialog.save_selected.connect(
+                lambda function_name: self._request_table_script_and_close(table_id, function_name)
+            )
+        else:
+            dialog.save_button.setEnabled(False)
+        dialog.discard_selected.connect(
+            lambda: self.generated_command(f"close_table({table_id!r})", show_in_terminal=False, echo=False)
+        )
+        dialog.exec()
+
+    def _request_table_script_and_close(self, table_id, function_name):
+        if self.project is None:
+            return
+        if not function_name.strip():
+            return
+        request_id = self.controller.send(
+            "get_table_script",
+            {"table_id": table_id, "function_name": function_name.strip()},
+        )
+        self.pending_callbacks[request_id] = lambda response: self._write_table_script_and_close(
+            table_id, function_name.strip(), response
+        )
+
+    def _write_table_script_and_close(self, table_id, function_name, response):
+        if self.project is None:
+            return
+        self.project.upsert_master_entry(function_name, response["script_source"])
+        request_id = self.controller.send("set_project_root", self.project_path)
+        self.pending_callbacks[request_id] = lambda _response: self._finalize_saved_master_entry(
+            f"close_table({table_id!r})"
+        )
+
+    def _finalize_saved_master_entry(self, close_command):
         self.script_entries = self.project.scan_scripts()
         self._update_ui(self.last_snapshot or {"namespace_summary": [], "figures": [], "tables": []})
+        self.generated_command(
+            close_command,
+            show_in_terminal=False,
+            echo=False,
+            record_history=False,
+        )
 
     def _execute_generated_multiline(self, command, dialog):
         if not command.strip():
@@ -601,6 +670,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
                     show_in_terminal=False,
                     echo=False,
                     record_history=False,
+                    silent=True,
                 )
             return
 
@@ -626,6 +696,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
                     show_in_terminal=False,
                     echo=False,
                     record_history=False,
+                    silent=True,
                 )
             return
 
@@ -641,6 +712,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
             show_in_terminal=False,
             echo=False,
             record_history=False,
+            silent=True,
         )
 
     def _suppressed_command(self, command):

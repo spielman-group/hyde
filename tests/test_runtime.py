@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
+from hyde.project import HydeProject
 from hyde.runtime import ExecutionRuntime
 
 
@@ -57,6 +58,22 @@ def test_runtime_can_execute_without_recording_history():
 
     assert runtime.namespace["alpha_value"] == 1
     assert runtime.snapshot()["history"] == []
+
+
+def test_runtime_silent_execute_suppresses_expression_output():
+    runtime = ExecutionRuntime()
+    runtime.execute("wave('a', [1.0, 2.0, 3.0]); display('a', figure_name='fig')", echo=False)
+
+    response = runtime.execute(
+        "edit_figure('fig', xgrid=True)",
+        echo=False,
+        record_history=False,
+        silent=True,
+    )
+
+    assert response["success"] is True
+    assert response["stdout"] == ""
+    assert runtime.figures["fig"]["axes"]["xgrid"] is True
 
 
 def test_runtime_marker_only_trace_source_uses_linestyle_none():
@@ -306,3 +323,33 @@ def test_runtime_figure_source_uses_all_trace_variables_as_arguments():
     source = runtime.figure_replay_source("fig_ab", "figure_ab")
 
     assert "def figure_ab(a, b):" in source
+
+
+def test_runtime_loads_saved_master_figure_and_table_entries_into_namespace(tmp_path):
+    project = HydeProject(tmp_path / "saved_entries.hy")
+    project.create()
+    runtime = ExecutionRuntime()
+    runtime.execute(
+        "wave('a', np.array([1.0, 2.0, 3.0])); "
+        "wave('b', np.array([4.0, 5.0, 6.0])); "
+        "display('b', x='a', figure_name='fig_ab'); "
+        "open_table('a', 'b', title='table_ab')",
+        echo=False,
+    )
+    project.upsert_master_entry("figure_ab", runtime.figure_replay_source("fig_ab", "figure_ab"))
+    project.upsert_master_entry("table_ab", runtime.table_replay_source("table_ab", "table_ab"))
+
+    runtime.set_project_root(project.root)
+
+    assert callable(runtime.namespace["figure_ab"])
+    assert callable(runtime.namespace["table_ab"])
+
+    runtime.execute("close_figure('fig_ab'); close_table('table_ab')", echo=False, record_history=False)
+    response = runtime.execute("figure_ab(a, b); table_ab(a, b)", echo=False)
+
+    assert response["success"] is True
+    assert "figure_ab" in runtime.figures
+    assert "table_ab" in runtime.tables
+    assert runtime.figures["figure_ab"]["traces"][0]["x_name"] == "a"
+    assert runtime.figures["figure_ab"]["traces"][0]["y_name"] == "b"
+    assert runtime.tables["table_ab"]["objects"] == ["a", "b"]

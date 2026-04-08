@@ -23,6 +23,7 @@ def main():
                         payload["code"],
                         echo=payload.get("echo", True),
                         record_history=payload.get("record_history", True),
+                        silent=payload.get("silent", False),
                     )
                 else:
                     response = runtime.execute(payload)
@@ -46,6 +47,14 @@ def main():
                 response = {
                     "success": True,
                     "script_source": runtime.figure_replay_source(figure_id, function_name),
+                    "snapshot": runtime.snapshot(),
+                }
+            elif command == "get_table_script":
+                table_id = payload["table_id"]
+                function_name = payload["function_name"]
+                response = {
+                    "success": True,
+                    "script_source": runtime.table_replay_source(table_id, function_name),
                     "snapshot": runtime.snapshot(),
                 }
             elif command == "quit":

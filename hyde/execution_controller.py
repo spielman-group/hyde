@@ -31,8 +31,11 @@ class ExecutionController(QtCore.QObject):
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
 
-    def execute(self, code, echo=True, record_history=True):
-        return self.send("execute", {"code": code, "echo": echo, "record_history": record_history})
+    def execute(self, code, echo=True, record_history=True, silent=False):
+        return self.send(
+            "execute",
+            {"code": code, "echo": echo, "record_history": record_history, "silent": silent},
+        )
 
     def send(self, command, payload=None):
         request_id = uuid.uuid4().hex

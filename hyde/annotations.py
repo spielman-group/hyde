@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,8 +16,16 @@ HYDE_DECORATOR_NAMES = {
 
 def _decorate(kind):
     def decorator(function):
-        function.__hyde_kind__ = kind
-        return function
+        @functools.wraps(function)
+        def wrapped(*args, **kwargs):
+            result = function(*args, **kwargs)
+            hook = function.__globals__.get("_hyde_register_result")
+            if callable(hook):
+                return hook(kind, function.__name__, result)
+            return result
+
+        wrapped.__hyde_kind__ = kind
+        return wrapped
 
     return decorator
 
@@ -66,7 +75,12 @@ def discover_script_entries(path: str | Path):
                     kind=kind,
                     title=node.name.replace("_", " ").title(),
                     line_number=node.lineno,
-                    parameters=tuple(argument.arg for argument in node.args.args[1:]),
+                    parameters=tuple(
+                        argument.arg
+                        for argument in (
+                            node.args.args[1:] if kind == "fit_function" else node.args.args
+                        )
+                    ),
                 )
             )
             break

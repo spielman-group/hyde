@@ -58,6 +58,7 @@ class ExecutionRuntime:
             "wave": self.wave,
             "display": self.display,
             "open_table": self.open_table,
+            "close_table": self.close_table,
             "append_to_graph": self.append_to_graph,
             "delete_object": self.delete_object,
             "show_where_used": self.show_where_used,
@@ -69,6 +70,7 @@ class ExecutionRuntime:
             "record_incoming_shot": self.record_incoming_shot,
             "run_hyde_script": self.run_hyde_script,
             "_last_graph": self.last_graph_id,
+            "_hyde_register_result": self._register_decorated_result,
         }
         self.namespace.clear()
         self.namespace.update(helpers)
@@ -85,7 +87,7 @@ class ExecutionRuntime:
         self.project_root = str(project_root)
         self._load_master_procedure()
 
-    def execute(self, code, echo=True, record_history=True):
+    def execute(self, code, echo=True, record_history=True, silent=False):
         output = io.StringIO()
         error = None
         if record_history:
@@ -94,7 +96,7 @@ class ExecutionRuntime:
             import contextlib
 
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-                result = self.shell.run_cell(code)
+                result = self.shell.run_cell(code, store_history=record_history, silent=silent)
         except Exception:  # pragma: no cover - IPython normally traps this
             success = False
             error = traceback.format_exc()
@@ -173,7 +175,7 @@ class ExecutionRuntime:
         return tracked_array
 
     def open_table(self, *names, title=None):
-        names = [str(name) for name in names]
+        names = [self._table_object_name(name) for name in names]
         table_id = title or "_".join(names) or "table"
         snapshot = {
             "id": table_id,
@@ -308,6 +310,9 @@ class ExecutionRuntime:
 
     def close_figure(self, figure_id):
         self.figures.pop(figure_id, None)
+
+    def close_table(self, table_id):
+        self.tables.pop(table_id, None)
 
     def save_graphics(
         self,
@@ -479,6 +484,28 @@ class ExecutionRuntime:
         figure = self.figures[figure_id]
         return self._figure_function_source(figure, function_name)
 
+    def table_replay_source(self, table_id, function_name):
+        table = self.tables[table_id]
+        arguments = ", ".join(table["objects"])
+        if arguments:
+            arguments = f"({arguments})"
+        else:
+            arguments = "()"
+        object_arguments = ", ".join(table["objects"])
+        call_arguments = object_arguments
+        if call_arguments:
+            call_arguments = f"{call_arguments}, title={table['id']!r}"
+        else:
+            call_arguments = f"title={table['id']!r}"
+        lines = [
+            "from hyde import *",
+            "",
+            "@table",
+            f"def {function_name}{arguments}:",
+            f"    return open_table({call_arguments})",
+        ]
+        return "\n".join(lines) + "\n"
+
     def _serialize_object(self, name, value):
         if isinstance(value, TrackedArray):
             return {
@@ -608,6 +635,9 @@ class ExecutionRuntime:
         if isinstance(result, MatplotlibFigure):
             return self._register_matplotlib_figure(result, default_name)
         return result
+
+    def _register_decorated_result(self, _kind, function_name, result):
+        return self._coerce_script_result(result, function_name)
 
     def _register_matplotlib_figure(self, figure, default_name):
         figure_spec = getattr(figure, "_hyde_figure_spec", {})
@@ -783,6 +813,13 @@ class ExecutionRuntime:
 
     def _trace_y_expression(self, trace):
         return f"np.asarray({trace['y_name']})"
+
+    def _table_object_name(self, object_or_name):
+        if isinstance(object_or_name, str):
+            return object_or_name
+        if hasattr(object_or_name, "name"):
+            return object_or_name.name
+        raise TypeError(f"{object_or_name!r} is not Hyde-managed array-backed data")
 
     def _figure_function_arguments(self, figure):
         arguments = []

@@ -148,3 +148,46 @@ def test_project_load_session_reports_partial_state_for_malformed_toml(tmp_path)
     loaded = project.load_session(allow_partial=True)
     assert loaded.manifest["layout"] == {}
     assert loaded.session["history"] == []
+
+
+def test_project_upsert_master_entry_appends_and_overwrites_functions(tmp_path):
+    project = HydeProject(tmp_path / "master_entries.hy")
+    project.create()
+
+    project.upsert_master_entry(
+        "figure_alpha",
+        "from hyde import *\n"
+        "import numpy as np\n"
+        "import matplotlib.pyplot as plt\n\n"
+        "@figure\n"
+        "def figure_alpha(a, b):\n"
+        "    return b\n",
+    )
+    project.upsert_master_entry(
+        "table_alpha",
+        "from hyde import *\n\n"
+        "@table\n"
+        "def table_alpha(a):\n"
+        "    return open_table(a, title='table_alpha')\n",
+    )
+    project.upsert_master_entry(
+        "figure_alpha",
+        "from hyde import *\n"
+        "import numpy as np\n"
+        "import matplotlib.pyplot as plt\n\n"
+        "@figure\n"
+        "def figure_alpha(a, b):\n"
+        "    return a + b\n",
+    )
+
+    master_text = project.master_path.read_text(encoding="utf-8")
+
+    assert master_text.count("def figure_alpha(") == 1
+    assert master_text.count("def table_alpha(") == 1
+    assert "return a + b" in master_text
+    assert "return b" not in master_text
+    assert "import numpy as np" in master_text
+    assert "import matplotlib.pyplot as plt" in master_text
+    entries = {(entry.kind, entry.function_name, entry.parameters) for entry in project.scan_scripts()}
+    assert ("figure", "figure_alpha", ("a", "b")) in entries
+    assert ("table", "table_alpha", ("a",)) in entries

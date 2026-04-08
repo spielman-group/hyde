@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import shutil
 from dataclasses import dataclass
@@ -68,6 +69,10 @@ class HydeProject:
     @property
     def session_path(self):
         return self.root / "session.toml"
+
+    @property
+    def master_path(self):
+        return self.root / "procedures" / "master.py"
 
     def _default_manifest(self, application_version="0.1.0", layout=None, objects=None, scripts=None):
         return {
@@ -205,6 +210,28 @@ class HydeProject:
         destination_project.ensure_layout()
         return destination_project
 
+    def upsert_master_entry(self, function_name, source):
+        self.ensure_layout()
+        master_path = self.master_path
+        text = master_path.read_text(encoding="utf-8")
+        imports, definition = self._split_module_source(source)
+        text = self._ensure_import_lines(text, imports)
+        lines = text.splitlines()
+        module = ast.parse(text, filename=str(master_path))
+        replacement = definition.rstrip().splitlines()
+        for node in module.body:
+            if not isinstance(node, ast.FunctionDef) or node.name != function_name:
+                continue
+            start = min([node.lineno] + [decorator.lineno for decorator in node.decorator_list]) - 1
+            end = node.end_lineno
+            lines[start:end] = replacement
+            break
+        else:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.extend(replacement)
+        master_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
     def import_archive(self, archive_path):
         shutil.unpack_archive(str(archive_path), extract_dir=str(self.root.parent))
         return self.load_session()
@@ -239,3 +266,32 @@ class HydeProject:
             decoded.pop("message_handler_json", '{"enabled": true}')
         )
         return decoded
+
+    def _split_module_source(self, source):
+        imports = []
+        body = []
+        in_body = False
+        for line in source.strip().splitlines():
+            stripped = line.strip()
+            if not in_body and (
+                not stripped or stripped.startswith("import ") or stripped.startswith("from ")
+            ):
+                if stripped:
+                    imports.append(stripped)
+                continue
+            in_body = True
+            body.append(line.rstrip())
+        return imports, "\n".join(body)
+
+    def _ensure_import_lines(self, text, imports):
+        lines = text.splitlines()
+        existing = {line.strip() for line in lines}
+        missing = [line for line in imports if line and line not in existing]
+        if not missing:
+            return text
+        insert_at = 0
+        for index, line in enumerate(lines):
+            if line.startswith("from ") or line.startswith("import "):
+                insert_at = index + 1
+        lines[insert_at:insert_at] = missing + [""]
+        return "\n".join(lines).rstrip() + "\n"
