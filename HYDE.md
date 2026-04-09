@@ -49,104 +49,25 @@ Hyde must use a single top-level `QMainWindow` with an MDI area for figures, tab
 
 Hyde must separate the GUI from execution. User code and GUI-generated code run in a separate Python process, not in the Qt GUI process. The GUI process is responsible for presenting state, dispatching code, and reacting to execution results.
 
-The execution process must run IPython and act as the authoritative session namespace for v1.
+The execution process must act as the authoritative session namespace.
 
-The GUI must communicate with the execution process through a clear IPC boundary. Use the existing suite infrastructure where possible.
+See [`hyde/ARCHITECTURE.md`](hyde/ARCHITECTURE.md) for detailed code organization, module structure, IPC mechanism, and implementation patterns.
 
-Static UI structure should follow existing labscript-suite practice:
-
-- Define the main window, browser panels, and standard dialogs in Qt Designer `.ui` files.
-- Load those `.ui` files with the existing `UiLoader` path used elsewhere in the suite.
-- Build widgets dynamically in Python only where the content is inherently runtime-driven, for example matplotlib canvases, model-backed tables, or similar data-dependent containers.
-
-Supplementary UI requirements and screenshot references live in
-[`specifications/UI_SPEC.md`](specifications/UI_SPEC.md). Code organization
-and module design are documented in
-[`hyde/ARCHITECTURE.md`](hyde/ARCHITECTURE.md). An implementation agent must read these files
-together with this specification before building the UI.
+Supplementary UI requirements and screenshot references live in [`specifications/UI_SPEC.md`](specifications/UI_SPEC.md).
 
 ## Package Format
 
 The canonical Hyde project is a directory package with a `.hy` suffix.
 
-Example layout:
-
-```text
-example.hy/
-  manifest.toml
-  session.toml
-  terminal/
-    history.py
-  procedures/
-  data/
-  figures/
-  tables/
-  exports/
-```
-
 Every Hyde package must contain a master procedure in `procedures/master.py`.
 
-Requirements:
-
-- The package must be portable across macOS, Windows, and Linux.
-- Paths stored inside the package must be relative.
-- The package must be self-contained enough to reopen the session on another machine.
-- The application must be able to open a directory package directly.
-- The application should also be able to export and import a zipped archive of the same tree for easier sharing.
-- `manifest.toml` must record package version, application version, saved window layout, and the registry of named objects.
-- `manifest.toml` must also record the registry of package-scoped scripts and their user-visible names.
-
-Storage rules:
-
-- Scripts are stored as plain `.py` text files.
-- Figure-recreation scripts and package procedures are both plain `.py` files stored in the package.
-- Human-readable settings and metadata are stored in `.toml` or `.json`.
-- Numpy-backed data is stored in `.npy` by default.
-- HDF5 may be used when it is the better fit for a structured dataset, but it must follow the suite locking conventions if used.
-- Pandas `DataFrame` and `Series` objects are a special case and should use a
-  pandas-native serialization path rather than the generic binary object path.
-- Simple atomic state such as strings, numbers, small lists, small dicts, and similar metadata may be stored in the human-readable settings file.
-- Complex Python objects may be stored in a compressed binary serialized form using `pickle` or `dill`.
-- Use the simplest serializer that correctly round-trips the object; do not reinvent Python object serialization.
-
-Boundary between human-readable and binary storage:
-
-- Use human-readable storage only for state that is intended to be inspected or
-  edited by a human and that can be represented as plain JSON/TOML data.
-- Human-readable values must be limited to scalars, strings, booleans, null,
-  lists, tuples, and dicts with string keys, with no custom classes, callables,
-  bytes, cyclic references, or large nested structures.
-- Use binary serialized storage for everything else, including custom Python
-  objects, complex object graphs, implementation state, GUI state that is not
-  meant to be edited manually, and any value that cannot round-trip cleanly as
-  plain JSON/TOML.
-- NumPy arrays remain a special case and should normally use `.npy` or HDF5
-  rather than pickle/dill.
-- Pandas `DataFrame` and `Series` objects should likewise use a pandas-native
-  serialization method when they appear as first-class Hyde state.
-- If a value could reasonably live in either place, prefer the human-readable
-  file only when it is genuinely configuration-like; otherwise use binary
-  serialization.
+See [`hyde/ARCHITECTURE.md`](hyde/ARCHITECTURE.md) for detailed package format, storage rules, and serialization.
 
 ## Data Model
 
-Hyde v1 uses a flat namespace.
+Hyde v1 uses a flat namespace. Named objects in Hyde correspond to Python objects in the execution process.
 
-- The terminal process namespace is the user-visible namespace.
-- There are no data folders in v1.
-- Data folders may be introduced later, but they are not part of the first release.
-- Named objects in Hyde correspond to Python objects in the execution process.
-
-Hyde array-like data must be backed by numpy arrays, but not as bare arrays alone. Use a lightweight Hyde-managed wrapper around the array so that changes can be observed and propagated.
-
-That wrapper must provide:
-
-- A stable name.
-- The underlying numpy array.
-- A revision counter or equivalent dirty flag.
-- Change notifications when data is mutated through Hyde-aware APIs.
-
-Hyde figures and tables depend on named data objects, not on untracked ad hoc local variables.
+See [`hyde/ARCHITECTURE.md`](hyde/ARCHITECTURE.md) for implementation details on data tracking and change notifications.
 
 ## Data Browser
 
@@ -192,43 +113,16 @@ The save model must preserve all three of these kinds of information:
 - Object state.
 - Data snapshots.
 
-## Terminal
-
-The Hyde terminal is a critical v1 feature.
-
-Requirements:
-
-- The terminal must be IPython-based.
-- The terminal must run in the separate execution process.
-- The terminal must accept direct Python input.
-- The terminal must execute code generated by menu actions.
-- The terminal namespace must be exposed to Hyde as the canonical state namespace.
-- External Python debugging is sufficient; Hyde does not need an embedded debugger.
-
-If the user edits a script externally, Hyde must not automatically treat that as a data change. Script edits only change code definitions, not live figure dependencies.
-
 ## GUI-Generated Code
 
 All GUI-generated actions must become Python commands that execute in the terminal.
 
-The GUI must not maintain a parallel opaque action system for v1.
-
 Requirements:
-
 - Every action that constructs a figure, edits a table, or modifies a named object must be represented as Python code.
 - That code must be visible and replayable.
-- Menu commands must effectively insert code into the terminal.
 - When a figure window is closed, Hyde must prompt the user to save the figure as a final script.
-- The saved final script must be runnable later from a menu item.
 
-Figure close behavior must mirror Igor's recreation workflow:
-
-- Closing a figure must open a prompt that offers to save the figure-recreation script.
-- The prompt must allow the user to name the saved script.
-- The prompt must offer both save and discard options.
-- A saved figure script must recreate the figure later from the browser or a menu action.
-
-Hyde must preserve the exact code path used to create a figure whenever possible, because reproducibility matters more than hiding implementation details.
+See [`hyde/ARCHITECTURE.md`](hyde/ARCHITECTURE.md) for implementation details on how GUI actions generate Python code.
 
 ## Procedure Browser
 

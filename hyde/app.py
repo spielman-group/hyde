@@ -13,19 +13,18 @@ from labscript_utils.ls_zprocess import ProcessTree
 from labscript_utils.splash import Splash, configure_qapplication
 from qtutils.qt import QtCore, QtWidgets
 
-from .execution_controller import ExecutionController
-from .main_window import (
-    CloseFigureDialog,
-    FigureEditDialog,
-    FitDialog,
-    HydeMainWindow,
-    NewGraphDialog,
-    SaveGraphicsDialog,
-    TraceEditDialog,
-)
+from .execution.execution_controller import ExecutionController
+from .user_interface.main import HydeMainWindow
+from .user_interface.figure_edit_dialog import FigureEditDialog
+from .user_interface.fit_dialog import FitDialog
+from .user_interface.new_graph_dialog import NewGraphDialog
+from .user_interface.save_graphics_dialog import SaveGraphicsDialog
+from .user_interface.trace_edit_dialog import TraceEditDialog
+from .user_interface.close_figure_dialog import CloseFigureDialog
 from .message_server import HydeMessageServer
 from .project import HydeProject, HydeProjectLoadError
 from .features import register_all_features
+from .user_interface.close_figure_dialog import CloseFigureDialog
 
 
 class HydeApplication(QtCore.QObject, LabscriptApplication):

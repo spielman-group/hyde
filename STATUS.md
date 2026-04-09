@@ -6,8 +6,7 @@ Hyde has a working first-pass implementation in this repo. The core paths are:
 
 - `hyde/app.py`
 - `hyde/main_window.py`
-- `hyde/execution_controller.py`
-- `hyde/execution_subprocess.py`
+- `hyde/execution/` (execution_controller.py, execution_subprocess.py)
 - `hyde/runtime.py`
 - `hyde/project.py`
 - `hyde/message_server.py`

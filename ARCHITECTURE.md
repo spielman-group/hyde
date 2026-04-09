@@ -18,11 +18,9 @@ hyde/
 │   └── user_interface/       # Per-window packages
 │       ├── main/
 │       │   ├── __init__.py
-│       │   ├── main.py
 │       │   └── main.ui
 │       ├── data_browser/
 │       │   ├── __init__.py
-│       │   ├── data_browser.py
 │       │   ├── data_browser.ui
 │       │   └── ...
 │       └── ...
@@ -65,7 +63,12 @@ The GUI process communicates with the execution subprocess using `zprocess.Proce
 
 ## Execution
 
-The execution subprocess runs in a separate Python process. Its namespace is explicitly defined by `procedures/master.py`, which must contain `from hyde import *`. If this import is not present, it will be added automatically before the subprocess accesses the namespace.
+The execution subprocess runs in a separate Python process using the `spyder_kernels` Jupyter kernel. This provides:
+- Full IPython functionality
+- Namespace tracking for data browser
+- Comm-based notifications for live figure/table refresh
+
+The GUI sends raw Python code to the kernel for execution - there is no special GUI-to-kernel protocol.
 
 ## Tracking of Changed Objects
 
@@ -81,12 +84,11 @@ Each window in its own subdirectory under `user_interface/`:
 
 ```
 window_name/
-├── __init__.py   # Loads .ui, exports widget class contained in window_name.py
-├── window_name.py   # defines widget class
+├── __init__.py   # Loads .ui, defines widget class
 └── window_name.ui     # Qt Designer file
 ```
 
-Main window lives in top-level package.
+Main window also lives in a subdirectory.
 
 ## Widget Types
 
@@ -96,15 +98,23 @@ Main window lives in top-level package.
 
 ### Command Window
 
-The command window behaves as an IPython terminal.  The user should experience it as a direct "window" to the execution subprocess.
+The command window uses the `spyder_kernels` Jupyter kernel, with the frontend provided by qtconsole's RichJupyterWidget embedded in the main window.
+
+The user should experience it as a direct "window" to the execution subprocess kernel.
 
 It provides:
 - Tab completion
 - Up arrow/down arrow to scroll through command history
 - syntax highlighting
-- ... all other expected IPython behavers
+- ... all other expected IPython behaviors
 
 Unlike Igor Pro, there is no separate command entry box at the bottom, and no line numbers other than what IPython typically generates.
+
+Using spyder_kernels provides:
+- Proper namespace tracking for the data browser
+- Comm-based change notifications for live figure refresh
+- Matplotlib backend integration
+- Mature, well-tested architecture
 
 ## Figures
 
@@ -118,8 +128,18 @@ Incoming message handling replicates the protocol defined in the `lyse` project.
 
 The GUI generates complete Python statements using underlying libraries (matplotlib, lmfit) rather than wrapping them in custom helper functions.
 
-The runtime provides only functions that are not present in the supported libraries for example:
+For example, when the user asks to display data, Hyde does not call a `display()` function. Instead, Hyde generates the explicit object-oriented matplotlib code that creates the figure, such as:
+```python
+fig = plt.figure()
+gs = fig.add_gridspec(...)
+ax = fig.add_subplot(gs[0, 0])
+ax.plot(x, y)
+```
+
+The runtime provides only functions that are not present in the supported libraries, for example:
 - `open_table(...)`: Open a table view (not provided by a supported library)
+
+This ensures all GUI actions generate the same Python code that could be written manually in the terminal.
 
 ## Default Procedures
 
