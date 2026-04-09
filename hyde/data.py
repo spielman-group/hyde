@@ -156,7 +156,21 @@ def summarize_object(name, value):
     if isinstance(value, TrackedArray):
         return value.summary().__dict__
     if isinstance(value, np.ndarray):
-        return TrackedArray(name, value).summary().__dict__
+        array = np.asarray(value)
+        preview = np.array2string(
+            array.reshape(-1)[:6],
+            precision=4,
+            separator=", ",
+        )
+        return HydeObjectSummary(
+            name=name,
+            kind="numpy",
+            type_name="ndarray",
+            shape=list(array.shape),
+            dtype=str(array.dtype),
+            revision=0,
+            preview=preview,
+        ).__dict__
     preview = repr(value)
     if len(preview) > 80:
         preview = preview[:77] + "..."

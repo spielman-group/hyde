@@ -13,7 +13,6 @@ from hyde.main_window import (
     NewGraphDialog,
     SaveGraphicsDialog,
     TableWindow,
-    TerminalWidget,
     TraceEditDialog,
 )
 
@@ -107,24 +106,6 @@ def test_ui_uses_array_terminology():
     assert browser.waves_checkbox.text() == "Arrays"
     assert dialog.ui.y_group.title() == "Y Array(s)"
     assert dialog.ui.x_group.title() == "X Array"
-
-
-def test_terminal_widget_converts_ansi_to_html():
-    _qapplication()
-    terminal = TerminalWidget()
-    html = terminal._ansi_to_html("\x1b[0;31merror\x1b[0m")
-
-    assert "error" in html
-    assert "\x1b" not in html
-    assert "color" in html
-
-
-def test_terminal_widget_preserves_indentation_in_output():
-    _qapplication()
-    terminal = TerminalWidget()
-    terminal.append_output("    indented_line")
-
-    assert terminal.output.toPlainText().splitlines()[-1] == "    indented_line"
 
 
 def test_trace_edit_dialog_markers_mode_disables_line_style():

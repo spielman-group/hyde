@@ -45,7 +45,7 @@ External tools or user code may add these capabilities later, but they are not p
 
 Hyde must be built on the existing Qt compatibility layer used by the labscript suite. Do not import a raw Qt binding directly in application code.
 
-Hyde must use a single top-level `QMainWindow` with an MDI area for figures, tables, and other child windows. The command window, data browser, and script browser must also be ordinary MDI child windows confined inside the main window rather than dock widgets pinned to an edge.
+Hyde must use a single top-level `QMainWindow` with an MDI area for figures, tables, and other child windows. All browsers and command interfaces must also be ordinary MDI child windows confined inside the main window.
 
 Hyde must separate the GUI from execution. User code and GUI-generated code run in a separate Python process, not in the Qt GUI process. The GUI process is responsible for presenting state, dispatching code, and reacting to execution results.
 
@@ -60,9 +60,10 @@ Static UI structure should follow existing labscript-suite practice:
 - Build widgets dynamically in Python only where the content is inherently runtime-driven, for example matplotlib canvases, model-backed tables, or similar data-dependent containers.
 
 Supplementary UI requirements and screenshot references live in
-[`specifications/UI_SPEC.md`](specifications/UI_SPEC.md). An implementation
-agent must read that file together with this specification before building the
-UI.
+[`specifications/UI_SPEC.md`](specifications/UI_SPEC.md). Code organization
+and module design are documented in
+[`hyde/ARCHITECTURE.md`](hyde/ARCHITECTURE.md). An implementation agent must read these files
+together with this specification before building the UI.
 
 ## Package Format
 
@@ -76,7 +77,6 @@ example.hy/
   session.toml
   terminal/
     history.py
-  scripts/
   procedures/
   data/
   figures/

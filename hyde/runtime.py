@@ -88,19 +88,14 @@ class ExecutionRuntime:
         self._load_master_procedure()
 
     def execute(self, code, echo=True, record_history=True, silent=False):
-        output = io.StringIO()
         error = None
         if record_history:
             self.history.append(code)
         try:
-            import contextlib
-
-            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-                result = self.shell.run_cell(code, store_history=record_history, silent=silent)
+            result = self.shell.run_cell(code, store_history=record_history, silent=silent)
         except Exception:  # pragma: no cover - IPython normally traps this
             success = False
             error = traceback.format_exc()
-            output.write(error)
         else:
             success = (
                 getattr(result, "error_before_exec", None) is None
@@ -114,8 +109,6 @@ class ExecutionRuntime:
         self._refresh_all_views()
         return {
             "success": success,
-            "code": code if echo else "",
-            "stdout": output.getvalue(),
             "error": error,
             "snapshot": self.snapshot(),
         }
@@ -254,7 +247,8 @@ class ExecutionRuntime:
         markersize=6.0,
         linewidth=1.5,
     ):
-        figure = self.figures[figure_id]
+        if figure_id not in self.figures:
+            raise KeyError(f"Figure '{figure_id}' not found")
         y_array = self._resolve_tracked_array(y)
         if x is None:
             x_data = np.arange(len(y_array))
@@ -279,6 +273,8 @@ class ExecutionRuntime:
         return FigureCommandResult(figure["id"], figure["script_source"])
 
     def edit_figure(self, figure_id, **updates):
+        if figure_id not in self.figures:
+            raise KeyError(f"Figure '{figure_id}' not found")
         figure = self.figures[figure_id]
         figure["title"] = updates.get("title", figure["title"])
         axes = figure.setdefault("axes", {})
@@ -300,8 +296,11 @@ class ExecutionRuntime:
         return FigureCommandResult(figure["id"], figure["script_source"])
 
     def edit_trace(self, figure_id, index, **updates):
+        if figure_id not in self.figures:
+            raise KeyError(f"Figure '{figure_id}' not found")
         figure = self.figures[figure_id]
-        trace = figure["traces"][index]
+        if index < 0 or index >= len(figure["traces"]):
+            raise IndexError(f"Trace index {index} out of range for figure '{figure_id}'")
         for key in ("label", "style", "color", "visible", "marker", "markersize", "linewidth", "gaps"):
             if key in updates:
                 trace[key] = updates[key]
@@ -324,6 +323,8 @@ class ExecutionRuntime:
         color=True,
         overwrite=False,
     ):
+        if figure_id not in self.figures:
+            raise KeyError(f"Figure '{figure_id}' not found")
         output_path = Path(path)
         if output_path.exists() and not overwrite:
             raise FileExistsError(f"{output_path} already exists")
@@ -387,6 +388,8 @@ class ExecutionRuntime:
             x_name = x_array.name
         y_data = np.asarray(y_array, dtype=float)
         if x_range:
+            if not isinstance(x_range, (tuple, list)) or len(x_range) != 2:
+                raise ValueError("x_range must be a tuple of (lower, upper)")
             lower, upper = x_range
             mask = np.ones_like(x_data, dtype=bool)
             if lower is not None:
@@ -481,10 +484,14 @@ class ExecutionRuntime:
         ]
 
     def figure_replay_source(self, figure_id, function_name):
+        if figure_id not in self.figures:
+            raise KeyError(f"Figure '{figure_id}' not found")
         figure = self.figures[figure_id]
         return self._figure_function_source(figure, function_name)
 
     def table_replay_source(self, table_id, function_name):
+        if table_id not in self.tables:
+            raise KeyError(f"Table '{table_id}' not found")
         table = self.tables[table_id]
         arguments = ", ".join(table["objects"])
         if arguments:
@@ -554,11 +561,18 @@ class ExecutionRuntime:
             for trace in figure["traces"]:
                 if trace["x_name"] == name or trace["y_name"] == name:
                     continue
-                y_array = self._resolve_tracked_array(trace["y_name"])
+                try:
+                    y_array = self._resolve_tracked_array(trace["y_name"])
+                except KeyError:
+                    continue
                 if trace["x_name"] is None:
                     x_data = np.arange(len(y_array))
                 else:
-                    x_data = np.asarray(self._resolve_tracked_array(trace["x_name"]))
+                    try:
+                        x_array = self._resolve_tracked_array(trace["x_name"])
+                        x_data = np.asarray(x_array)
+                    except KeyError:
+                        x_data = np.arange(len(y_array))
                 trace["x_data"] = np.asarray(x_data).tolist()
                 trace["y_data"] = np.asarray(y_array).tolist()
                 trace["revisions"] = self._trace_revisions(trace["x_name"], trace["y_name"])
@@ -575,27 +589,45 @@ class ExecutionRuntime:
 
     def _refresh_all_views(self):
         for figure in self.figures.values():
+            valid_traces = []
             for trace in figure["traces"]:
-                y_array = self._resolve_tracked_array(trace["y_name"])
+                try:
+                    y_array = self._resolve_tracked_array(trace["y_name"])
+                except KeyError:
+                    continue
                 if trace["x_name"] is None:
                     x_data = np.arange(len(y_array))
                 else:
-                    x_data = np.asarray(self._resolve_tracked_array(trace["x_name"]))
+                    try:
+                        x_array = self._resolve_tracked_array(trace["x_name"])
+                        x_data = np.asarray(x_array)
+                    except KeyError:
+                        continue
                 trace["x_data"] = np.asarray(x_data).tolist()
                 trace["y_data"] = np.asarray(y_array).tolist()
                 trace["revisions"] = self._trace_revisions(trace["x_name"], trace["y_name"])
+                valid_traces.append(trace)
+            figure["traces"] = valid_traces
             figure["script_source"] = self._figure_function_source(figure, figure["id"])
-        for table in self.tables.values():
-            table["data"] = {
-                name: np.asarray(self._resolve_tracked_array(name)).tolist()
-                for name in table["objects"]
-            }
+        valid_tables = {}
+        for table_id, table in self.tables.items():
+            valid_data = {}
+            for name in table["objects"]:
+                try:
+                    valid_data[name] = np.asarray(self._resolve_tracked_array(name)).tolist()
+                except KeyError:
+                    continue
+            if valid_data:
+                valid_tables[table_id] = table
+                table["data"] = valid_data
+        self.tables = valid_tables
 
     def _trace_revisions(self, x_name, y_name):
         revisions = {}
-        if x_name is not None:
+        if x_name is not None and x_name in self.namespace:
             revisions[x_name] = self._resolve_tracked_array(x_name).revision
-        revisions[y_name] = self._resolve_tracked_array(y_name).revision
+        if y_name is not None and y_name in self.namespace:
+            revisions[y_name] = self._resolve_tracked_array(y_name).revision
         return revisions
 
     def _figure_has_trace(self, figure_id, y_name):
@@ -640,48 +672,54 @@ class ExecutionRuntime:
         return self._coerce_script_result(result, function_name)
 
     def _register_matplotlib_figure(self, figure, default_name):
-        figure_spec = getattr(figure, "_hyde_figure_spec", {})
-        figure_id = figure_spec.get("id") or figure.get_label() or default_name or f"figure_{uuid.uuid4().hex[:8]}"
+        figure_id = figure.get_label() or default_name or f"figure_{uuid.uuid4().hex[:8]}"
         axes = figure.axes[0] if figure.axes else figure.add_subplot(111)
         traces = []
-        metadata_by_index = list(figure_spec.get("traces", []))
         for index, line in enumerate(axes.get_lines()):
-            metadata = metadata_by_index[index] if index < len(metadata_by_index) else {}
-            x_name = metadata.get("x_name")
-            y_name = metadata.get("y_name")
+            x_data = line.get_xdata()
+            y_data = line.get_ydata()
+            has_x_name = hasattr(line, "_hyde_x_name") and line._hyde_x_name is not None
+            x_name = getattr(line, "_hyde_x_name", None) if has_x_name else None
+            label = line.get_label()
+            if hasattr(line, "_hyde_y_name") and line._hyde_y_name:
+                y_name = line._hyde_y_name
+            elif label and label in self.namespace:
+                y_name = label
+            else:
+                y_name = f"trace_{index}"
             traces.append(
                 {
                     "x_name": x_name,
                     "y_name": y_name,
-                    "label": metadata.get("label", line.get_label()),
-                    "style": metadata.get("style", line.get_linestyle() or "-"),
-                    "color": metadata.get("color", line.get_color() or ""),
-                    "visible": metadata.get("visible", line.get_visible()),
-                    "marker": metadata.get("marker", line.get_marker() or None),
-                    "markersize": metadata.get("markersize", float(line.get_markersize())),
-                    "linewidth": metadata.get("linewidth", float(line.get_linewidth())),
-                    "gaps": metadata.get("gaps", False),
-                    "x_data": np.asarray(line.get_xdata()).tolist(),
-                    "y_data": np.asarray(line.get_ydata()).tolist(),
-                    "revisions": self._trace_revisions(x_name, y_name) if y_name is not None else {},
+                    "label": label or y_name,
+                    "style": line.get_linestyle() or "-",
+                    "color": line.get_color() or "",
+                    "visible": line.get_visible(),
+                    "marker": line.get_marker() or None,
+                    "markersize": float(line.get_markersize()),
+                    "linewidth": float(line.get_linewidth()),
+                    "gaps": False,
+                    "x_data": np.asarray(x_data).tolist(),
+                    "y_data": np.asarray(y_data).tolist(),
+                    "revisions": self._trace_revisions(x_name, y_name) if y_name and y_name in self.namespace else {},
                 }
             )
         snapshot = {
             "id": figure_id,
-            "title": figure_spec.get("title", axes.get_title() or figure_id),
+            "title": axes.get_title() or figure_id,
             "size_inches": tuple(float(value) for value in figure.get_size_inches()),
             "traces": traces,
             "axes": {
-                "xlabel": figure_spec.get("axes", {}).get("xlabel", axes.get_xlabel()),
-                "ylabel": figure_spec.get("axes", {}).get("ylabel", axes.get_ylabel()),
-                "xscale": figure_spec.get("axes", {}).get("xscale", axes.get_xscale()),
-                "yscale": figure_spec.get("axes", {}).get("yscale", axes.get_yscale()),
-                "xgrid": figure_spec.get("axes", {}).get("xgrid", False),
-                "ygrid": figure_spec.get("axes", {}).get("ygrid", False),
-                "xmin": figure_spec.get("axes", {}).get("xmin"),
-                "xmax": figure_spec.get("axes", {}).get("xmax"),
-                "ymin": figure_spec.get("axes", {}).get("ymin"),
-                "ymax": figure_spec.get("axes", {}).get("ymax"),
+                "xlabel": axes.get_xlabel() or "",
+                "ylabel": axes.get_ylabel() or "",
+                "xscale": axes.get_xscale(),
+                "yscale": axes.get_yscale(),
+                "xgrid": False,
+                "ygrid": False,
+                "xmin": None,
+                "xmax": None,
+                "ymin": None,
+                "ymax": None,
             },
         }
         snapshot["script_source"] = self._figure_function_source(snapshot, figure_id)
@@ -742,7 +780,6 @@ class ExecutionRuntime:
             lines.append("    ax.grid(True, axis='y')")
         if len(figure["traces"]) > 1:
             lines.append("    ax.legend()")
-        lines.append(f"    fig._hyde_figure_spec = {self._figure_metadata(figure, function_name)!r}")
         lines.append("    return fig")
         return "\n".join(lines) + "\n"
 

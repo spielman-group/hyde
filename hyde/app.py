@@ -25,6 +25,7 @@ from .main_window import (
 )
 from .message_server import HydeMessageServer
 from .project import HydeProject, HydeProjectLoadError
+from .features import register_all_features
 
 
 class HydeApplication(QtCore.QObject, LabscriptApplication):
@@ -33,6 +34,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
 
     def __init__(self, qapplication, splash=None):
         super().__init__()
+        register_all_features()
         self.qapplication = qapplication
         self.splash = splash
         self.process_tree = ProcessTree.instance()
@@ -50,10 +52,11 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
             self.splash.update_text("starting Hyde execution process")
         self.controller = ExecutionController(self)
         self.controller.response_received.connect(self._handle_response)
-        self.controller.start()
         if self.splash is not None:
             self.splash.update_text("loading Hyde graphical interface")
         self.window = HydeMainWindow(self)
+        self.controller.set_output_redirection_port(self.window.output_box.port)
+        self.controller.start()
         self.window.show()
         self.pending_callbacks = {}
         self.project = None
@@ -96,7 +99,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         snapshot = response.get("snapshot")
         if snapshot is not None:
             self.last_snapshot = snapshot
-            self.window.terminal.set_history(snapshot.get("history", []))
+            self.window.command_input.set_history(snapshot.get("history", []))
             self._update_ui(snapshot)
         if request_id in self._dirty_request_ids:
             self._dirty_request_ids.discard(request_id)
@@ -104,11 +107,8 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
                 self.session_dirty = True
         if callback is not None:
             callback(response)
-        if response.get("code"):
-            self.window.terminal.append_command(response["code"])
-        self.window.terminal.append_output(response.get("stdout", ""))
         if response.get("error"):
-            self.window.terminal.append_output(response["error"])
+            self.window.output_box.output(response["error"], red=True)
 
     def _update_ui(self, snapshot):
         if self.project is not None:
@@ -116,6 +116,8 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         self.window.apply_snapshot(snapshot, self.script_entries)
 
     def execute_command(self, command, echo=True, record_history=True, mark_dirty=True, silent=False):
+        if echo:
+            self.window.output_box.output(f">>> {command}\n")
         request_id = self.controller.execute(
             command,
             echo=echo,
@@ -128,7 +130,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
 
     def request_terminal_completion(self, code, cursor_pos):
         request_id = self.controller.send("complete", {"code": code, "cursor_pos": cursor_pos})
-        self.pending_callbacks[request_id] = lambda response: self.window.terminal.apply_completion(
+        self.pending_callbacks[request_id] = lambda response: self.window.command_input.apply_completion(
             response.get("token", ""),
             cursor_pos,
             response.get("matches", []),
@@ -144,7 +146,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         silent=False,
     ):
         if show_in_terminal and not execute:
-            self.window.terminal.insert_command(command)
+            self.window.command_input.insert_command(command)
         if execute:
             self.execute_command(
                 command,
@@ -173,6 +175,14 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         self._open_project_path(base)
 
     def _open_project_path(self, path, create=False):
+        path_obj = Path(path)
+        if not create and not path_obj.exists():
+            QtWidgets.QMessageBox.critical(
+                self.window,
+                "Project Not Found",
+                f"The project directory does not exist:\n{path}",
+            )
+            return False
         self.project = HydeProject(path)
         try:
             state = self.project.create() if create else self.project.load_session()
@@ -218,6 +228,8 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         self.window.restore_window_layout(layout)
         self.script_entries = self.project.scan_scripts()
         self._update_ui(self.last_snapshot or {"namespace_summary": [], "figures": [], "tables": []})
+        if self.window.script_window.widget() is None:
+            self.window.script_window.setWidget(self.window.procedure_browser)
         self.session_dirty = False
 
     def save_project(self):
@@ -305,7 +317,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         size_inches = self.window.current_figure_size_inches() or (6.4, 4.8)
         dialog = SaveGraphicsDialog(figure_id, default_path, size_inches=size_inches, parent=self.window)
         dialog.do_it_button.clicked.connect(lambda: self.generated_command(dialog.command()) or dialog.accept())
-        dialog.to_cmd_button.clicked.connect(lambda: self.window.terminal.insert_command(dialog.command()))
+        dialog.to_cmd_button.clicked.connect(lambda: self.window.command_input.insert_command(dialog.command()))
         dialog.to_clip_button.clicked.connect(
             lambda: QtWidgets.QApplication.clipboard().setText(dialog.command())
         )
@@ -314,11 +326,23 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
     def display_selection(self, names):
         if not names:
             return
-        if len(names) == 1:
-            command = f"display({names[0]!r})"
-        else:
-            command = f"display({names[0]!r}, x={names[1]!r})"
-        self.generated_command(command)
+        request_id = self.controller.send("snapshot")
+        self.pending_callbacks[request_id] = self._display_figure_commands
+
+    def _display_figure_commands(self, response):
+        figure_dict = response.get("snapshot", {}).get("figures", {})
+        if not figure_dict:
+            return
+        figure_id = list(figure_dict.keys())[0]
+        figure = figure_dict[figure_id]
+        script_source = figure.get("script_source", "")
+        lines = script_source.strip().split("\n")
+        for i, line in enumerate(lines):
+            if line.startswith("from hyde"):
+                lines.pop(i)
+                break
+        for line in lines:
+            self.generated_command(line)
 
     def table_selection(self, names):
         if not names:
@@ -386,7 +410,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
         dialog = NewGraphDialog(object_names, selected_names=selected_names, parent=self.window)
         dialog.do_it_button.clicked.connect(lambda: self._execute_generated_multiline(dialog.command(), dialog))
         dialog.to_cmd_button.clicked.connect(
-            lambda: self.window.terminal.insert_command(self._flatten_command(dialog.command()))
+            lambda: self.window.command_input.insert_command(self._flatten_command(dialog.command()))
         )
         dialog.to_clip_button.clicked.connect(
             lambda: QtWidgets.QApplication.clipboard().setText(dialog.command())
@@ -470,7 +494,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
             return
         dialog = FitDialog(fit_entries, selected_names, self.project_path, self.window)
         dialog.do_it_button.clicked.connect(lambda: self.generated_command(dialog.command()) or dialog.accept())
-        dialog.to_cmd_button.clicked.connect(lambda: self.window.terminal.insert_command(dialog.command()))
+        dialog.to_cmd_button.clicked.connect(lambda: self.window.command_input.insert_command(dialog.command()))
         dialog.graph_now_button.clicked.connect(lambda: self._graph_fit_preview(dialog))
         dialog.exec()
 
@@ -659,7 +683,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
             lambda command: self._apply_live_dialog_command(dialog, command, live_state)
         )
         dialog.do_it_button.clicked.connect(lambda: self.generated_command(dialog.command()) or dialog.accept())
-        dialog.to_cmd_button.clicked.connect(lambda: self.window.terminal.insert_command(dialog.command()))
+        dialog.to_cmd_button.clicked.connect(lambda: self.window.command_input.insert_command(dialog.command()))
         dialog.to_clip_button.clicked.connect(
             lambda: QtWidgets.QApplication.clipboard().setText(dialog.command())
         )
@@ -685,7 +709,7 @@ class HydeApplication(QtCore.QObject, LabscriptApplication):
             lambda command: self._apply_live_dialog_command(dialog, command, live_state)
         )
         dialog.do_it_button.clicked.connect(lambda: self.generated_command(dialog.command()) or dialog.accept())
-        dialog.to_cmd_button.clicked.connect(lambda: self.window.terminal.insert_command(dialog.command()))
+        dialog.to_cmd_button.clicked.connect(lambda: self.window.command_input.insert_command(dialog.command()))
         dialog.to_clip_button.clicked.connect(
             lambda: QtWidgets.QApplication.clipboard().setText(dialog.command())
         )

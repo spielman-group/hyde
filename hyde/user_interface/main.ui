@@ -13,29 +13,29 @@
   <property name="windowTitle">
    <string>Hyde</string>
   </property>
-  <widget class="QWidget" name="centralwidget">
-   <layout class="QVBoxLayout" name="verticalLayout">
-    <property name="leftMargin">
-     <number>0</number>
-    </property>
-    <property name="topMargin">
-     <number>0</number>
-    </property>
-    <property name="rightMargin">
-     <number>0</number>
-    </property>
-    <property name="bottomMargin">
-     <number>0</number>
-    </property>
-    <item>
-     <widget class="QMdiArea" name="mdiArea">
-      <property name="viewMode">
-       <enum>QMdiArea::SubWindowView</enum>
-      </property>
-     </widget>
-    </item>
-   </layout>
-  </widget>
+   <widget class="QWidget" name="centralwidget">
+    <layout class="QVBoxLayout" name="verticalLayout">
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QMdiArea" name="mdiArea">
+       <property name="viewMode">
+        <enum>QMdiArea::SubWindowView</enum>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
@@ -94,8 +94,16 @@
     <addaction name="actionCommandWindow"/>
     <addaction name="actionScriptBrowser"/>
     <addaction name="separator"/>
+    <addaction name="menuControl"/>
     <addaction name="menuGraphMacros"/>
     <addaction name="menuTableMacros"/>
+   </widget>
+   <widget class="QMenu" name="menuControl">
+    <property name="title">
+     <string>Control</string>
+    </property>
+    <addaction name="actionRetrieveWindow"/>
+    <addaction name="actionRetrieveAll"/>
    </widget>
    <widget class="QMenu" name="menuGraphMacros">
     <property name="title">
@@ -190,12 +198,22 @@
     <string>Command window</string>
    </property>
   </action>
-  <action name="actionScriptBrowser">
-   <property name="text">
-    <string>Script browser</string>
-   </property>
-  </action>
- </widget>
+   <action name="actionScriptBrowser">
+    <property name="text">
+     <string>Script browser</string>
+    </property>
+   </action>
+   <action name="actionRetrieveWindow">
+    <property name="text">
+     <string>Retrieve Window</string>
+    </property>
+   </action>
+   <action name="actionRetrieveAll">
+    <property name="text">
+     <string>Retrieve All Windows</string>
+    </property>
+   </action>
+  </widget>
  <resources/>
  <connections/>
 </ui>

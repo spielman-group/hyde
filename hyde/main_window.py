@@ -13,6 +13,10 @@ import numpy as np
 from qtutils import UiLoader
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
+from hyde.features.matplotlib_features import MatplotlibFeatures, register_matplotlib_features
+from hyde.features.lmfit_features import LmfitFeatures, register_lmfit_features
+from labscript_utils.qtwidgets.outputbox import OutputBox
+
 
 UI_DIR = Path(__file__).resolve().parent / "user_interface"
 
@@ -31,15 +35,13 @@ def decode_qbytes(value):
     return QtCore.QByteArray.fromBase64(value.encode("ascii"))
 
 
-class TerminalWidget(QtWidgets.QWidget):
+class CommandInputHandler(QtCore.QObject):
     command_submitted = QtCore.Signal(str)
     completion_requested = QtCore.Signal(str, int)
 
-    def __init__(self, parent=None):
+    def __init__(self, input_widget=None, parent=None):
         super().__init__(parent)
-        self.ui = load_ui("terminal_panel.ui", self)
-        self.output = self.ui.output
-        self.input = self.ui.input
+        self.input = input_widget if input_widget is not None else QtWidgets.QLineEdit()
         self.history = []
         self.history_index = 0
         self.history_draft = ""
@@ -51,29 +53,70 @@ class TerminalWidget(QtWidgets.QWidget):
         self.completer.activated.connect(self._insert_completion)
         self.input.setCompleter(self.completer)
         self.input.installEventFilter(self)
-        self.input.returnPressed.connect(self._submit)
-        self.output.setAcceptRichText(True)
-        self.output.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+        self.input.returnPressed.connect(self._on_return_pressed)
         self.input.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+
+    def _on_return_pressed(self):
+        self._submit()
 
     def _submit(self):
         command = self.input.text().strip()
         if not command:
             return
-        self._record_history(command)
+        if not self.history or self.history[-1] != command:
+            self.history.append(command)
+        self.history_index = len(self.history)
+        self.history_draft = ""
         self.input.clear()
         self.command_submitted.emit(command)
 
-    def append_command(self, command):
-        self._append_html(f"<span style='color:#1f6feb;'>&gt;&gt;&gt; {html.escape(command)}</span>")
+    def eventFilter(self, watched, event):
+        if watched is self.input and event.type() == QtCore.QEvent.KeyPress:
+            if event.key() == QtCore.Qt.Key_Up:
+                self._navigate_history(-1)
+                return True
+            if event.key() == QtCore.Qt.Key_Down:
+                self._navigate_history(1)
+                return True
+            if event.key() == QtCore.Qt.Key_Tab:
+                self.completion_requested.emit(self.input.text(), self.input.cursorPosition())
+                return True
+        return super().eventFilter(watched, event)
 
-    def append_output(self, text):
-        if text:
-            self._append_html(self._ansi_to_html(text.rstrip("\n")))
+    def _submit(self):
+        command = self.input.text().strip()
+        if not command:
+            return
+        if not self.history or self.history[-1] != command:
+            self.history.append(command)
+        self.history_index = len(self.history)
+        self.history_draft = ""
+        self.input.clear()
+        self.command_submitted.emit(command)
 
-    def insert_command(self, command):
-        self.input.setText(command)
-        self.input.setFocus(QtCore.Qt.OtherFocusReason)
+    def _navigate_history(self, delta):
+        if not self.history:
+            return
+        new_index = self.history_index + delta
+        if delta < 0:
+            if self.history_index == len(self.history):
+                self.history_draft = self.input.text()
+            if new_index >= 0:
+                self.history_index = new_index
+                self.input.setText(self.history[self.history_index])
+        elif delta > 0:
+            if new_index < len(self.history):
+                self.history_index = new_index
+                self.input.setText(self.history[self.history_index])
+            else:
+                self.history_index = len(self.history)
+                self.input.setText(self.history_draft)
+
+    def _insert_completion(self, completion):
+        line = self.input.text()
+        start = max(self._completion_cursor - len(self._completion_token), 0)
+        self.input.setText(line[:start] + completion + line[self._completion_cursor:])
+        self.input.setCursorPosition(start + len(completion))
 
     def set_history(self, history):
         self.history = list(history)
@@ -94,108 +137,9 @@ class TerminalWidget(QtWidgets.QWidget):
         rect.setWidth(self.completer.popup().sizeHintForColumn(0) + 24)
         self.completer.complete(rect)
 
-    def eventFilter(self, watched, event):
-        if watched is self.input and event.type() == QtCore.QEvent.KeyPress:
-            if event.key() == QtCore.Qt.Key_Up:
-                self._show_previous_history()
-                return True
-            if event.key() == QtCore.Qt.Key_Down:
-                self._show_next_history()
-                return True
-            if event.key() == QtCore.Qt.Key_Tab:
-                self.completion_requested.emit(self.input.text(), self.input.cursorPosition())
-                return True
-        return super().eventFilter(watched, event)
-
-    def _record_history(self, command):
-        if not self.history or self.history[-1] != command:
-            self.history.append(command)
-        self.history_index = len(self.history)
-        self.history_draft = ""
-
-    def _show_previous_history(self):
-        if not self.history:
-            return
-        if self.history_index == len(self.history):
-            self.history_draft = self.input.text()
-        if self.history_index > 0:
-            self.history_index -= 1
-        self.input.setText(self.history[self.history_index])
-
-    def _show_next_history(self):
-        if not self.history:
-            return
-        if self.history_index < len(self.history) - 1:
-            self.history_index += 1
-            self.input.setText(self.history[self.history_index])
-            return
-        self.history_index = len(self.history)
-        self.input.setText(self.history_draft)
-
-    def _insert_completion(self, completion):
-        line = self.input.text()
-        start = max(self._completion_cursor - len(self._completion_token), 0)
-        self.input.setText(line[:start] + completion + line[self._completion_cursor :])
-        self.input.setCursorPosition(start + len(completion))
-
-    def _append_html(self, fragment):
-        cursor = self.output.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
-        cursor.insertHtml(f"<div style='white-space: pre-wrap;'>{fragment}</div>")
-        cursor.insertBlock()
-        self.output.setTextCursor(cursor)
-        self.output.ensureCursorVisible()
-
-    def _ansi_to_html(self, text):
-        pattern = re.compile(r"\x1b\[([0-9;]*)m")
-        html_parts = []
-        open_span = False
-        position = 0
-        style = {"color": None, "font-weight": None}
-        colors = {
-            30: "#000000",
-            31: "#cc0000",
-            32: "#238636",
-            33: "#9a6700",
-            34: "#1f6feb",
-            35: "#8250df",
-            36: "#0a7ea4",
-            37: "#6e7781",
-            90: "#6e7781",
-            91: "#ff7b72",
-            92: "#3fb950",
-            93: "#d29922",
-            94: "#79c0ff",
-            95: "#bc8cff",
-            96: "#39c5cf",
-            97: "#f0f6fc",
-        }
-        for match in pattern.finditer(text):
-            html_parts.append(html.escape(text[position : match.start()]))
-            position = match.end()
-            codes = [int(part) for part in match.group(1).split(";") if part] or [0]
-            for code in codes:
-                if code == 0:
-                    style = {"color": None, "font-weight": None}
-                elif code == 1:
-                    style["font-weight"] = "bold"
-                elif code == 39:
-                    style["color"] = None
-                elif code in colors:
-                    style["color"] = colors[code]
-            if open_span:
-                html_parts.append("</span>")
-                open_span = False
-            css = "; ".join(
-                f"{key}: {value}" for key, value in style.items() if value is not None
-            )
-            if css:
-                html_parts.append(f"<span style='{css}'>")
-                open_span = True
-        html_parts.append(html.escape(text[position:]))
-        if open_span:
-            html_parts.append("</span>")
-        return "".join(html_parts)
+    def insert_command(self, command):
+        self.input.setText(command)
+        self.input.setFocus(QtCore.Qt.OtherFocusReason)
 
 
 class DataBrowserWidget(QtWidgets.QWidget):
@@ -237,15 +181,15 @@ class DataBrowserWidget(QtWidgets.QWidget):
         self.filter_edit.textChanged.connect(self._apply_filter)
         self.tree.itemSelectionChanged.connect(self._update_summary)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
-        self.display_button.clicked.connect(self._emit_display)
-        self.edit_button.clicked.connect(self._emit_edit)
-        self.append_graph_button.clicked.connect(self._emit_append_graph)
-        self.append_table_button.clicked.connect(self._emit_append_table)
-        self.delete_button.clicked.connect(self._emit_delete)
+        self.display_button.clicked.connect(lambda: self._emit(self.display_requested))
+        self.edit_button.clicked.connect(lambda: self._emit(self.edit_requested))
+        self.append_graph_button.clicked.connect(lambda: self._emit(self.append_graph_requested))
+        self.append_table_button.clicked.connect(lambda: self._emit(self.append_table_requested))
+        self.delete_button.clicked.connect(lambda: self._emit(self.delete_requested))
         if self.where_used_button is not None:
-            self.where_used_button.clicked.connect(self._emit_where_used)
+            self.where_used_button.clicked.connect(lambda: self._emit(self.where_used_requested))
         if self.fit_button is not None:
-            self.fit_button.clicked.connect(self._emit_fit)
+            self.fit_button.clicked.connect(lambda: self._emit(self.fit_requested))
         self.waves_checkbox.toggled.connect(lambda _checked: self._apply_filter(self.filter_edit.text()))
         self.variables_checkbox.toggled.connect(lambda _checked: self._apply_filter(self.filter_edit.text()))
         self.strings_checkbox.toggled.connect(lambda _checked: self._apply_filter(self.filter_edit.text()))
@@ -302,32 +246,8 @@ class DataBrowserWidget(QtWidgets.QWidget):
                 "\n\n".join(self._entry_details(self.entries_by_name[name]) for name in names[:4])
             )
 
-    def _emit_display(self):
-        self.display_requested.emit(self.selected_names())
-
-    def _emit_edit(self):
-        self.edit_requested.emit(self.selected_names())
-
-    def _emit_table(self):
-        self.table_requested.emit(self.selected_names())
-
-    def _emit_append_graph(self):
-        self.append_graph_requested.emit(self.selected_names())
-
-    def _emit_append_table(self):
-        self.append_table_requested.emit(self.selected_names())
-
-    def _emit_delete(self):
-        self.delete_requested.emit(self.selected_names())
-
-    def _emit_where_used(self):
-        self.where_used_requested.emit(self.selected_names())
-
-    def _emit_fit(self):
-        self.fit_requested.emit(self.selected_names())
-
-    def _emit_copy_path(self):
-        self.copy_path_requested.emit(self.selected_names())
+    def _emit(self, signal):
+        signal.emit(self.selected_names())
 
     def _matches_display_filter(self, entry):
         if entry["kind"] == "numpy":
@@ -359,13 +279,13 @@ class DataBrowserWidget(QtWidgets.QWidget):
         names = self.selected_names()
         has_selection = bool(names)
         actions = [
-            ("Display", self._emit_display),
-            ("Edit", self._emit_edit),
-            ("Append to Graph", self._emit_append_graph),
-            ("Append to Table", self._emit_append_table),
-            ("Copy Full Path", self._emit_copy_path),
-            ("Delete Object", self._emit_delete),
-            ("Show Where Object Is Used...", self._emit_where_used),
+            ("Display", lambda: self._emit(self.display_requested)),
+            ("Edit", lambda: self._emit(self.edit_requested)),
+            ("Append to Graph", lambda: self._emit(self.append_graph_requested)),
+            ("Append to Table", lambda: self._emit(self.append_table_requested)),
+            ("Copy Full Path", lambda: self._emit(self.copy_path_requested)),
+            ("Delete Object", lambda: self._emit(self.delete_requested)),
+            ("Show Where Object Is Used...", lambda: self._emit(self.where_used_requested)),
         ]
         for label, callback in actions:
             action = menu.addAction(label)
@@ -761,67 +681,164 @@ class FigureEditDialog(QtWidgets.QDialog):
         self.figure_id = figure_id
         self.snapshot = snapshot
         self._loading = False
-        self.scale_combo = self.ui.scale_combo
-        self.grid_checkbox = self.ui.grid_checkbox
+
         self.axis_combo = self.ui.axis_combo
         self.title_edit = self.ui.title_edit
+        self.title_bold_button = self.ui.title_bold_button
+        self.title_italic_button = self.ui.title_italic_button
+        self.linear_radio = self.ui.linear_radio
+        self.log_radio = self.ui.log_radio
+        self.log2_radio = self.ui.log2_radio
+        self.date_time_radio = self.ui.date_time_radio
         self.axis_label_edit = self.ui.axis_label_edit
+        self.label_bold_button = self.ui.label_bold_button
+        self.label_italic_button = self.ui.label_italic_button
+        self.major_ticks_checkbox = self.ui.major_ticks_checkbox
+        self.minor_ticks_checkbox = self.ui.minor_ticks_checkbox
+        self.tick_labels_checkbox = self.ui.tick_labels_checkbox
+        self.ticks_both_sides_checkbox = self.ui.ticks_both_sides_checkbox
+        self.major_grid_checkbox = self.ui.major_grid_checkbox
+        self.minor_grid_checkbox = self.ui.minor_grid_checkbox
+        self.auto_range_checkbox = self.ui.auto_range_checkbox
         self.minimum_edit = self.ui.minimum_edit
         self.maximum_edit = self.ui.maximum_edit
+        self.reverse_axis_checkbox = self.ui.reverse_axis_checkbox
+        self.font_combo = self.ui.font_combo
+        self.font_size_spin = self.ui.font_size_spin
+        self.font_bold_button = self.ui.font_bold_button
+        self.font_italic_button = self.ui.font_italic_button
+        self.line_color_combo = self.ui.line_color_combo
+        self.line_style_combo = self.ui.line_style_combo
+        self.line_width_spin = self.ui.line_width_spin
+        self.marker_style_combo = self.ui.marker_style_combo
+        self.marker_size_spin = self.ui.marker_size_spin
+        self.marker_fill_combo = self.ui.marker_fill_combo
+        self.fill_enabled_checkbox = self.ui.fill_enabled_checkbox
+        self.fill_style_combo = self.ui.fill_style_combo
+        self.fill_color_combo = self.ui.fill_color_combo
+        self.fill_opacity_slider = self.ui.fill_opacity_slider
+        self.error_bars_checkbox = self.ui.error_bars_checkbox
+        self.error_style_combo = self.ui.error_style_combo
+        self.error_color_combo = self.ui.error_color_combo
+        self.show_trendline_checkbox = self.ui.show_trendline_checkbox
+        self.trend_type_combo = self.ui.trend_type_combo
+        self.polynomial_order_spin = self.ui.polynomial_order_spin
+        self.show_equation_checkbox = self.ui.show_equation_checkbox
+        self.show_r_squared_checkbox = self.ui.show_r_squared_checkbox
+        self.show_mean_checkbox = self.ui.show_mean_checkbox
+        self.show_std_dev_checkbox = self.ui.show_std_dev_checkbox
+        self.show_min_max_checkbox = self.ui.show_min_max_checkbox
+        self.show_sum_checkbox = self.ui.show_sum_checkbox
+        self.show_n_checkbox = self.ui.show_n_checkbox
+        self.show_confidence_checkbox = self.ui.show_confidence_checkbox
+        self.show_prediction_checkbox = self.ui.show_prediction_checkbox
+        self.error_level_combo = self.ui.error_level_combo
+        self.sync_with_combo = self.ui.sync_with_combo
+        self.sync_axis_combo = self.ui.sync_axis_combo
+        self.link_x_axis_checkbox = self.ui.link_x_axis_checkbox
+        self.link_y_axis_checkbox = self.ui.link_y_axis_checkbox
+        self.events_enabled_checkbox = self.ui.events_enabled_checkbox
+        self.axes_table = self.ui.axes_table
+        self.add_axis_button = self.ui.add_axis_button
+        self.remove_axis_button = self.ui.remove_axis_button
         self.live_update_checkbox = self.ui.live_update_checkbox
         self.do_it_button = self.ui.do_it_button
         self.to_cmd_button = self.ui.to_cmd_button
         self.to_clip_button = self.ui.to_clip_button
         self.help_button = self.ui.help_button
         self.cancel_button = self.ui.cancel_button
-        self.scale_combo.addItems(["linear", "log"])
-        self.axis_combo.addItems(["bottom", "left"])
-        self.title_edit.setText(snapshot["title"])
+
+        self.title_edit.setText(snapshot.get("title", ""))
         self.axis_combo.currentIndexChanged.connect(self._load_axis)
         self.cancel_button.clicked.connect(self.reject)
         self.help_button.clicked.connect(self._show_help)
-        for widget, signal_name in (
+
+        self._connect_all_signals()
+
+        self._load_axis()
+
+    def _connect_all_signals(self):
+        signals = [
             (self.axis_combo, "currentIndexChanged"),
             (self.title_edit, "textChanged"),
             (self.axis_label_edit, "textChanged"),
             (self.minimum_edit, "textChanged"),
             (self.maximum_edit, "textChanged"),
-            (self.scale_combo, "currentTextChanged"),
-            (self.grid_checkbox, "toggled"),
-        ):
+            (self.linear_radio, "toggled"),
+            (self.log_radio, "toggled"),
+            (self.major_grid_checkbox, "toggled"),
+            (self.minor_grid_checkbox, "toggled"),
+            (self.auto_range_checkbox, "toggled"),
+            (self.reverse_axis_checkbox, "toggled"),
+            (self.line_color_combo, "currentTextChanged"),
+            (self.line_style_combo, "currentTextChanged"),
+            (self.line_width_spin, "valueChanged"),
+            (self.marker_style_combo, "currentTextChanged"),
+            (self.marker_size_spin, "valueChanged"),
+            (self.marker_fill_combo, "currentTextChanged"),
+            (self.fill_enabled_checkbox, "toggled"),
+            (self.fill_style_combo, "currentTextChanged"),
+            (self.fill_color_combo, "currentTextChanged"),
+            (self.fill_opacity_slider, "valueChanged"),
+            (self.error_bars_checkbox, "toggled"),
+            (self.show_trendline_checkbox, "toggled"),
+            (self.trend_type_combo, "currentTextChanged"),
+            (self.polynomial_order_spin, "valueChanged"),
+            (self.show_equation_checkbox, "toggled"),
+            (self.show_r_squared_checkbox, "toggled"),
+            (self.show_mean_checkbox, "toggled"),
+            (self.show_std_dev_checkbox, "toggled"),
+            (self.show_min_max_checkbox, "toggled"),
+            (self.show_sum_checkbox, "toggled"),
+            (self.show_n_checkbox, "toggled"),
+            (self.show_confidence_checkbox, "toggled"),
+            (self.show_prediction_checkbox, "toggled"),
+            (self.sync_with_combo, "currentTextChanged"),
+            (self.sync_axis_combo, "currentTextChanged"),
+            (self.link_x_axis_checkbox, "toggled"),
+            (self.link_y_axis_checkbox, "toggled"),
+            (self.events_enabled_checkbox, "toggled"),
+        ]
+        for widget, signal_name in signals:
             getattr(widget, signal_name).connect(self._emit_command)
-        self._load_axis()
 
     def command(self):
         axis = self.axis_combo.currentText()
         axis_label = self.axis_label_edit.text().strip()
-        updates = [f"title={self.title_edit.text()!r}"]
-        if axis == "bottom":
-            updates.extend(
-                [
-                    f"xlabel={axis_label!r}",
-                    f"xscale={self.scale_combo.currentText()!r}",
-                    f"xgrid={self.grid_checkbox.isChecked()!r}",
-                    f"xmin={self._limit_value(self.minimum_edit.text())!r}",
-                    f"xmax={self._limit_value(self.maximum_edit.text())!r}",
-                ]
-            )
+        title = self.title_edit.text().strip()
+
+        if self.linear_radio.isChecked():
+            scale = "linear"
+        elif self.log_radio.isChecked():
+            scale = "log"
+        elif self.log2_radio.isChecked():
+            scale = "log2"
         else:
-            updates.extend(
-                [
-                    f"ylabel={axis_label!r}",
-                    f"yscale={self.scale_combo.currentText()!r}",
-                    f"ygrid={self.grid_checkbox.isChecked()!r}",
-                    f"ymin={self._limit_value(self.minimum_edit.text())!r}",
-                    f"ymax={self._limit_value(self.maximum_edit.text())!r}",
-                ]
-            )
+            scale = "linear"
+
+        updates = [f"title={title!r}"]
+        if axis == "bottom":
+            updates.extend([
+                f"xlabel={axis_label!r}",
+                f"xscale={scale!r}",
+                f"xgrid={self.major_grid_checkbox.isChecked()!r}",
+                f"xmin={self._limit_value(self.minimum_edit.text())!r}",
+                f"xmax={self._limit_value(self.maximum_edit.text())!r}",
+            ])
+        else:
+            updates.extend([
+                f"ylabel={axis_label!r}",
+                f"yscale={scale!r}",
+                f"ygrid={self.major_grid_checkbox.isChecked()!r}",
+                f"ymin={self._limit_value(self.minimum_edit.text())!r}",
+                f"ymax={self._limit_value(self.maximum_edit.text())!r}",
+            ])
         return f"edit_figure({self.figure_id!r}, {', '.join(updates)})"
 
     def revert_command(self):
         axes = self.snapshot.get("axes", {})
         return (
-            f"edit_figure({self.figure_id!r}, title={self.snapshot['title']!r}, "
+            f"edit_figure({self.figure_id!r}, title={self.snapshot.get('title', '')!r}, "
             f"xlabel={axes.get('xlabel', '')!r}, ylabel={axes.get('ylabel', '')!r}, "
             f"xscale={axes.get('xscale', 'linear')!r}, yscale={axes.get('yscale', 'linear')!r}, "
             f"xgrid={axes.get('xgrid', False)!r}, ygrid={axes.get('ygrid', False)!r}, "
@@ -833,18 +850,28 @@ class FigureEditDialog(QtWidgets.QDialog):
         axes = self.snapshot.get("axes", {})
         self._loading = True
         axis = self.axis_combo.currentText()
+
         if axis == "bottom":
             self.axis_label_edit.setText(axes.get("xlabel", ""))
-            self.scale_combo.setCurrentText(axes.get("xscale", "linear"))
-            self.grid_checkbox.setChecked(axes.get("xgrid", False))
+            scale = axes.get("xscale", "linear")
             self.minimum_edit.setText("" if axes.get("xmin") is None else repr(axes["xmin"]))
             self.maximum_edit.setText("" if axes.get("xmax") is None else repr(axes["xmax"]))
         else:
             self.axis_label_edit.setText(axes.get("ylabel", ""))
-            self.scale_combo.setCurrentText(axes.get("yscale", "linear"))
-            self.grid_checkbox.setChecked(axes.get("ygrid", False))
+            scale = axes.get("yscale", "linear")
             self.minimum_edit.setText("" if axes.get("ymin") is None else repr(axes["ymin"]))
             self.maximum_edit.setText("" if axes.get("ymax") is None else repr(axes["ymax"]))
+
+        if scale == "linear":
+            self.linear_radio.setChecked(True)
+        elif scale == "log":
+            self.log_radio.setChecked(True)
+        elif scale == "log2":
+            self.log2_radio.setChecked(True)
+        else:
+            self.linear_radio.setChecked(True)
+
+        self.major_grid_checkbox.setChecked(axes.get("xgrid" if axis == "bottom" else "ygrid", False))
         self._loading = False
         self._emit_command()
 
@@ -860,7 +887,9 @@ class FigureEditDialog(QtWidgets.QDialog):
         QtWidgets.QMessageBox.information(
             self,
             "Modify Axis",
-            "Adjust the current axis label, scale, grid, and limits. With Live Update enabled, edits are applied to the active figure immediately.",
+            "Adjust axis settings including title, label, scale, grid, and limits. "
+            "With Live Update enabled, edits are applied to the active figure immediately. "
+            "The Graph, Analysis, and Advanced tabs contain additional styling and analysis options.",
         )
 
 
@@ -1328,9 +1357,17 @@ class FitDialog(QtWidgets.QDialog):
             range_expr.append(None if not text else float(text))
         params = {}
         for row in range(self.coefficients_table.rowCount()):
-            name = self.coefficients_table.item(row, 0).text()
-            initial = float(self.coefficients_table.item(row, 1).text())
-            hold = self.coefficients_table.item(row, 2).checkState() == QtCore.Qt.Checked
+            name_item = self.coefficients_table.item(row, 0)
+            initial_item = self.coefficients_table.item(row, 1)
+            if name_item is None or initial_item is None:
+                continue
+            name = name_item.text()
+            try:
+                initial = float(initial_item.text())
+            except ValueError:
+                continue
+            hold_item = self.coefficients_table.item(row, 2)
+            hold = hold_item.checkState() == QtCore.Qt.Checked if hold_item else False
             params[name] = {"value": initial, "vary": not hold}
         result_name = self._result_name()
         graph_value = bool(graph_override)
@@ -1413,9 +1450,26 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         self.panel_windows = {}
         self._saved_subwindow_layouts = {}
 
-        self.terminal = TerminalWidget()
-        self.terminal.command_submitted.connect(self.app.execute_command)
-        self.terminal.completion_requested.connect(self.app.request_terminal_completion)
+        self.command_panel = QtWidgets.QWidget()
+        command_layout = QtWidgets.QVBoxLayout(self.command_panel)
+        command_layout.setContentsMargins(0, 0, 0, 0)
+        self.output_box = OutputBox(command_layout)
+        self.command_input = CommandInputHandler(None)
+        input_frame = QtWidgets.QFrame()
+        input_frame.setFrameShape(QtWidgets.QFrame.Panel)
+        input_frame.setFrameShadow(QtWidgets.QFrame.Raised)
+        input_layout = QtWidgets.QHBoxLayout(input_frame)
+        input_layout.setContentsMargins(4, 2, 4, 2)
+        prompt_label = QtWidgets.QLabel(">>>")
+        font = QtGui.QFont("Monaco", 11)
+        font.setBold(True)
+        prompt_label.setFont(font)
+        input_layout.addWidget(prompt_label)
+        input_layout.addWidget(self.command_input.input)
+        command_layout.addWidget(input_frame)
+
+        self.command_input.command_submitted.connect(self.app.execute_command)
+        self.command_input.completion_requested.connect(self.app.request_terminal_completion)
         self.data_browser = DataBrowserWidget()
         self.data_browser.display_requested.connect(self.app.display_selection)
         self.data_browser.edit_requested.connect(self.app.table_selection)
@@ -1434,7 +1488,7 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         self._connect_actions()
 
     def _create_panel_windows(self):
-        self.command_window = self._add_panel_window("command", "Command window", self.terminal)
+        self.command_window = self._add_panel_window("command", "Command window", self.command_panel)
         self.data_window = self._add_panel_window("data_browser", "Data Browser", self.data_browser)
         self.script_window = self._add_panel_window("script_browser", "Script browser", self.procedure_browser)
 
@@ -1470,6 +1524,7 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         command_shortcut = "Meta+J" if sys.platform == "darwin" else "Ctrl+J"
         self.actionCommandWindow.setShortcut(QtGui.QKeySequence(command_shortcut))
         self.actionCommandWindow.setShortcutContext(QtCore.Qt.ApplicationShortcut)
+        self.actionCommandWindow.triggered.connect(self._focus_command_input)
 
         self._bind_window_actions(self.command_window, self.actionCommandWindow)
         self._bind_window_actions(
@@ -1477,6 +1532,9 @@ class HydeMainWindow(QtWidgets.QMainWindow):
             self.actionDataBrowser,
         )
         self._bind_window_actions(self.script_window, self.actionScriptBrowser)
+
+        self.actionRetrieveWindow.triggered.connect(self._retrieve_window)
+        self.actionRetrieveAll.triggered.connect(self._retrieve_all_windows)
 
         self.scripts_menu = self.menuScripts
         self.graph_macros_menu = self.menuGraphMacros
@@ -1501,12 +1559,60 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         window.visibility_changed.connect(sync)
         sync(window.isVisible())
 
+    def _retrieve_window(self):
+        subwindows = self.mdi.subWindowList()
+        if not subwindows:
+            return
+        if len(subwindows) == 1:
+            self._ensure_window_visible(subwindows[0])
+            return
+        window, _selected = QtWidgets.QInputDialog.getItem(
+            self,
+            "Retrieve Window",
+            "Select window to retrieve:",
+            [sw.windowTitle() or f"Window {i+1}" for i, sw in enumerate(subwindows)],
+            0,
+            False,
+        )
+        if window:
+            for sub in subwindows:
+                if sub.windowTitle() == window:
+                    self._ensure_window_visible(sub)
+                    break
+
+    def _retrieve_all_windows(self):
+        for subwindow in self.mdi.subWindowList():
+            self._ensure_window_visible(subwindow)
+        if self.mdi.subWindowList():
+            self.mdi.subWindowList()[0].activateWindow()
+
+    def _ensure_window_visible(self, window):
+        screen = self.mdi.screen()
+        available_geometry = screen.availableGeometry()
+        geometry = window.geometry()
+        
+        if not available_geometry.contains(geometry):
+            x = max(available_geometry.left(), available_geometry.left() + 50)
+            y = max(available_geometry.top(), available_geometry.top() + 50)
+            width = min(geometry.width(), available_geometry.width() - 50)
+            height = min(geometry.height(), available_geometry.height() - 50)
+            window.setGeometry(x, y, width, height)
+        
+        window.showNormal()
+        window.activateWindow()
+        window.raise_()
+
     def apply_snapshot(self, snapshot, script_entries):
         self.data_browser.set_objects(snapshot.get("namespace_summary", []))
         self.procedure_browser.set_entries(script_entries)
         self._rebuild_scripts_menu(script_entries)
         self._sync_figures(snapshot.get("figures", []))
         self._sync_tables(snapshot.get("tables", []))
+        if not self.script_window.widget():
+            self.script_window.setWidget(self.procedure_browser)
+
+    def _focus_command_input(self):
+        self.command_input.input.setFocus(QtCore.Qt.OtherFocusReason)
 
     def closeEvent(self, event):
         if self.app.shutdown_requested():
@@ -1628,8 +1734,12 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         layout = self._saved_subwindow_layouts.get(key)
         if not layout:
             return
-        geometry = decode_qbytes(layout.get("geometry", ""))
-        if not geometry.isEmpty():
-            window.restoreGeometry(geometry)
+        geometry_data = decode_qbytes(layout.get("geometry", ""))
+        if geometry_data:
+            window.restoreGeometry(geometry_data)
+            mdi_geometry = self.mdi.viewport().rect()
+            window_geometry = window.geometry()
+            if not mdi_geometry.contains(window_geometry):
+                window.setGeometry(mdi_geometry.x(), mdi_geometry.y(), window_geometry.width(), window_geometry.height())
         if not layout.get("visible", True):
             window.hide()

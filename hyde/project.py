@@ -179,11 +179,18 @@ class HydeProject:
         objects = {}
         for name, info in manifest.get("objects", {}).items():
             path = self.root / info["path"]
-            if info["kind"] == "wave":
-                objects[name] = TrackedArray(name, np.load(path, allow_pickle=False))
-            else:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                objects[name] = payload.get("value", payload)
+            if not path.exists():
+                errors.append(f"Object file not found: {path}")
+                continue
+            try:
+                if info["kind"] == "wave":
+                    objects[name] = TrackedArray(name, np.load(path, allow_pickle=False))
+                else:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                    objects[name] = payload.get("value", payload)
+            except Exception as exc:
+                errors.append(f"Failed to load {name}: {exc}")
+                continue
         state = HydeProjectState(str(self.root), manifest, session, objects)
         if errors and not allow_partial:
             raise HydeProjectLoadError(self.root, errors, state)
