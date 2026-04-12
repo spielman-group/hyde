@@ -16,6 +16,8 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Impl: Scaffold the core PyQt MainWindow shell (the resulting code should run without error, yielding a near-featurless MDI container.)
 - [x] Impl: Implement the `ExecutionController` that spins up `spyder_kernels` in a subprocess.
 - [x] Impl: Create and wire in the command_window widget.
+- [x] Impl: Integrate unified `zlog` and managed `ProcessTree` hierarchy.
+- [x] Impl: Create the MDI Logging window for process observability.
 
 ## Phase III: Core System Tests
 - [x] Add tests executing kernel startup/shutdown.

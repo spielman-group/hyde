@@ -24,11 +24,19 @@ Developed a headless integration suite (`tests/test_watchdog.py`) that:
 - Executes isolated code strings via a `BlockingKernelClient`.
 - Proves bidirectional ZMQ communication works without a GUI event loop.
 
+### 4. Managed Process Tree & Observability
+Established a hierarchical managed lifecycle and real-time observability:
+- **Managed Hierarchy**: Implemented a `GUI -> Watchdog -> Launcher -> Kernel` tree using `zprocess` heartbeats to eliminate orphan processes.
+- **Unified Logging**: Integrated `zlog` across all nodes, targeting standard suite `~/labscript_suite/logs/`.
+- **Logging Window**: Added a dedicated MDI `OutputBox` for real-time stdout/stderr redirection of background processes.
+
 ## Refinements & Bug Fixes
 - **Path Derivation**: Implemented absolute module-based path derivation to prevent CWD-drift issues between the GUI and child processes.
-- **Initialization Safeties**: Refined the `CommandWindow` instantiation to ensure the `ioloop` and ZMQ channels are fully established before the widget hooks into them.
+- **Initialization Safeties**: Added a polling loop to the Watchdog to ensure the Jupyter connection file exists and is ready before the GUI attempts to connect.
+- **UI UX**: Standardized the Logging window size (80x40 equivalent) and ensured it behaves correctly within the MDI container.
 
 ## Documentation Updated
-- `project_management/PLAN.md`: Marked Phase II and III as complete.
+- `project_management/PLAN.md`: Marked Phase II architectural refinements as complete.
 - `project_management/ARCHITECTURE.md`: Codified the finalized IPC and package structure models.
-- `project_management/specs/IPC_PROTOCOL.md`: Added RunManager integration details.
+- `project_management/specs/logging_window/SPEC.md`: Added formal specifications for the new observability window.
+- `2025_04_12_OPUS_EVALUATION.md`: Noted the transition toward `zprocess.Event` for future state notifications.

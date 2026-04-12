@@ -7,7 +7,8 @@ desktop_app.set_process_appid('hyde')
 
 # Splash screen
 import labscript_utils.splash
-splash = labscript_utils.splash.Splash(os.path.join(os.path.dirname(__file__), 'hyde.svg'))
+from hyde.paths import SPLASH_SVG
+splash = labscript_utils.splash.Splash(SPLASH_SVG)
 splash.show()
 
 # Update splash text and import qtutils, which can take time
@@ -17,6 +18,8 @@ from qtutils.qt import QtWidgets
 # Framework error hooks
 splash.update_text('importing labscript mechanics')
 import labscript_utils.excepthook
+from labscript_utils.setup_logging import setup_logging
+setup_logging('hyde')
 from labscript_utils.ls_zprocess import ProcessTree
 
 splash.update_text('initializing ProcessTree')

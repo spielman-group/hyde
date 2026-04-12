@@ -40,9 +40,10 @@
    </widget>
    <widget class="QMenu" name="menuWindow">
     <property name="title">
-     <string>Window</string>
+     <string>Windows</string>
     </property>
     <addaction name="actionNew_Figure"/>
+    <addaction name="actionLogging"/>
    </widget>
    <widget class="QMenu" name="menuGraph">
     <property name="title">
@@ -78,6 +79,11 @@
   <action name="actionModify_Figure">
    <property name="text">
     <string>Modify Figure...</string>
+   </property>
+  </action>
+  <action name="actionLogging">
+   <property name="text">
+    <string>Logging</string>
    </property>
   </action>
  </widget>
