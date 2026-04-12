@@ -24,3 +24,4 @@ You must thoroughly review the files in `project_management/` before writing any
 We are aggressively iterating through a phased roadmap defined in `project_management/STRATEGY.md`.
 - **Do Not Overbuild:** We are intentionally building minimal viable components to test architectural assumptions (Phase II). Do not build complex feature trees, generic plugin handlers, or edge-case handling prematurely.
 - **Check the Plan:** Always look at `project_management/PLAN.md` to determine exactly what Phase the project is currently in. Restrict your work solely to the immediate uncompleted tasks.
+- **Review Current Progress:** Refer to `project_management/STATUS.md` for a summary of the current architectural state and recent accomplishments.
