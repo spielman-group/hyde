@@ -36,8 +36,10 @@ The following sections define the draft architectural patterns and specific stru
 hyde/
 ├── hyde/                      # Main package
 │   ├── __init__.py            # Public exports
-│   ├── __main__.py            # CLI entry point
-│   ├── ...                    # Core application modules
+│   ├── __main__.py            # CLI entry point / MDI Launch
+│   ├── execution/             # Backend Control Layer
+│   │   ├── __init__.py
+│   │   └── execution_controller.py # The Watchdog Process
 │   ├── features/              # Feature implementations
 │   │   ├── __init__.py
 │   │   ├── lmfit_features.py
@@ -47,13 +49,12 @@ hyde/
 │       ├── main/
 │       │   ├── __init__.py
 │       │   └── main.ui
-│       ├── data_browser/
-│       │   ├── __init__.py
-│       │   ├── data_browser.ui
-│       │   └── ...
+│       ├── command_window/
+│       │   └── __init__.py    # RichJupyterWidget bridge
 │       └── ...
 └── tests/
-    ├── ...
+    ├── test_watchdog.py      # Architecture integration tests
+    └── ...
 ```
 
 ## Feature implementations
@@ -85,9 +86,17 @@ example.hy/
 - Array data is stored in numpy format (`.npy`)
 - Human-readable settings use TOML or JSON
 
-## IPC
+## IPC: The 3-Process Model
 
-The GUI process communicates with the execution subprocess using `zprocess.ProcessTree`.
+Hyde operates across three distinct processes to ensure the GUI remains responsive and the scientific state remains authoritative and isolated:
+
+1. **Main Process (GUI):** Owns the `QMdiArea`, the `ProcessTree.instance()`, and the `JupyterClient` sockets.
+2. **Execution Controller (Watchdog):** A child process launched via `zprocess`. It monitors the kernel lifecycle and reports `KERNEL_READY` / `KERNEL_CRASHED` alerts.
+3. **The Kernel (spyder_kernels):** The isolated IPython engine.
+
+### Communication Lanes
+- **Lane 1 (Control):** `zprocess.ProcessTree` handles application-level orchestration between the GUI and the Watchdog.
+- **Lane 2 (Data):** Standard Jupyter ZMQ sockets bridge the GUI directly to the Kernel for execution and figure/table metadata updates.
 
 ## Execution
 
@@ -95,6 +104,7 @@ The execution subprocess runs in a separate Python process using the `spyder_ker
 - Full IPython functionality
 - Namespace tracking for data browser
 - Comm-based notifications for live figure/table refresh
+- Mature, well-tested architecture
 
 The GUI sends raw Python code to the kernel for execution - there is no special GUI-to-kernel protocol.
 
