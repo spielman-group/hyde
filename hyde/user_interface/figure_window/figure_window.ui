@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<ui version="4.0">
- <class>FigureWindowWidget</class>
- <widget class="QWidget" name="FigureWindowWidget">
-  <layout class="QVBoxLayout" name="figure_layout"/>
- </widget>
- <resources/>
- <connections/>
-</ui>
