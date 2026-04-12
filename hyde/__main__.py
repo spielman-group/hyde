@@ -17,6 +17,11 @@ from qtutils.qt import QtWidgets
 # Framework error hooks
 splash.update_text('importing labscript mechanics')
 import labscript_utils.excepthook
+from labscript_utils.ls_zprocess import ProcessTree
+
+splash.update_text('initializing ProcessTree')
+process_tree = ProcessTree.instance()
+process_tree.zlock_client.set_process_name('hyde')
 
 # Core application
 splash.update_text('loading Hyde UI')
@@ -36,8 +41,11 @@ if __name__ == '__main__':
     except AttributeError:
         pass # Handle if splash doesn't have this method defined natively
     
-    hyde_instance = HydeApp(qapplication)
-    hyde_instance.ui.show()
+    splash.update_text('Waiting for Watchdog and spyder_kernels spin-up...')
     
-    splash.hide()
+    hyde_instance = HydeApp(qapplication, process_tree, splash)
+    
+    # splash.hide() and hyde_instance.ui.show() are now explicitly handled 
+    # dynamically by HydeApp when KERNEL_READY is caught from the ProcessTree queue.
+    
     sys.exit(qapplication.exec_())

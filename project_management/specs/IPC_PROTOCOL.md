@@ -31,3 +31,17 @@ If the `spyder_kernels` instance segfaults or receives an `exit()` command:
 2. **Orphaning:** Since the backend namespace is wiped, the GUI will apply a visual "Disconnected/Stale" overlay to all linked Figures and Tables. It does **not** hard crash.
 3. **Recovery:** Because the GUI remembers the Application State (which `.hy` package was active), recovery handles reloading natively by triggering the exact same code path as if the user had clicked the `File -> Load` menu item to replay the state script against the fresh kernel.
 4. **Re-binding:** As the data loads into the new kernel, the `comm` channels emit namespace tracking updates, and the orphaned UI widgets dynamically reconnect and refresh.
+
+---
+
+## External Suite IPC (e.g. Runmanager)
+During standard operation, other `labscript-suite` applications (like `runmanager` or `blacs`) distribute asynchronous messages alerting the system to new `.h5` shot files. 
+
+**Decision:** The **Main Process (GUI)** will bear sole responsibility for listening to these suite-level ZeroMQ messages (mimicking `lyse`'s server socket behavior). 
+
+**Rationale:** This preserves the Central Dogma ("The GUI is a String Factory") and the purity of the Watchdog. By handling the incoming payload in the GUI, the application will simply intercept the filepath, convert it into a human-readable execution string (e.g., `hyde.process_shot("filepath.h5")`), and squirt it directly down the established Spyder/Jupyter ZMQ `Lane 2`. 
+
+This guarantees:
+1. The Watchdog remains exclusively a blunt lifecycle-manager.
+2. We don't have to spin up twin/competing `JupyterClient`s to share kernel access.
+3. Automated processing executes precisely as if the user had typed it into the Command Window themselves.

@@ -1,0 +1,19 @@
+NOTE: When using the `ipython kernel` entry point, Ctrl-C will not work.
+
+To exit, you will have to explicitly quit this process, by either sending
+"quit" from a client, or using Ctrl-\ in UNIX-like environments.
+
+To read more about this, see https://github.com/ipython/ipython/issues/2049
+
+
+To connect another client to this kernel, use:
+    --existing /Users/ispielma/Python/Labscript/hyde/hyde/kernel-hyde.json
+[Watchdog] Starting spyder_kernels connected to /Users/ispielma/Python/Labscript/hyde/hyde/kernel-hyde.json...
+
+[Test] Spawning Watchdog: /Users/ispielma/Python/Labscript/hyde/hyde/execution/execution_controller.py
+[Test] KERNEL_READY successfully intercepted.
+[Test] IPC File /Users/ispielma/Python/Labscript/hyde/hyde/kernel-hyde.json validated.
+[Test] Injecting 1+1 Python string into Spyder execution namespace...
+[Test] ZMQ Socket responded OK!
+[Test] Sending QUIT queue dispatch to Watchdog.
+[Test] Watchdog cleanly terminated.

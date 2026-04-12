@@ -9,18 +9,17 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Draft this `PLAN.md`.
 - [x] Refine `HYDE.md` to cleanly articulate vision and goals.
 - [x] Refine `ARCHITECTURE.md` to define design philosophy.
-- [ ] Test the documentation by spawining a sub-agent and verifying that it correctly and completly understood the design philosophy.
+- [x] Test the documentation by spawining a sub-agent and verifying that it correctly and completly understood the design philosophy.
 
 ## Phase II: Minimum Feature Set Prototype
 - [x] Spec: Draft `specs/IPC_PROTOCOL.md` defining how the PyQt window interacts with the Jupyter kernel.
 - [x] Impl: Scaffold the core PyQt MainWindow shell (the resulting code should run without error, yielding a near-featurless MDI container.)
-- [ ] Impl: Implement the `ExecutionController` that spins up `spyder_kernels` in a subprocess.
-- [ ] Impl: Create a simple text input widget that sends Python strings to the subprocess and prints the result.
-- [ ] Review: Does the separation of concerns feel robust? Adjust `ARCHITECTURE.md` if necessary.
+- [x] Impl: Implement the `ExecutionController` that spins up `spyder_kernels` in a subprocess.
+- [x] Impl: Create and wire in the command_window widget.
 
 ## Phase III: Core System Tests
-- [ ] Add tests executing kernel startup/shutdown.
-- [ ] Add tests verifying strings are executed in the separated namespace.
+- [x] Add tests executing kernel startup/shutdown.
+- [x] Add tests verifying strings are executed in the separated namespace.
 
 ## Phase IV: Iterative Feature Deployment
 ### Feature A: Matplotlib Figure Capture
