@@ -29,3 +29,15 @@ EXECUTION_CONTROLLER = os.path.join(
 KERNEL_LAUNCHER = os.path.join(
     HYDE_PKG_DIR, "execution", "kernel_launcher.py"
 )
+
+# --- Project Management Paths ---
+
+# Default project location (bootstrap)
+DEFAULT_PROJECT_DIR = os.path.join(
+    os.path.expanduser("~"), "HydeProjects", "default.hy"
+)
+
+# Important subdirectories within a .hy project
+PROCEDURES_DIR = os.path.join(DEFAULT_PROJECT_DIR, "procedures")
+MASTER_SCRIPT = os.path.join(PROCEDURES_DIR, "master.py")
+

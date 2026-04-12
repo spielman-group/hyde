@@ -44,6 +44,7 @@
     </property>
     <addaction name="actionNew_Figure"/>
     <addaction name="actionLogging"/>
+    <addaction name="actionProcedures"/>
    </widget>
    <widget class="QMenu" name="menuGraph">
     <property name="title">
@@ -84,6 +85,11 @@
   <action name="actionLogging">
    <property name="text">
     <string>Logging</string>
+   </property>
+  </action>
+  <action name="actionProcedures">
+   <property name="text">
+    <string>Procedures</string>
    </property>
   </action>
  </widget>

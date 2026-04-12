@@ -24,18 +24,27 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Add tests verifying strings are executed in the separated namespace.
 
 ## Phase IV: Iterative Feature Deployment
-### Feature A: Matplotlib Figure Capture
+### Feature A: Procedure Browser & Kernel Initialization
+- [x] Spec: Draft `specs/procedure_browser/SPEC.md`.
+- [x] Impl: Implement `master.py` bootstrapping and automated kernel execution.
+- [x] Impl: Create the MDI Procedure Browser with filesystem monitoring.
+- [x] Test: Verify environment synchronization between script and kernel.
+
+### Feature B: Matplotlib Figure Capture
 - [ ] Spec: Draft `specs/GUI_FIGURES.md`.
-- [ ] Impl: Allow `plt.plot()` in the execution process to pop open a PyQt MDI sub-window in the GUI process.
+- [ ] Impl: Allow `plt.plot()` in the execution process to pop open a PyQt MDI sub-window in the GUI process via the Metadata Mirror model.
 - [ ] Test: Figure rendering and closing behavior.
 
-### Feature B: Data Browser
+### Feature C: Data Browser
 - [ ] Spec: Draft `specs/DATA_TRACKING.md`.
 - [ ] Impl: Capture namespace variables (int, float, array) using `spyder` comms.
 - [ ] Impl: Show tracked variables in a QTreeView in the GUI.
 - [ ] Test: Namespace syncing when changing variables in the python kernel.
 
 *(Further features like Curve Fitting, Tables, Save/Load `.hy` packages will be added here as we iterate)*
+
+### Feature C: Table Editor
+
 
 ## Phase V: Announcement and Release
 - [ ] TBD.

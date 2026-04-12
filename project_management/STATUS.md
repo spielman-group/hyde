@@ -1,4 +1,4 @@
-# Hyde Phase II & III Completion Status
+# Hyde Phase II, III, & IV Feature A Status
 
 We have successfully built the core architectural skeleton of Hyde, transitioning from design philosophy to a fully functional multi-process infrastructure.
 
@@ -29,6 +29,14 @@ Established a hierarchical managed lifecycle and real-time observability:
 - **Managed Hierarchy**: Implemented a `GUI -> Watchdog -> Launcher -> Kernel` tree using `zprocess` heartbeats to eliminate orphan processes.
 - **Unified Logging**: Integrated `zlog` across all nodes, targeting standard suite `~/labscript_suite/logs/`.
 - **Logging Window**: Added a dedicated MDI `OutputBox` for real-time stdout/stderr redirection of background processes.
+
+### 5. Phase IV-A: Procedure Browser & Explicit Initialization
+Established the foundation for a transparent, reproducible scientific environment:
+- **Default Project Bootstrapping**: Implemented a transition to the `.hy` project structure, defaulting to `~/HydeProjects/default.hy`.
+- **"Explicit is Better than Implicit"**: Automated the execution of `procedures/master.py` in the kernel upon startup, ensuring all imports (numpy, matplotlib) and backends are script-defined.
+- **Run-on-Save Synchronization**: Integrated a file-system watcher that automatically re-executes `master.py` in the kernel whenever it is saved, keeping the interactive workspace in sync with the script.
+- **MDI Procedure Browser**: Added a native script browser for managing `.py` files within the project, featuring double-click integration with the system-default editor.
+
 
 ## Refinements & Bug Fixes
 - **Path Derivation**: Implemented absolute module-based path derivation to prevent CWD-drift issues between the GUI and child processes.
