@@ -12,8 +12,8 @@ This document is a living checklist tracking the specific steps we will follow (
 - [ ] Test the documentation by spawining a sub-agent and verifying that it correctly and completly understood the design philosophy.
 
 ## Phase II: Minimum Feature Set Prototype
-- [ ] Spec: Draft `specs/IPC_PROTOCOL.md` defining how the PyQt window interacts with the Jupyter kernel.
-- [ ] Impl: Scaffold the core PyQt MainWindow shell.
+- [x] Spec: Draft `specs/IPC_PROTOCOL.md` defining how the PyQt window interacts with the Jupyter kernel.
+- [x] Impl: Scaffold the core PyQt MainWindow shell (the resulting code should run without error, yielding a near-featurless MDI container.)
 - [ ] Impl: Implement the `ExecutionController` that spins up `spyder_kernels` in a subprocess.
 - [ ] Impl: Create a simple text input widget that sends Python strings to the subprocess and prints the result.
 - [ ] Review: Does the separation of concerns feel robust? Adjust `ARCHITECTURE.md` if necessary.
