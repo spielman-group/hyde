@@ -273,6 +273,53 @@ class TestWatchdogArchitecture(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
 
+    def test_hyde_table_request_reaches_watchdog(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name('hyde-test')
+
+        controller_path = os.path.abspath(
+            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        )
+
+        to_worker, from_worker, worker = process_tree.subprocess(
+            controller_path,
+            args=[CONNECTION_FILE],
+        )
+
+        try:
+            task, data = from_worker.get(timeout=15)
+            self.assertEqual(task, 'KERNEL_READY')
+
+            client = BlockingKernelClient(connection_file=CONNECTION_FILE)
+            client.load_connection_file()
+            client.start_channels()
+
+            try:
+                client.wait_for_ready(timeout=5)
+                msg_id = client.execute(
+                    "import numpy as np, hyde\n"
+                    "c = np.arange(4)\n"
+                    "hyde.table(c)\n"
+                )
+                while True:
+                    reply = client.get_shell_msg(timeout=5)
+                    if reply['parent_header'].get('msg_id') == msg_id:
+                        break
+                self.assertEqual(reply['content']['status'], 'ok')
+
+                task, payload = from_worker.get(timeout=10)
+                self.assertEqual(task, 'OPEN_TABLE')
+                self.assertEqual(payload['names'], ['c'])
+                self.assertIsNone(payload['target'])
+            finally:
+                client.stop_channels()
+        finally:
+            to_worker.put(['QUIT', None])
+            try:
+                worker.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
+
     def test_watch_project_starts_with_only_package_init(self):
         process_tree = ProcessTree.instance()
         process_tree.zlock_client.set_process_name('hyde-test')

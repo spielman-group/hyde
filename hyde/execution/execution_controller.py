@@ -7,6 +7,7 @@ from labscript_utils.ls_zprocess import ProcessTree
 from labscript_utils.filewatcher import FileWatcher
 from labscript_utils.setup_logging import setup_logging
 from jupyter_client import BlockingKernelClient
+from zprocess.utils import TimeoutError as ZprocessTimeoutError
 from hyde.paths import KERNEL_LAUNCHER
 import labscript_utils.excepthook
 
@@ -57,6 +58,14 @@ class ExecutionWatchdog:
                 self.kernel_client = BlockingKernelClient(connection_file=self.connection_file)
                 self.kernel_client.load_connection_file()
                 self.kernel_client.start_channels()
+
+            # Monitor kernel-side Hyde signaling as long as this kernel is alive
+            monitor_thread = threading.Thread(
+                target=self.monitor_kernel, 
+                args=(self.from_kernel,)
+            )
+            monitor_thread.daemon = True
+            monitor_thread.start()
 
             if not self.exiting and self.kernel_process.poll() is None:
                 self.to_parent.put(['KERNEL_READY', self.connection_file])
@@ -148,12 +157,41 @@ class ExecutionWatchdog:
                 task, data = self.from_parent.get()
                 if task == 'WATCH_PROJECT':
                     self.watch_project(data)
+                elif task == 'FETCH_TABLE_DATA':
+                    if self.kernel_client is not None:
+                        names = data.get('names', [])
+                        request_id = data.get('request_id')
+                        code = (
+                            f"import hyde.execution.ipc; "
+                            f"hyde.execution.ipc.push_table_data({names!r}, {request_id!r})"
+                        )
+                        self.kernel_client.execute(code, silent=True)
                 elif task == 'QUIT':
                     self.exiting = True
                     self.reload_requested.set()
                     break
             except Exception as e:
                 print(f"[Watchdog] Error polling ProcessTree queue: {e}")
+
+    def monitor_kernel(self, from_kernel):
+        """Relay Hyde signals from the kernel ProcessTree queue to the GUI."""
+        while not self.exiting:
+            try:
+                # Pulse based on the kernel subprocess queue
+                msg = from_kernel.get(timeout=0.1)
+                if not msg:
+                    continue
+                
+                task, data = msg
+                if task == 'OPEN_TABLE_REQUEST':
+                    self.to_parent.put(['OPEN_TABLE', data])
+                elif task == 'TABLE_DATA_RESPONSE':
+                    self.to_parent.put(['TABLE_DATA', data])
+            except ZprocessTimeoutError:
+                continue
+            except Exception:
+                # Kernel queue likely closed or kernel died
+                break
 
 if __name__ == '__main__':
     # Bootstrap into the labscript ProcessTree parent

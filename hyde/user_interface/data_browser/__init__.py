@@ -254,13 +254,12 @@ class DataBrowser(QtWidgets.QWidget):
         copy_action.setEnabled(enabled)
         delete_action.setEnabled(enabled)
         
-        # Table actions are only for 1D numeric arrays
+        # Table actions are only for eligible types (1D numeric arrays initially)
         can_table = False
         if enabled:
             metadata = self._primary_selected_metadata()
-            python_type = metadata.get("python_type", "").lower()
-            numpy_type = metadata.get("numpy_type", "")
-            can_table = python_type == "ndarray" or numpy_type == "Array"
+            from hyde.features.hyde_features import is_eligible_for_table
+            can_table = is_eligible_for_table(metadata)
         
         edit_action.setEnabled(can_table)
         
@@ -286,7 +285,7 @@ class DataBrowser(QtWidgets.QWidget):
         if dialog.exec_():
             command = dialog.get_command()
             if command and self.app:
-                self.app.execute_command(command)
+                self.app.execute_command(command, visible=True)
 
     def _append_to_table_selected(self):
         names = self._selected_names()
@@ -294,9 +293,9 @@ class DataBrowser(QtWidgets.QWidget):
             return
         
         target = self.app.active_table_handle
-        args = ", ".join(names)
-        command = f"hyde.table({args}, target={target!r})"
-        self.app.execute_command(command)
+        from hyde.features.hyde_features import format_table_command
+        command = format_table_command(names, target=target)
+        self.app.execute_command(command, visible=True)
 
     def closeEvent(self, event):
         self._closed = True

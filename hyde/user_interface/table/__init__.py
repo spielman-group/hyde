@@ -1,4 +1,5 @@
 import os
+import uuid
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from qtconsole.client import QtKernelClient
@@ -77,6 +78,7 @@ class TableWidget(QtWidgets.QWidget):
         self.connection_file = connection_file
         self.app = app
         self._external_kernel_busy = False
+        self._current_request_id = None
         self._refresh_in_flight = False
         self._closed = False
 
@@ -108,22 +110,24 @@ class TableWidget(QtWidgets.QWidget):
         self.refresh_data()
 
     def refresh_data(self):
-        """Request array data via the shared Hyde comm."""
+        """Request array data via the Executor relay path."""
         if self._closed or self._refresh_in_flight:
             return
         
-        if self.app and self.app.hyde_comm:
-            self._refresh_in_flight = True
-            self.app.hyde_comm.request_table_data(
-                self.names, 
-                callback=self._on_data_received
-            )
+        self._current_request_id = str(uuid.uuid4())
+        self._refresh_in_flight = True
+        if self.app and self.app.to_worker:
+            self.app.to_worker.put(['FETCH_TABLE_DATA', {
+                'names': self.names,
+                'request_id': self._current_request_id
+            }])
 
     @inmain_decorator()
-    def _on_data_received(self, data):
-        self._refresh_in_flight = False
-        if not isinstance(data, dict):
+    def on_data_received(self, data, request_id):
+        """Callback from HydeApp relay for FETCH_TABLE_DATA."""
+        if request_id != self._current_request_id:
             return
+        self._refresh_in_flight = False
         self.model.update_data(data)
         self._update_selection_info()
 
@@ -135,6 +139,8 @@ class TableWidget(QtWidgets.QWidget):
                 if not self._refresh_in_flight:
                     self._external_kernel_busy = True
             elif state == "idle":
+                if self._refresh_in_flight:
+                    return
                 if self._external_kernel_busy:
                     # External command finished, refresh viewports
                     self._external_kernel_busy = False
@@ -180,9 +186,12 @@ class TableWidget(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Invalid Value", "Only numeric values are supported.")
             return
 
-        command = f"{name}[{row}] = {val_text}"
+        from hyde.features.hyde_features import format_cell_edit_command
+        command = format_cell_edit_command(name, row, val_text)
+        
         if self.app:
-            self.app.execute_command(command)
+            # Table edits use muted execution policy
+            self.app.execute_command(command, visible=False)
 
     def closeEvent(self, event):
         self._closed = True

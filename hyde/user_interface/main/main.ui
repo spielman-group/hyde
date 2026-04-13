@@ -44,6 +44,7 @@
      <string>Windows</string>
     </property>
     <addaction name="actionCommandWindow"/>
+    <addaction name="actionNew_Table"/>
     <addaction name="actionNew_Figure"/>
     <addaction name="actionLogging"/>
     <addaction name="actionProcedures"/>
@@ -103,6 +104,11 @@
   <action name="actionProcedures">
    <property name="text">
     <string>Procedures</string>
+   </property>
+  </action>
+  <action name="actionNew_Table">
+   <property name="text">
+    <string>New Table...</string>
    </property>
   </action>
   <action name="actionDataBrowser">
