@@ -4,6 +4,7 @@ import time
 import unittest
 import subprocess
 import tempfile
+from pathlib import Path
 
 from labscript_utils.ls_zprocess import ProcessTree
 from jupyter_client import BlockingKernelClient
@@ -12,6 +13,14 @@ import hyde
 from hyde.paths import CONNECTION_FILE
 
 class TestWatchdogArchitecture(unittest.TestCase):
+    def test_kernel_launcher_runs_spyder_in_process(self):
+        launcher_path = Path(os.path.dirname(hyde.__file__)) / "execution" / "kernel_launcher.py"
+        source = launcher_path.read_text()
+
+        self.assertIn("from spyder_kernels.console.start import main as start_spyder_kernel", source)
+        self.assertIn("start_spyder_kernel()", source)
+        self.assertNotIn("subprocess.Popen", source)
+
     def wait_for_code_ok(self, client, code, timeout=5):
         deadline = time.time() + timeout
         last_reply = None
