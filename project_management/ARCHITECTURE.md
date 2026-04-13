@@ -59,7 +59,20 @@ hyde/
 
 `import hyde` is valid in the kernel and in project procedures because Hyde is an installable Python package. At present, this package does not expose a broad helper API beyond the package itself.
 
-When Hyde-specific helper functions are added in the future, they should be exposed deliberately through the Hyde package surface rather than through ad hoc GUI-only hooks.
+Anything exposed from `hyde/__init__.py` is part of Hyde's public kernel-facing API.
+Public helpers such as `hyde.table(...)` must therefore be added deliberately, not as
+incidental re-exports, and they must be documented in a form suitable for generated API
+documentation.
+
+The `features/` layer is not the home of the public Hyde runtime API. Instead,
+`features/...` is reserved for translation between GUI representations and Python command
+strings, and for translating Python command strings or metadata back into GUI-facing
+representations.
+
+When Hyde-specific helper functions are added, they should be exposed deliberately through
+the Hyde package surface rather than through ad hoc GUI-only hooks. The table feature is
+the first planned example of this pattern, with `hyde.table(...)` serving as the kernel-
+facing entry point for table creation and appending.
 
 ## Project and Persistence
 

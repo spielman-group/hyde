@@ -19,6 +19,7 @@ You must thoroughly review the files in `project_management/` before writing any
 - **UI Framework Boundary:** Do not ever import `PyQt5`, `PyQt6`, `PySide2`, or `PySide6` natively. You must route all imports through the labscript-suite's `qtutils` compatibility layer (e.g., `from qtutils.qt.QtWidgets import QMainWindow`).
 - **Threading:** If an IPython response out of the `quconsole` or a zero-MQ callback touches the UI, you MUST route it to the main GUI thread using `qtutils.inmain_decorator` or similar helpers. 
 - **Communication:** Use `zprocess.ProcessTree` for general subprocess spawning and suite-level IPC (like listening for `lyse` equivalent messages), but rely entirely on standard Jupyter zero-MQ messaging (`spyder_kernels` / `qtconsole`) to interact with the Python execution kernel.
+- **Public API Documentation Is Required:** Anything exposed from `hyde/__init__.py` is part of Hyde's public API. Do not add or re-export symbols there unless they are documented with docstrings and parameter/behavior descriptions suitable for generated API documentation.
 
 ## 4. Work Strategy & Scope
 We are aggressively iterating through a phased roadmap defined in `project_management/STRATEGY.md`.

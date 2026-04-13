@@ -2,7 +2,9 @@ import os
 import shutil
 import threading
 from qtutils import UiLoader, inmain_decorator
-from qtutils.qt import QtWidgets, QtCore
+from qtutils.qt import QtWidgets, QtCore, QtGui
+from qtconsole.client import QtKernelClient
+from spyder_kernels.comms.commbase import CommBase
 
 from hyde.paths import (
     EXECUTION_CONTROLLER, 
@@ -77,6 +79,37 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
             return [self._selected_path]
         return super().selectedFiles()
 
+class HydeFrontendComm(CommBase):
+    """Narrow frontend handler for Hyde-specific UI triggers and data fetching."""
+
+    def __init__(self, kernel_client, app):
+        super().__init__()
+        self.kernel_client = kernel_client
+        self.app = app
+        self.comm = None
+        self.register_call_handler("open_table", self.app.open_table)
+
+    def on_comm_open(self, comm, msg):
+        """Handle incoming comm open from the kernel (open_table intent)."""
+        self._register_comm(comm)
+
+    def open(self):
+        """Manually open the comm to the kernel for data requests."""
+        if self.comm is not None:
+            return
+        self.comm = self.kernel_client.comm_manager.new_comm('hyde_api')
+        self._register_comm(self.comm)
+
+    def request_table_data(self, names, callback):
+        """Fetch array data via remote call to the kernel."""
+        if self.comm is None:
+            self.open()
+        self.remote_call(
+            comm_id=self.comm.comm_id,
+            callback=callback
+        ).get_table_data(names)
+
+
 class HydeMainWindow(QtWidgets.QMainWindow):
     def __init__(self, app, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -95,6 +128,11 @@ class HydeApp:
         self.from_worker = None
         self.worker = None
         self._subwindow_filters = []
+        self.tables = {}  # {handle: TableWidget}
+        self.active_table_handle = None
+        self.table_counter = 0
+        self.hyde_comm = None
+        self.kernel_client = None
         
         # Load the UI
         loader = UiLoader()
@@ -139,6 +177,9 @@ class HydeApp:
         self.listener_thread.daemon = True
         self.listener_thread.start()
         
+        # Track active subwindow for "Active Table" rule
+        self.ui.mdiArea.subWindowActivated.connect(self._on_subwindow_activated)
+        
         # Connect Application events
         self.ui.actionNew.triggered.connect(self.choose_project)
         self.ui.actionLoad.triggered.connect(self.choose_project)
@@ -172,6 +213,47 @@ class HydeApp:
         self.data_browser_subwindow.show()
         self.data_browser_subwindow.setFocus()
         self.data_browser_subwindow.raise_()
+
+    @inmain_decorator()
+    def open_table(self, names, target=None):
+        """
+        Open a new table or append to an existing one.
+        Called via hyde_api comm from the kernel.
+        """
+        from hyde.user_interface.table import TableWidget
+
+        if target is not None and target in self.tables:
+            table = self.tables[target]
+            table.append_columns(names)
+            table.parentWidget().show()
+            table.parentWidget().setFocus()
+            table.parentWidget().raise_()
+            return
+
+        handle = f"Table{self.table_counter}"
+        self.table_counter += 1
+        
+        table = TableWidget(handle, names, connection_file=CONNECTION_FILE, app=self)
+        subwindow = self.ui.mdiArea.addSubWindow(table)
+        self.tables[handle] = table
+        subwindow.setWindowTitle(f"{handle}: {', '.join(names)}")
+        subwindow.show()
+        
+        # When subwindow is destroyed, remove from registry
+        subwindow.destroyed.connect(lambda: self.tables.pop(handle, None))
+
+    def _on_subwindow_activated(self, subwindow):
+        if subwindow is None:
+            return
+        widget = subwindow.widget()
+        from hyde.user_interface.table import TableWidget
+        if isinstance(widget, TableWidget):
+            self.active_table_handle = widget.handle
+
+    def execute_command(self, code):
+        """Execute a command in the kernel via the app's client."""
+        if self.kernel_client is not None:
+            self.kernel_client.execute(code)
 
     def configure_persistent_subwindow(self, subwindow):
         subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
@@ -306,11 +388,18 @@ class HydeApp:
             self.command_window.show()
             
             # Instantiate Data Browser with its own client
-            self.data_browser = DataBrowser(connection_file=CONNECTION_FILE)
+            self.data_browser = DataBrowser(connection_file=CONNECTION_FILE, app=self)
             self.data_browser_subwindow = self.ui.mdiArea.addSubWindow(self.data_browser)
             self.configure_persistent_subwindow(self.data_browser_subwindow)
             self.data_browser.show()
             
+            # Setup Hyde-specific comm channel for UI triggers
+            self.kernel_client = QtKernelClient(connection_file=CONNECTION_FILE)
+            self.kernel_client.load_connection_file()
+            self.kernel_client.start_channels()
+            self.hyde_comm = HydeFrontendComm(self.kernel_client, self)
+            self.kernel_client.comm_manager.register_target("hyde_api", self.hyde_comm.on_comm_open)
+
             # Release the splash screen and manifest the GUI
             self.ui.show()
             self.splash.hide()

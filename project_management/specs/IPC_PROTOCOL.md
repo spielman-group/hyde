@@ -29,7 +29,21 @@ The kernel may import the Hyde package directly:
 import hyde
 ```
 
-Today, this provides the Hyde Python package namespace itself. Hyde-specific helper functions are not yet a defined public API surface. When such helpers are added, they should be exposed deliberately through the Hyde package and documented alongside the implementation.
+Anything exposed from `hyde/__init__.py` is part of Hyde's public kernel-facing API.
+
+Public helpers added there must:
+- be defined deliberately as part of Hyde's runtime interface
+- be documented with docstrings and parameter/behavior descriptions suitable for generated API documentation
+- remain separate from the `features/...` translation layer
+
+The `features/...` layer is reserved for:
+- GUI representation -> Python strings
+- Python strings or metadata -> GUI representation
+
+The table feature is the first planned example of a public Hyde helper, with
+`hyde.table(...)` serving as the kernel-facing entry point for table creation and
+appending. Future decorators such as `@hyde.table` are deferred until the recreation
+contract is defined.
 
 ## Lane 1: GUI <-> Executor (`zprocess.ProcessTree`)
 

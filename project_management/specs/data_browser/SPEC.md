@@ -7,8 +7,10 @@
 - [x] Show a selection-driven info pane with type and value metadata.
 - [x] Show a selection-driven preview area with placeholder text for future plotting support.
 - [x] Support `Copy Python Expression` and `Delete Object`.
+- [x] Support table creation from the selection via `Edit` and the New Table dialog.
+- [x] Support appending selected arrays to an existing table via `Append to Table`.
 - [x] Keep the browser synchronized with kernel namespace changes without storing scientific state in the GUI.
-- [ ] Support display/edit/append actions once figure and table infrastructure exists.
+- [ ] Support figure-oriented `Display` and `Append to Graph` actions once figure infrastructure exists.
 - [ ] Define cross-project browsing of another `.hy` project.
   Cross-project browsing is specified here but is not part of the initial deployment.
 
@@ -16,7 +18,8 @@
 
 The Data Browser is Hyde's visual browser for the authoritative Python execution namespace.
 It allows the user to inspect named objects, view concise metadata, preview plottable data,
-and invoke common actions from a context menu.
+and invoke common actions from a context menu. It also serves as the entry point for
+table creation and appending from selected kernel-owned arrays.
 
 The Data Browser is not a filesystem browser and does not implement Igor Pro data folders.
 Its object model is Python-native:
@@ -36,6 +39,9 @@ It includes:
 - metadata-driven list rows for name, type, and display value
 - a placeholder preview area
 - currently supported actions that map cleanly onto Python and Hyde behavior
+- table launch actions for supported array selections (`Edit`, `Append to Table`)
+- `Edit` and `Append to Table` only for selection types the table widget supports in the initial deployment
+- `pandas.DataFrame` objects remain visible under `Waves` but their table actions are future work
 
 The initial deployment does not include:
 
@@ -44,6 +50,7 @@ The initial deployment does not include:
 - browsing a second project side-by-side
 - save-copy workflows
 - arbitrary "execute command on selection" UI
+- figure-oriented `Display` and `Append to Graph` actions
 - usage/dependency lookup unless a Hyde-native definition is later specified
 
 ## Window Layout
@@ -58,6 +65,30 @@ Its layout follows the broad structure suggested by the screenshot while using H
 
 The browser reflects the active project and active kernel session.
 Changing the current `.hy` project replaces the browser contents with the namespace of the newly loaded project.
+
+## Visible Controls
+
+The visible controls are classified as follows:
+
+- `Waves` - `active`
+- `Variables` - `active`
+- `Strings` - `active`
+- `Info` - `active`
+- `Plot` - `inert-but-visible`
+- `Delete` - `active`
+- `New Data Folder` - `excluded`
+- `Save Copy` - `excluded`
+- `Browse Expt...` - `excluded`
+- `Execute Cmd...` - `excluded`
+- `Current Data Folder` / `root:` field - `excluded`
+- current-folder arrow indicator - `excluded`
+- context-menu `Copy Python Expression` - `active`
+- context-menu `Delete Object` - `active`
+- context-menu `Edit` - `active`
+- context-menu `Append to Table` - `active`
+- context-menu `Display` - `excluded`
+- context-menu `Append to Graph` - `excluded`
+- context-menu `Show Where Object Is Used...` - `excluded`
 
 ## Left Sidebar Controls
 
@@ -80,9 +111,9 @@ The sidebar also contains action buttons derived from the reference screenshot.
 In the initial deployment:
 
 - `Delete` is active.
-- `New Data Folder`, `Save Copy`, `Browse Expt...`, and `Execute Cmd...` are visible but disabled.
+- `New Data Folder`, `Save Copy`, `Browse Expt...`, and `Execute Cmd...` are excluded from the initial deployment.
 
-These disabled buttons do not imply support for the corresponding Igor workflows.
+The screenshot-derived current-folder controls are excluded because Hyde does not implement Igor-style data folders.
 
 ## Object List
 
@@ -127,6 +158,21 @@ It displays static placeholder text indicating that preview support will arrive 
 The preview pane remains a viewport-only area.
 Any durable or user-directed visualization action will still need to generate explicit Python commands and open the appropriate Hyde window once figure support exists.
 
+## Editable Operations
+
+The only live mutable operation in the initial deployment is `Delete Object`.
+
+- Target objects: one or more selected top-level Python names in the active kernel namespace.
+- Python-level effect: remove the selected binding(s) from the kernel namespace with explicit `del` statements.
+- Timing: confirmed before dispatch.
+- Invalid or unsupported selections: no deletion occurs if nothing valid is selected.
+
+The following operations are visible in the screenshot but are not part of the initial deployment:
+
+- `Display`
+- `Append to Graph`
+- `Show Where Object Is Used...`
+
 ## Context Menu Actions
 
 The browser supports a right-click menu of object actions.
@@ -135,16 +181,34 @@ In the initial deployment, the active actions are:
 - `Copy Python Expression`
   Copy the Python expression that identifies the selected object.
   For the initial deployment this is the top-level variable name.
+  This is the Hyde-native replacement for Igor's `Copy Full Path` action.
 - `Delete Object`
   Delete the selected object or objects from the live namespace after confirmation.
-
-The following actions remain future work until their dependent feature infrastructure exists:
-
-- `Display`
 - `Edit`
-- `Append to Graph`
+  Open the New Table dialog with the selected array-like objects so the dialog can
+  generate `hyde.table(...)`.
 - `Append to Table`
-- `Show Where Object Is Used`
+  Append the selected array-like objects to the currently active table using
+  `hyde.table(..., target=<table_name>)`.
+
+The remaining Igor actions are intentionally not part of the initial deployment.
+
+`Edit` and `Append to Table` are only enabled for selections that the initial table
+widget supports. In the initial table deployment that means 1D numeric arrays.
+`pandas.DataFrame` objects remain visible in the browser but their table actions are
+deferred until the table widget defines DataFrame semantics.
+
+## Table Integration
+
+The Data Browser launches the table widget through the New Table dialog and the
+kernel-facing `hyde.table(...)` API.
+
+- `Edit` opens the New Table dialog with the selected array-like objects
+- `Append to Table` appends the selected array-like objects to the active table
+
+If no table is active, `Append to Table` is unavailable.
+If the selection is not compatible with the initial table widget, both table actions
+are unavailable.
 
 ## Command Generation
 
@@ -155,6 +219,11 @@ Instead, the GUI generates explicit Python strings and dispatches them to the ke
 Examples of the intended pattern include:
 
 - deleting objects with explicit Python statements such as `del name`
+- copying a valid Python expression for the selected object
+- creating a new table with `hyde.table(arr1, arr2)`
+- appending to an existing table with `hyde.table(arr1, target="Table0")`
+
+GUI state that is only needed to generate the command string may be transient, but it is never authoritative scientific state.
 
 The browser therefore remains a viewport and command source for kernel-owned state.
 
@@ -168,7 +237,6 @@ Namespace changes caused by:
 
 - terminal input
 - procedure reloads
-- figure/table actions
 - external Python code run in the kernel
 
 must update the Data Browser view.
@@ -199,6 +267,17 @@ The following Igor concepts do not carry into Hyde as part of this specification
 - packed-experiment file browsing as an Igor file format feature
 - unpacked save-copy workflows
 - free-form execute-command dialogs
+- root/current-folder navigation UI
+- figure and table action support in the initial deployment
+- `Show Where Object Is Used...` in the initial deployment
+
+## Future Work
+
+- display actions once Hyde figure support exists
+- edit actions once the target widget semantics are defined
+- append-to-graph actions once figure support exists
+- append-to-table actions once the table widget exists
+- cross-project browsing of another `.hy` project
 
 ## 08_data_browser_context_menu.png
 ![Data Browser Context Menu](08_data_browser_context_menu.png)

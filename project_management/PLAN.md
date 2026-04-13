@@ -47,7 +47,7 @@ This document is a living checklist tracking the specific steps we will follow (
 *(Further features like Curve Fitting, Tables, Save/Load `.hy` packages will be added here as we iterate)*
 
 ### Feature D: Table Editor
-- [ ] Spec: Refine `specs/table/SPEC.md`.
+- [x] Spec: Refine `specs/table/SPEC.md` and define the Data Browser table-launch contract.
 - [ ] Impl: Create the table editor MDI window and data model integration.
 - [ ] Test: Verify table editing, sorting, and persistence behavior.
 

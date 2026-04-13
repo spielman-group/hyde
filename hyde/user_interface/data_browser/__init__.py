@@ -85,10 +85,14 @@ class SpyderFrontendComm(CommBase):
         print(error_wrapper)
 
 
+from hyde.user_interface.new_table_dialog import NewTableDialog
+
+
 class DataBrowser(QtWidgets.QWidget):
-    def __init__(self, connection_file, *args, **kwargs):
+    def __init__(self, connection_file, app=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.connection_file = connection_file
+        self.app = app
         self._external_kernel_busy = False
         self._refresh_in_flight = False
         self._closed = False
@@ -150,6 +154,7 @@ class DataBrowser(QtWidgets.QWidget):
                 self.refresh_namespace()
 
     def _on_namespace_view(self, view):
+        self._last_view = view  # Cache for dialogs
         self._update_ui(view or {})
 
     @inmain_decorator()
@@ -240,17 +245,58 @@ class DataBrowser(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         copy_action = menu.addAction("Copy Python Expression")
         delete_action = menu.addAction("Delete Object")
+        menu.addSeparator()
+        edit_action = menu.addAction("Edit")
+        append_action = menu.addAction("Append to Table")
 
         names = self._selected_names()
         enabled = bool(names)
         copy_action.setEnabled(enabled)
         delete_action.setEnabled(enabled)
+        
+        # Table actions are only for 1D numeric arrays
+        can_table = False
+        if enabled:
+            metadata = self._primary_selected_metadata()
+            python_type = metadata.get("python_type", "").lower()
+            numpy_type = metadata.get("numpy_type", "")
+            can_table = python_type == "ndarray" or numpy_type == "Array"
+        
+        edit_action.setEnabled(can_table)
+        
+        has_active_table = self.app and self.app.active_table_handle is not None
+        append_action.setEnabled(can_table and has_active_table)
 
         chosen = menu.exec_(self.ui.treeView.viewport().mapToGlobal(position))
         if chosen == copy_action:
             self._copy_selected_expression()
         elif chosen == delete_action:
             self._delete_selected()
+        elif chosen == edit_action:
+            self._edit_selected()
+        elif chosen == append_action:
+            self._append_to_table_selected()
+
+    def _edit_selected(self):
+        names = self._selected_names()
+        if not names:
+            return
+        
+        dialog = NewTableDialog(self._last_view, preselection=names, parent=self)
+        if dialog.exec_():
+            command = dialog.get_command()
+            if command and self.app:
+                self.app.execute_command(command)
+
+    def _append_to_table_selected(self):
+        names = self._selected_names()
+        if not names or not self.app or not self.app.active_table_handle:
+            return
+        
+        target = self.app.active_table_handle
+        args = ", ".join(names)
+        command = f"hyde.table({args}, target={target!r})"
+        self.app.execute_command(command)
 
     def closeEvent(self, event):
         self._closed = True
