@@ -43,9 +43,11 @@
     <property name="title">
      <string>Windows</string>
     </property>
+    <addaction name="actionCommandWindow"/>
     <addaction name="actionNew_Figure"/>
     <addaction name="actionLogging"/>
     <addaction name="actionProcedures"/>
+    <addaction name="actionDataBrowser"/>
    </widget>
    <widget class="QMenu" name="menuGraph">
     <property name="title">
@@ -93,9 +95,19 @@
     <string>Logging</string>
    </property>
   </action>
+  <action name="actionCommandWindow">
+   <property name="text">
+    <string>Command Window</string>
+   </property>
+  </action>
   <action name="actionProcedures">
    <property name="text">
     <string>Procedures</string>
+   </property>
+  </action>
+  <action name="actionDataBrowser">
+   <property name="text">
+    <string>Data Browser</string>
    </property>
   </action>
  </widget>

@@ -39,10 +39,10 @@ This document is a living checklist tracking the specific steps we will follow (
 - [ ] Test: Figure rendering and closing behavior.
 
 ### Feature C: Data Browser
-- [ ] Spec: Draft `specs/data_browser/SPEC.md`.
-- [ ] Impl: Capture namespace variables (int, float, array) using `spyder` comms.
-- [ ] Impl: Show tracked variables in a QTreeView in the GUI.
-- [ ] Test: Namespace syncing when changing variables in the python kernel.
+- [x] Spec: Draft and refine `specs/data_browser/SPEC.md`.
+- [x] Impl: Capture namespace variables using Spyder comms.
+- [x] Impl: Show tracked variables in a GUI browser with Waves / Variables / Strings filters and an Info pane.
+- [x] Test: Verify namespace syncing on startup, after kernel execution, and after `procedures/__init__.py` reload.
 
 *(Further features like Curve Fitting, Tables, Save/Load `.hy` packages will be added here as we iterate)*
 

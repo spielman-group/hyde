@@ -1,14 +1,14 @@
 # Data Browser Specification
 
 ## Feature Checklist
-- [ ] Add a `Data Browser` MDI subwindow to the Hyde workspace.
-- [ ] Populate the browser from the live execution namespace using Spyder-style namespace tracking.
-- [ ] Show a filterable list of named Python objects rather than Igor-style data folders.
-- [ ] Show a selection-driven info pane with type and value metadata.
-- [ ] Show a selection-driven preview pane for plottable array-like objects.
-- [ ] Support right-click actions for display, edit, append to graph, append to table, copy expression, and delete.
-- [ ] Support multi-selection for actions that naturally operate on multiple objects.
-- [ ] Keep the browser synchronized with kernel namespace changes without storing scientific state in the GUI.
+- [x] Add a `Data Browser` MDI subwindow to the Hyde workspace.
+- [x] Populate the browser from the live execution namespace using Spyder-style namespace tracking.
+- [x] Show a filterable list of named Python objects rather than Igor-style data folders.
+- [x] Show a selection-driven info pane with type and value metadata.
+- [x] Show a selection-driven preview area with placeholder text for future plotting support.
+- [x] Support `Copy Python Expression` and `Delete Object`.
+- [x] Keep the browser synchronized with kernel namespace changes without storing scientific state in the GUI.
+- [ ] Support display/edit/append actions once figure and table infrastructure exists.
 - [ ] Define cross-project browsing of another `.hy` project.
   Cross-project browsing is specified here but is not part of the initial deployment.
 
@@ -31,10 +31,11 @@ The initial deployment focuses on the active `.hy` project's live kernel namespa
 It includes:
 
 - a single browser pane for the current execution namespace
-- filtering by object type and text search
+- filtering by object type through the left-hand display controls
 - single-selection inspection
-- multi-selection for graph/table-oriented actions where the selected objects are compatible
-- context-menu actions that map cleanly onto Python and Hyde behavior
+- metadata-driven list rows for name, type, and display value
+- a placeholder preview area
+- currently supported actions that map cleanly onto Python and Hyde behavior
 
 The initial deployment does not include:
 
@@ -50,13 +51,38 @@ The initial deployment does not include:
 The Data Browser lives as an MDI child window.
 Its layout follows the broad structure suggested by the screenshot while using Hyde-native semantics:
 
+- a left-hand sidebar containing display controls and action buttons
 - a main object list occupying most of the window
-- a compact filter area above or beside the list
 - an info pane showing metadata for the current selection
-- a preview pane showing a quick visual preview for plottable objects
+- a preview pane reserved for future visual preview support
 
 The browser reflects the active project and active kernel session.
 Changing the current `.hy` project replaces the browser contents with the namespace of the newly loaded project.
+
+## Left Sidebar Controls
+
+The left-hand sidebar follows the user-approved screenshot.
+
+The `Display` group contains:
+
+- `Waves`
+  Show array-like scientific data, specifically `numpy.ndarray` and `pandas.DataFrame`.
+- `Variables`
+  Show numeric scalar variables.
+- `Strings`
+  Show `str` values.
+- `Info`
+  Toggle the visibility of the info pane.
+- `Plot`
+  Visible for layout continuity with the reference screenshot, but inert in the initial deployment.
+
+The sidebar also contains action buttons derived from the reference screenshot.
+In the initial deployment:
+
+- `Delete` is active.
+- `New Data Folder`, `Save Copy`, `Browse Expt...`, and `Execute Cmd...` are visible but disabled.
+
+These disabled buttons do not imply support for the corresponding Igor workflows.
 
 ## Object List
 
@@ -72,8 +98,7 @@ Each row should provide enough information to recognize the object quickly, incl
 The list supports:
 
 - single selection
-- multi-selection for compatible actions
-- text filtering
+- multi-selection for compatible actions such as delete
 - type-based filtering
 - sorting by at least name and type
 
@@ -96,42 +121,30 @@ If the selected object supports an edit operation, editing is initiated by an ex
 
 ## Preview Pane
 
-The preview pane shows a quick visual preview for objects that Hyde can render meaningfully without opening a full figure or table.
-Examples include:
+The preview pane is present in the initial deployment but does not yet render data.
+It displays static placeholder text indicating that preview support will arrive later.
 
-- 1D numeric arrays as a simple line preview
-- 2D numeric arrays as an image preview
-
-If the selected object is not previewable, the preview pane shows an empty state rather than guessing at a rendering.
-
-The preview pane is a viewport only.
-Any durable or user-directed visualization action still generates explicit Python commands and opens the appropriate Hyde window.
+The preview pane remains a viewport-only area.
+Any durable or user-directed visualization action will still need to generate explicit Python commands and open the appropriate Hyde window once figure support exists.
 
 ## Context Menu Actions
 
-The screenshot establishes the core interaction model: the browser supports a right-click menu of object actions.
-In Hyde, those actions are defined as follows:
+The browser supports a right-click menu of object actions.
+In the initial deployment, the active actions are:
 
-- `Display`
-  Open the selected object or objects in the most natural Hyde viewer.
-  Array-like data should open a figure or image view as appropriate.
-- `Edit`
-  Open an edit path only for object types that Hyde explicitly supports editing.
-  Unsupported types keep this action disabled.
-- `Append to Graph`
-  Generate Python that appends the selected compatible object or objects to the active figure.
-- `Append to Table`
-  Generate Python that appends the selected compatible object or objects to the active table.
 - `Copy Python Expression`
   Copy the Python expression that identifies the selected object.
-  For initial deployment this is the top-level variable name.
+  For the initial deployment this is the top-level variable name.
 - `Delete Object`
   Delete the selected object or objects from the live namespace after confirmation.
-- `Show Where Object Is Used`
-  This action is not part of the initial deployment and remains unspecified until Hyde defines a Python-native usage model.
 
-The browser enables or disables each action based on selection compatibility.
-For example, `Append to Graph` is enabled only when the selected objects can be plotted meaningfully.
+The following actions remain future work until their dependent feature infrastructure exists:
+
+- `Display`
+- `Edit`
+- `Append to Graph`
+- `Append to Table`
+- `Show Where Object Is Used`
 
 ## Command Generation
 
@@ -141,8 +154,6 @@ Instead, the GUI generates explicit Python strings and dispatches them to the ke
 
 Examples of the intended pattern include:
 
-- displaying selected arrays with explicit matplotlib code
-- opening a table through the Hyde public API exposed by `import hyde`
 - deleting objects with explicit Python statements such as `del name`
 
 The browser therefore remains a viewport and command source for kernel-owned state.
@@ -161,6 +172,8 @@ Namespace changes caused by:
 - external Python code run in the kernel
 
 must update the Data Browser view.
+
+The browser establishes its own namespace-view comm path and requests an initial snapshot after that path is ready, so startup and project reopen begin with a populated list rather than waiting for a future user command.
 
 ## Cross-Project Browsing
 

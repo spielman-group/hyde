@@ -158,6 +158,63 @@ import procedures
 - any relevant `.py` change sets the executor's reload flag
 - the watchdog main loop consumes that flag and re-runs the same canonical command string
 
+## Lane 2C: Data Browser Namespace View (Target: `spyder_api`)
+
+### Transport
+- Jupyter `comm` channel.
+- Kernel-side: `spyder_kernels` registers the `spyder_api` comm target natively.
+- GUI-side: the Data Browser maintains its own `QtKernelClient`.
+- Frontend comm opening is performed through `qtconsole`'s `kernel_client.comm_manager`, not by calling comm methods on `QtKernelClient` directly.
+
+### Purpose
+- provide a live namespace view for the Data Browser
+- reuse Spyder's existing namespace metadata machinery instead of inventing a Hyde-specific tracker
+
+### Session Ownership
+- the command window keeps its own visible user-facing Jupyter client session
+- the Data Browser keeps a separate GUI-side metadata session
+- the executor keeps its own background control session
+
+### Setup Sequence
+The Data Browser performs the following sequence after its own client channels are ready:
+
+1. open a `spyder_api` comm through `kernel_client.comm_manager.new_comm(...)`
+2. wait for the comm-ready callback from Spyder
+3. send a Spyder `remote_call` to:
+   - `set_configuration({"namespace_view_settings": ...})`
+4. send a Spyder `remote_call` to:
+   - `get_namespace_view()`
+
+### Data Returned
+The namespace view comes from Spyder's existing `get_namespace_view()` handler.
+It is a dictionary keyed by variable name.
+
+Representative payload shape:
+```python
+{
+    'x': {
+        'type': 'int',
+        'size': 1,
+        'view': '1',
+        'python_type': 'int',
+        'numpy_type': 'Unknown'
+    },
+    'arr': {
+        'type': 'Array of int64',
+        'size': (100,),
+        'view': 'Column vector containing 100 elements',
+        'python_type': 'ndarray',
+        'numpy_type': 'Array'
+    },
+}
+```
+
+### Triggering Policy
+- **On Initialization**: Viewports request an initial snapshot immediately upon comm establishment.
+- **On Execution**: The Data Browser monitors kernel `status` messages. When externally generated kernel work transitions `busy -> idle`, it requests a new namespace snapshot.
+- **On Reload**: Executor-driven `procedures/__init__.py` reloads also trigger the same `busy -> idle` path, ensuring the Data Browser reflects script-defined changes.
+- **Scope**: The Data Browser only consumes messages associated with its own Spyder comm. Unrelated comm traffic must be ignored.
+
 ## Kernel-Side Consequences
 
 ### For GUI Session Commands
@@ -171,7 +228,8 @@ import procedures
 - no `execute_input` for those requests
 - no prompt/history consumption for that background execution
 
+---
+
 ## Not Yet Implemented Here
 - Figure metadata mirroring over Jupyter `comm` channels is planned but not yet implemented.
-- Namespace/data-browser comm traffic is planned but not yet implemented.
 - External suite messages such as runmanager/BLACS notifications are not yet part of the implemented Hyde IPC path.
