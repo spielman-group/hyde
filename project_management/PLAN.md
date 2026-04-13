@@ -26,26 +26,30 @@ This document is a living checklist tracking the specific steps we will follow (
 ## Phase IV: Iterative Feature Deployment
 ### Feature A: Procedure Browser & Kernel Initialization
 - [x] Spec: Draft `specs/procedure_browser/SPEC.md`.
-- [x] Impl: Implement `master.py` bootstrapping and automated kernel execution.
+- [x] Impl: Implement `procedures/__init__.py` bootstrapping and automated kernel execution.
 - [x] Impl: Create the MDI Procedure Browser.
 - [x] Test: Verify environment synchronization between script and kernel.
-- [ ] Refinement: Move procedure-file change tracking and `master.py` re-sync ownership into the execution side using `labscript_utils.filewatcher.FileWatcher` (BLACS connection-table pattern).
+- [x] Refinement: Move procedure-file change tracking and `procedures/__init__.py` re-sync ownership into the execution side using `labscript_utils.filewatcher.FileWatcher` (BLACS connection-table pattern).
+- [x] Refinement: Mask executor-owned `procedures/__init__.py` execution input at the kernel protocol level with `silent=True`.
+- [ ] Refinement: Define the command-window display policy for output originating from executor-owned silent execution.
 
 ### Feature B: Matplotlib Figure Capture
-- [ ] Spec: Draft `specs/GUI_FIGURES.md`.
+- [ ] Spec: Draft `specs/figure_window/SPEC.md`.
 - [ ] Impl: Allow `plt.plot()` in the execution process to pop open a PyQt MDI sub-window in the GUI process via the Metadata Mirror model.
 - [ ] Test: Figure rendering and closing behavior.
 
 ### Feature C: Data Browser
-- [ ] Spec: Draft `specs/DATA_TRACKING.md`.
+- [ ] Spec: Draft `specs/data_browser/SPEC.md`.
 - [ ] Impl: Capture namespace variables (int, float, array) using `spyder` comms.
 - [ ] Impl: Show tracked variables in a QTreeView in the GUI.
 - [ ] Test: Namespace syncing when changing variables in the python kernel.
 
 *(Further features like Curve Fitting, Tables, Save/Load `.hy` packages will be added here as we iterate)*
 
-### Feature C: Table Editor
-
+### Feature D: Table Editor
+- [ ] Spec: Refine `specs/table/SPEC.md`.
+- [ ] Impl: Create the table editor MDI window and data model integration.
+- [ ] Test: Verify table editing, sorting, and persistence behavior.
 
 ## Phase V: Announcement and Release
 - [ ] TBD.

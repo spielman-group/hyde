@@ -25,7 +25,7 @@ class ExecutionWatchdog:
         self.filewatcher = None
         self.project_dir = None
         self.procedures_dir = None
-        self.master_script = None
+        self.procedures_init = None
         self.exiting = False
         self.reload_requested = threading.Event()
 
@@ -64,7 +64,9 @@ class ExecutionWatchdog:
             while not self.exiting and self.kernel_process.poll() is None:
                 if self.reload_requested.wait(timeout=0.1):
                     self.reload_requested.clear()
-                    self.execute_master_script()
+                    if self.exiting:
+                        break
+                    self.execute_procedures_init()
 
             if self.kernel_client is not None:
                 self.kernel_client.stop_channels()
@@ -75,18 +77,37 @@ class ExecutionWatchdog:
                 self.to_parent.put(['KERNEL_CRASHED', None])
                 time.sleep(1)
 
-    def execute_master_script(self):
-        if self.kernel_client is None or self.project_dir is None or self.master_script is None:
+        if self.filewatcher is not None:
+            self.filewatcher.stop()
+            self.filewatcher = None
+        if self.kernel_process is not None and self.kernel_process.poll() is None:
+            self.kernel_process.terminate()
+
+    def execute_procedures_init(self):
+        if self.kernel_client is None or self.project_dir is None or self.procedures_init is None:
             return
-        if not os.path.exists(self.master_script):
+        if not os.path.exists(self.procedures_init):
             return
-        code = (
-            f"import os\n"
+        code = self.build_procedures_bootstrap_code()
+        self.kernel_client.execute(code, silent=True)
+
+    def build_procedures_bootstrap_code(self):
+        return (
+            "import os\n"
+            "import sys\n"
+            "import importlib\n"
             f"os.chdir({self.project_dir!r})\n"
-            f"with open({self.master_script!r}) as f:\n"
-            f"    exec(f.read())\n"
+            "project_root = os.getcwd()\n"
+            "if sys.path[:1] != [project_root]:\n"
+            "    while project_root in sys.path:\n"
+            "        sys.path.remove(project_root)\n"
+            "    sys.path.insert(0, project_root)\n"
+            "importlib.invalidate_caches()\n"
+            "for name in list(sys.modules):\n"
+            "    if name == 'procedures' or name.startswith('procedures.'):\n"
+            "        del sys.modules[name]\n"
+            "import procedures\n"
         )
-        self.kernel_client.execute(code)
 
     def on_procedure_change(self, name, info, event=None):
         if event == 'original':
@@ -98,12 +119,13 @@ class ExecutionWatchdog:
     def watch_project(self, data):
         self.project_dir = data['project_dir']
         self.procedures_dir = data['procedures_dir']
-        self.master_script = data['master_script']
+        self.procedures_init = data['procedures_init']
         if self.filewatcher is not None:
             self.filewatcher.stop()
+        watched_files = [self.procedures_init] if os.path.exists(self.procedures_init) else []
         self.filewatcher = FileWatcher(
             self.on_procedure_change,
-            files=[self.master_script],
+            files=watched_files,
             folders=[self.procedures_dir],
             hashable_types=['.py'],
             interval=0.5,
@@ -119,13 +141,6 @@ class ExecutionWatchdog:
                 elif task == 'QUIT':
                     self.exiting = True
                     self.reload_requested.set()
-                    if self.filewatcher is not None:
-                        self.filewatcher.stop()
-                    if self.kernel_client is not None:
-                        self.kernel_client.stop_channels()
-                        self.kernel_client = None
-                    if self.kernel_process:
-                        self.kernel_process.terminate()
                     break
             except Exception as e:
                 print(f"[Watchdog] Error polling ProcessTree queue: {e}")

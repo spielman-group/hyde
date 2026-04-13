@@ -38,8 +38,8 @@ DEFAULT_PROJECTS_DIR = os.path.join(os.path.expanduser("~"), "HydeProjects")
 # Repo-stored default project template copied when creating a new project.
 PROJECT_TEMPLATES_DIR = os.path.join(HYDE_PKG_DIR, "project_templates")
 DEFAULT_PROJECT_TEMPLATE = os.path.join(PROJECT_TEMPLATES_DIR, "default.hy")
-DEFAULT_MASTER_TEMPLATE = os.path.join(
-    DEFAULT_PROJECT_TEMPLATE, "procedures", "master.py"
+DEFAULT_PROCEDURES_INIT_TEMPLATE = os.path.join(
+    DEFAULT_PROJECT_TEMPLATE, "procedures", "__init__.py"
 )
 
 
@@ -47,5 +47,5 @@ def get_project_paths(project_dir):
     """Return the standard paths inside a Hyde ``.hy`` project package."""
     project_dir = os.path.abspath(project_dir)
     procedures_dir = os.path.join(project_dir, "procedures")
-    master_script = os.path.join(procedures_dir, "master.py")
-    return project_dir, procedures_dir, master_script
+    procedures_init = os.path.join(procedures_dir, "__init__.py")
+    return project_dir, procedures_dir, procedures_init

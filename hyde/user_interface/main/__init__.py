@@ -9,7 +9,7 @@ from hyde.paths import (
     CONNECTION_FILE, 
     DEFAULT_PROJECTS_DIR,
     DEFAULT_PROJECT_TEMPLATE,
-    DEFAULT_MASTER_TEMPLATE,
+    DEFAULT_PROCEDURES_INIT_TEMPLATE,
     get_project_paths,
 )
 from hyde.user_interface.command_window import CommandWindow
@@ -29,7 +29,7 @@ class HydeApp:
         self.argv = argv or []
         self.current_project_dir = None
         self.procedures_dir = None
-        self.master_script = None
+        self.procedures_init = None
         self.to_worker = None
         self.from_worker = None
         self.worker = None
@@ -166,15 +166,15 @@ class HydeApp:
         self.load_project(project_dir, create_if_missing=create_if_missing)
 
     def load_project(self, project_dir, create_if_missing=False):
-        self.current_project_dir, self.procedures_dir, self.master_script = get_project_paths(project_dir)
+        self.current_project_dir, self.procedures_dir, self.procedures_init = get_project_paths(project_dir)
         if create_if_missing:
             self.bootstrap_project()
         else:
             os.makedirs(self.procedures_dir, exist_ok=True)
         self.procedure_browser.set_procedures_dir(self.procedures_dir)
         self.ui.setWindowTitle(f"Hyde - {os.path.basename(self.current_project_dir)}")
-        if not os.path.exists(self.master_script):
-            self.offer_to_create_master_script()
+        if not os.path.exists(self.procedures_init):
+            self.offer_to_create_procedures_init()
         self.configure_execution_watchdog()
 
     def configure_execution_watchdog(self):
@@ -185,27 +185,27 @@ class HydeApp:
             {
                 'project_dir': self.current_project_dir,
                 'procedures_dir': self.procedures_dir,
-                'master_script': self.master_script,
+                'procedures_init': self.procedures_init,
             },
         ])
 
-    def offer_to_create_master_script(self):
+    def offer_to_create_procedures_init(self):
         response = QtWidgets.QMessageBox.question(
             self.ui,
-            "Missing master.py",
+            "Missing procedures/__init__.py",
             (
-                f"{self.master_script} is missing.\n\n"
-                "Create a default procedures/master.py template for this project?"
+                f"{self.procedures_init} is missing.\n\n"
+                "Create a default procedures/__init__.py template for this project?"
             ),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
             QtWidgets.QMessageBox.Yes,
         )
         if response == QtWidgets.QMessageBox.Yes:
-            self.write_default_master_script()
+            self.write_default_procedures_init()
 
-    def write_default_master_script(self):
+    def write_default_procedures_init(self):
         os.makedirs(self.procedures_dir, exist_ok=True)
-        shutil.copy2(DEFAULT_MASTER_TEMPLATE, self.master_script)
+        shutil.copy2(DEFAULT_PROCEDURES_INIT_TEMPLATE, self.procedures_init)
         self.configure_execution_watchdog()
 
     def listen_for_watchdog(self):
@@ -252,5 +252,5 @@ class HydeApp:
         """Ensures the selected project directory structure exists."""
         print(f"[Hyde] Bootstrapping project at {self.current_project_dir}")
         shutil.copytree(DEFAULT_PROJECT_TEMPLATE, self.current_project_dir, dirs_exist_ok=True)
-        if not os.path.exists(self.master_script):
-            self.write_default_master_script()
+        if not os.path.exists(self.procedures_init):
+            self.write_default_procedures_init()

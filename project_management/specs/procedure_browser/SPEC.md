@@ -8,13 +8,13 @@ The Procedure Browser is a central hub for managing the scientific scripts and e
 - **Interactions**:
     - **Single Click**: Selection.
     - **Double Click**: Opens the script in the **default system editor** for that file type (using `QDesktopServices`).
-    - **Right Click**: No action currently defined.
+    - **Right Click**: No action is defined.
 
 ## Kernel Initialization Logic
-Hyde follows the "Explicit is Better than Implicit" rule by running a `master.py` script on startup.
+Hyde follows the "Explicit is Better than Implicit" rule by running `procedures/__init__.py` on startup.
 
-### `master.py` Requirements
-Every project must contain a `procedures/master.py`. It should typically contain:
+### `procedures/__init__.py` Requirements
+Every project must contain a `procedures/__init__.py`. It should typically contain:
 ```python
 import hyde
 import numpy as np
@@ -24,18 +24,17 @@ import matplotlib.pyplot as plt
 ```
 
 ### Automation
-1. When Hyde starts or a project is loaded, the GUI sends the following sequence to **Lane 2 (Execution)**:
+1. When Hyde starts or a project is loaded, the execution layer executes the following sequence in the kernel:
    ```python
    import os
    os.chdir("path/to/project/root")
-   with open("procedures/master.py") as f:
-       exec(f.read())
+   import procedures
    ```
-2. This ensures that the global namespace in the Command Window (IPython) is instantly identical to the state defined in the master script.
+2. This ensures that the global namespace in the Command Window (IPython) is identical to the state defined in `procedures/__init__.py`.
 
 ## Filesystem Monitoring
 The Procedure Browser is only a view onto the `procedures/` directory. Tracking changes to
-`master.py` and other procedure files, and deciding when the execution namespace must be
+`procedures/__init__.py` and other procedure files, and deciding when the execution namespace must be
 re-synchronized, is a core execution feature and must not be owned by the Procedure Browser.
 
 This monitoring should live on the execution side and follow the same style of file tracking
@@ -45,4 +44,4 @@ the BLACS connection table plugin.
 ## Technical Details
 - **Path Handling**: The browser is rooted at `procedures/`, and displayed paths are relative to
   that directory.
-- **Safety**: If `master.py` is missing, the kernel successfully starts but the GUI should warn the user and offer to create a default template.
+- **Safety**: If `procedures/__init__.py` is missing, the kernel successfully starts but the GUI should warn the user and offer to create a default template.

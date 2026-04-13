@@ -26,6 +26,32 @@ class TestWatchdogArchitecture(unittest.TestCase):
             time.sleep(0.1)
         self.fail(f"Code did not succeed within {timeout} seconds: {code!r}\nLast reply: {last_reply}")
 
+    def drain_iopub(self, client, timeout=0.2):
+        while True:
+            try:
+                client.get_iopub_msg(timeout=timeout)
+            except Exception:
+                return
+
+    def collect_iopub_until_idle(self, client, timeout=5):
+        deadline = time.time() + timeout
+        messages = []
+        saw_busy = False
+        while time.time() < deadline:
+            try:
+                msg = client.get_iopub_msg(timeout=0.5)
+            except Exception:
+                continue
+            messages.append(msg)
+            if msg['msg_type'] != 'status':
+                continue
+            state = msg['content'].get('execution_state')
+            if state == 'busy':
+                saw_busy = True
+            elif saw_busy and state == 'idle':
+                return messages
+        self.fail(f"Did not observe execution idle state within {timeout} seconds. Messages: {messages!r}")
+
     def test_kernel_lifecycle_and_execution(self):
         """
         Tests the full Phase II / III Architecture:
@@ -98,7 +124,7 @@ class TestWatchdogArchitecture(unittest.TestCase):
         self.assertIsNotNone(worker.poll())
         print("[Test] Watchdog cleanly terminated.")
 
-    def test_watch_project_reloads_master_script(self):
+    def test_watch_project_reloads_package_init(self):
         process_tree = ProcessTree.instance()
         process_tree.zlock_client.set_process_name('hyde-test')
 
@@ -110,8 +136,8 @@ class TestWatchdogArchitecture(unittest.TestCase):
             project_dir = os.path.join(tmpdir, 'reload_test.hy')
             procedures_dir = os.path.join(project_dir, 'procedures')
             os.makedirs(procedures_dir)
-            master_script = os.path.join(procedures_dir, 'master.py')
-            with open(master_script, 'w') as f:
+            procedures_init = os.path.join(procedures_dir, '__init__.py')
+            with open(procedures_init, 'w') as f:
                 f.write("VALUE = 1\n")
 
             to_worker, from_worker, worker = process_tree.subprocess(
@@ -124,7 +150,7 @@ class TestWatchdogArchitecture(unittest.TestCase):
                 {
                     'project_dir': project_dir,
                     'procedures_dir': procedures_dir,
-                    'master_script': master_script,
+                    'procedures_init': procedures_init,
                 },
             ])
 
@@ -138,12 +164,147 @@ class TestWatchdogArchitecture(unittest.TestCase):
 
                 try:
                     client.wait_for_ready(timeout=5)
-                    self.wait_for_code_ok(client, "assert VALUE == 1")
+                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == 1")
 
-                    with open(master_script, 'w') as f:
+                    with open(procedures_init, 'w') as f:
                         f.write("VALUE = 2\n")
 
-                    self.wait_for_code_ok(client, "assert VALUE == 2", timeout=10)
+                    time.sleep(1.5)
+                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == 2", timeout=10)
+                finally:
+                    client.stop_channels()
+            finally:
+                to_worker.put(['QUIT', None])
+                try:
+                    worker.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
+
+    def test_watch_project_executes_package_init_silently(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name('hyde-test')
+
+        controller_path = os.path.abspath(
+            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, 'silent_test.hy')
+            procedures_dir = os.path.join(project_dir, 'procedures')
+            os.makedirs(procedures_dir)
+            procedures_init = os.path.join(procedures_dir, '__init__.py')
+            with open(procedures_init, 'w') as f:
+                f.write('print("masked output")\nVALUE = 1\n')
+
+            to_worker, from_worker, worker = process_tree.subprocess(
+                controller_path,
+                args=[CONNECTION_FILE],
+            )
+
+            to_worker.put([
+                'WATCH_PROJECT',
+                {
+                    'project_dir': project_dir,
+                    'procedures_dir': procedures_dir,
+                    'procedures_init': procedures_init,
+                },
+            ])
+
+            try:
+                task, data = from_worker.get(timeout=15)
+                self.assertEqual(task, 'KERNEL_READY')
+
+                client = BlockingKernelClient(connection_file=CONNECTION_FILE)
+                client.load_connection_file()
+                client.start_channels()
+
+                try:
+                    client.wait_for_ready(timeout=5)
+                    self.drain_iopub(client)
+
+                    to_worker.put([
+                        'WATCH_PROJECT',
+                        {
+                            'project_dir': project_dir,
+                            'procedures_dir': procedures_dir,
+                            'procedures_init': procedures_init,
+                        },
+                    ])
+
+                    messages = self.collect_iopub_until_idle(client, timeout=10)
+
+                    self.assertTrue(
+                        any(
+                            msg['msg_type'] == 'stream'
+                            and 'masked output' in msg['content'].get('text', '')
+                            for msg in messages
+                        ),
+                        msg=f"Expected stream output from silent package-init execution. Messages: {messages!r}",
+                    )
+                    self.assertFalse(
+                        any(msg['msg_type'] == 'execute_input' for msg in messages),
+                        msg=f"Silent package-init execution should not emit execute_input. Messages: {messages!r}",
+                    )
+
+                    msg_id = client.execute("1 + 1")
+                    while True:
+                        reply = client.get_shell_msg(timeout=5)
+                        if reply['parent_header'].get('msg_id') == msg_id:
+                            break
+                    self.assertEqual(reply['content']['status'], 'ok')
+                    self.assertEqual(reply['content']['execution_count'], 1)
+                finally:
+                    client.stop_channels()
+            finally:
+                to_worker.put(['QUIT', None])
+                try:
+                    worker.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
+
+    def test_watch_project_starts_with_only_package_init(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name('hyde-test')
+
+        controller_path = os.path.abspath(
+            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, 'package_init_only.hy')
+            procedures_dir = os.path.join(project_dir, 'procedures')
+            os.makedirs(procedures_dir)
+            procedures_init = os.path.join(procedures_dir, '__init__.py')
+            with open(procedures_init, 'w') as f:
+                f.write('VALUE = 1\n')
+
+            self.assertFalse(os.path.exists(os.path.join(procedures_dir, 'master.py')))
+
+            to_worker, from_worker, worker = process_tree.subprocess(
+                controller_path,
+                args=[CONNECTION_FILE],
+            )
+
+            to_worker.put([
+                'WATCH_PROJECT',
+                {
+                    'project_dir': project_dir,
+                    'procedures_dir': procedures_dir,
+                    'procedures_init': procedures_init,
+                },
+            ])
+
+            try:
+                task, data = from_worker.get(timeout=15)
+                self.assertEqual(task, 'KERNEL_READY')
+
+                client = BlockingKernelClient(connection_file=CONNECTION_FILE)
+                client.load_connection_file()
+                client.start_channels()
+
+                try:
+                    client.wait_for_ready(timeout=5)
+                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == 1", timeout=10)
                 finally:
                     client.stop_channels()
             finally:

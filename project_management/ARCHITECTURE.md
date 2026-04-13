@@ -3,7 +3,7 @@
 ## The Central Dogma
 The core tenet of Hyde's design is the strict separation of concerns between the **Presentation Layer (GUI Process)** and the **State Layer (Execution Subprocess)**.
 
-1. **The GUI has UX Memory, but no Scientific Memory.** The PyQt MDI application remembers window positions, table viewports, and browser states. It may also hold intermediate data structures (e.g., dicts representing a figure's editable state), but this state must be fully determined by the underlying Python code and is only used to regenerate updated Python commands. The GUI does not hold the actual array data or manipulate python/matplotlib objects natively.
+1. **The GUI has UX Memory, but no Scientific Memory.** The PyQt MDI application remembers window positions, table viewports, and browser states. It may hold transient, serializable UI-edit state only when that state is sufficient to regenerate Python commands and is fully derived from the authoritative execution state. The GUI does not hold canonical scientific data, arrays, matplotlib objects, or analytical state natively.
 2. **The Execution namespace is authoritative.** All named data objects, calculations, and plotting configurations live inside an independent Python execution process. The kernel should remain completely agnostic of Hyde's internal GUI representations; it simply executes standard Matplotlib code.
 3. **The Metadata Mirror Model.** For scientific visualization (figures, tables), the Kernel process provides the authoritative raw data and metadata (state), but remains agnostic of windowing. The GUI process receives this metadata via `comm` channels and performs its own local rendering using its own Matplotlib/UI installation.
     - **Pros**: Zero "UI weight" in the kernel; highly responsive GUI-side interactivity; low bandwidth for most operations.
@@ -68,6 +68,8 @@ The overall function of the Hyde GUI is to provide easy access to specific under
 
 The expected interface centers on dialog boxes that define behavior and result in an output string (possibly multiline) that will be sent to a Python process and executed line-by-line. Thus the dialogs define a state and the `..._features.py` files convert such a state to a valid set of Python commands.
 
+The `features/` package is also the authoritative place where Hyde exposes supported tool integrations to the kernel namespace. In other words, the public API surfaced by `import hyde` should be understood as the kernel-facing interface to the supported feature set implemented under `features/`.
+
 ## Project and Persistence
 
 A Hyde project is a directory package with `.hy` suffix:
@@ -79,7 +81,8 @@ example.hy/
 ├── terminal/
 │   └── history.py  # Command history
 ├── procedures/     # Python scripts
-│   └── master.py   # Mandatory entry point script
+│   ├── __init__.py  # Mandatory package initialization script
+│   └── helpers.py   # Additional procedure modules
 ├── data/           # Array data
 ├── figures/        # Figure scripts
 └── tables/         # Table data
@@ -88,8 +91,8 @@ example.hy/
 ### Explicit Initialization & Synchronization
 To ensure "Explicit is better than Implicit," Hyde enforces a strict initialization sequence:
 1. **Bootstrap**: Upon startup or project load, the GUI ensures a project structure exists.
-2. **Master Execution**: The GUI automatically executes `master.py` in the kernel namespace to establish the environment.
-3. **Run-on-Save**: Monitoring of `master.py` and other procedure files is an execution-side responsibility. The execution layer should watch for relevant file changes and trigger namespace re-synchronization when needed, using the suite's standard non-GUI file-watching approach (`labscript_utils.filewatcher.FileWatcher`, as in the BLACS connection table plugin).
+2. **Package Initialization**: The execution layer imports `procedures` from `procedures/__init__.py` in the kernel namespace to establish the environment after the GUI configures the active project.
+3. **Run-on-Save**: Monitoring of `procedures/__init__.py` and other procedure files is an execution-side responsibility. The execution layer watches for relevant file changes and re-runs the canonical package initialization path when needed, using the suite's standard non-GUI file-watching approach (`labscript_utils.filewatcher.FileWatcher`, as in the BLACS connection table plugin).
 
 ### Procedure Browser
 The **Procedure Browser** (an MDI window) provides the primary UI for managing these scripts. It lists the contents of the `procedures/` directory and allows the user to open scripts in their system's default editor via double-click.
@@ -209,18 +212,20 @@ ax.plot(x, y)
 The runtime provides only functions that are not present in the supported libraries, for example:
 - `open_table(...)`: Open a table view (not provided by a supported library)
 
+Hyde-specific helpers exposed through `import hyde` are therefore part of the same supported-tool interface. They are the public kernel API by which Hyde exposes feature functionality that is not already directly available from the underlying libraries.
+
 This ensures all GUI actions generate the same Python code that could be written manually in the terminal.
 
 ## Default Procedures
 
-New projects include a `procedures/master.py` that establishes the baseline environment. It must contain:
+New projects include a `procedures/__init__.py` that establishes the baseline environment. It must contain:
 
 ```python
 import hyde         # Hyde-specific functions (e.g. open_table)
-import numpy as np 
+import numpy as np
 import matplotlib
 # matplotlib.use('Hyde')  # Explicitly set the Hyde backend (when implemented)
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 import lmfit        # For curve fitting
 ```
 
