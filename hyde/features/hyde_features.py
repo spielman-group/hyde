@@ -25,6 +25,24 @@ def format_table_command(names, target=None, title=None):
     return f"hyde.table({args_str})"
 
 
+def format_table_macro_source(macro_name, names, title=None):
+    """
+    Build a parameterized decorated table recreation macro definition.
+    """
+    parameters = ", ".join(names)
+    kwargs = []
+    if title:
+        kwargs.append(f"title={title!r}")
+    arguments = parameters
+    if kwargs:
+        arguments = f"{arguments}, {', '.join(kwargs)}"
+    return (
+        "@hyde.table\n"
+        f"def {macro_name}({parameters}):\n"
+        f"    hyde.table({arguments})\n"
+    )
+
+
 def format_cell_edit_command(var_name, index, value):
     """
     Formulates a muted mutation command for table cell editing.
