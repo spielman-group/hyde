@@ -4,7 +4,7 @@
 import hyde
 import numpy as np
 import matplotlib
-# matplotlib.use('Hyde')  # Explicitly set the Hyde backend (when implemented)
+# matplotlib.use('Hyde')  # Enable when the Hyde Matplotlib backend exists.
 import matplotlib.pyplot as plt
 import lmfit
 

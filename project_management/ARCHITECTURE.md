@@ -5,9 +5,7 @@ The core tenet of Hyde's design is the strict separation of concerns between the
 
 1. **The GUI has UX Memory, but no Scientific Memory.** The PyQt MDI application remembers window positions, table viewports, and browser states. It may hold transient, serializable UI-edit state only when that state is sufficient to regenerate Python commands and is fully derived from the authoritative execution state. The GUI does not hold canonical scientific data, arrays, matplotlib objects, or analytical state natively.
 2. **The Execution namespace is authoritative.** All named data objects, calculations, and plotting configurations live inside an independent Python execution process. The kernel should remain completely agnostic of Hyde's internal GUI representations; it simply executes standard Matplotlib code.
-3. **The Metadata Mirror Model.** For scientific visualization (figures, tables), the Kernel process provides the authoritative raw data and metadata (state), but remains agnostic of windowing. The GUI process receives this metadata via `comm` channels and performs its own local rendering using its own Matplotlib/UI installation.
-    - **Pros**: Zero "UI weight" in the kernel; highly responsive GUI-side interactivity; low bandwidth for most operations.
-    - **Cons**: Requires state-synchronization logic for the "managed subset" of features.
+3. **Metadata-over-Comms.** GUI viewports that depend on execution metadata receive that metadata over Jupyter `comm` channels and render GUI-local view state from it. The Data Browser already follows this pattern through Spyder's namespace-view comm path. Future figure and table windows are expected to follow the same broad approach with their own metadata contracts.
 4. **2-Lane IPC Strategy.**
     - **Lane 1 (Control)**: `zprocess.ProcessTree` handles application-level orchestration (launch, heartbeats, QUIT). Analytical commands do NOT traverse this tree.
     - **Lane 2 (Execution)**: Standard Jupyter ZMQ and `comm` channels handle all scientific traffic, including code execution, figure metadata/rendering, and scientific state synchronization.
@@ -31,9 +29,9 @@ To achieve "live updates" in the UI (e.g., updating a table when an array change
 
 ---
 
-# Draft Implementation Proposals
+# Implemented Structure And Planned Extensions
 
-The following sections define the draft architectural patterns and specific structural decisions that will guide implementation through Phase II and beyond.
+The following sections distinguish between Hyde's implemented structure and the planned extensions that are not yet present in code.
 
 ## Package Structure
 
@@ -45,11 +43,6 @@ hyde/
 │   ├── execution/             # Backend Control Layer
 │   │   ├── __init__.py
 │   │   └── execution_controller.py # The Watchdog Process
-│   ├── features/              # Feature implementations
-│   │   ├── __init__.py
-│   │   ├── lmfit_features.py
-│   │   ├── matplotlib_features.py
-│   │   └── ....
 │   └── user_interface/       # Per-window packages
 │       ├── main/
 │       │   ├── __init__.py
@@ -62,13 +55,11 @@ hyde/
     └── ...
 ```
 
-## Feature implementations
+## Hyde Package Surface
 
-The overall function of the Hyde GUI is to provide easy access to specific underlying Python packages, starting with matplotlib and lmfit. Each file in `features` interfaces with a specific Python package.
+`import hyde` is valid in the kernel and in project procedures because Hyde is an installable Python package. At present, this package does not expose a broad helper API beyond the package itself.
 
-The expected interface centers on dialog boxes that define behavior and result in an output string (possibly multiline) that will be sent to a Python process and executed line-by-line. Thus the dialogs define a state and the `..._features.py` files convert such a state to a valid set of Python commands.
-
-The `features/` package is also the authoritative place where Hyde exposes supported tool integrations to the kernel namespace. In other words, the public API surfaced by `import hyde` should be understood as the kernel-facing interface to the supported feature set implemented under `features/`.
+When Hyde-specific helper functions are added in the future, they should be exposed deliberately through the Hyde package surface rather than through ad hoc GUI-only hooks.
 
 ## Project and Persistence
 
@@ -122,7 +113,7 @@ Hyde operates across three distinct processes to ensure the GUI remains responsi
 The execution subprocess runs in a separate Python process using the `spyder_kernels` Jupyter kernel. This provides:
 - Full IPython functionality
 - Namespace tracking for data browser
-- Comm-based notifications for live figure/table refresh
+- Spyder namespace-view support for the Data Browser
 - Mature, well-tested architecture
 
 The GUI sends raw Python code to the kernel for execution - there is no special GUI-to-kernel protocol.
@@ -169,29 +160,14 @@ Unlike Igor Pro, there is no separate command entry box at the bottom, and no li
 
 Using spyder_kernels provides:
 - Proper namespace tracking for the data browser
-- Comm-based change notifications for live figure refresh
-- Matplotlib backend integration
+- A standard Jupyter execution environment
 - Mature, well-tested architecture
 
 ## Figures
 
-### Implementation Approach: The Metadata Mirror
+Figure capture and GUI figure windows are not implemented yet.
 
-Hyde implements a local-rendering "mirror" strategy to ensure the GUI is interactive while the kernel remains headless.
-
-1. **Kernel Bridge (`backend_hyde`)**: A custom Matplotlib backend subclassed from `matplotlib.backend_bases.FigureCanvasBase`. 
-   - It captures `draw()` and `show()` calls.
-   - It extracts a serializable metadata snapshot of the figure (the "Managed Subset": axes, labels, data) and emits it over a Jupyter `comm` channel.
-   - It does NOT instantiate any PyQt widgets or enter a GUI event loop.
-
-2. **GUI Figure Window (`hyde.user_interface.figure_window`)**:
-   - Maintains its own local `matplotlib.backends.backend_qtagg.FigureCanvasQTAgg`.
-   - Listens for `comm` updates and synchronizes its local `Figure` object with the state received from the kernel.
-   - Handles `pick_event` and mouse clicks natively to spawn Hyde dialogs (e.g. Axis Editor).
-
-3. **String Factory**: Changes made in the GUI generate Python strings (e.g. `plt.title(...)`) sent back to the kernel to maintain the authoritative scientific state.
-
-This approach provides full interactivity (pan, zoom, pick events) with minimal custom code. Static-image fallback (inline PNG/SVG) is deliberately not pursued — the goal is native interactive figures embedded in the MDI workspace.
+The planned direction is a metadata-driven figure path in which the kernel remains authoritative and the GUI renders a local mirror from figure metadata delivered over Jupyter `comm` channels. That planned direction should not be treated as an implemented interface until the figure backend and GUI window exist in code.
 
 ## Message Protocol
 
@@ -209,22 +185,17 @@ ax = fig.add_subplot(gs[0, 0])
 ax.plot(x, y)
 ```
 
-The runtime provides only functions that are not present in the supported libraries, for example:
-- `open_table(...)`: Open a table view (not provided by a supported library)
-
-Hyde-specific helpers exposed through `import hyde` are therefore part of the same supported-tool interface. They are the public kernel API by which Hyde exposes feature functionality that is not already directly available from the underlying libraries.
-
-This ensures all GUI actions generate the same Python code that could be written manually in the terminal.
+If Hyde-specific helper functions are introduced later for capabilities not provided by the underlying scientific libraries, those helpers should be added to the Hyde package explicitly and documented at the time they are implemented.
 
 ## Default Procedures
 
 New projects include a `procedures/__init__.py` that establishes the baseline environment. It must contain:
 
 ```python
-import hyde         # Hyde-specific functions (e.g. open_table)
+import hyde
 import numpy as np
 import matplotlib
-# matplotlib.use('Hyde')  # Explicitly set the Hyde backend (when implemented)
+# matplotlib.use('Hyde')  # Enable when the Hyde Matplotlib backend exists.
 import matplotlib.pyplot as plt
 import lmfit        # For curve fitting
 ```

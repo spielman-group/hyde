@@ -178,7 +178,7 @@ class TestDataBrowserFinal(unittest.TestCase):
         wait_for_code_ok(
             self.client,
             "from ipykernel.comm import Comm\n"
-            "unrelated = Comm(target_name='hyde_mgmt')\n"
+            "unrelated = Comm(target_name='unrelated_target')\n"
             "unrelated.send({'type': 'UNRELATED'})\n",
         )
         process_events(0.5)

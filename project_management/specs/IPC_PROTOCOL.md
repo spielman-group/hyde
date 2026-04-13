@@ -22,14 +22,14 @@ Hyde controls three distinct communication paths:
 
 The executor and the GUI both connect to the same kernel, but they use separate Jupyter client sessions for different purposes.
 
-## Hyde Feature Surface in the Kernel
-Supported tools expose their Hyde-facing behavior through the package's `features/` modules. This includes the kernel API made available by:
+## Hyde Package Surface in the Kernel
+The kernel may import the Hyde package directly:
 
 ```python
 import hyde
 ```
 
-That import should be understood as the public Hyde interface to supported tool features. If Hyde provides a helper that is not already part of the underlying third-party library, that helper belongs to this supported feature surface.
+Today, this provides the Hyde Python package namespace itself. Hyde-specific helper functions are not yet a defined public API surface. When such helpers are added, they should be exposed deliberately through the Hyde package and documented alongside the implementation.
 
 ## Lane 1: GUI <-> Executor (`zprocess.ProcessTree`)
 
@@ -129,7 +129,7 @@ This is the executor-owned background control session.
 ### Responsibilities
 - execute `procedures/__init__.py` after project configuration
 - reload `procedures/__init__.py` when watched procedure files change
-- establish the kernel namespace in which `import hyde` exposes the supported Hyde feature surface
+- establish the kernel namespace in which project procedures run
 
 ### Execution String
 The executor uses one canonical command string for both initial load and reload:
@@ -138,13 +138,28 @@ The executor uses one canonical command string for both initial load and reload:
 import os
 import sys
 import importlib
+import __main__
 
 os.chdir(project_dir)
+project_root = os.getcwd()
+if sys.path[:1] != [project_root]:
+    while project_root in sys.path:
+        sys.path.remove(project_root)
+    sys.path.insert(0, project_root)
+for name in list(getattr(__main__, "__hyde_procedures_exports__", set())):
+    __main__.__dict__.pop(name, None)
 importlib.invalidate_caches()
 for name in list(sys.modules):
     if name == "procedures" or name.startswith("procedures."):
         del sys.modules[name]
 import procedures
+__hyde_exports = {
+    name: value
+    for name, value in procedures.__dict__.items()
+    if not name.startswith("_")
+}
+__main__.__dict__.update(__hyde_exports)
+__main__.__hyde_procedures_exports__ = set(__hyde_exports)
 ```
 
 ### Execution Policy

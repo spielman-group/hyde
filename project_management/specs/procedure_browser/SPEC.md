@@ -19,18 +19,13 @@ Every project must contain a `procedures/__init__.py`. It should typically conta
 import hyde
 import numpy as np
 import matplotlib
-matplotlib.use('Hyde') # custom backend
+# matplotlib.use('Hyde')  # Enable when the Hyde Matplotlib backend exists.
 import matplotlib.pyplot as plt
 ```
 
 ### Automation
-1. When Hyde starts or a project is loaded, the execution layer executes the following sequence in the kernel:
-   ```python
-   import os
-   os.chdir("path/to/project/root")
-   import procedures
-   ```
-2. This ensures that the global namespace in the Command Window (IPython) is identical to the state defined in `procedures/__init__.py`.
+1. When Hyde starts or a project is loaded, the execution layer changes to the project root, imports the `procedures` package, and exports its public names into the interactive kernel namespace.
+2. This ensures that the global namespace in the Command Window (IPython) is identical to the public state defined in `procedures/__init__.py`.
 
 ## Filesystem Monitoring
 The Procedure Browser is only a view onto the `procedures/` directory. Tracking changes to
