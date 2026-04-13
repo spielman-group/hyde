@@ -164,13 +164,15 @@ class TestWatchdogArchitecture(unittest.TestCase):
 
                 try:
                     client.wait_for_ready(timeout=5)
-                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == 1")
+                    self.wait_for_code_ok(client, "assert VALUE == 1")
+                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == VALUE")
 
                     with open(procedures_init, 'w') as f:
                         f.write("VALUE = 2\n")
 
                     time.sleep(1.5)
-                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == 2", timeout=10)
+                    self.wait_for_code_ok(client, "assert VALUE == 2", timeout=10)
+                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == VALUE", timeout=10)
                 finally:
                     client.stop_channels()
             finally:
@@ -304,7 +306,8 @@ class TestWatchdogArchitecture(unittest.TestCase):
 
                 try:
                     client.wait_for_ready(timeout=5)
-                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == 1", timeout=10)
+                    self.wait_for_code_ok(client, "assert VALUE == 1", timeout=10)
+                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == VALUE", timeout=10)
                 finally:
                     client.stop_channels()
             finally:

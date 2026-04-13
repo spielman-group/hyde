@@ -45,6 +45,9 @@ Established the foundation for a transparent, reproducible scientific environmen
 - **Initialization Safeties**: Added a polling loop to the Watchdog to ensure the Jupyter connection file exists and is ready before the GUI attempts to connect.
 - **UI UX**: Standardized the Logging window size (80x40 equivalent) and ensured it behaves correctly within the MDI container.
 
+## Active Major Bugs
+- **`exit()` in Command Window**: Typing `exit()` in the embedded IPython command window kills the kernel and produces repeated `Kernel died, restarting` output along with repeated crash alerts. This is a major UX bug. Hyde needs a defined policy for terminal-driven kernel exit so that it is either intercepted, converted into an orderly application quit, or handled as a single controlled kernel restart event rather than a visible crash loop.
+
 ## Documentation Updated
 - `project_management/PLAN.md`: Marked Phase II architectural refinements as complete.
 - `project_management/ARCHITECTURE.md`: Codified the finalized IPC and package structure models.

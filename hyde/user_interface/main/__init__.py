@@ -16,6 +16,56 @@ from hyde.user_interface.command_window import CommandWindow
 from hyde.user_interface.logging_window import LoggingWindow
 from hyde.user_interface.procedure_browser import ProcedureBrowser
 
+class ProjectSelectionDialog(QtWidgets.QFileDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent, "Open or Create Hyde Project", DEFAULT_PROJECTS_DIR)
+        self._selected_path = None
+        self.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
+        self.setFileMode(QtWidgets.QFileDialog.Directory)
+        self.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
+        self.setLabelText(QtWidgets.QFileDialog.Accept, "Open / Create")
+        self.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
+        self._file_name_edit = self.findChild(QtWidgets.QLineEdit, 'fileNameEdit')
+        self._accept_button = None
+        for button in self.findChildren(QtWidgets.QPushButton):
+            if button.text() == self.labelText(QtWidgets.QFileDialog.Accept):
+                self._accept_button = button
+                break
+        if self._file_name_edit is not None:
+            self._file_name_edit.textChanged.connect(self.update_accept_button)
+        self.currentChanged.connect(lambda _path: self.update_accept_button())
+        self.directoryEntered.connect(lambda _path: self.update_accept_button())
+        self.update_accept_button()
+
+    def current_project_path(self):
+        if self._file_name_edit is not None:
+            text = self._file_name_edit.text().strip()
+            if text:
+                return os.path.abspath(self.directory().absoluteFilePath(text))
+        selected_files = super().selectedFiles()
+        if selected_files:
+            return os.path.abspath(selected_files[0])
+        return None
+
+    def update_accept_button(self):
+        if self._accept_button is None:
+            return
+        project_dir = self.current_project_path()
+        enabled = bool(project_dir and os.path.basename(project_dir).endswith('.hy'))
+        self._accept_button.setEnabled(enabled)
+
+    def accept(self):
+        project_dir = self.current_project_path()
+        if project_dir is None:
+            return
+        self._selected_path = project_dir
+        QtWidgets.QDialog.accept(self)
+
+    def selectedFiles(self):
+        if self._selected_path is not None:
+            return [self._selected_path]
+        return super().selectedFiles()
+
 class HydeMainWindow(QtWidgets.QMainWindow):
     def __init__(self, app, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -107,16 +157,7 @@ class HydeApp:
         suggested_path = os.path.join(DEFAULT_PROJECTS_DIR, 'untitled.hy')
 
         while True:
-            dialog = QtWidgets.QFileDialog(
-                self.ui,
-                "Open or Create Hyde Project",
-                DEFAULT_PROJECTS_DIR,
-            )
-            dialog.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
-            dialog.setFileMode(QtWidgets.QFileDialog.Directory)
-            dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
-            dialog.setLabelText(QtWidgets.QFileDialog.Accept, "Open / Create")
-            dialog.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
+            dialog = ProjectSelectionDialog(self.ui)
             dialog.selectFile(suggested_path)
             if not dialog.exec_():
                 return None
@@ -133,7 +174,7 @@ class HydeApp:
                 suggested_path = project_dir
                 continue
 
-            if not os.path.isdir(project_dir):
+            if os.path.exists(project_dir) and not os.path.isdir(project_dir):
                 QtWidgets.QMessageBox.warning(
                     self.ui,
                     "Invalid Project Path",
