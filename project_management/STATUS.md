@@ -26,7 +26,7 @@ Developed a headless integration suite (`tests/test_watchdog.py`) that:
 
 ### 4. Managed Process Tree & Observability
 Established a hierarchical managed lifecycle and real-time observability:
-- **Managed Hierarchy**: Implemented a `GUI -> Watchdog -> Launcher -> Kernel` tree using `zprocess` heartbeats to eliminate orphan processes.
+- **Managed Hierarchy**: Implemented a `GUI -> Watchdog -> Kernel` tree using `zprocess` heartbeats to eliminate orphan processes. The `kernel_launcher.py` entrypoint now starts Spyder's kernel in-process so the real kernel is the managed `ProcessTree` child rather than a separate `Popen` descendant.
 - **Unified Logging**: Integrated `zlog` across all nodes, targeting standard suite `~/labscript_suite/logs/`.
 - **Logging Window**: Added a dedicated MDI `OutputBox` for real-time stdout/stderr redirection of background processes.
 

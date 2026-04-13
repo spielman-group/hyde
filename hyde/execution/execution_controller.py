@@ -40,8 +40,8 @@ class ExecutionWatchdog:
             if os.path.exists(self.connection_file):
                 os.remove(self.connection_file)
 
-            # Launch the IPython kernel via the managed launcher.
-            # This launcher performs the zprocess handshake to prevent timeouts.
+            # Launch the real Spyder kernel through the ProcessTree-managed
+            # entrypoint so the kernel process itself is the tree child.
             self.to_kernel, self.from_kernel, self.kernel_process = self.process_tree.subprocess(
                 KERNEL_LAUNCHER,
                 args=["-f", self.connection_file]

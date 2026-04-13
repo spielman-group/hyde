@@ -8,7 +8,7 @@ Hyde runs as three cooperating processes:
 2. **Execution Controller / Watchdog**
    Spawned by the GUI through `zprocess.ProcessTree`. Owns kernel lifecycle and procedure-file monitoring.
 3. **Kernel Process**
-   The `spyder_kernels` IPython kernel that holds the authoritative Python namespace.
+   The `spyder_kernels` IPython kernel that holds the authoritative Python namespace. It is started in-process by `hyde/execution/kernel_launcher.py`, so the real kernel process is itself the `ProcessTree` child.
 
 ## Communication Inventory
 Hyde controls three distinct communication paths:

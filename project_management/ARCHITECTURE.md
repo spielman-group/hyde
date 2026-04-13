@@ -129,6 +129,8 @@ The execution subprocess runs in a separate Python process using the `spyder_ker
 - Spyder namespace-view support for the Data Browser
 - Mature, well-tested architecture
 
+The `hyde/execution/kernel_launcher.py` entrypoint is the managed `ProcessTree` child and starts Spyder's kernel startup code in-process. Hyde does not insert a separate launcher-shim process between the Watchdog and the real kernel.
+
 The GUI sends raw Python code to the kernel for execution - there is no special GUI-to-kernel protocol.
 
 ## Tracking of Changed Objects
