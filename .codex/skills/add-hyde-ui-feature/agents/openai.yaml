@@ -1,4 +1,4 @@
 interface:
   display_name: "Add Hyde UI Feature"
-  short_description: "Draft Hyde frontend feature specs"
-  default_prompt: "Use $add-hyde-ui-feature to create or refine a Hyde frontend feature specification from screenshots, SPEC.md, and IGOR.md artifacts."
+  short_description: "Draft Hyde-native UI feature specs"
+  default_prompt: "Use $add-hyde-ui-feature to create or refine a Hyde UI feature specification from screenshots, SPEC.md, and IGOR.md artifacts, with explicit control classification, exclusions, and backend guardrails."
