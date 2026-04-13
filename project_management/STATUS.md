@@ -1,4 +1,4 @@
-# Hyde Phase II, III, & IV Feature A Status
+# Hyde Phase II, III, & IV Status
 
 We have successfully built the core architectural skeleton of Hyde, transitioning from design philosophy to a fully functional multi-process infrastructure.
 
@@ -39,6 +39,16 @@ Established the foundation for a transparent, reproducible scientific environmen
 - **Masked Background Execution**: Watchdog-driven `procedures/__init__.py` execution uses Jupyter `silent=True`, so backend-controlled execution does not emit visible `execute_input` or consume the user's prompt history.
 - **Procedure Browser Path Semantics**: The browser is rooted at `procedures/`; displayed entries are relative to that directory, not to the `.hy` project root.
 
+### 6. Phase IV-C: Data Browser Initial Implementation
+Established the first Hyde-native namespace browser:
+- **Spyder-Based Namespace View**: The Data Browser uses Spyder's namespace-view comm path rather than a Hyde-specific metadata tracker.
+- **MDI Data Browser**: Added a dedicated MDI Data Browser window with a left-hand display control column and a main namespace list.
+- **Filtering Semantics**: Implemented `Waves`, `Variables`, and `Strings` filters, with `Waves` covering numpy arrays and pandas DataFrames.
+- **Info Pane Toggle**: The `Info` checkbox controls the visibility of the metadata pane.
+- **Namespace Synchronization**: The browser requests an initial namespace snapshot after its own comm path is ready and refreshes after kernel execution and executor-owned procedure reload.
+- **Supported Actions**: Implemented `Copy Python Expression` and `Delete Object` against the live kernel namespace.
+- **Persistent Tool Windows**: MDI tool windows, including the Data Browser, now hide on close rather than destroying their subwindow wrappers.
+
 
 ## Refinements & Bug Fixes
 - **Path Derivation**: Implemented absolute module-based path derivation to prevent CWD-drift issues between the GUI and child processes.
@@ -52,4 +62,6 @@ Established the foundation for a transparent, reproducible scientific environmen
 - `project_management/PLAN.md`: Marked Phase II architectural refinements as complete.
 - `project_management/ARCHITECTURE.md`: Codified the finalized IPC and package structure models.
 - `project_management/specs/logging_window/SPEC.md`: Added formal specifications for the new observability window.
+- `project_management/specs/data_browser/SPEC.md`: Updated to match the implemented Hyde-native browser layout and supported action set.
+- `project_management/specs/IPC_PROTOCOL.md`: Updated to document the actual `spyder_api` namespace-view comm path.
 - `2025_04_12_OPUS_EVALUATION.md`: Noted the transition toward `zprocess.Event` for future state notifications.

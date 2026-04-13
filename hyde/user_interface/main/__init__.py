@@ -15,6 +15,17 @@ from hyde.paths import (
 from hyde.user_interface.command_window import CommandWindow
 from hyde.user_interface.logging_window import LoggingWindow
 from hyde.user_interface.procedure_browser import ProcedureBrowser
+from hyde.user_interface.data_browser import DataBrowser
+
+class PersistentSubwindowFilter(QtCore.QObject):
+    """Turn MDI close requests into hide requests so tool windows persist."""
+
+    def eventFilter(self, watched, event):
+        if event.type() == QtCore.QEvent.Close:
+            watched.hide()
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
 
 class ProjectSelectionDialog(QtWidgets.QFileDialog):
     def __init__(self, parent=None):
@@ -83,6 +94,7 @@ class HydeApp:
         self.to_worker = None
         self.from_worker = None
         self.worker = None
+        self._subwindow_filters = []
         
         # Load the UI
         loader = UiLoader()
@@ -100,6 +112,7 @@ class HydeApp:
         # Initialize Logging Window as an MDI sub-window
         self.logging_window = LoggingWindow()
         self.logging_subwindow = self.ui.mdiArea.addSubWindow(self.logging_window)
+        self.configure_persistent_subwindow(self.logging_subwindow)
         self.logging_subwindow.resize(800, 600)
         self.logging_subwindow.hide()
 
@@ -107,6 +120,7 @@ class HydeApp:
         initial_procedures_dir = get_project_paths(project_dir)[1]
         self.procedure_browser = ProcedureBrowser(procedures_dir=initial_procedures_dir)
         self.procedures_subwindow = self.ui.mdiArea.addSubWindow(self.procedure_browser)
+        self.configure_persistent_subwindow(self.procedures_subwindow)
         self.procedures_subwindow.resize(300, 500)
         self.procedures_subwindow.hide()
 
@@ -129,9 +143,17 @@ class HydeApp:
         self.ui.actionNew.triggered.connect(self.choose_project)
         self.ui.actionLoad.triggered.connect(self.choose_project)
         self.ui.actionQuit.triggered.connect(self.qapplication.quit)
+        self.ui.actionCommandWindow.triggered.connect(self.show_command_window)
         self.ui.actionLogging.triggered.connect(self.show_logging_window)
         self.ui.actionProcedures.triggered.connect(self.show_procedures_window)
+        self.ui.actionDataBrowser.triggered.connect(self.show_data_browser)
         self.qapplication.aboutToQuit.connect(self.shutdown_watchdog)
+
+    @inmain_decorator()
+    def show_command_window(self, checked=False):
+        self.command_subwindow.show()
+        self.command_subwindow.setFocus()
+        self.command_subwindow.raise_()
 
     @inmain_decorator()
     def show_logging_window(self, checked=False):
@@ -144,6 +166,18 @@ class HydeApp:
         self.procedures_subwindow.show()
         self.procedures_subwindow.setFocus()
         self.procedures_subwindow.raise_()
+
+    @inmain_decorator()
+    def show_data_browser(self, checked=False):
+        self.data_browser_subwindow.show()
+        self.data_browser_subwindow.setFocus()
+        self.data_browser_subwindow.raise_()
+
+    def configure_persistent_subwindow(self, subwindow):
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
+        event_filter = PersistentSubwindowFilter(subwindow)
+        subwindow.installEventFilter(event_filter)
+        self._subwindow_filters.append(event_filter)
 
     def resolve_startup_project(self):
         if self.argv:
@@ -267,8 +301,15 @@ class HydeApp:
             
             # Instantiate Command Window bypassing ProcessTree and targeting ZMQ
             self.command_window = CommandWindow(connection_file=CONNECTION_FILE)
-            sub_window = self.ui.mdiArea.addSubWindow(self.command_window)
+            self.command_subwindow = self.ui.mdiArea.addSubWindow(self.command_window)
+            self.configure_persistent_subwindow(self.command_subwindow)
             self.command_window.show()
+            
+            # Instantiate Data Browser with its own client
+            self.data_browser = DataBrowser(connection_file=CONNECTION_FILE)
+            self.data_browser_subwindow = self.ui.mdiArea.addSubWindow(self.data_browser)
+            self.configure_persistent_subwindow(self.data_browser_subwindow)
+            self.data_browser.show()
             
             # Release the splash screen and manifest the GUI
             self.ui.show()
