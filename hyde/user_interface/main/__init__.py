@@ -215,7 +215,7 @@ class HydeApp:
         handle = target if target else f"Table{self.table_counter}"
         self.table_counter += 1
         
-        table = TableWidget(handle, names, connection_file=CONNECTION_FILE, app=self)
+        table = TableWidget(handle, names, app=self)
         subwindow = self.ui.mdiArea.addSubWindow(table)
         self.tables[handle] = table
         

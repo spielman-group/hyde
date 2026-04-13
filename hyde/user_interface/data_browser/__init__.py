@@ -89,6 +89,8 @@ from hyde.user_interface.new_table_dialog import NewTableDialog
 
 
 class DataBrowser(QtWidgets.QWidget):
+    namespace_view_updated = QtCore.Signal(object)
+
     def __init__(self, connection_file, app=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.connection_file = connection_file
@@ -154,8 +156,13 @@ class DataBrowser(QtWidgets.QWidget):
                 self.refresh_namespace()
 
     def _on_namespace_view(self, view):
-        self._last_view = view  # Cache for dialogs
-        self._update_ui(view or {})
+        self._apply_namespace_view(view or {})
+
+    @inmain_decorator()
+    def _apply_namespace_view(self, view):
+        self._last_view = dict(view)
+        self._update_ui(self._last_view)
+        self.namespace_view_updated.emit(dict(self._last_view))
 
     def namespace_view(self):
         """Return the latest cached namespace metadata snapshot."""
@@ -302,6 +309,9 @@ class DataBrowser(QtWidgets.QWidget):
         self.app.execute_command(command, visible=True)
 
     def closeEvent(self, event):
+        if self._closed:
+            super().closeEvent(event)
+            return
         self._closed = True
         try:
             self.kernel_client.iopub_channel.message_received.disconnect(self._handle_iopub_message)

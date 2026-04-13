@@ -13,7 +13,7 @@ splash.show()
 
 # Update splash text and import qtutils, which can take time
 splash.update_text('importing qtutils')
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtWidgets, QtGui
 
 # Framework error hooks
 splash.update_text('importing labscript mechanics')
@@ -30,6 +30,24 @@ process_tree.zlock_client.set_process_name('hyde')
 splash.update_text('loading Hyde UI')
 from hyde.user_interface.main import HydeApp
 
+
+def force_light_palette(qapplication):
+    qapplication.setStyle('Fusion')
+    palette = QtGui.QPalette()
+    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(239, 239, 239))
+    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(0, 0, 0))
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(255, 255, 255))
+    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(245, 245, 245))
+    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(255, 255, 220))
+    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(0, 0, 0))
+    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(0, 0, 0))
+    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(239, 239, 239))
+    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(0, 0, 0))
+    palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 0, 0))
+    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(76, 163, 224))
+    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
+    qapplication.setPalette(palette)
+
 if __name__ == '__main__':
     splash.update_text('starting Qt event loop')
     
@@ -38,6 +56,7 @@ if __name__ == '__main__':
         qapplication = QtWidgets.QApplication(sys.argv)
         
     qapplication.setApplicationName('hyde')
+    force_light_palette(qapplication)
     
     try:
         labscript_utils.splash.configure_qapplication(qapplication)

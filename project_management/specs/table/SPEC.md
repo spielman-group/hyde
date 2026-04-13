@@ -27,8 +27,9 @@ explicit Python commands when the user edits supported cells.
 
 ## Initial Deployment Scope
 
-The initial deployment focuses on 1D numeric wave-like objects from the active Hyde
-project.
+The initial deployment focuses on 1D wave-like objects from the active Hyde project.
+Existing table creation from the namespace remains centered on numeric arrays, while
+in-table creation of a new column infers dtype from the entered value.
 
 It includes:
 
@@ -38,7 +39,9 @@ It includes:
 - using `hyde.table(...)` as the kernel-facing table constructor
 - one displayed column per selected object
 - a point/index column at the left
-- direct editing of supported numeric cells
+- direct editing of supported cells in displayed columns
+- appending to an existing displayed array by editing the first cell below its current end
+- creating a new displayed array by editing the top cell of the first inactive column
 - a current-cell summary and value field above the grid
 - live refresh when the underlying kernel data changes
 - table creation from the Data Browser `Edit` action
@@ -51,7 +54,6 @@ It does not include:
 - row/column formatting dialogs
 - sort/export/presentation tooling
 - multidimensional wave editing
-- text-wave editing
 - pandas DataFrame tables and editing
 - arbitrary command-entry dialogs
 
@@ -66,6 +68,8 @@ The Table window is a single MDI subwindow containing:
 
 The top strip shows the current target cell and the currently selected value.
 The grid uses a point column on the left and one or more data columns to the right.
+The grid also exposes one append row below the longest active column and one inactive
+column at the right for creating a new array directly from the table.
 
 The table window is created and updated by explicit Hyde kernel commands rather than
 by GUI-owned table state.
@@ -110,13 +114,16 @@ deployment. Igor-only folder/root controls are excluded rather than shown inertl
 
 ## Editable Operations
 
-The initial deployment supports direct editing of existing numeric data cells in
-displayed 1D wave-like objects.
+The initial deployment supports direct editing of existing data cells in displayed
+1D wave-like objects.
 
 Supported edits:
 
-- changing a selected data cell to a new numeric value
+- changing a selected data cell to a new value
 - committing the edited value from the value field or equivalent table entry path
+- appending to an existing column by editing the first inactive cell directly below
+  that column's current data
+- creating a new array by editing the top cell of the first inactive column
 
 For each live edit:
 
@@ -124,12 +131,27 @@ For each live edit:
 - the Python-level effect is an indexed assignment into that object
 - the edit is committed immediately after confirmation
 
+For append edits:
+
+- the target object is the selected kernel-owned array
+- the Python-level effect is appending one value to that array
+- the entered value is converted to an explicit Python literal before the command is sent
+
+For new-column creation:
+
+- the table creates a new kernel array from the entered value
+- the new array is equivalent to `np.array([value])`, so numpy infers the dtype from
+  the typed value
+- the created array is automatically appended to the current table
+- default names follow Hyde's current auto-generated wave naming pattern such as
+  `wave0` or `textWave0`
+
 Invalid or unsupported edits:
 
 - editing the point/index column is rejected
 - editing an unsupported object type is rejected
 - editing with no valid selection is rejected
-- non-numeric values in numeric cells are rejected without mutating the kernel
+- empty values are rejected without mutating the kernel
 
 Future table behavior may expand this section to include row insertion, row deletion,
 clipboard paste, and additional object types, but those are not part of the initial
@@ -144,8 +166,10 @@ string for the kernel rather than mutating scientific state in the GUI.
 Examples of the intended pattern:
 
 - `wave[row] = value` for a 1D wave-like object
+- `wave = np.append(wave, value)` for appending one value below an existing column
 - `hyde.table(arr1, arr2)` for creating a new table from selected arrays
 - `hyde.table(arr1, target="Table0")` for appending to an existing table
+- `wave0 = np.array([value])` for creating a new array from the first inactive column
 
 The table does not own the authoritative value being edited. The GUI may hold only
 transient edit text long enough to generate the kernel command.
@@ -192,7 +216,6 @@ The following Igor concepts are not part of the initial Hyde table:
 The long-term table direction may include:
 
 - multidimensional wave display
-- text-wave editing
 - pandas DataFrame table display and editing
 - row insertion and deletion
 - column sorting and formatting
