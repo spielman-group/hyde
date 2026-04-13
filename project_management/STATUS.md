@@ -32,10 +32,14 @@ Established a hierarchical managed lifecycle and real-time observability:
 
 ### 5. Phase IV-A: Procedure Browser & Explicit Initialization
 Established the foundation for a transparent, reproducible scientific environment:
-- **Default Project Bootstrapping**: Implemented a transition to the `.hy` project structure, defaulting to `~/HydeProjects/default.hy`.
+- **Project Creation / Loading Flow**: Startup now accepts an existing `.hy` project path from `argv`, or prompts the user to open an existing project or create a new one. New projects are copied from a repo-stored template package.
 - **"Explicit is Better than Implicit"**: Automated the execution of `procedures/master.py` in the kernel upon startup, ensuring all imports (numpy, matplotlib) and backends are script-defined.
-- **Run-on-Save Synchronization**: Integrated a file-system watcher that automatically re-executes `master.py` in the kernel whenever it is saved, keeping the interactive workspace in sync with the script.
 - **MDI Procedure Browser**: Added a native script browser for managing `.py` files within the project, featuring double-click integration with the system-default editor.
+
+## Current Architectural Clarification
+
+- **Procedure Browser Path Semantics**: The browser is rooted at `procedures/`; displayed entries are relative to that directory, not to the `.hy` project root.
+- **Procedure Change Tracking Ownership**: Tracking changes to `master.py` and other procedure files is now considered an execution-side concern rather than a Procedure Browser concern. The intended implementation is to use `labscript_utils.filewatcher.FileWatcher`, following the BLACS connection-table pattern, instead of GUI `QFileSystemWatcher` ownership.
 
 
 ## Refinements & Bug Fixes

@@ -2,8 +2,11 @@ import sys
 import subprocess
 import threading
 import time
+import os
 from labscript_utils.ls_zprocess import ProcessTree
+from labscript_utils.filewatcher import FileWatcher
 from labscript_utils.setup_logging import setup_logging
+from jupyter_client import BlockingKernelClient
 from hyde.paths import KERNEL_LAUNCHER
 import labscript_utils.excepthook
 
@@ -18,11 +21,15 @@ class ExecutionWatchdog:
         self.connection_file = connection_file
         self.process_tree = ProcessTree.instance()
         self.kernel_process = None
+        self.kernel_client = None
+        self.filewatcher = None
+        self.project_dir = None
+        self.procedures_dir = None
+        self.master_script = None
         self.exiting = False
+        self.reload_requested = threading.Event()
 
     def start(self):
-        import os
-
         # Start daemon thread listening to commands from GUI ProcessTree
         listener = threading.Thread(target=self.listen_for_gui)
         listener.daemon = True
@@ -46,24 +53,77 @@ class ExecutionWatchdog:
                     break
                 time.sleep(0.1)
 
-            # Notify GUI that kernel is ready
+            if not self.exiting and self.kernel_process.poll() is None:
+                self.kernel_client = BlockingKernelClient(connection_file=self.connection_file)
+                self.kernel_client.load_connection_file()
+                self.kernel_client.start_channels()
+
             if not self.exiting and self.kernel_process.poll() is None:
                 self.to_parent.put(['KERNEL_READY', self.connection_file])
             
-            # Block until kernel dies or is terminated
-            self.kernel_process.wait()
+            while not self.exiting and self.kernel_process.poll() is None:
+                if self.reload_requested.wait(timeout=0.1):
+                    self.reload_requested.clear()
+                    self.execute_master_script()
+
+            if self.kernel_client is not None:
+                self.kernel_client.stop_channels()
+                self.kernel_client = None
             
             if not self.exiting:
                 print("[Watchdog] Kernel crashed or exited unexpectedly. Restarting...")
                 self.to_parent.put(['KERNEL_CRASHED', None])
                 time.sleep(1)
 
+    def execute_master_script(self):
+        if self.kernel_client is None or self.project_dir is None or self.master_script is None:
+            return
+        if not os.path.exists(self.master_script):
+            return
+        code = (
+            f"import os\n"
+            f"os.chdir({self.project_dir!r})\n"
+            f"with open({self.master_script!r}) as f:\n"
+            f"    exec(f.read())\n"
+        )
+        self.kernel_client.execute(code)
+
+    def on_procedure_change(self, name, info, event=None):
+        if event == 'original':
+            return
+        if name != 'all' and not name.endswith('.py'):
+            return
+        self.reload_requested.set()
+
+    def watch_project(self, data):
+        self.project_dir = data['project_dir']
+        self.procedures_dir = data['procedures_dir']
+        self.master_script = data['master_script']
+        if self.filewatcher is not None:
+            self.filewatcher.stop()
+        self.filewatcher = FileWatcher(
+            self.on_procedure_change,
+            files=[self.master_script],
+            folders=[self.procedures_dir],
+            hashable_types=['.py'],
+            interval=0.5,
+        )
+        self.reload_requested.set()
+
     def listen_for_gui(self):
         while not self.exiting:
             try:
                 task, data = self.from_parent.get()
-                if task == 'QUIT':
+                if task == 'WATCH_PROJECT':
+                    self.watch_project(data)
+                elif task == 'QUIT':
                     self.exiting = True
+                    self.reload_requested.set()
+                    if self.filewatcher is not None:
+                        self.filewatcher.stop()
+                    if self.kernel_client is not None:
+                        self.kernel_client.stop_channels()
+                        self.kernel_client = None
                     if self.kernel_process:
                         self.kernel_process.terminate()
                     break

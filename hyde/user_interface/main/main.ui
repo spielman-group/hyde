@@ -33,6 +33,7 @@
     <property name="title">
      <string>File</string>
     </property>
+    <addaction name="actionNew"/>
     <addaction name="actionLoad"/>
     <addaction name="actionSave"/>
     <addaction name="separator"/>
@@ -60,6 +61,11 @@
   <action name="actionLoad">
    <property name="text">
     <string>Load...</string>
+   </property>
+  </action>
+  <action name="actionNew">
+   <property name="text">
+    <string>New...</string>
    </property>
   </action>
   <action name="actionSave">

@@ -27,8 +27,9 @@ This document is a living checklist tracking the specific steps we will follow (
 ### Feature A: Procedure Browser & Kernel Initialization
 - [x] Spec: Draft `specs/procedure_browser/SPEC.md`.
 - [x] Impl: Implement `master.py` bootstrapping and automated kernel execution.
-- [x] Impl: Create the MDI Procedure Browser with filesystem monitoring.
+- [x] Impl: Create the MDI Procedure Browser.
 - [x] Test: Verify environment synchronization between script and kernel.
+- [ ] Refinement: Move procedure-file change tracking and `master.py` re-sync ownership into the execution side using `labscript_utils.filewatcher.FileWatcher` (BLACS connection-table pattern).
 
 ### Feature B: Matplotlib Figure Capture
 - [ ] Spec: Draft `specs/GUI_FIGURES.md`.

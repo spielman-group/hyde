@@ -89,12 +89,13 @@ example.hy/
 To ensure "Explicit is better than Implicit," Hyde enforces a strict initialization sequence:
 1. **Bootstrap**: Upon startup or project load, the GUI ensures a project structure exists.
 2. **Master Execution**: The GUI automatically executes `master.py` in the kernel namespace to establish the environment.
-3. **Run-on-Save**: The GUI monitors `master.py` for changes. Whenever it is saved, the script is re-executed in the kernel, ensuring the interactive session remains synchronized with the code.
+3. **Run-on-Save**: Monitoring of `master.py` and other procedure files is an execution-side responsibility. The execution layer should watch for relevant file changes and trigger namespace re-synchronization when needed, using the suite's standard non-GUI file-watching approach (`labscript_utils.filewatcher.FileWatcher`, as in the BLACS connection table plugin).
 
 ### Procedure Browser
 The **Procedure Browser** (an MDI window) provides the primary UI for managing these scripts. It lists the contents of the `procedures/` directory and allows the user to open scripts in their system's default editor via double-click.
 
 - Paths inside the package are relative for portability
+- The Procedure Browser is rooted at `procedures/`, so displayed entries are relative to that directory
 - `manifest.toml` records package version, saved layout, object registry
 - `session.toml` records open windows, current state
 - Scripts are plain `.py` files

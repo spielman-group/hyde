@@ -46,7 +46,7 @@ if __name__ == '__main__':
     
     splash.update_text('Waiting for Watchdog and spyder_kernels spin-up...')
     
-    hyde_instance = HydeApp(qapplication, process_tree, splash)
+    hyde_instance = HydeApp(qapplication, process_tree, splash, argv=sys.argv[1:])
     
     # splash.hide() and hyde_instance.ui.show() are now explicitly handled 
     # dynamically by HydeApp when KERNEL_READY is caught from the ProcessTree queue.

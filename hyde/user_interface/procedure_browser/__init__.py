@@ -1,5 +1,5 @@
 import os
-from qtutils.qt.QtCore import Qt, QUrl
+from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout, QTreeView, QFileSystemModel
 from qtutils.qt.QtGui import QDesktopServices
 
@@ -7,14 +7,11 @@ class ProcedureBrowser(QWidget):
     def __init__(self, procedures_dir, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setWindowTitle("Procedures")
-        self.procedures_dir = procedures_dir
-        
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
         # File System Model configured for the procedures directory
         self.model = QFileSystemModel()
-        self.model.setRootPath(self.procedures_dir)
         # Filters: only files (no dirs in top level for now), only .py files
         self.model.setNameFilters(["*.py"])
         self.model.setNameFilterDisables(False)
@@ -22,7 +19,6 @@ class ProcedureBrowser(QWidget):
         # Tree View setup
         self.tree_view = QTreeView()
         self.tree_view.setModel(self.model)
-        self.tree_view.setRootIndex(self.model.index(self.procedures_dir))
         
         # UI Polish: Hide unnecessary columns (Size, Type, Date)
         self.tree_view.setColumnHidden(1, True)
@@ -33,6 +29,12 @@ class ProcedureBrowser(QWidget):
         self.tree_view.doubleClicked.connect(self.on_double_click)
         
         self.layout.addWidget(self.tree_view)
+        self.set_procedures_dir(procedures_dir)
+
+    def set_procedures_dir(self, procedures_dir):
+        self.procedures_dir = procedures_dir
+        root_index = self.model.setRootPath(self.procedures_dir)
+        self.tree_view.setRootIndex(root_index)
 
     def on_double_click(self, index):
         """Opens the file in the default system editor."""

@@ -10,7 +10,13 @@ include-package-data = true
 find = {namespaces = false}
 
 [tool.setuptools.package-data]
-hyde = ["*.json", "*.svg", "user_interface/**/*.ui"]
+hyde = [
+    "*.json",
+    "*.svg",
+    "user_interface/**/*.ui",
+    "project_templates/**/*",
+    "project_templates/**/.gitkeep",
+]
 
 [project]
 name = "hyde"

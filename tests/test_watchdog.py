@@ -3,13 +3,29 @@ import sys
 import time
 import unittest
 import subprocess
+import tempfile
 
 from labscript_utils.ls_zprocess import ProcessTree
 from jupyter_client import BlockingKernelClient
 
 import hyde
+from hyde.paths import CONNECTION_FILE
 
 class TestWatchdogArchitecture(unittest.TestCase):
+    def wait_for_code_ok(self, client, code, timeout=5):
+        deadline = time.time() + timeout
+        last_reply = None
+        while time.time() < deadline:
+            msg_id = client.execute(code)
+            reply = client.get_shell_msg(timeout=5)
+            if reply['parent_header'].get('msg_id') != msg_id:
+                continue
+            last_reply = reply
+            if reply['content']['status'] == 'ok':
+                return
+            time.sleep(0.1)
+        self.fail(f"Code did not succeed within {timeout} seconds: {code!r}\nLast reply: {last_reply}")
+
     def test_kernel_lifecycle_and_execution(self):
         """
         Tests the full Phase II / III Architecture:
@@ -29,7 +45,10 @@ class TestWatchdogArchitecture(unittest.TestCase):
         
         # 2. Spawning Watchdog Subprocess
         print(f"\n[Test] Spawning Watchdog: {controller_path}")
-        to_worker, from_worker, worker = process_tree.subprocess(controller_path)
+        to_worker, from_worker, worker = process_tree.subprocess(
+            controller_path,
+            args=[CONNECTION_FILE],
+        )
         
         # 3. Wait for KERNEL_READY
         try:
@@ -40,12 +59,12 @@ class TestWatchdogArchitecture(unittest.TestCase):
             self.fail(f"Did not receive KERNEL_READY from Watchdog: {e}")
         
         # 4. Verify connection file dropped perfectly into the target directory
-        connection_file = os.path.join(os.path.dirname(hyde.__file__), 'kernel-hyde.json')
-        self.assertTrue(os.path.exists(connection_file))
-        print(f"[Test] IPC File {connection_file} validated.")
+        self.assertEqual(data, CONNECTION_FILE)
+        self.assertTrue(os.path.exists(CONNECTION_FILE))
+        print(f"[Test] IPC File {CONNECTION_FILE} validated.")
         
         # 5. Connect ZMQ Client securely explicitly bypassing the PyQt event loop
-        client = BlockingKernelClient(connection_file=connection_file)
+        client = BlockingKernelClient(connection_file=CONNECTION_FILE)
         client.load_connection_file()
         client.start_channels()
         
@@ -78,6 +97,61 @@ class TestWatchdogArchitecture(unittest.TestCase):
             
         self.assertIsNotNone(worker.poll())
         print("[Test] Watchdog cleanly terminated.")
+
+    def test_watch_project_reloads_master_script(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name('hyde-test')
+
+        controller_path = os.path.abspath(
+            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, 'reload_test.hy')
+            procedures_dir = os.path.join(project_dir, 'procedures')
+            os.makedirs(procedures_dir)
+            master_script = os.path.join(procedures_dir, 'master.py')
+            with open(master_script, 'w') as f:
+                f.write("VALUE = 1\n")
+
+            to_worker, from_worker, worker = process_tree.subprocess(
+                controller_path,
+                args=[CONNECTION_FILE],
+            )
+
+            to_worker.put([
+                'WATCH_PROJECT',
+                {
+                    'project_dir': project_dir,
+                    'procedures_dir': procedures_dir,
+                    'master_script': master_script,
+                },
+            ])
+
+            try:
+                task, data = from_worker.get(timeout=15)
+                self.assertEqual(task, 'KERNEL_READY')
+
+                client = BlockingKernelClient(connection_file=CONNECTION_FILE)
+                client.load_connection_file()
+                client.start_channels()
+
+                try:
+                    client.wait_for_ready(timeout=5)
+                    self.wait_for_code_ok(client, "assert VALUE == 1")
+
+                    with open(master_script, 'w') as f:
+                        f.write("VALUE = 2\n")
+
+                    self.wait_for_code_ok(client, "assert VALUE == 2", timeout=10)
+                finally:
+                    client.stop_channels()
+            finally:
+                to_worker.put(['QUIT', None])
+                try:
+                    worker.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
 
 if __name__ == '__main__':
     unittest.main()

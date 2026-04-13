@@ -1,4 +1,3 @@
-import os
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
 from qtconsole.client import QtKernelClient
 
@@ -13,5 +12,4 @@ class CommandWindow(RichJupyterWidget):
         # Start the channels before assigning to the widget
         client.start_channels()
         
-        # Assign to the widget property
         self.kernel_client = client

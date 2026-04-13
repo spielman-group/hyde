@@ -34,8 +34,15 @@ import matplotlib.pyplot as plt
 2. This ensures that the global namespace in the Command Window (IPython) is instantly identical to the state defined in the master script.
 
 ## Filesystem Monitoring
-The Procedure Browser must implement a `QFileSystemWatcher` on the `procedures/` directory to automatically update the view when files are added, removed, or renamed outside of Hyde.
+The Procedure Browser is only a view onto the `procedures/` directory. Tracking changes to
+`master.py` and other procedure files, and deciding when the execution namespace must be
+re-synchronized, is a core execution feature and must not be owned by the Procedure Browser.
+
+This monitoring should live on the execution side and follow the same style of file tracking
+used elsewhere in the suite, specifically `labscript_utils.filewatcher.FileWatcher` as used by
+the BLACS connection table plugin.
 
 ## Technical Details
-- **Path Handling**: All paths displayed are relative to the project root.
+- **Path Handling**: The browser is rooted at `procedures/`, and displayed paths are relative to
+  that directory.
 - **Safety**: If `master.py` is missing, the kernel successfully starts but the GUI should warn the user and offer to create a default template.
