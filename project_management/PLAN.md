@@ -44,12 +44,14 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Impl: Show tracked variables in a GUI browser with Waves / Variables / Strings filters and an Info pane.
 - [x] Test: Verify namespace syncing on startup, after kernel execution, and after `procedures/__init__.py` reload.
 
-*(Further features like Curve Fitting, Tables, Save/Load `.hy` packages will be added here as we iterate)*
+*(Further features like Curve Fitting, Save/Load `.hy` packages, and figure workflows will be added here as we iterate)*
 
 ### Feature D: Table Editor
 - [x] Spec: Refine `specs/table/SPEC.md` and define the Data Browser table-launch contract.
-- [ ] Impl: Create the table editor MDI window and data model integration.
-- [ ] Test: Verify table editing, sorting, and persistence behavior.
+- [x] Impl: Create the table editor MDI window, New Table dialog, and Data Browser table-launch/appending integration.
+- [x] Test: Verify kernel-to-GUI table-open relay and watchdog handling for `hyde.table(...)`.
+- [ ] Test: Expand coverage for GUI row rendering, muted cell-edit execution, and broader table interaction behavior.
+- [ ] Refinement: Replace the current executor-triggered table-data fetch hop with a cleaner direct kernel-to-watchdog data path now that the real kernel is a managed `ProcessTree` child.
 
 ## Phase V: Announcement and Release
 - [ ] TBD.

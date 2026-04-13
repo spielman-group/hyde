@@ -231,9 +231,12 @@ class HydeApp:
     def show_new_table_dialog(self):
         """Opens the New Table dialog with current namespace metadata."""
         from hyde.user_interface.new_table_dialog import NewTableDialog
-        
-        # Reuse existing Data Browser metadata if available
-        metadata = getattr(self.data_browser, '_last_view', {}) if hasattr(self, 'data_browser') else {}
+
+        metadata = (
+            self.data_browser.namespace_view()
+            if hasattr(self, 'data_browser')
+            else {}
+        )
         
         dialog = NewTableDialog(metadata, parent=self.ui)
         if dialog.exec_():

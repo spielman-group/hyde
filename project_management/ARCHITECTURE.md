@@ -5,10 +5,10 @@ The core tenet of Hyde's design is the strict separation of concerns between the
 
 1. **The GUI has UX Memory, but no Scientific Memory.** The PyQt MDI application remembers window positions, table viewports, and browser states. It may hold transient, serializable UI-edit state only when that state is sufficient to regenerate Python commands and is fully derived from the authoritative execution state. The GUI does not hold canonical scientific data, arrays, matplotlib objects, or analytical state natively.
 2. **The Execution namespace is authoritative.** All named data objects, calculations, and plotting configurations live inside an independent Python execution process. The kernel should remain completely agnostic of Hyde's internal GUI representations; it simply executes standard Matplotlib code.
-3. **Metadata-over-Comms.** GUI viewports that depend on execution metadata receive that metadata over Jupyter `comm` channels and render GUI-local view state from it. The Data Browser already follows this pattern through Spyder's namespace-view comm path. Future figure and table windows are expected to follow the same broad approach with their own metadata contracts.
+3. **Metadata-over-Comms and Structured Relays.** GUI viewports that depend on execution metadata receive that metadata over the narrowest existing channel that fits the feature. The Data Browser uses Spyder's namespace-view `comm` path. The implemented Table window uses a Hyde-owned `ProcessTree` relay for table-open intents and structured table-data payloads, while still relying on standard Jupyter execution for visible commands.
 4. **2-Lane IPC Strategy.**
     - **Lane 1 (Control)**: `zprocess.ProcessTree` handles application-level orchestration (launch, heartbeats, QUIT). Analytical commands do NOT traverse this tree.
-    - **Lane 2 (Execution)**: Standard Jupyter ZMQ and `comm` channels handle all scientific traffic, including code execution, figure metadata/rendering, and scientific state synchronization.
+    - **Lane 2 (Execution)**: Standard Jupyter ZMQ and `comm` channels handle visible scientific execution, background execution, and namespace metadata. Hyde-specific relays should only extend this model when an existing path does not cleanly fit the feature.
 5. **App-level I/O is a GUI responsibility.** Operations such as package saving and loading (`.hy` files) are managed natively by the GUI process.
 
 ---
@@ -71,8 +71,8 @@ representations.
 
 When Hyde-specific helper functions are added, they should be exposed deliberately through
 the Hyde package surface rather than through ad hoc GUI-only hooks. The table feature is
-the first planned example of this pattern, with `hyde.table(...)` serving as the kernel-
-facing entry point for table creation and appending.
+the first implemented example of this pattern, with `hyde.table(...)` serving as the
+kernel-facing entry point for table creation and appending.
 
 ## Project and Persistence
 
@@ -118,8 +118,8 @@ Hyde operates across three distinct processes to ensure the GUI remains responsi
 3. **The Kernel (spyder_kernels):** The isolated IPython engine.
 
 ### Communication Lanes
-- **Lane 1 (Control):** `zprocess.ProcessTree` handles application-level orchestration between the GUI and the Watchdog.
-- **Lane 2 (Execution):** Standard Jupyter ZMQ sockets and `comm` channels bridge the GUI directly to the Kernel for all scientific traffic (execution, figures, and metadata updates).
+- **Lane 1 (Control):** `zprocess.ProcessTree` handles application-level orchestration between the GUI and the Watchdog, along with narrow Hyde-owned relays such as table-open intents and structured table-data payloads.
+- **Lane 2 (Execution):** Standard Jupyter ZMQ sockets and `comm` channels bridge the GUI directly to the Kernel for visible execution, background execution, and namespace metadata updates.
 
 ## Execution
 

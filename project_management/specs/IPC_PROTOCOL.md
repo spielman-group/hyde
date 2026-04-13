@@ -40,7 +40,7 @@ The `features/...` layer is reserved for:
 - GUI representation -> Python strings
 - Python strings or metadata -> GUI representation
 
-The table feature is the first planned example of a public Hyde helper, with
+The table feature is the first implemented example of a public Hyde helper, with
 `hyde.table(...)` serving as the kernel-facing entry point for table creation and
 appending. Future decorators such as `@hyde.table` are deferred until the recreation
 contract is defined.
@@ -88,6 +88,26 @@ Behavior:
 Send site:
 - GUI `aboutToQuit`
 
+#### `['FETCH_TABLE_DATA', payload]`
+Requests structured table data for one table instance.
+
+Payload:
+```python
+{
+    'names': ['x', 'y'],
+    'request_id': 'uuid-or-token',
+}
+```
+
+Behavior:
+- executor triggers a silent kernel-side helper call to serialize the named objects
+- the kernel pushes the resulting payload back to the executor through `ProcessTree`
+- executor forwards that payload to the GUI as `['TABLE_DATA', ...]`
+
+Send sites:
+- initial table population
+- external kernel `busy -> idle` refresh for open tables
+
 ### Executor -> GUI Messages
 
 #### `['KERNEL_READY', connection_file]`
@@ -108,6 +128,40 @@ Sent when the watchdog detects unexpected kernel death and is about to restart i
 
 GUI behavior:
 - show a warning dialog that the execution kernel died unexpectedly
+
+#### `['OPEN_TABLE', payload]`
+Forwarded when the kernel requests that the GUI open or update a table.
+
+Payload:
+```python
+{
+    'names': ['x', 'y'],
+    'target': None,      # or 'Table0' when appending to an existing table
+    'title': 'My Table', # optional visible title
+}
+```
+
+GUI behavior:
+- create a new table window when `target` is `None`
+- append columns to an existing table when `target` matches an open table handle
+
+#### `['TABLE_DATA', payload]`
+Forwarded when the kernel pushes structured table data back through the executor.
+
+Payload:
+```python
+{
+    'request_id': 'uuid-or-token',
+    'data': {
+        'x': [1, 2, 3],
+        'y': [4, 5, 6],
+    },
+}
+```
+
+GUI behavior:
+- deliver the payload to open tables
+- each table ignores responses whose `request_id` does not match its outstanding fetch
 
 ## Lane 2A: GUI -> Kernel (Visible Command Session)
 
@@ -144,6 +198,7 @@ This is the executor-owned background control session.
 - execute `procedures/__init__.py` after project configuration
 - reload `procedures/__init__.py` when watched procedure files change
 - establish the kernel namespace in which project procedures run
+- trigger silent helper calls that cause the kernel to push structured table data back over `ProcessTree`
 
 ### Execution String
 The executor uses one canonical command string for both initial load and reload:
@@ -186,6 +241,7 @@ __main__.__hyde_procedures_exports__ = set(__hyde_exports)
 - `labscript_utils.filewatcher.FileWatcher` watches `procedures/` and `procedures/__init__.py`
 - any relevant `.py` change sets the executor's reload flag
 - the watchdog main loop consumes that flag and re-runs the same canonical command string
+- `FETCH_TABLE_DATA` triggers a silent helper call to `hyde.execution.ipc.push_table_data(...)`
 
 ## Lane 2C: Data Browser Namespace View (Target: `spyder_api`)
 
@@ -243,6 +299,44 @@ Representative payload shape:
 - **On Execution**: The Data Browser monitors kernel `status` messages. When externally generated kernel work transitions `busy -> idle`, it requests a new namespace snapshot.
 - **On Reload**: Executor-driven `procedures/__init__.py` reloads also trigger the same `busy -> idle` path, ensuring the Data Browser reflects script-defined changes.
 - **Scope**: The Data Browser only consumes messages associated with its own Spyder comm. Unrelated comm traffic must be ignored.
+
+## Kernel -> Executor Table Relay
+
+The kernel uses its managed `ProcessTree` parent connection for Hyde-owned table
+coordination.
+
+### `['OPEN_TABLE_REQUEST', payload]`
+Sent by `hyde.table(...)` through `hyde.execution.ipc.signal_open_table(...)`.
+
+Payload:
+```python
+{
+    'names': ['x', 'y'],
+    'target': None,      # or 'Table0'
+    'title': 'My Table', # optional visible title
+}
+```
+
+Behavior:
+- executor forwards this to the GUI as `['OPEN_TABLE', payload]`
+
+### `['TABLE_DATA_RESPONSE', payload]`
+Sent by `hyde.execution.ipc.push_table_data(...)` after collecting structured
+values from `__main__`.
+
+Payload:
+```python
+{
+    'request_id': 'uuid-or-token',
+    'data': {
+        'x': [1, 2, 3],
+        'y': [4, 5, 6],
+    },
+}
+```
+
+Behavior:
+- executor forwards this to the GUI as `['TABLE_DATA', payload]`
 
 ## Kernel-Side Consequences
 

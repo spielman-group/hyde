@@ -15,7 +15,7 @@ Successfully isolated the GUI from execution logic using a robust three-tier hie
 ### 2. The 2-Lane IPC Strategy
 Implemented clear separation of communication concerns:
 - **Lane 1 (Control)**: `zprocess.ProcessTree` handles orchestration signals like `QUIT`, `KERNEL_READY`, and `KERNEL_CRASHED`.
-- **Lane 2 (Data/Execution)**: Pure Jupyter ZMQ pipeline for real-time string execution and future state tracking via `comm` channels.
+- **Lane 2 (Data/Execution)**: Jupyter ZMQ handles visible execution, silent executor-owned execution, and Spyder namespace metadata. Hyde-owned structured relays such as table-open intents and table-data payloads travel through `ProcessTree` only where that narrow relay is a better fit than a new comm protocol.
 
 ### 3. Automated System Tests (Phase III)
 Developed a headless integration suite (`tests/test_watchdog.py`) that:
@@ -49,6 +49,16 @@ Established the first Hyde-native namespace browser:
 - **Supported Actions**: Implemented `Copy Python Expression` and `Delete Object` against the live kernel namespace.
 - **Persistent Tool Windows**: MDI tool windows, including the Data Browser, now hide on close rather than destroying their subwindow wrappers.
 
+### 7. Phase IV-D: Table Initial Implementation
+Established Hyde's first editable kernel-backed table workflow:
+- **Public Table API**: `hyde.table(...)` now serves as a documented public Hyde helper for opening a table from live kernel objects.
+- **MDI Table Window**: Added a table subwindow with a point column, one column per selected object, and a current-cell value strip.
+- **New Table Dialog**: Added a `Windows -> New Table...` entry and a dialog that generates visible `hyde.table(...)` commands.
+- **Data Browser Integration**: The Data Browser's `Edit` and `Append to Table` actions now route table creation/appending through the same visible command path.
+- **Kernel Relay Path**: Table-open requests and structured table-data payloads travel through the `ProcessTree` relay between the kernel, Watchdog, and GUI.
+- **Muted Cell Edits**: Table cell edits execute through the same command machinery as other Hyde commands, but are hidden from the visible command history to avoid console clutter.
+- **Current Scope**: The implemented table path is limited to 1D numeric arrays; DataFrame tables, sorting, and persistence remain future work.
+
 
 ## Refinements & Bug Fixes
 - **Path Derivation**: Implemented absolute module-based path derivation to prevent CWD-drift issues between the GUI and child processes.
@@ -64,4 +74,5 @@ Established the first Hyde-native namespace browser:
 - `project_management/specs/logging_window/SPEC.md`: Added formal specifications for the new observability window.
 - `project_management/specs/data_browser/SPEC.md`: Updated to match the implemented Hyde-native browser layout and supported action set.
 - `project_management/specs/IPC_PROTOCOL.md`: Updated to document the actual `spyder_api` namespace-view comm path.
+- `project_management/specs/table/SPEC.md` and `project_management/specs/new_table_dialog/SPEC.md`: Updated to match the implemented table workflow.
 - `2025_04_12_OPUS_EVALUATION.md`: Noted the transition toward `zprocess.Event` for future state notifications.

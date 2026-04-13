@@ -157,6 +157,10 @@ class DataBrowser(QtWidgets.QWidget):
         self._last_view = view  # Cache for dialogs
         self._update_ui(view or {})
 
+    def namespace_view(self):
+        """Return the latest cached namespace metadata snapshot."""
+        return dict(getattr(self, "_last_view", {}) or {})
+
     @inmain_decorator()
     def _update_ui(self, view):
         self.model.removeRows(0, self.model.rowCount())

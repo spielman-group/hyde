@@ -45,20 +45,12 @@
     </property>
     <addaction name="actionCommandWindow"/>
     <addaction name="actionNew_Table"/>
-    <addaction name="actionNew_Figure"/>
     <addaction name="actionLogging"/>
     <addaction name="actionProcedures"/>
     <addaction name="actionDataBrowser"/>
    </widget>
-   <widget class="QMenu" name="menuGraph">
-    <property name="title">
-     <string>Graph</string>
-    </property>
-    <addaction name="actionModify_Figure"/>
-   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuWindow"/>
-   <addaction name="menuGraph"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionLoad">
@@ -79,16 +71,6 @@
   <action name="actionQuit">
    <property name="text">
     <string>Quit</string>
-   </property>
-  </action>
-  <action name="actionNew_Figure">
-   <property name="text">
-    <string>New Figure...</string>
-   </property>
-  </action>
-  <action name="actionModify_Figure">
-   <property name="text">
-    <string>Modify Figure...</string>
    </property>
   </action>
   <action name="actionLogging">
