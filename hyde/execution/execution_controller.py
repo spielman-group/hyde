@@ -111,6 +111,8 @@ class ExecutionWatchdog:
             "    while project_root in sys.path:\n"
             "        sys.path.remove(project_root)\n"
             "    sys.path.insert(0, project_root)\n"
+            "import hyde._table_macros as _hyde_table_macros\n"
+            "_hyde_table_macros.clear_table_macros()\n"
             "for name in list(getattr(__main__, '__hyde_procedures_exports__', set())):\n"
             "    __main__.__dict__.pop(name, None)\n"
             "importlib.invalidate_caches()\n"
@@ -125,6 +127,7 @@ class ExecutionWatchdog:
             "}\n"
             "__main__.__dict__.update(__hyde_exports)\n"
             "__main__.__hyde_procedures_exports__ = set(__hyde_exports)\n"
+            "_hyde_table_macros.publish_table_macro_registry()\n"
         )
 
     def on_procedure_change(self, name, info, event=None):
@@ -165,6 +168,15 @@ class ExecutionWatchdog:
                             f"hyde.execution.ipc.push_table_data({names!r}, {request_id!r})"
                         )
                         self.kernel_client.execute(code, silent=True)
+                elif task == 'RELOAD_PROCEDURES':
+                    self.execute_procedures_init()
+                elif task == 'REFRESH_WINDOW_MACROS':
+                    if self.kernel_client is not None and data.get('kind') == 'table':
+                        code = (
+                            "import hyde._table_macros as _hyde_table_macros; "
+                            "_hyde_table_macros.publish_table_macro_registry()"
+                        )
+                        self.kernel_client.execute(code, silent=True)
                 elif task == 'QUIT':
                     self.exiting = True
                     self.reload_requested.set()
@@ -186,6 +198,8 @@ class ExecutionWatchdog:
                     self.to_parent.put(['OPEN_TABLE', data])
                 elif task == 'TABLE_DATA_RESPONSE':
                     self.to_parent.put(['TABLE_DATA', data])
+                elif task == 'WINDOW_MACROS_RESPONSE':
+                    self.to_parent.put(['WINDOW_MACROS', data])
             except ZprocessTimeoutError:
                 continue
             except Exception:

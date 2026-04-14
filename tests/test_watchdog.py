@@ -373,5 +373,64 @@ class TestWatchdogArchitecture(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
 
+    def test_watch_project_publishes_table_macros(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name('hyde-test')
+
+        controller_path = os.path.abspath(
+            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, 'table_macros.hy')
+            procedures_dir = os.path.join(project_dir, 'procedures')
+            os.makedirs(procedures_dir)
+            procedures_init = os.path.join(procedures_dir, '__init__.py')
+            with open(procedures_init, 'w') as f:
+                f.write(
+                    "import hyde\n\n"
+                    "@hyde.table\n"
+                    "def Table0(c):\n"
+                    "    hyde.table(c)\n"
+                )
+
+            to_worker, from_worker, worker = process_tree.subprocess(
+                controller_path,
+                args=[CONNECTION_FILE],
+            )
+
+            to_worker.put([
+                'WATCH_PROJECT',
+                {
+                    'project_dir': project_dir,
+                    'procedures_dir': procedures_dir,
+                    'procedures_init': procedures_init,
+                },
+            ])
+
+            try:
+                saw_ready = False
+                saw_macros = False
+                deadline = time.time() + 15
+                while time.time() < deadline and not saw_macros:
+                    task, data = from_worker.get(timeout=15)
+                    if task == 'KERNEL_READY':
+                        saw_ready = True
+                    elif task == 'WINDOW_MACROS':
+                        self.assertEqual(data['kind'], 'table')
+                        self.assertIn(
+                            {'name': 'Table0', 'args': ['c']},
+                            data['macros'],
+                        )
+                        saw_macros = True
+                self.assertTrue(saw_ready)
+                self.assertTrue(saw_macros)
+            finally:
+                to_worker.put(['QUIT', None])
+                try:
+                    worker.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
+
 if __name__ == '__main__':
     unittest.main()

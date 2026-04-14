@@ -2,6 +2,14 @@ import os
 import uuid
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
+from hyde.features.hyde_features import (
+    format_cell_append_command,
+    format_cell_edit_command,
+    format_delete_indices_command,
+    format_new_array_command,
+    format_table_macro_source,
+    suggest_new_array_name,
+)
 
 
 class TableViewModel(QtCore.QAbstractTableModel):
@@ -391,8 +399,6 @@ class TableWidget(QtWidgets.QWidget):
         if confirm != QtWidgets.QMessageBox.Yes:
             return
 
-        from hyde.features.hyde_features import format_delete_indices_command
-
         for name, rows in sorted(rows_by_name.items()):
             command = format_delete_indices_command(name, rows)
             if self.app:
@@ -446,13 +452,6 @@ class TableWidget(QtWidgets.QWidget):
         row = idx.row()
         val_text = self.ui.valueEdit.text()
 
-        from hyde.features.hyde_features import (
-            format_cell_append_command,
-            format_cell_edit_command,
-            format_new_array_command,
-            suggest_new_array_name,
-        )
-
         try:
             if idx.column() == self.model.columnCount() - 1:
                 if row != 0:
@@ -487,8 +486,38 @@ class TableWidget(QtWidgets.QWidget):
         return True
 
     def closeEvent(self, event):
+        if self._closed:
+            super().closeEvent(event)
+            return
+
+        if self.app and getattr(self.app, "shutting_down", False):
+            self.shutdown_client()
+            super().closeEvent(event)
+            return
+
+        if QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier:
+            parent = self.parentWidget()
+            if parent is not None:
+                parent.hide()
+            else:
+                self.hide()
+            event.ignore()
+            return
+
+        if self.app and hasattr(self.app, "request_save_table_macro"):
+            if not self.app.request_save_table_macro(self):
+                event.ignore()
+                return
+
         self.shutdown_client()
         super().closeEvent(event)
+
+    def default_macro_name(self):
+        return self.handle
+
+    def recreation_function_source(self, macro_name):
+        title = macro_name
+        return format_table_macro_source(macro_name, self.names, title=title)
 
     def shutdown_client(self):
         if self._closed:

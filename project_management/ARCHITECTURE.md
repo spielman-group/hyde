@@ -71,8 +71,9 @@ representations.
 
 When Hyde-specific helper functions are added, they should be exposed deliberately through
 the Hyde package surface rather than through ad hoc GUI-only hooks. The table feature is
-the first implemented example of this pattern, with `hyde.table(...)` serving as the
-kernel-facing entry point for table creation and appending.
+the first implemented example of this pattern, with `hyde.table(...)` serving as both the
+kernel-facing entry point for table creation/appending and the recreation decorator used
+to register saved table macros.
 
 ## Project and Persistence
 
@@ -182,7 +183,7 @@ Using spyder_kernels provides:
 
 Figure capture and GUI figure windows are not implemented yet.
 
-The planned direction is a metadata-driven figure path in which the kernel remains authoritative and the GUI renders a local mirror from figure metadata delivered over Jupyter `comm` channels. That planned direction should not be treated as an implemented interface until the figure backend and GUI window exist in code.
+The planned direction is a metadata-driven figure path in which the kernel remains authoritative and the GUI renders a local mirror from figure metadata delivered over Jupyter `comm` channels. Figure save/recreation behavior is still future work even though Hyde now has generic save-window dialog plumbing for saveable windows.
 
 ## Message Protocol
 

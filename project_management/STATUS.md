@@ -58,6 +58,7 @@ Established Hyde's first editable kernel-backed table workflow:
 - **Kernel Relay Path**: Table-open requests and structured table-data payloads travel through the `ProcessTree` relay between the kernel, Watchdog, and GUI.
 - **Muted Cell Edits**: Table cell edits execute through the same command machinery as other Hyde commands, but are hidden from the visible command history to avoid console clutter.
 - **Current Scope**: The implemented table path is limited to 1D numeric arrays; DataFrame tables, sorting, and persistence remain future work.
+- **Recreation Macros**: Table close now offers to save a parameterized `@hyde.table` recreation macro into `procedures/__init__.py`, and `Windows -> Table Macros` is populated from the decorated registry after procedures reload.
 
 
 ## Refinements & Bug Fixes
