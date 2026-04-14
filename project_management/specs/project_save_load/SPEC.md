@@ -33,11 +33,6 @@ preserving an older synchronized copy.
 - `File -> Save As...`
 - `File -> Load...`
 
-### Inert-but-visible
-- `figures/` and `tables/` directories inside the package structure
-  - they exist in the package layout now
-  - figure-specific package persistence is not implemented in this pass
-
 ### Excluded
 - automatic hidden kernel save/load calls that bypass visible command generation
 - persistence of transient GUI editing state such as current table cell, in-progress text edits, or temporary selections
@@ -54,9 +49,7 @@ example.hy/
 │   └── history.py
 ├── procedures/
 │   └── __init__.py
-├── data/
-├── figures/
-└── tables/
+└── data/
 ```
 
 ### `manifest.toml`
@@ -170,6 +163,6 @@ Kernel objects are saved by exclusion, not whitelist.
 
 ## Explicit Exclusions
 - figure package persistence
-- package persistence for table contents beyond reopening saved table windows from kernel names
+- package persistence for table contents beyond reopening saved table windows from kernel names recorded in `session.toml`
 - restoration of transient table editor state
 - hidden, non-reproducible GUI-to-kernel save/load shortcuts

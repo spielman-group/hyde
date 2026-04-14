@@ -29,7 +29,7 @@ def _project_dir(path=None):
 
 
 def _ensure_project_dirs(project_dir: Path):
-    for relpath in ("data", "figures", "tables", "terminal", "procedures"):
+    for relpath in ("data", "terminal", "procedures"):
         (project_dir / relpath).mkdir(parents=True, exist_ok=True)
 
 

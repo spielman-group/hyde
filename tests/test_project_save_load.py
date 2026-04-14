@@ -242,6 +242,28 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertTrue(warnings)
             self.assertEqual(app.command_window.entries, ["a = 1", "hyde.save_state()"])
 
+    def test_bootstrap_project_skips_template_placeholder_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "new_project.hy")
+
+            app = type("DummyApp", (), {})()
+            app.current_project_dir = project_dir
+            app.procedures_dir = os.path.join(project_dir, "procedures")
+            app.procedures_init = os.path.join(app.procedures_dir, "__init__.py")
+            app.write_default_procedures_init = lambda: self.fail(
+                "bootstrap_project() should copy procedures/__init__.py from the template"
+            )
+
+            from hyde.user_interface.main import HydeApp
+
+            HydeApp.bootstrap_project(app)
+
+            self.assertTrue(os.path.isdir(os.path.join(project_dir, "data")))
+            self.assertTrue(os.path.isdir(os.path.join(project_dir, "terminal")))
+            self.assertTrue(os.path.exists(app.procedures_init))
+            self.assertFalse(os.path.exists(os.path.join(project_dir, "data", ".gitkeep")))
+            self.assertFalse(os.path.exists(os.path.join(app.procedures_dir, "__pycache__")))
+
 
 class TestProjectSaveLoadIntegration(unittest.TestCase):
     def setUp(self):

@@ -89,9 +89,7 @@ example.hy/
 ├── procedures/     # Python scripts
 │   ├── __init__.py  # Mandatory package initialization script
 │   └── helpers.py   # Additional procedure modules
-├── data/           # Array data
-├── figures/        # Figure scripts
-└── tables/         # Table data
+└── data/           # Saved kernel object data
 ```
 
 ### Explicit Initialization & Synchronization

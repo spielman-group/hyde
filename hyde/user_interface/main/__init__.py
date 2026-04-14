@@ -718,7 +718,12 @@ class HydeApp:
     def bootstrap_project(self):
         """Ensures the selected project directory structure exists."""
         print(f"[Hyde] Bootstrapping project at {self.current_project_dir}")
-        shutil.copytree(DEFAULT_PROJECT_TEMPLATE, self.current_project_dir, dirs_exist_ok=True)
+        shutil.copytree(
+            DEFAULT_PROJECT_TEMPLATE,
+            self.current_project_dir,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(".gitkeep", "__pycache__"),
+        )
         if not os.path.exists(self.procedures_init):
             self.write_default_procedures_init()
 
