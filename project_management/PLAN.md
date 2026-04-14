@@ -31,6 +31,7 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Test: Verify environment synchronization between script and kernel.
 - [x] Refinement: Move procedure-file change tracking and `procedures/__init__.py` re-sync ownership into the execution side using `labscript_utils.filewatcher.FileWatcher` (BLACS connection-table pattern).
 - [x] Refinement: Mask executor-owned `procedures/__init__.py` execution input at the kernel protocol level with `silent=True`.
+- [x] Refinement: Add an executor-owned lyse-compatible remote listener on the existing `ports.lyse` labconfig entry that queues incoming agnostic paths into the Watchdog loop, which dispatches visible `remote(...)` in the kernel.
 - [ ] Refinement: Define the command-window display policy for output originating from executor-owned silent execution.
 
 ### Feature B: Matplotlib Figure Capture

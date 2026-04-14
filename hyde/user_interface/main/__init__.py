@@ -549,7 +549,18 @@ class HydeApp:
     def request_window_macros(self, kind='table'):
         if self.to_worker is None:
             return
-        self.to_worker.put(['REFRESH_WINDOW_MACROS', {'kind': kind}])
+        if kind != 'table':
+            return
+        self.to_worker.put([
+            'EXECUTE_COMMAND',
+            {
+                'code': (
+                    "import hyde._table_macros as _hyde_table_macros; "
+                    "_hyde_table_macros.publish_table_macro_registry()"
+                ),
+                'silent': True,
+            },
+        ])
 
     def offer_to_create_procedures_init(self):
         response = QtWidgets.QMessageBox.question(

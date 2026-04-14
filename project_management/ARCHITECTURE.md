@@ -194,7 +194,11 @@ The planned direction is a metadata-driven figure path in which the kernel remai
 
 ## Message Protocol
 
-Incoming message handling replicates the protocol defined in the `lyse` project.
+Incoming message handling replicates the protocol defined in the `lyse` project. In
+particular, the executor owns a lyse-compatible remote listener on the existing
+`ports.lyse` labconfig entry. Its listener thread normalizes incoming agnostic-path
+payloads and queues them into the executor, and the watchdog loop translates them
+into visible kernel execution of `remote(...)`.
 
 ## Execution Helpers
 

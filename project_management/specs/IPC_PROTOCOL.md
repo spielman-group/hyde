@@ -19,8 +19,14 @@ Hyde controls three distinct communication paths:
    `zprocess.ProcessTree` queue messages for watchdog status.
 3. **GUI -> Kernel** and **Executor -> Kernel**
    Standard Jupyter ZeroMQ clients connected through the shared kernel connection file.
+4. **External -> Executor**
+   A lyse-compatible `labscript_utils.ls_zprocess.ZMQServer` bound to the existing
+   `ports.lyse` labconfig entry.
 
 The executor and the GUI both connect to the same kernel, but they use separate Jupyter client sessions for different purposes.
+
+External clients that already target lyse's labconfig port may also talk to Hyde
+through the executor-owned listener.
 
 ## Hyde Package Surface in the Kernel
 The kernel may import the Hyde package directly:
@@ -111,25 +117,25 @@ GUI behavior:
 - complete Save As project switching after a successful save result
 - restore `session.toml` after a successful load result for the active project
 
-#### `['FETCH_TABLE_DATA', payload]`
-Requests structured table data for one table instance.
+#### `['EXECUTE_COMMAND', payload]`
+Requests executor-side kernel execution of a prebuilt Python command string.
 
 Payload:
 ```python
 {
-    'names': ['x', 'y'],
-    'request_id': 'uuid-or-token',
+    'code': "import hyde.execution.ipc; hyde.execution.ipc.push_table_data(['x'], 'uuid')",
+    'silent': True,
 }
 ```
 
 Behavior:
-- executor triggers a silent kernel-side helper call to serialize the named objects
-- the kernel pushes the resulting payload back to the executor through `ProcessTree`
-- executor forwards that payload to the GUI as `['TABLE_DATA', ...]`
+- the producer, not the executor consumer, owns command-string generation and execution visibility policy
+- the executor sends the provided string to the kernel if the kernel is alive
 
 Send sites:
-- initial table population
-- external kernel `busy -> idle` refresh for open tables
+- initial table population / table refresh
+- table-macro registry refresh
+- lyse-compatible remote-listener requests received by the executor
 
 #### `['RELOAD_PROCEDURES', None]`
 Requests immediate execution of the canonical `procedures/__init__.py` reload path.
@@ -137,13 +143,6 @@ Requests immediate execution of the canonical `procedures/__init__.py` reload pa
 Behavior:
 - executor runs the existing procedures bootstrap string immediately
 - the rebuilt procedures package re-registers any saved `@hyde.table` recreation macros
-
-#### `['REFRESH_WINDOW_MACROS', {'kind': 'table'}]`
-Requests a fresh kernel-side snapshot of the registered window-macro metadata.
-
-Behavior:
-- executor triggers a silent kernel helper that serializes the current macro registry
-- kernel pushes the serialized macro entries back over `ProcessTree`
 
 ### Executor -> GUI Messages
 
@@ -259,6 +258,33 @@ This is the executor-owned background control session.
 - trigger silent helper calls that cause the kernel to push structured table data back over `ProcessTree`
 - relay project-state completion messages emitted by kernel-side save/load helpers
 - trigger silent helper calls that publish the current table-macro registry after procedures reload
+- execute visible `remote(...)` in response to lyse-compatible remote-listener requests received by the executor
+
+## External Lyse-Compatible Listener
+
+### Transport
+- `hyde/execution/execution_controller.py`
+- `labscript_utils.ls_zprocess.ZMQServer`
+- port source: `LabConfig().get('ports', 'lyse')`, with fallback `42519`
+
+### Supported requests
+- `'hello'`
+  - returns `'hello'`
+- `{'filepath': <agnostic_path>}`
+  - executor converts the agnostic/shared-drive path to a local path
+  - listener thread enqueues the normalized payload into the executor
+  - the watchdog main loop issues visible kernel code `remote(<local_path>)`
+  - returns `'added successfully'`
+- `<agnostic_path>` as a plain string
+  - listener thread enqueues the payload into the executor
+  - the watchdog main loop issues visible kernel code `remote(<agnostic_path>)`
+  - returns `'added successfully'`
+
+### Important boundary
+- the GUI does not own this listener
+- no Hyde-specific labconfig port is introduced
+- it is the user's responsibility to define `remote()` in `procedures/__init__.py`
+- the listener thread does not touch the kernel client directly; it only normalizes and queues requests for the watchdog loop
 
 ### Execution String
 The executor uses one canonical command string for both initial load and reload. On a
@@ -307,7 +333,7 @@ __main__.__hyde_procedures_exports__ = set(__hyde_exports)
 - `labscript_utils.filewatcher.FileWatcher` watches `procedures/` and `procedures/__init__.py`
 - any relevant `.py` change sets the executor's reload flag
 - the watchdog main loop consumes that flag and re-runs the same canonical command string
-- `FETCH_TABLE_DATA` triggers a silent helper call to `hyde.execution.ipc.push_table_data(...)`
+- table refresh requests send `EXECUTE_COMMAND` with a silent `hyde.execution.ipc.push_table_data(...)` helper call
 
 ## Lane 2C: Data Browser Namespace View (Target: `spyder_api`)
 

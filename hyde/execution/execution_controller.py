@@ -1,4 +1,5 @@
 import os
+import queue
 import sys
 import threading
 import time
@@ -9,13 +10,47 @@ HYDE_SOURCE_ROOT = os.path.dirname(
 if HYDE_SOURCE_ROOT not in sys.path:
     sys.path.insert(0, HYDE_SOURCE_ROOT)
 
-from labscript_utils.ls_zprocess import ProcessTree
+from labscript_utils.labconfig import LabConfig
+from labscript_utils import shared_drive
+from labscript_utils.ls_zprocess import ProcessTree, ZMQServer
 from labscript_utils.filewatcher import FileWatcher
 from labscript_utils.setup_logging import setup_logging
 from jupyter_client import BlockingKernelClient
 from zprocess.utils import TimeoutError as ZprocessTimeoutError
+from zmq.error import ZMQError
 from hyde.paths import HYDE_PKG_DIR, KERNEL_LAUNCHER
 import labscript_utils.excepthook
+
+
+class RemoteListener(ZMQServer):
+    """Listen for lyse-compatible remote payloads and relay them to the kernel."""
+
+    def __init__(self, watchdog, port):
+        self.watchdog = watchdog
+        super().__init__(port=port, bind_address='tcp://*')
+
+    def handler(self, request_data):
+        if request_data == 'hello':
+            return 'hello'
+        if isinstance(request_data, dict) and 'filepath' in request_data:
+            request_data = shared_drive.path_to_local(str(request_data['filepath']))
+            if isinstance(request_data, bytes):
+                request_data = request_data.decode('utf8')
+        if isinstance(request_data, str):
+            if (
+                self.watchdog.kernel_client is None
+                or self.watchdog.kernel_process is None
+                or self.watchdog.kernel_process.poll() is not None
+            ):
+                return 'error: kernel unavailable'
+            self.watchdog.local_queue.put([
+                'EXECUTE_COMMAND',
+                {'code': f"remote({request_data!r})", 'silent': False},
+            ])
+            return 'added successfully'
+        return ("error: operation not supported. Recognised requests are:\n "
+                "'hello'\n {'filepath': <some_agnostic_path>}\n <some_agnostic_path>")
+
 
 class ExecutionWatchdog:
     """
@@ -30,12 +65,14 @@ class ExecutionWatchdog:
         self.kernel_process = None
         self.kernel_client = None
         self.filewatcher = None
+        self.remote_listener = None
         self.project_dir = None
         self.procedures_dir = None
         self.procedures_init = None
         self.exiting = False
         self.reload_requested = threading.Event()
         self.reset_namespace_requested = False
+        self.local_queue = queue.Queue()
 
     def start(self):
         # Start daemon thread listening to commands from GUI ProcessTree
@@ -65,6 +102,16 @@ class ExecutionWatchdog:
                 self.kernel_client = BlockingKernelClient(connection_file=self.connection_file)
                 self.kernel_client.load_connection_file()
                 self.kernel_client.start_channels()
+                if self.remote_listener is None:
+                    try:
+                        try:
+                            port = int(LabConfig().get('ports', 'lyse'))
+                        except Exception:
+                            port = 42519
+                        self.remote_listener = RemoteListener(self, port)
+                    except ZMQError as exc:
+                        print(f"[Watchdog] Could not start lyse-compatible remote listener: {exc}")
+                        self.remote_listener = None
 
             # Monitor kernel-side Hyde signaling as long as this kernel is alive
             monitor_thread = threading.Thread(
@@ -97,6 +144,9 @@ class ExecutionWatchdog:
         if self.filewatcher is not None:
             self.filewatcher.stop()
             self.filewatcher = None
+        if self.remote_listener is not None:
+            self.remote_listener.shutdown()
+            self.remote_listener = None
         if self.kernel_process is not None and self.kernel_process.poll() is None:
             self.kernel_process.terminate()
 
@@ -206,31 +256,30 @@ class ExecutionWatchdog:
     def listen_for_gui(self):
         while not self.exiting:
             try:
-                task, data = self.from_parent.get()
-                if task == 'WATCH_PROJECT':
-                    self.watch_project(data)
-                elif task == 'FETCH_TABLE_DATA':
-                    if self.kernel_client is not None:
-                        names = data.get('names', [])
-                        request_id = data.get('request_id')
-                        code = (
-                            f"import hyde.execution.ipc; "
-                            f"hyde.execution.ipc.push_table_data({names!r}, {request_id!r})"
+                try:
+                    task, data = self.local_queue.get_nowait()
+                except queue.Empty:
+                    task, data = self.from_parent.get(timeout=0.1)
+                if task == 'EXECUTE_COMMAND':
+                    if (
+                        self.kernel_client is not None
+                        and self.kernel_process is not None
+                        and self.kernel_process.poll() is None
+                    ):
+                        self.kernel_client.execute(
+                            data['code'],
+                            silent=data.get('silent', True),
                         )
-                        self.kernel_client.execute(code, silent=True)
+                elif task == 'WATCH_PROJECT':
+                    self.watch_project(data)
                 elif task == 'RELOAD_PROCEDURES':
                     self.execute_procedures_init()
-                elif task == 'REFRESH_WINDOW_MACROS':
-                    if self.kernel_client is not None and data.get('kind') == 'table':
-                        code = (
-                            "import hyde._table_macros as _hyde_table_macros; "
-                            "_hyde_table_macros.publish_table_macro_registry()"
-                        )
-                        self.kernel_client.execute(code, silent=True)
                 elif task == 'QUIT':
                     self.exiting = True
                     self.reload_requested.set()
                     break
+            except ZprocessTimeoutError:
+                continue
             except Exception as e:
                 print(f"[Watchdog] Error polling ProcessTree queue: {e}")
 

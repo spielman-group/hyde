@@ -1,15 +1,20 @@
 import os
+import queue
 import sys
 import time
+import threading
 import unittest
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
-from labscript_utils.ls_zprocess import ProcessTree
+from labscript_utils.ls_zprocess import ProcessTree, get_config
 from jupyter_client import BlockingKernelClient
+from zprocess.clientserver import ZMQClient
 
 import hyde
+from hyde.execution.execution_controller import ExecutionWatchdog, RemoteListener
 from hyde.paths import CONNECTION_FILE
 
 class TestWatchdogArchitecture(unittest.TestCase):
@@ -272,6 +277,118 @@ class TestWatchdogArchitecture(unittest.TestCase):
                     worker.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
+
+    def test_remote_listener_executes_visibly(self):
+        class FakeProcess:
+            def poll(self):
+                return None
+
+        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
+        watchdog.kernel_client = object()
+        watchdog.kernel_process = FakeProcess()
+        watchdog.local_queue = queue.Queue()
+        server = RemoteListener(watchdog, port=None)
+        try:
+            payload = "hello's world"
+            client = ZMQClient(shared_secret=get_config()['shared_secret'])
+            self.assertEqual(
+                client.get(server.port, 'localhost', payload, timeout=5),
+                'added successfully',
+            )
+            self.assertEqual(
+                watchdog.local_queue.get_nowait(),
+                ['EXECUTE_COMMAND', {'code': f"remote({payload!r})", 'silent': False}],
+            )
+        finally:
+            server.shutdown()
+
+    def test_remote_listener_normalizes_filepath_payloads(self):
+        class FakeProcess:
+            def poll(self):
+                return None
+
+        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
+        watchdog.kernel_client = object()
+        watchdog.kernel_process = FakeProcess()
+        watchdog.local_queue = queue.Queue()
+        server = RemoteListener(watchdog, port=None)
+        try:
+            client = ZMQClient(shared_secret=get_config()['shared_secret'])
+            with patch('hyde.execution.execution_controller.shared_drive.path_to_local') as path_to_local:
+                path_to_local.return_value = '/local/shared-drive/file.h5'
+                self.assertEqual(
+                    client.get(
+                        server.port,
+                        'localhost',
+                        {'filepath': 'Z:\\shared-drive\\file.h5'},
+                        timeout=5,
+                    ),
+                    'added successfully',
+                )
+            path_to_local.assert_called_once_with('Z:\\shared-drive\\file.h5')
+            self.assertEqual(
+                watchdog.local_queue.get_nowait(),
+                [
+                    'EXECUTE_COMMAND',
+                    {'code': "remote('/local/shared-drive/file.h5')", 'silent': False},
+                ],
+            )
+        finally:
+            server.shutdown()
+
+    def test_remote_listener_returns_error_when_kernel_unavailable(self):
+        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
+        watchdog.kernel_client = None
+        watchdog.kernel_process = None
+        watchdog.local_queue = queue.Queue()
+
+        server = RemoteListener(watchdog, port=None)
+        try:
+            client = ZMQClient(shared_secret=get_config()['shared_secret'])
+            self.assertEqual(
+                client.get(server.port, 'localhost', 'some/path', timeout=5),
+                'error: kernel unavailable',
+            )
+        finally:
+            server.shutdown()
+
+    def test_remote_queue_executes_visibly_in_command_loop(self):
+        class FakeProcess:
+            def poll(self):
+                return None
+
+        class FakeKernelClient:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, code, silent=True):
+                self.calls.append((code, silent))
+
+        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
+        watchdog.exiting = False
+        watchdog.kernel_client = FakeKernelClient()
+        watchdog.kernel_process = FakeProcess()
+        watchdog.local_queue = queue.Queue()
+        watchdog.reload_requested = threading.Event()
+
+        class FakeQueue:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, timeout=None):
+                self.calls += 1
+                return ['QUIT', None]
+
+        watchdog.from_parent = FakeQueue()
+        watchdog.local_queue.put([
+            'EXECUTE_COMMAND',
+            {'code': "remote(\"hello's world\")", 'silent': False},
+        ])
+        watchdog.listen_for_gui()
+        self.assertEqual(
+            watchdog.kernel_client.calls,
+            [("remote(\"hello's world\")", False)],
+        )
 
     def test_hyde_table_request_reaches_watchdog(self):
         process_tree = ProcessTree.instance()

@@ -156,14 +156,18 @@ class TableWidget(QtWidgets.QWidget):
         self._current_request_id = str(uuid.uuid4())
         self._refresh_in_flight = True
         if self.app and self.app.to_worker:
-            self.app.to_worker.put(['FETCH_TABLE_DATA', {
-                'names': self.names,
-                'request_id': self._current_request_id
+            code = (
+                f"import hyde.execution.ipc; "
+                f"hyde.execution.ipc.push_table_data({self.names!r}, {self._current_request_id!r})"
+            )
+            self.app.to_worker.put(['EXECUTE_COMMAND', {
+                'code': code,
+                'silent': True,
             }])
 
     @inmain_decorator()
     def on_data_received(self, data, request_id):
-        """Callback from HydeApp relay for FETCH_TABLE_DATA."""
+        """Callback from HydeApp relay for structured table-data responses."""
         if request_id != self._current_request_id:
             return
 
