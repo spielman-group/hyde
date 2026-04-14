@@ -461,7 +461,7 @@ class HydeApp:
 
     def request_kernel_project_save(self, project_dir):
         self.execute_command(
-            f"import hyde; hyde.save_state({project_dir!r})",
+            f"import hyde; hyde.save_state({project_dir!r});",
             visible=True,
         )
 
@@ -621,8 +621,6 @@ class HydeApp:
 
             self.maybe_trigger_project_state_load()
             self.request_window_macros('table')
-            self.maybe_trigger_project_state_load()
-            self.request_window_macros('table')
             
             # Release the splash screen and manifest the GUI
             self.ui.show()
@@ -654,7 +652,7 @@ class HydeApp:
         self._pending_project_state_load = False
         self._pending_session_restore = True
         self.execute_command(
-            f"import hyde; hyde.load_state({self.current_project_dir!r})",
+            f"import hyde; hyde.load_state({self.current_project_dir!r});",
             visible=True,
         )
 
@@ -685,6 +683,7 @@ class HydeApp:
                 self._pending_session_restore = False
                 self.restore_project_session()
 
+    @inmain_decorator()
     def update_table_macros(self, macros):
         self.table_macros = [
             {

@@ -136,10 +136,49 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             self.assertEqual(session["active_table_handle"], "Table0")
             self.assertEqual(session["table_counter"], 4)
-            self.assertFalse(session["tool_windows"]["logging_visible"])
+            self.assertFalse(session["tool_windows"]["logging"]["visible"])
             self.assertFalse(session["data_browser"]["variables"])
             self.assertEqual(session["tables"][0]["handle"], "Table0")
             self.assertEqual(session["tables"][0]["names"], ["a", "b"])
+
+    def test_write_and_read_session_without_active_table(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "session_no_active.hy")
+            os.makedirs(project_dir)
+
+            main_window = QtWidgets.QMainWindow()
+            mdi_area = QtWidgets.QMdiArea()
+            main_window.setCentralWidget(mdi_area)
+            main_window.show()
+
+            command_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            logging_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            procedures_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            data_browser_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+
+            data_browser = DummyDataBrowser()
+            data_browser.ui.wavesCheckBox.setChecked(True)
+            data_browser.ui.variablesCheckBox.setChecked(True)
+            data_browser.ui.stringsCheckBox.setChecked(True)
+            data_browser.ui.infoCheckBox.setChecked(True)
+
+            app = type("DummyApp", (), {})()
+            app.ui = main_window
+            app.command_subwindow = command_subwindow
+            app.logging_subwindow = logging_subwindow
+            app.procedures_subwindow = procedures_subwindow
+            app.data_browser_subwindow = data_browser_subwindow
+            app.data_browser = data_browser
+            app.tables = {}
+            app.active_table_handle = None
+            app.table_counter = 0
+
+            write_session(app, project_dir)
+            session = read_session(project_dir)
+
+            self.assertNotIn("active_table_handle", session)
+            self.assertEqual(session["table_counter"], 0)
+            self.assertEqual(session["tables"], [])
 
     def test_try_read_session_returns_error_for_malformed_toml(self):
         with tempfile.TemporaryDirectory() as tmpdir:

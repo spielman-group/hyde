@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 import tomllib
+import tomli_w
 from qtutils.qt import QtCore
 
 
@@ -27,49 +28,8 @@ def _list_to_rect(values):
 
 
 def _write_toml(path: Path, session):
-    lines = [
-        f"format_version = {int(session['format_version'])}",
-        f"active_table_handle = {session['active_table_handle']!r}",
-        f"table_counter = {int(session['table_counter'])}",
-        "",
-    ]
-    lines.extend(
-        [
-            "[main_window]",
-            f'geometry = "{session["main_window"]["geometry"]}"',
-            f'state = "{session["main_window"]["state"]}"',
-            "",
-            "[data_browser]",
-            f"waves = {str(session['data_browser']['waves']).lower()}",
-            f"variables = {str(session['data_browser']['variables']).lower()}",
-            f"strings = {str(session['data_browser']['strings']).lower()}",
-            f"info = {str(session['data_browser']['info']).lower()}",
-            "",
-            "[tool_windows]",
-        ]
-    )
-    for key in ("command", "logging", "procedures", "data_browser"):
-        info = session["tool_windows"][key]
-        lines.extend(
-            [
-                f"{key}_visible = {str(info['visible']).lower()}",
-                f"{key}_geometry = {info['geometry']!r}",
-            ]
-        )
-    lines.append("")
-    for table in session["tables"]:
-        lines.extend(
-            [
-                "[[tables]]",
-                f'handle = "{table["handle"]}"',
-                f'title = "{table["title"]}"',
-                f"names = {table['names']!r}",
-                f"hidden = {str(table['hidden']).lower()}",
-                f"geometry = {table['geometry']!r}",
-                "",
-            ]
-        )
-    path.write_text("\n".join(lines), encoding="utf-8")
+    with path.open("wb") as handle:
+        tomli_w.dump(session, handle)
 
 
 def _session_path(project_dir):
@@ -128,7 +88,10 @@ def capture_session(app):
 def write_session(app, project_dir):
     path = _session_path(project_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    _write_toml(path, capture_session(app))
+    session = capture_session(app)
+    if session.get("active_table_handle") is None:
+        session.pop("active_table_handle", None)
+    _write_toml(path, session)
 
 
 def read_session(project_dir):
@@ -197,10 +160,11 @@ def restore_tool_windows(app, session):
         "data_browser": app.data_browser_subwindow,
     }
     for key, subwindow in mapping.items():
-        geometry = tool_windows.get(f"{key}_geometry")
+        info = tool_windows.get(key, {})
+        geometry = info.get("geometry")
         if geometry:
             subwindow.setGeometry(_list_to_rect(geometry))
-        subwindow.setVisible(bool(tool_windows.get(f"{key}_visible", False)))
+        subwindow.setVisible(bool(info.get("visible", False)))
 
 
 def restore_data_browser_state(app, session):

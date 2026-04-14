@@ -14,6 +14,7 @@ from pathlib import Path
 import __main__
 import numpy as np
 import tomllib
+import tomli_w
 
 from .execution.ipc import publish_project_state_result
 
@@ -85,24 +86,14 @@ def _write_manifest(project_dir: Path, object_entries):
     manifest_path = project_dir / "manifest.toml"
     project_name = project_dir.name[:-3] if project_dir.name.endswith(".hy") else project_dir.name
     timestamp = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    lines = [
-        f"format_version = {FORMAT_VERSION}",
-        f'project_name = "{project_name}"',
-        f'saved_at = "{timestamp}"',
-        "",
-    ]
-    for entry in object_entries:
-        lines.extend(
-            [
-                "[[objects]]",
-                f'name = "{entry["name"]}"',
-                f'serializer = "{entry["serializer"]}"',
-                f'path = "{entry["path"]}"',
-                f'python_type = "{entry["python_type"]}"',
-                "",
-            ]
-        )
-    manifest_path.write_text("\n".join(lines), encoding="utf-8")
+    manifest = {
+        "format_version": FORMAT_VERSION,
+        "project_name": project_name,
+        "saved_at": timestamp,
+        "objects": object_entries,
+    }
+    with manifest_path.open("wb") as handle:
+        tomli_w.dump(manifest, handle)
 
 
 def _read_manifest(project_dir: Path):
