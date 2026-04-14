@@ -61,6 +61,7 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Spec: Refine `specs/table/SPEC.md` and define the Data Browser table-launch contract.
 - [x] Impl: Create the table editor MDI window, New Table dialog, and Data Browser table-launch/appending integration.
 - [x] Test: Verify kernel-to-GUI table-open relay and watchdog handling for `hyde.table(...)`.
+- [x] Impl: Add save-on-close table recreation macros and `Windows -> Table Macros`.
 - [ ] Test: Expand coverage for GUI row rendering, muted cell-edit execution, and broader table interaction behavior.
 - [ ] Refinement: Replace the current executor-triggered table-data fetch hop with a cleaner direct kernel-to-watchdog data path now that the real kernel is a managed `ProcessTree` child.
 

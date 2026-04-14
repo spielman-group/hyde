@@ -50,8 +50,6 @@ def resolve_names(args, frame, validate_1d=True):
             )
             
     return names
-
-
 def validate_1d_numeric(obj, name):
     """
     Verifies object is a 1D numeric array-like.

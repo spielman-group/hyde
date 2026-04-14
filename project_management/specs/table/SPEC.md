@@ -10,6 +10,8 @@
 - [x] Allow the Data Browser to append selected arrays to an existing table via `Append to Table`.
 - [x] Show a selection summary and editable value field for the current cell.
 - [x] Keep the table synchronized with the authoritative kernel namespace.
+- [x] Offer to save a parameterized table recreation macro when the table is closed.
+- [x] Populate `Windows -> Table Macros` from registered table recreation macros.
 - [ ] Support pandas DataFrame tables and editing.
 - [ ] Support row insertion and deletion.
 - [ ] Support sorting, formatting, export, and presentation workflows.
@@ -46,6 +48,9 @@ It includes:
 - live refresh when the underlying kernel data changes
 - table creation from the Data Browser `Edit` action
 - table append from the Data Browser `Append to Table` action
+- save-on-close table recreation macros
+- parameterized `@hyde.table` recreation decorators
+- reopening saved tables from `Windows -> Table Macros`
 
 It does not include:
 
@@ -65,6 +70,7 @@ The Table window is a single MDI subwindow containing:
 - a compact selection/status strip above the grid
 - a main spreadsheet-like grid
 - scrollbars for navigating the displayed data
+- a close prompt that offers to save a recreation macro unless the close button is shift-clicked
 
 The top strip shows the current target cell and the currently selected value.
 The grid uses a point column on the left and one or more data columns to the right.
@@ -107,7 +113,8 @@ The following visible controls are part of the initial Hyde table:
   - exposes table actions that are valid for the current selection
 - Grid selection and scrollbars: `active`
   - navigate the visible data
-- No recreation function or table-macro control is present in the initial deployment
+- Save-on-close recreation prompt: `active`
+- `Windows -> Table Macros`: `active`
 
 No meaningful visible control is retained purely for layout continuity in the initial
 deployment. Igor-only folder/root controls are excluded rather than shown inertly.
@@ -175,8 +182,15 @@ The table does not own the authoritative value being edited. The GUI may hold on
 transient edit text long enough to generate the kernel command.
 
 The kernel-facing `hyde.table(...)` API is the first deliberate helper exposed through
-`import hyde` for this feature. A future `@hyde.table` decorator may register table
-recreation functions, but that is not part of the initial deployment.
+`import hyde` for this feature. The same public symbol also supports
+decorator use:
+
+- `@hyde.table`
+
+Saved recreation macros are written into `procedures/__init__.py`, reloaded through the
+existing procedures path, and then surfaced in `Windows -> Table Macros`. Saved table
+macros declare parameters naming the live kernel variables required to recreate the
+table, and the menu invokes them with those visible names.
 
 ## Synchronization
 
@@ -189,6 +203,7 @@ The table should:
 - refresh after kernel execution that changes the displayed objects
 - refresh after supported table edits are accepted by the kernel
 - preserve the current selection when possible
+- trigger a procedures reload after saving a recreation macro so the menu registry refreshes
 
 The GUI may cache only the metadata needed to render the grid and the current cell.
 It must not cache canonical scientific data as its own source of truth.
@@ -203,7 +218,6 @@ The following Igor concepts are not part of the initial Hyde table:
 - data folders
 - current data folder selectors
 - packed-experiment table workflows
-- table recreation macros or automatic reopen on close
 - row/column formatting dialogs
 - sort controls
 - add-row / delete-row toolbars
@@ -220,8 +234,6 @@ The long-term table direction may include:
 - row insertion and deletion
 - column sorting and formatting
 - clipboard copy/paste workflows
-- reopening named tables from the Windows menu
-- `@hyde.table` recreation decorators
 - additional table-aware kernel metadata contracts
 
 These capabilities are deferred until their underlying backend behavior is defined.

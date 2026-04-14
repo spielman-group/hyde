@@ -46,6 +46,7 @@
     </property>
     <addaction name="actionCommandWindow"/>
     <addaction name="actionNew_Table"/>
+    <addaction name="menuTableMacros"/>
     <addaction name="actionLogging"/>
     <addaction name="actionProcedures"/>
     <addaction name="actionDataBrowser"/>
@@ -113,6 +114,11 @@
     <string>Data Browser</string>
    </property>
   </action>
+  <widget class="QMenu" name="menuTableMacros">
+   <property name="title">
+    <string>Table Macros</string>
+   </property>
+  </widget>
  </widget>
  <resources/>
  <connections/>

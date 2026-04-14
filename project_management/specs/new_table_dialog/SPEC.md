@@ -5,8 +5,7 @@
 - [x] Generate the kernel-facing `hyde.table(...)` command string from the dialog state.
 - [x] Support table creation from selected 1D numeric arrays / wave-like objects.
 - [ ] Support pandas DataFrame table creation.
-- [ ] Support style macros, recreation macros, and table reopen-on-close workflows.
-- [ ] Support `@hyde.table` recreation decorators.
+- [ ] Support style macros.
 - [ ] Support multidimensional waves, text waves, and presentation workflows.
 
 ## Purpose
@@ -36,7 +35,6 @@ It does not include:
 - pandas DataFrame creation support
 - multidimensional wave creation or editing
 - style macros
-- recreation macros
 - automatic reopen-on-close behavior
 - Igor-style data folders or root selection
 - arbitrary command-entry boxes beyond the command string Hyde generates
@@ -114,7 +112,6 @@ controls remain visible for layout continuity:
 
 - data folders
 - `root:` selection controls
-- table recreation macros
 - style macro selection workflows
 - export/presentation workflows
 - multidimensional wave editing
@@ -127,8 +124,6 @@ controls remain visible for layout continuity:
 Future table-dialog work may include:
 
 - `pandas.DataFrame` support
-- `@hyde.table` recreation decorators
-- table reopen/recreation menus
 - style macros
 - additional initial-display modes
 - wider object-type support

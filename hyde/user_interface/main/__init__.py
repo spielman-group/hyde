@@ -27,6 +27,12 @@ from hyde.user_interface.project_state import (
     write_history,
     write_session,
 )
+from hyde.user_interface.save_window_dialog import SaveWindowDialog
+from hyde.user_interface.window_macro_store import (
+    MacroStoreError,
+    inspect_macro_conflict,
+    write_macro_source,
+)
 
 class PersistentSubwindowFilter(QtCore.QObject):
     """Turn MDI close requests into hide requests so tool windows persist."""
@@ -117,6 +123,8 @@ class HydeApp:
         self._pending_project_state_load = False
         self._pending_session_restore = False
         self._pending_project_switch = None
+        self.shutting_down = False
+        self.table_macros = []
         
         # Load the UI
         loader = UiLoader()
@@ -175,6 +183,8 @@ class HydeApp:
         self.ui.actionProcedures.triggered.connect(self.show_procedures_window)
         self.ui.actionDataBrowser.triggered.connect(self.show_data_browser)
         self.ui.actionNew_Table.triggered.connect(self.show_new_table_dialog)
+        self.ui.menuTableMacros.aboutToShow.connect(self.rebuild_table_macros_menu)
+        self.qapplication.aboutToQuit.connect(self._mark_shutting_down)
         self.qapplication.aboutToQuit.connect(self.shutdown_watchdog)
 
     @inmain_decorator()
@@ -249,6 +259,60 @@ class HydeApp:
         # When subwindow is destroyed, remove from registry
         subwindow.destroyed.connect(lambda: self.tables.pop(handle, None))
 
+    def request_save_table_macro(self, table_widget):
+        current_name = table_widget.default_macro_name()
+        while True:
+            dialog = SaveWindowDialog(default_name=current_name, parent=self.ui)
+            if dialog.exec_() != QtWidgets.QDialog.Accepted:
+                return False
+            if dialog.choice == SaveWindowDialog.NO_SAVE:
+                return True
+            if dialog.choice != SaveWindowDialog.SAVE:
+                return False
+
+            macro_name = dialog.macro_name()
+            current_name = macro_name
+            try:
+                macro_source = table_widget.recreation_function_source(macro_name)
+            except MacroStoreError as exc:
+                QtWidgets.QMessageBox.warning(self.ui, "Invalid Macro Name", str(exc))
+                continue
+
+            conflict = inspect_macro_conflict(self.procedures_init, macro_name)
+            if conflict is not None:
+                response = QtWidgets.QMessageBox.question(
+                    self.ui,
+                    "Overwrite Recreation Macro",
+                    f"A function named {macro_name} already exists in procedures/__init__.py.\n\n"
+                    "Overwrite that function?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No,
+                )
+                if response != QtWidgets.QMessageBox.Yes:
+                    continue
+
+            write_macro_source(self.procedures_init, macro_name, macro_source)
+            self.reload_procedures()
+            return True
+
+    def rebuild_table_macros_menu(self):
+        menu = self.ui.menuTableMacros
+        menu.clear()
+        if not self.table_macros:
+            placeholder = menu.addAction("No Saved Table Macros")
+            placeholder.setEnabled(False)
+            menu.setEnabled(False)
+            return
+        menu.setEnabled(True)
+        for macro in self.table_macros:
+            macro_name = macro["name"]
+            macro_args = list(macro.get("args", []))
+            invocation = f"{macro_name}({', '.join(macro_args)})"
+            action = menu.addAction(macro_name)
+            action.triggered.connect(
+                lambda checked=False, command=invocation: self.execute_command(command, visible=True)
+            )
+
     def show_new_table_dialog(self):
         """Opens the New Table dialog with current namespace metadata."""
         from hyde.user_interface.new_table_dialog import NewTableDialog
@@ -273,6 +337,8 @@ class HydeApp:
         from hyde.user_interface.table import TableWidget
         if isinstance(widget, TableWidget):
             self.active_table_handle = widget.handle
+        else:
+            self.active_table_handle = None
 
     def configure_persistent_subwindow(self, subwindow):
         subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
@@ -460,6 +526,8 @@ class HydeApp:
         self._pending_project_state_load = True
         self._pending_session_restore = False
         self.configure_execution_watchdog()
+        self.table_macros = []
+        self.rebuild_table_macros_menu()
 
     def configure_execution_watchdog(self):
         if self.to_worker is None:
@@ -472,6 +540,16 @@ class HydeApp:
                 'procedures_init': self.procedures_init,
             },
         ])
+
+    def reload_procedures(self):
+        if self.to_worker is None:
+            return
+        self.to_worker.put(['RELOAD_PROCEDURES', None])
+
+    def request_window_macros(self, kind='table'):
+        if self.to_worker is None:
+            return
+        self.to_worker.put(['REFRESH_WINDOW_MACROS', {'kind': kind}])
 
     def offer_to_create_procedures_init(self):
         response = QtWidgets.QMessageBox.question(
@@ -516,6 +594,11 @@ class HydeApp:
                     self.on_project_state_result(data)
                 elif task == 'KERNEL_CRASHED':
                     self.show_crash_alert()
+                elif task == 'WINDOW_MACROS':
+                    kind = data.get('kind')
+                    macros = data.get('macros', [])
+                    if kind == 'table':
+                        self.update_table_macros(macros)
             except Exception:
                 pass
                 
@@ -537,6 +620,9 @@ class HydeApp:
             self.data_browser.show()
 
             self.maybe_trigger_project_state_load()
+            self.request_window_macros('table')
+            self.maybe_trigger_project_state_load()
+            self.request_window_macros('table')
             
             # Release the splash screen and manifest the GUI
             self.ui.show()
@@ -555,6 +641,7 @@ class HydeApp:
         self._procedures_ready = bool(ok)
         if self.data_browser is not None:
             self.data_browser.refresh_namespace()
+        self.request_window_macros('table')
         self.maybe_trigger_project_state_load()
 
     def maybe_trigger_project_state_load(self):
@@ -597,6 +684,19 @@ class HydeApp:
             if success and self._pending_session_restore and path == self.current_project_dir:
                 self._pending_session_restore = False
                 self.restore_project_session()
+
+    def update_table_macros(self, macros):
+        self.table_macros = [
+            {
+                "name": macro["name"],
+                "args": list(macro.get("args", [])),
+            }
+            for macro in macros
+        ]
+        self.rebuild_table_macros_menu()
+
+    def _mark_shutting_down(self):
+        self.shutting_down = True
 
     def shutdown_watchdog(self):
         print("[Hyde] Sending QUIT signal to execution Watchdog...")

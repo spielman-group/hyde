@@ -42,7 +42,8 @@ The `features/...` layer is reserved for:
 
 The table feature is the first implemented example of a public Hyde helper, with
 `hyde.table(...)` serving as the kernel-facing entry point for table creation and
-appending. Project persistence is the second implemented example, with
+appending. The same public symbol also supports decorator use for saved parameterized
+table recreation macros. Project persistence is the second implemented example, with
 `hyde.save_state(...)` and `hyde.load_state(...)` serving as the explicit save/load
 entry points used by the GUI File menu.
 
@@ -130,6 +131,20 @@ Send sites:
 - initial table population
 - external kernel `busy -> idle` refresh for open tables
 
+#### `['RELOAD_PROCEDURES', None]`
+Requests immediate execution of the canonical `procedures/__init__.py` reload path.
+
+Behavior:
+- executor runs the existing procedures bootstrap string immediately
+- the rebuilt procedures package re-registers any saved `@hyde.table` recreation macros
+
+#### `['REFRESH_WINDOW_MACROS', {'kind': 'table'}]`
+Requests a fresh kernel-side snapshot of the registered window-macro metadata.
+
+Behavior:
+- executor triggers a silent kernel helper that serializes the current macro registry
+- kernel pushes the serialized macro entries back over `ProcessTree`
+
 ### Executor -> GUI Messages
 
 #### `['KERNEL_READY', connection_file]`
@@ -185,6 +200,25 @@ GUI behavior:
 - deliver the payload to open tables
 - each table ignores responses whose `request_id` does not match its outstanding fetch
 
+#### `['WINDOW_MACROS', payload]`
+Forwarded when the kernel publishes a serialized window-macro registry snapshot.
+
+Payload:
+```python
+{
+    'kind': 'table',
+    'macros': [
+        {'name': 'Table0', 'args': ['c', 'd']},
+        {'name': 'Table1', 'args': ['wave0']},
+    ],
+}
+```
+
+GUI behavior:
+- rebuild the corresponding Windows submenu
+- selecting a table macro generates a visible call such as `Table0(c, d)`
+- disable that submenu when `macros` is empty
+
 ## Lane 2A: GUI -> Kernel (Visible Command Session)
 
 ### Transport
@@ -224,6 +258,7 @@ This is the executor-owned background control session.
 - establish the kernel namespace in which project procedures run
 - trigger silent helper calls that cause the kernel to push structured table data back over `ProcessTree`
 - relay project-state completion messages emitted by kernel-side save/load helpers
+- trigger silent helper calls that publish the current table-macro registry after procedures reload
 
 ### Execution String
 The executor uses one canonical command string for both initial load and reload. On a
