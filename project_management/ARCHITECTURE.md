@@ -9,7 +9,7 @@ The core tenet of Hyde's design is the strict separation of concerns between the
 4. **2-Lane IPC Strategy.**
     - **Lane 1 (Control)**: `zprocess.ProcessTree` handles application-level orchestration (launch, heartbeats, QUIT). Analytical commands do NOT traverse this tree.
     - **Lane 2 (Execution)**: Standard Jupyter ZMQ and `comm` channels handle visible scientific execution, background execution, and namespace metadata. Hyde-specific relays should only extend this model when an existing path does not cleanly fit the feature.
-5. **App-level I/O is a GUI responsibility.** Operations such as package saving and loading (`.hy` files) are managed natively by the GUI process.
+5. **App-level I/O is a GUI responsibility.** Operations such as package saving and loading (`.hy` files) are coordinated by the GUI process, but kernel-state persistence still runs through explicit Hyde commands executed in the kernel.
 
 ---
 
@@ -72,7 +72,8 @@ representations.
 When Hyde-specific helper functions are added, they should be exposed deliberately through
 the Hyde package surface rather than through ad hoc GUI-only hooks. The table feature is
 the first implemented example of this pattern, with `hyde.table(...)` serving as the
-kernel-facing entry point for table creation and appending.
+kernel-facing entry point for table creation and appending. Project persistence now follows
+the same pattern with public `hyde.save_state(...)` and `hyde.load_state(...)` helpers.
 
 ## Project and Persistence
 
@@ -96,18 +97,24 @@ example.hy/
 To ensure "Explicit is better than Implicit," Hyde enforces a strict initialization sequence:
 1. **Bootstrap**: Upon startup or project load, the GUI ensures a project structure exists.
 2. **Package Initialization**: The execution layer imports `procedures` from `procedures/__init__.py` in the kernel namespace to establish the environment after the GUI configures the active project.
-3. **Run-on-Save**: Monitoring of `procedures/__init__.py` and other procedure files is an execution-side responsibility. The execution layer watches for relevant file changes and re-runs the canonical package initialization path when needed, using the suite's standard non-GUI file-watching approach (`labscript_utils.filewatcher.FileWatcher`, as in the BLACS connection table plugin).
+3. **Project-Switch Reset**: When the active `.hy` project changes, the execution layer resets the kernel namespace back to Hyde's clean baseline for that session before loading the new project's procedures.
+4. **Kernel-State Restore**: After `procedures/__init__.py` runs, the GUI executes visible `hyde.load_state(...)` so persisted kernel objects override same-name procedure outputs.
+5. **GUI Session Restore**: Once kernel state is restored, the GUI reapplies `session.toml` to reopen tables and restore window layout, filters, and visible command history. If the session file is malformed or missing, the GUI warns and continues with kernel-state restore already complete.
+6. **Run-on-Save**: Monitoring of `procedures/__init__.py` and other procedure files is an execution-side responsibility. The execution layer watches for relevant file changes and re-runs the canonical package initialization path when needed, using the suite's standard non-GUI file-watching approach (`labscript_utils.filewatcher.FileWatcher`, as in the BLACS connection table plugin).
 
 ### Procedure Browser
 The **Procedure Browser** (an MDI window) provides the primary UI for managing these scripts. It lists the contents of the `procedures/` directory and allows the user to open scripts in their system's default editor via double-click.
 
 - Paths inside the package are relative for portability
 - The Procedure Browser is rooted at `procedures/`, so displayed entries are relative to that directory
-- `manifest.toml` records package version, saved layout, object registry
-- `session.toml` records open windows, current state
+- `manifest.toml` records package version and the saved-object registry
+- `session.toml` records restorable GUI session state
+- in-place project saves rewrite the current saved state rather than preserving an older synchronized copy
 - Scripts are plain `.py` files
-- Array data is stored in numpy format (`.npy`)
-- Human-readable settings use TOML or JSON
+- Array data is stored in numpy format (`.npy`) when the saved object is an ndarray
+- Other saveable objects use pickle fallback (`.pkl`)
+- `terminal/history.py` stores visible command history only
+- Human-readable settings use TOML or Python-literal history files
 
 ## IPC: The 3-Process Model
 

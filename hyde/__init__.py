@@ -7,6 +7,32 @@ __version__ = "0.1.0.dev0"
 import inspect
 
 
+def save_state(path=None):
+    """
+    Save the current kernel namespace into a Hyde `.hy` project package.
+
+    Args:
+        path (str, optional): Target `.hy` package directory. If omitted, Hyde
+            saves into the current working project directory.
+    """
+    from ._project_state import save_state as _save_state
+
+    return _save_state(path=path)
+
+
+def load_state(path=None):
+    """
+    Load saved kernel namespace objects from a Hyde `.hy` project package.
+
+    Args:
+        path (str, optional): Source `.hy` package directory. If omitted, Hyde
+            loads from the current working project directory.
+    """
+    from ._project_state import load_state as _load_state
+
+    return _load_state(path=path)
+
+
 def table(*args, target=None, title=None):
     """
     Open or append to a Hyde table window displaying 1D numeric data.

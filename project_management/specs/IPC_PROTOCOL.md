@@ -42,8 +42,9 @@ The `features/...` layer is reserved for:
 
 The table feature is the first implemented example of a public Hyde helper, with
 `hyde.table(...)` serving as the kernel-facing entry point for table creation and
-appending. Future decorators such as `@hyde.table` are deferred until the recreation
-contract is defined.
+appending. Project persistence is the second implemented example, with
+`hyde.save_state(...)` and `hyde.load_state(...)` serving as the explicit save/load
+entry points used by the GUI File menu.
 
 ## Lane 1: GUI <-> Executor (`zprocess.ProcessTree`)
 
@@ -67,6 +68,7 @@ Payload:
 
 Behavior:
 - update the executor's project paths
+- if the selected project differs from the current one, mark the kernel namespace for reset before bootstrapping the new project
 - rebuild the `FileWatcher` for `procedures/` plus `procedures/__init__.py`
 - request a package initialization execution through the executor's canonical reload path
 
@@ -87,6 +89,26 @@ Behavior:
 
 Send site:
 - GUI `aboutToQuit`
+
+#### `['PROJECT_STATE_RESULT', payload]`
+Forwarded when a kernel-side `hyde.save_state(...)` or `hyde.load_state(...)` call
+publishes its completion result over `ProcessTree`.
+
+Payload:
+```python
+{
+    'operation': 'save' or 'load',
+    'path': '/abs/path/to/project.hy',
+    'success': True,
+    'errors': ['optional warning/error strings'],
+    'object_count': 3,
+}
+```
+
+GUI behavior:
+- warn if `errors` is non-empty
+- complete Save As project switching after a successful save result
+- restore `session.toml` after a successful load result for the active project
 
 #### `['FETCH_TABLE_DATA', payload]`
 Requests structured table data for one table instance.
@@ -179,6 +201,8 @@ This is the user's visible interactive console session.
 - user-entered Python is sent directly to the kernel over standard Jupyter `execute_request`
 - this session owns the visible rich IPython prompt/history behavior seen by the user
 - the user may access Hyde's supported feature surface in the kernel via `import hyde`
+- GUI-owned save/load actions also use this visible session by generating explicit
+  `import hyde; hyde.save_state(...)` and `import hyde; hyde.load_state(...)` commands
 
 ### Important boundary
 - Hyde should not inject watchdog-controlled system execution through this session
@@ -199,9 +223,12 @@ This is the executor-owned background control session.
 - reload `procedures/__init__.py` when watched procedure files change
 - establish the kernel namespace in which project procedures run
 - trigger silent helper calls that cause the kernel to push structured table data back over `ProcessTree`
+- relay project-state completion messages emitted by kernel-side save/load helpers
 
 ### Execution String
-The executor uses one canonical command string for both initial load and reload:
+The executor uses one canonical command string for both initial load and reload. On a
+project switch, this bootstrap first restores the kernel namespace to Hyde's clean
+baseline before importing the new project's `procedures` package:
 
 ```python
 import os
@@ -215,11 +242,14 @@ if sys.path[:1] != [project_root]:
     while project_root in sys.path:
         sys.path.remove(project_root)
     sys.path.insert(0, project_root)
-for name in list(getattr(__main__, "__hyde_procedures_exports__", set())):
-    __main__.__dict__.pop(name, None)
+if "__hyde_clean_dict__" not in __main__.__dict__:
+    __main__.__dict__["__hyde_clean_dict__"] = __main__.__dict__.copy()
+# on project switch only:
+__main__.__dict__.clear()
+__main__.__dict__.update(__main__.__dict__["__hyde_clean_dict__"])
 importlib.invalidate_caches()
 for name in list(sys.modules):
-    if name == "procedures" or name.startswith("procedures."):
+    if name == "procedures" or name.startswith("procedures.") or name == "hyde" or name.startswith("hyde."):
         del sys.modules[name]
 import procedures
 __hyde_exports = {
@@ -238,6 +268,7 @@ __main__.__hyde_procedures_exports__ = set(__hyde_exports)
 
 ### Trigger Source
 - `WATCH_PROJECT` requests initial execution
+- when the watched project path changes, the next bootstrap resets the kernel namespace before importing procedures
 - `labscript_utils.filewatcher.FileWatcher` watches `procedures/` and `procedures/__init__.py`
 - any relevant `.py` change sets the executor's reload flag
 - the watchdog main loop consumes that flag and re-runs the same canonical command string

@@ -16,6 +16,17 @@ from hyde.user_interface.command_window import CommandWindow
 from hyde.user_interface.logging_window import LoggingWindow
 from hyde.user_interface.procedure_browser import ProcedureBrowser
 from hyde.user_interface.data_browser import DataBrowser
+from hyde.user_interface.project_state import (
+    clear_tables,
+    try_read_history,
+    try_read_session,
+    restore_data_browser_state,
+    restore_main_window,
+    restore_tables,
+    restore_tool_windows,
+    write_history,
+    write_session,
+)
 
 class PersistentSubwindowFilter(QtCore.QObject):
     """Turn MDI close requests into hide requests so tool windows persist."""
@@ -28,13 +39,13 @@ class PersistentSubwindowFilter(QtCore.QObject):
         return super().eventFilter(watched, event)
 
 class ProjectSelectionDialog(QtWidgets.QFileDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent, "Open or Create Hyde Project", DEFAULT_PROJECTS_DIR)
+    def __init__(self, parent=None, title="Open or Create Hyde Project", accept_label="Open / Create"):
+        super().__init__(parent, title, DEFAULT_PROJECTS_DIR)
         self._selected_path = None
         self.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
         self.setFileMode(QtWidgets.QFileDialog.Directory)
         self.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
-        self.setLabelText(QtWidgets.QFileDialog.Accept, "Open / Create")
+        self.setLabelText(QtWidgets.QFileDialog.Accept, accept_label)
         self.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
         self._file_name_edit = self.findChild(QtWidgets.QLineEdit, 'fileNameEdit')
         self._accept_button = None
@@ -98,6 +109,14 @@ class HydeApp:
         self.tables = {}  # {handle: TableWidget}
         self.active_table_handle = None
         self.table_counter = 0
+        self.command_window = None
+        self.command_subwindow = None
+        self.data_browser = None
+        self.data_browser_subwindow = None
+        self._procedures_ready = False
+        self._pending_project_state_load = False
+        self._pending_session_restore = False
+        self._pending_project_switch = None
         
         # Load the UI
         loader = UiLoader()
@@ -148,6 +167,8 @@ class HydeApp:
         # Connect Application events
         self.ui.actionNew.triggered.connect(self.choose_project)
         self.ui.actionLoad.triggered.connect(self.choose_project)
+        self.ui.actionSave.triggered.connect(self.save_project)
+        self.ui.actionSave_As.triggered.connect(self.save_project_as)
         self.ui.actionQuit.triggered.connect(self.qapplication.quit)
         self.ui.actionCommandWindow.triggered.connect(self.show_command_window)
         self.ui.actionLogging.triggered.connect(self.show_logging_window)
@@ -320,7 +341,112 @@ class HydeApp:
         project_dir, create_if_missing = selection
         self.load_project(project_dir, create_if_missing=create_if_missing)
 
+    def prompt_for_save_as_project(self):
+        os.makedirs(DEFAULT_PROJECTS_DIR, exist_ok=True)
+        suggested_path = os.path.join(
+            DEFAULT_PROJECTS_DIR,
+            f"{os.path.splitext(os.path.basename(self.current_project_dir or 'untitled.hy'))[0]}.hy",
+        )
+        dialog = ProjectSelectionDialog(
+            self.ui,
+            title="Save Hyde Project As",
+            accept_label="Save As",
+        )
+        dialog.selectFile(suggested_path)
+        if not dialog.exec_():
+            return None
+        project_dir = dialog.selectedFiles()[0]
+        if not project_dir:
+            return None
+        project_dir = os.path.abspath(project_dir)
+        if not project_dir.endswith('.hy'):
+            QtWidgets.QMessageBox.warning(
+                self.ui,
+                "Invalid Project Directory",
+                "Hyde projects must be directories ending in .hy.",
+            )
+            return None
+        if os.path.exists(project_dir) and not os.path.isdir(project_dir):
+            QtWidgets.QMessageBox.warning(
+                self.ui,
+                "Invalid Project Path",
+                f"{project_dir} is not a directory.",
+            )
+            return None
+        return project_dir
+
+    def confirm_overwrite_project(self, project_dir):
+        response = QtWidgets.QMessageBox.question(
+            self.ui,
+            "Overwrite Project",
+            (
+                f"{project_dir} already exists and is not empty.\n\n"
+                "Overwrite the existing project contents?"
+            ),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        return response == QtWidgets.QMessageBox.Yes
+
+    def write_project_session(self, project_dir):
+        write_session(self, project_dir)
+        if self.command_window is not None:
+            write_history(self.command_window, project_dir)
+
+    def request_kernel_project_save(self, project_dir):
+        self.execute_command(
+            f"import hyde; hyde.save_state({project_dir!r})",
+            visible=True,
+        )
+
+    def save_project_state(self, project_dir):
+        self.write_project_session(project_dir)
+        self.request_kernel_project_save(project_dir)
+
+    def save_project(self, checked=False):
+        del checked
+        if not self.current_project_dir or self.command_window is None:
+            return
+        self.save_project_state(self.current_project_dir)
+
+    def save_project_as(self, checked=False):
+        del checked
+        if not self.current_project_dir or self.command_window is None:
+            return
+        project_dir = self.prompt_for_save_as_project()
+        if project_dir is None:
+            return
+        if project_dir == self.current_project_dir:
+            self.save_project()
+            return
+        if (
+            os.path.exists(project_dir)
+            and project_dir != self.current_project_dir
+            and os.path.isdir(project_dir)
+            and os.listdir(project_dir)
+            and not self.confirm_overwrite_project(project_dir)
+        ):
+            return
+        if not os.path.exists(project_dir):
+            shutil.copytree(
+                self.current_project_dir,
+                project_dir,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+        else:
+            shutil.copytree(
+                self.current_project_dir,
+                project_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+        self.save_project_state(project_dir)
+        self._pending_project_switch = project_dir
+
     def load_project(self, project_dir, create_if_missing=False):
+        switching = self.current_project_dir is not None
+        if switching:
+            clear_tables(self)
         self.current_project_dir, self.procedures_dir, self.procedures_init = get_project_paths(project_dir)
         if create_if_missing:
             self.bootstrap_project()
@@ -330,6 +456,9 @@ class HydeApp:
         self.ui.setWindowTitle(f"Hyde - {os.path.basename(self.current_project_dir)}")
         if not os.path.exists(self.procedures_init):
             self.offer_to_create_procedures_init()
+        self._procedures_ready = False
+        self._pending_project_state_load = True
+        self._pending_session_restore = False
         self.configure_execution_watchdog()
 
     def configure_execution_watchdog(self):
@@ -381,6 +510,10 @@ class HydeApp:
                     table_data = data.get('data', {})
                     for table in self.tables.values():
                         table.on_data_received(table_data, request_id)
+                elif task == 'PROCEDURES_RELOADED':
+                    self.on_procedures_reloaded(data.get('ok', False))
+                elif task == 'PROJECT_STATE_RESULT':
+                    self.on_project_state_result(data)
                 elif task == 'KERNEL_CRASHED':
                     self.show_crash_alert()
             except Exception:
@@ -402,6 +535,8 @@ class HydeApp:
             self.data_browser_subwindow = self.ui.mdiArea.addSubWindow(self.data_browser)
             self.configure_persistent_subwindow(self.data_browser_subwindow)
             self.data_browser.show()
+
+            self.maybe_trigger_project_state_load()
             
             # Release the splash screen and manifest the GUI
             self.ui.show()
@@ -414,6 +549,54 @@ class HydeApp:
     @inmain_decorator()
     def show_crash_alert(self):
         QtWidgets.QMessageBox.warning(self.ui, "Kernel Crashed", "The IPython execution kernel has died unexpectedly. It is being restarted in the background. Your interface state is now disconnected.")
+
+    @inmain_decorator()
+    def on_procedures_reloaded(self, ok):
+        self._procedures_ready = bool(ok)
+        if self.data_browser is not None:
+            self.data_browser.refresh_namespace()
+        self.maybe_trigger_project_state_load()
+
+    def maybe_trigger_project_state_load(self):
+        if not self._pending_project_state_load:
+            return
+        if not self._procedures_ready:
+            return
+        if self.command_window is None:
+            return
+        self._pending_project_state_load = False
+        self._pending_session_restore = True
+        self.execute_command(
+            f"import hyde; hyde.load_state({self.current_project_dir!r})",
+            visible=True,
+        )
+
+    @inmain_decorator()
+    def on_project_state_result(self, data):
+        operation = data.get('operation')
+        success = bool(data.get('success', False))
+        path = data.get('path')
+        errors = list(data.get('errors', []))
+        if operation == 'save':
+            if errors:
+                QtWidgets.QMessageBox.warning(
+                    self.ui,
+                    "Project Save Warnings",
+                    "\n".join(errors),
+                )
+            if success and self._pending_project_switch == path:
+                self._pending_project_switch = None
+                self.load_project(path, create_if_missing=False)
+        elif operation == 'load':
+            if errors:
+                QtWidgets.QMessageBox.warning(
+                    self.ui,
+                    "Project Load Warnings",
+                    "\n".join(errors),
+                )
+            if success and self._pending_session_restore and path == self.current_project_dir:
+                self._pending_session_restore = False
+                self.restore_project_session()
 
     def shutdown_watchdog(self):
         print("[Hyde] Sending QUIT signal to execution Watchdog...")
@@ -428,3 +611,27 @@ class HydeApp:
         shutil.copytree(DEFAULT_PROJECT_TEMPLATE, self.current_project_dir, dirs_exist_ok=True)
         if not os.path.exists(self.procedures_init):
             self.write_default_procedures_init()
+
+    def restore_project_session(self):
+        warnings = []
+        history_entries, history_error = try_read_history(self.current_project_dir)
+        if history_error:
+            warnings.append(f"terminal/history.py: {history_error}")
+        if self.command_window is not None:
+            self.command_window.restore_history_entries(history_entries)
+        session, session_error = try_read_session(self.current_project_dir)
+        if session_error:
+            warnings.append(f"session.toml: {session_error}")
+        if warnings:
+            QtWidgets.QMessageBox.warning(
+                self.ui,
+                "Project Session Restore Warnings",
+                "\n".join(warnings),
+            )
+        if not session:
+            return
+        restore_main_window(self, session)
+        restore_data_browser_state(self, session)
+        clear_tables(self)
+        restore_tables(self, session)
+        restore_tool_windows(self, session)
