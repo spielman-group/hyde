@@ -1,13 +1,20 @@
+import os
 import sys
 import threading
 import time
-import os
+
+HYDE_SOURCE_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+if HYDE_SOURCE_ROOT not in sys.path:
+    sys.path.insert(0, HYDE_SOURCE_ROOT)
+
 from labscript_utils.ls_zprocess import ProcessTree
 from labscript_utils.filewatcher import FileWatcher
 from labscript_utils.setup_logging import setup_logging
 from jupyter_client import BlockingKernelClient
 from zprocess.utils import TimeoutError as ZprocessTimeoutError
-from hyde.paths import KERNEL_LAUNCHER
+from hyde.paths import HYDE_PKG_DIR, KERNEL_LAUNCHER
 import labscript_utils.excepthook
 
 class ExecutionWatchdog:
@@ -28,6 +35,7 @@ class ExecutionWatchdog:
         self.procedures_init = None
         self.exiting = False
         self.reload_requested = threading.Event()
+        self.reset_namespace_requested = False
 
     def start(self):
         # Start daemon thread listening to commands from GUI ProcessTree
@@ -74,7 +82,8 @@ class ExecutionWatchdog:
                     self.reload_requested.clear()
                     if self.exiting:
                         break
-                    self.execute_procedures_init()
+                    ok = self.execute_procedures_init()
+                    self.to_parent.put(['PROCEDURES_RELOADED', {'ok': bool(ok)}])
 
             if self.kernel_client is not None:
                 self.kernel_client.stop_channels()
@@ -93,42 +102,78 @@ class ExecutionWatchdog:
 
     def execute_procedures_init(self):
         if self.kernel_client is None or self.project_dir is None or self.procedures_init is None:
-            return
+            return False
         if not os.path.exists(self.procedures_init):
-            return
-        code = self.build_procedures_bootstrap_code()
-        self.kernel_client.execute(code, silent=True)
-
-    def build_procedures_bootstrap_code(self):
-        return (
-            "import os\n"
-            "import sys\n"
-            "import importlib\n"
-            "import __main__\n"
-            f"os.chdir({self.project_dir!r})\n"
-            "project_root = os.getcwd()\n"
-            "if sys.path[:1] != [project_root]:\n"
-            "    while project_root in sys.path:\n"
-            "        sys.path.remove(project_root)\n"
-            "    sys.path.insert(0, project_root)\n"
-            "import hyde._table_macros as _hyde_table_macros\n"
-            "_hyde_table_macros.clear_table_macros()\n"
-            "for name in list(getattr(__main__, '__hyde_procedures_exports__', set())):\n"
-            "    __main__.__dict__.pop(name, None)\n"
-            "importlib.invalidate_caches()\n"
-            "for name in list(sys.modules):\n"
-            "    if name == 'procedures' or name.startswith('procedures.'):\n"
-            "        del sys.modules[name]\n"
-            "import procedures\n"
-            "__hyde_exports = {\n"
-            "    name: value\n"
-            "    for name, value in procedures.__dict__.items()\n"
-            "    if not name.startswith('_')\n"
-            "}\n"
-            "__main__.__dict__.update(__hyde_exports)\n"
-            "__main__.__hyde_procedures_exports__ = set(__hyde_exports)\n"
-            "_hyde_table_macros.publish_table_macro_registry()\n"
+            return False
+        code = self.build_procedures_bootstrap_code(
+            reset_namespace=self.reset_namespace_requested
         )
+        msg_id = self.kernel_client.execute(code, silent=True)
+        while True:
+            reply = self.kernel_client.get_shell_msg(timeout=10)
+            if reply['parent_header'].get('msg_id') != msg_id:
+                continue
+            ok = reply['content'].get('status') == 'ok'
+            if ok:
+                self.reset_namespace_requested = False
+            return ok
+
+    def build_procedures_bootstrap_code(self, reset_namespace=False):
+        hyde_source_root = os.path.dirname(HYDE_PKG_DIR)
+        lines = [
+            "import os",
+            "import sys",
+            "import importlib",
+            "import __main__",
+            f"os.chdir({self.project_dir!r})",
+            "def _hyde_bootstrap_procedures():",
+            "    _os = os",
+            "    _sys = sys",
+            "    _importlib = importlib",
+            "    _main = __main__",
+            f"    _hyde_source_root = {hyde_source_root!r}",
+            "    project_root = _os.getcwd()",
+            "    while project_root in _sys.path:",
+            "        _sys.path.remove(project_root)",
+            "    _sys.path.insert(0, project_root)",
+            "    while _hyde_source_root in _sys.path:",
+            "        _sys.path.remove(_hyde_source_root)",
+            "    _sys.path.insert(1, _hyde_source_root)",
+            "    if '__hyde_clean_dict__' not in _main.__dict__:",
+            "        _main.__dict__['__hyde_clean_dict__'] = _main.__dict__.copy()",
+        ]
+        if reset_namespace:
+            lines.extend(
+                [
+                    "    _hyde_clean_dict = _main.__dict__.get('__hyde_clean_dict__')",
+                    "    if _hyde_clean_dict is None:",
+                    "        _hyde_clean_dict = _main.__dict__.copy()",
+                    "    _main.__dict__.clear()",
+                    "    _main.__dict__.update(_hyde_clean_dict)",
+                    "    _main.__dict__['__hyde_clean_dict__'] = _hyde_clean_dict",
+                ]
+            )
+        lines.extend(
+            [
+                "    _importlib.invalidate_caches()",
+                "    for name in list(_sys.modules):",
+                "        if name == 'procedures' or name.startswith('procedures.') or name == 'hyde' or name.startswith('hyde.'):",
+                "            del _sys.modules[name]",
+                "    import hyde._table_macros as _hyde_table_macros",
+                "    _hyde_table_macros.clear_table_macros()",
+                "    import procedures",
+                "    __hyde_exports = {",
+                "        name: value",
+                "        for name, value in procedures.__dict__.items()",
+                "        if not name.startswith('_')",
+                "    }",
+                "    _main.__dict__.update(__hyde_exports)",
+                "    _main.__hyde_procedures_exports__ = set(__hyde_exports)",
+                "    _hyde_table_macros.publish_table_macro_registry()",
+                "_hyde_bootstrap_procedures()",
+            ]
+        )
+        return "\n".join(lines) + "\n"
 
     def on_procedure_change(self, name, info, event=None):
         if event == 'original':
@@ -138,9 +183,14 @@ class ExecutionWatchdog:
         self.reload_requested.set()
 
     def watch_project(self, data):
+        switching_project = (
+            self.project_dir is not None and data['project_dir'] != self.project_dir
+        )
         self.project_dir = data['project_dir']
         self.procedures_dir = data['procedures_dir']
         self.procedures_init = data['procedures_init']
+        if switching_project:
+            self.reset_namespace_requested = True
         if self.filewatcher is not None:
             self.filewatcher.stop()
         watched_files = [self.procedures_init] if os.path.exists(self.procedures_init) else []
@@ -198,6 +248,8 @@ class ExecutionWatchdog:
                     self.to_parent.put(['OPEN_TABLE', data])
                 elif task == 'TABLE_DATA_RESPONSE':
                     self.to_parent.put(['TABLE_DATA', data])
+                elif task == 'PROJECT_STATE_RESULT':
+                    self.to_parent.put(['PROJECT_STATE_RESULT', data])
                 elif task == 'WINDOW_MACROS_RESPONSE':
                     self.to_parent.put(['WINDOW_MACROS', data])
             except ZprocessTimeoutError:

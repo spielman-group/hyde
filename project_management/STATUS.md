@@ -60,6 +60,19 @@ Established Hyde's first editable kernel-backed table workflow:
 - **Current Scope**: The implemented table path is limited to 1D numeric arrays; DataFrame tables, sorting, and persistence remain future work.
 - **Recreation Macros**: Table close now offers to save a parameterized `@hyde.table` recreation macro into `procedures/__init__.py`, and `Windows -> Table Macros` is populated from the decorated registry after procedures reload.
 
+### 8. Phase IV-E: Project Save/Load Initial Implementation
+Established the first end-to-end `.hy` package persistence flow:
+- **Explicit Hyde Commands**: Project persistence now uses public `hyde.save_state(...)` and `hyde.load_state(...)` helpers executed through visible command strings.
+- **Kernel-State Persistence**: Saved kernel objects are written under `data/`, with `numpy.ndarray` using `.npy` and other saveable objects using pickle fallback.
+- **Exclusion-Based Save Rules**: Saveable objects are selected by exclusion, including modules, packages, routines, classes/types, and interactive artifacts such as `In` / `Out`.
+- **Manifest Tracking**: `manifest.toml` now records the saved-object registry, serializer, relative data path, and Python type name.
+- **GUI Session Persistence**: `session.toml` stores main-window state, tool-window visibility/geometry, Data Browser filter state, and open table descriptors.
+- **Visible History Persistence**: `terminal/history.py` stores visible command history only; muted GUI micro-mutations are excluded.
+- **File Menu Wiring**: `File -> Save` saves in place, `File -> Save As...` confirms before overwriting an existing non-empty project, writes a new `.hy` package, and switches Hyde to it, and project load restores kernel state after `procedures/__init__.py` runs.
+- **Session Restore Policy**: GUI session restore reports malformed or missing `session.toml` files and continues with kernel-state restore already complete.
+- **Save Semantics**: In-place project saves rewrite the current saved state rather than preserving an older synchronized copy.
+- **Project Switch Isolation**: Switching to a different `.hy` project resets the kernel namespace back to Hyde's clean baseline before the new project's procedures and saved state are loaded, so stale objects do not leak across projects.
+
 
 ## Refinements & Bug Fixes
 - **Path Derivation**: Implemented absolute module-based path derivation to prevent CWD-drift issues between the GUI and child processes.
@@ -76,4 +89,5 @@ Established Hyde's first editable kernel-backed table workflow:
 - `project_management/specs/data_browser/SPEC.md`: Updated to match the implemented Hyde-native browser layout and supported action set.
 - `project_management/specs/IPC_PROTOCOL.md`: Updated to document the actual `spyder_api` namespace-view comm path.
 - `project_management/specs/table/SPEC.md` and `project_management/specs/new_table_dialog/SPEC.md`: Updated to match the implemented table workflow.
+- `project_management/specs/project_save_load/SPEC.md`: Added the initial `.hy` package save/load contract and the overwrite-confirmation rule for `Save As...`.
 - `2025_04_12_OPUS_EVALUATION.md`: Noted the transition toward `zprocess.Event` for future state notifications.

@@ -23,3 +23,10 @@ class CommandWindow(RichJupyterWidget):
             interactive: If True, the console behaves as if the user typed it.
         """
         return super().execute(source=source, hidden=hidden, interactive=interactive)
+
+    def history_entries(self):
+        history = getattr(self, "_history", [])
+        return list(self.history_tail(len(history)))
+
+    def restore_history_entries(self, entries):
+        self._set_history(entries or [])

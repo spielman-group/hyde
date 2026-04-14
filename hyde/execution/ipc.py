@@ -62,3 +62,23 @@ def push_table_data(names, request_id):
             "request_id": request_id,
         },
     ])
+
+
+def publish_project_state_result(operation, path, success=True, errors=None, object_count=0):
+    """Publish kernel-side project save/load completion back to the GUI."""
+    try:
+        tree = ProcessTree.instance()
+        if tree is None or not hasattr(tree, "to_parent"):
+            return
+        tree.to_parent.put([
+            "PROJECT_STATE_RESULT",
+            {
+                "operation": operation,
+                "path": path,
+                "success": bool(success),
+                "errors": list(errors or []),
+                "object_count": int(object_count),
+            },
+        ])
+    except Exception:
+        pass
