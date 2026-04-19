@@ -33,7 +33,10 @@ class ProcedureBrowser(QWidget):
 
     def set_procedures_dir(self, procedures_dir):
         self.procedures_dir = procedures_dir
-        root_index = self.model.setRootPath(self.procedures_dir)
+        if procedures_dir is None:
+            self.tree_view.setRootIndex(self.model.index(""))
+            return
+        root_index = self.model.setRootPath(procedures_dir)
         self.tree_view.setRootIndex(root_index)
 
     def on_double_click(self, index):

@@ -1,3 +1,5 @@
+import sys
+import os
 from labscript_utils.ls_zprocess import ProcessTree
 from labscript_utils.setup_logging import setup_logging
 import labscript_utils.excepthook
@@ -11,6 +13,16 @@ if __name__ == '__main__':
 
     # Initialize unified logging before entering the Spyder kernel startup.
     setup_logging('hyde-kernel')
+
+    # Ensure hyde is importable from within the kernel before any user code runs.
+    # HYDE_PKG_DIR is two levels up from this file (hyde/execution/ -> hyde/ -> repo root).
+    _hyde_source_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if _hyde_source_root not in sys.path:
+        sys.path.insert(0, _hyde_source_root)
+
+    # Mark hyde as running inside a managed GUI session so IPC signals are enabled.
+    import hyde
+    hyde.gui_mode(True)
 
     # Reuse Spyder's standard kernel entrypoint in-process so this
     # ProcessTree child is the real Jupyter kernel process.
