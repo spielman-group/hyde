@@ -20,9 +20,19 @@ This document summarizes the changes made in the `feature/gui-mode-and-features-
 ### 1.4 Feature Logic Consolidation
 - **`hyde_features.py`:** Moved all logic for generating Python bootstrap and command strings into `hyde/features/hyde_features.py`. This ensures that the execution controller and GUI code stay lean and focused on orchestration.
 
+### 1.5 Dead Code Removal
+After moving project orchestration into the kernel, a thorough audit found substantial dead code left behind in the GUI that was removed:
+- Calls to deleted stubs `maybe_trigger_project_state_load`, `prompt_for_startup_action`, and `prompt_new_project` were still present and would have crashed at runtime.
+- Three state flags (`_pending_project_state_load`, `_pending_session_restore`, `_pending_project_switch`) were set but never read after the gating logic was removed.
+- `confirm_overwrite_project` was defined but never called anywhere.
+- `shutil` was imported but unused after `bootstrap_project` was deleted.
+- The startup `__init__` referenced an undefined `project_dir` variable — fixed by initialising `ProcedureBrowser` with `None` until a project is opened.
+- Three duplicate file-dialog implementations were consolidated into a single `_pick_project_dir` helper method plus `choose_new_project`.
+
 ## 2. Style Documentation
 - Created `project_management/STYLE.md` to house project-specific coding standards, including the prohibition of internal module aliasing and the enforcement of the UI/Kernel boundary.
 - Updated `AGENTS.md` to reference the centralized style guide.
+
 
 ## 3. Current State and Hand-off
 The core structural refactoring for Phase III is complete. All persistence operations now flow through the kernel asynchronously.
