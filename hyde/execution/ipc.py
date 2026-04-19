@@ -64,7 +64,7 @@ def push_table_data(names, request_id):
     ])
 
 
-def publish_project_state_result(operation, path, success=True, errors=None, object_count=0):
+def publish_project_state_result(operation, path, success=True, errors=None, object_count=0, mode="save"):
     """Publish kernel-side project save/load completion back to the GUI."""
     try:
         tree = ProcessTree.instance()
@@ -78,6 +78,7 @@ def publish_project_state_result(operation, path, success=True, errors=None, obj
                 "success": bool(success),
                 "errors": list(errors or []),
                 "object_count": int(object_count),
+                "mode": mode,
             },
         ])
     except Exception:

@@ -19,6 +19,7 @@ from jupyter_client import BlockingKernelClient
 from zprocess.utils import TimeoutError as ZprocessTimeoutError
 from zmq.error import ZMQError
 from hyde.paths import HYDE_PKG_DIR, KERNEL_LAUNCHER
+from hyde.features.hyde_features import format_procedures_bootstrap_code, format_remote_command
 import labscript_utils.excepthook
 
 
@@ -45,7 +46,7 @@ class RemoteListener(ZMQServer):
                 return 'error: kernel unavailable'
             self.watchdog.local_queue.put([
                 'EXECUTE_COMMAND',
-                {'code': f"remote({request_data!r})", 'silent': False},
+                {'code': format_remote_command(request_data), 'silent': False},
             ])
             return 'added successfully'
         return ("error: operation not supported. Recognised requests are:\n "
@@ -155,7 +156,10 @@ class ExecutionWatchdog:
             return False
         if not os.path.exists(self.procedures_init):
             return False
-        code = self.build_procedures_bootstrap_code(
+        hyde_source_root = os.path.dirname(HYDE_PKG_DIR)
+        code = format_procedures_bootstrap_code(
+            self.project_dir,
+            hyde_source_root,
             reset_namespace=self.reset_namespace_requested
         )
         msg_id = self.kernel_client.execute(code, silent=True)
@@ -168,62 +172,6 @@ class ExecutionWatchdog:
                 self.reset_namespace_requested = False
             return ok
 
-    def build_procedures_bootstrap_code(self, reset_namespace=False):
-        hyde_source_root = os.path.dirname(HYDE_PKG_DIR)
-        lines = [
-            "import os",
-            "import sys",
-            "import importlib",
-            "import __main__",
-            f"os.chdir({self.project_dir!r})",
-            "def _hyde_bootstrap_procedures():",
-            "    _os = os",
-            "    _sys = sys",
-            "    _importlib = importlib",
-            "    _main = __main__",
-            f"    _hyde_source_root = {hyde_source_root!r}",
-            "    project_root = _os.getcwd()",
-            "    while project_root in _sys.path:",
-            "        _sys.path.remove(project_root)",
-            "    _sys.path.insert(0, project_root)",
-            "    while _hyde_source_root in _sys.path:",
-            "        _sys.path.remove(_hyde_source_root)",
-            "    _sys.path.insert(1, _hyde_source_root)",
-            "    if '__hyde_clean_dict__' not in _main.__dict__:",
-            "        _main.__dict__['__hyde_clean_dict__'] = _main.__dict__.copy()",
-        ]
-        if reset_namespace:
-            lines.extend(
-                [
-                    "    _hyde_clean_dict = _main.__dict__.get('__hyde_clean_dict__')",
-                    "    if _hyde_clean_dict is None:",
-                    "        _hyde_clean_dict = _main.__dict__.copy()",
-                    "    _main.__dict__.clear()",
-                    "    _main.__dict__.update(_hyde_clean_dict)",
-                    "    _main.__dict__['__hyde_clean_dict__'] = _hyde_clean_dict",
-                ]
-            )
-        lines.extend(
-            [
-                "    _importlib.invalidate_caches()",
-                "    for name in list(_sys.modules):",
-                "        if name == 'procedures' or name.startswith('procedures.') or name == 'hyde' or name.startswith('hyde.'):",
-                "            del _sys.modules[name]",
-                "    import hyde._table_macros as _hyde_table_macros",
-                "    _hyde_table_macros.clear_table_macros()",
-                "    import procedures",
-                "    __hyde_exports = {",
-                "        name: value",
-                "        for name, value in procedures.__dict__.items()",
-                "        if not name.startswith('_')",
-                "    }",
-                "    _main.__dict__.update(__hyde_exports)",
-                "    _main.__hyde_procedures_exports__ = set(__hyde_exports)",
-                "    _hyde_table_macros.publish_table_macro_registry()",
-                "_hyde_bootstrap_procedures()",
-            ]
-        )
-        return "\n".join(lines) + "\n"
 
     def on_procedure_change(self, name, info, event=None):
         if event == 'original':

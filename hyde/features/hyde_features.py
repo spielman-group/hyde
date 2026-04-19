@@ -129,3 +129,73 @@ def is_eligible_for_table(metadata):
     is_numeric = kind in 'biuf'
     
     return is_array and is_numeric and ndim == 1
+
+
+def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=False):
+    import os
+    import sys
+    import importlib
+    import __main__
+    
+    os.chdir(project_dir)
+    project_root = os.getcwd()
+    
+    while project_root in sys.path:
+        sys.path.remove(project_root)
+    sys.path.insert(0, project_root)
+    
+    while hyde_source_root in sys.path:
+        sys.path.remove(hyde_source_root)
+    sys.path.insert(1, hyde_source_root)
+    
+    if '__hyde_clean_dict__' not in __main__.__dict__:
+        __main__.__dict__['__hyde_clean_dict__'] = __main__.__dict__.copy()
+        
+    if reset_namespace:
+        _hyde_clean_dict = __main__.__dict__.get('__hyde_clean_dict__')
+        if _hyde_clean_dict is None:
+            _hyde_clean_dict = __main__.__dict__.copy()
+        __main__.__dict__.clear()
+        __main__.__dict__.update(_hyde_clean_dict)
+        __main__.__dict__['__hyde_clean_dict__'] = _hyde_clean_dict
+        
+    importlib.invalidate_caches()
+    for name in list(sys.modules):
+        if name == 'procedures' or name.startswith('procedures.') or name == 'hyde' or name.startswith('hyde.'):
+            del sys.modules[name]
+            
+    import hyde
+    hyde.gui_mode(True)
+    import hyde.table_macros as _hyde_table_macros
+    _hyde_table_macros.clear_table_macros()
+    
+    import procedures
+    __hyde_exports = {
+        name: value
+        for name, value in procedures.__dict__.items()
+        if not name.startswith('_')
+    }
+    __main__.__dict__.update(__hyde_exports)
+    __main__.__hyde_procedures_exports__ = set(__hyde_exports)
+    _hyde_table_macros.publish_table_macro_registry()
+
+
+def format_procedures_bootstrap_code(project_dir, hyde_source_root, reset_namespace=False):
+    """
+    Formulates the canonical procedure environment bootstrap string by
+    invoking the real execution logic.
+    """
+    return (
+        "import sys\n"
+        f"if {hyde_source_root!r} not in sys.path:\n"
+        f"    sys.path.insert(0, {hyde_source_root!r})\n"
+        "from hyde.features.hyde_features import execute_procedures_bootstrap\n"
+        f"execute_procedures_bootstrap({project_dir!r}, {hyde_source_root!r}, reset_namespace={reset_namespace})\n"
+    )
+
+
+def format_remote_command(request_filepath):
+    """
+    Formulates a muted command to trigger remote execution for a file payload.
+    """
+    return f"remote({request_filepath!r})"

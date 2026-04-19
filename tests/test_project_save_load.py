@@ -211,7 +211,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             with open(os.path.join(project_dir, "session.toml"), "w", encoding="utf-8") as handle:
                 handle.write("not = [valid toml")
 
-            command_window = DummyCommandWindow(["a = 1", "hyde.save_state()"])
+            command_window = DummyCommandWindow(["a = 1", "hyde.save_project()"])
             write_history(command_window, project_dir)
 
             warnings = []
@@ -240,7 +240,7 @@ class TestProjectStateHelpers(unittest.TestCase):
                 main_module.QtWidgets.QMessageBox.warning = original_warning
 
             self.assertTrue(warnings)
-            self.assertEqual(app.command_window.entries, ["a = 1", "hyde.save_state()"])
+            self.assertEqual(app.command_window.entries, ["a = 1", "hyde.save_project()"])
 
     def test_bootstrap_project_skips_template_placeholder_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -327,7 +327,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
         self.assertIsNotNone(client)
         return project_dir, to_worker, from_worker, worker, client
 
-    def test_save_state_writes_manifest_and_excludes_packages(self):
+    def test_save_project_writes_manifest_and_excludes_packages(self):
         procedures = (
             "import hyde\n"
             "import numpy as np\n"
@@ -337,7 +337,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             "        self.value = value\n"
         )
         project_dir, to_worker, from_worker, worker, client = self._start_project(
-            "save_state.hy",
+            "save_project.hy",
             procedures,
         )
         try:
@@ -348,7 +348,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
                 "boxed = Box(7)\n"
                 "In = ['ignore-me']\n"
                 "Out = {1: 'ignore-me-too'}\n"
-                f"import hyde; hyde.save_state({project_dir!r})\n",
+                f"import hyde; hyde.save_project({project_dir!r})\n",
             )
             deadline = time.time() + 10
             result = None
@@ -378,7 +378,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             to_worker.put(["QUIT", None])
             worker.wait(timeout=10)
 
-    def test_load_state_restores_saved_objects_after_procedures(self):
+    def test_load_project_restores_saved_objects_after_procedures(self):
         procedures = (
             "import hyde\n"
             "import numpy as np\n"
@@ -388,7 +388,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             "VALUE = 1\n"
         )
         project_dir, to_worker, from_worker, worker, client = self._start_project(
-            "load_state.hy",
+            "load_project.hy",
             procedures,
         )
         try:
@@ -398,7 +398,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
                 "arr = np.arange(5)\n"
                 "boxed = Box(9)\n"
                 "VALUE = 22\n"
-                f"import hyde; hyde.save_state({project_dir!r})\n",
+                f"import hyde; hyde.save_project({project_dir!r})\n",
             )
             deadline = time.time() + 10
             while time.time() < deadline:
@@ -422,7 +422,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
                     saw_reloaded = True
             self.assertTrue(saw_reloaded)
             wait_for_code_ok(client, "assert VALUE == 1")
-            wait_for_code_ok(client, f"import hyde; hyde.load_state({project_dir!r})")
+            wait_for_code_ok(client, f"import hyde; hyde.load_project({project_dir!r})")
 
             deadline = time.time() + 10
             result = None
