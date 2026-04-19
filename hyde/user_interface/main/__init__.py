@@ -460,18 +460,14 @@ class HydeApp:
             'EXECUTE_COMMAND',
             {
                 'code': (
-                    "import hyde.table_macros as _hyde_table_macros; "
-                    "_hyde_table_macros.publish_table_macro_registry()"
+                    "import hyde.table_macros; "
+                    "hyde.table_macros.publish_table_macro_registry()"
                 ),
                 'silent': True,
             },
         ])
 
-    def offer_to_create_procedures_init(self):
-        pass # Now managed gracefully by kernel new_project
 
-    def write_default_procedures_init(self):
-        pass
 
     def listen_for_watchdog(self):
         while True:
@@ -542,8 +538,6 @@ class HydeApp:
         self.request_window_macros('table')
         self.maybe_trigger_project_state_load()
 
-    def maybe_trigger_project_state_load(self):
-        pass # Now driven entirely by kernel IPC, we no longer artificially try to inject load strings
 
     @inmain_decorator()
     def on_project_state_result(self, data):

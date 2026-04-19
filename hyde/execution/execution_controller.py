@@ -16,7 +16,7 @@ from labscript_utils.ls_zprocess import ProcessTree, ZMQServer
 from labscript_utils.filewatcher import FileWatcher
 from labscript_utils.setup_logging import setup_logging
 from jupyter_client import BlockingKernelClient
-from zprocess.utils import TimeoutError as ZprocessTimeoutError
+from zprocess.utils import TimeoutError
 from zmq.error import ZMQError
 from hyde.paths import HYDE_PKG_DIR, KERNEL_LAUNCHER
 from hyde.features.hyde_features import format_procedures_bootstrap_code, format_remote_command
@@ -226,7 +226,7 @@ class ExecutionWatchdog:
                     self.exiting = True
                     self.reload_requested.set()
                     break
-            except ZprocessTimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 print(f"[Watchdog] Error polling ProcessTree queue: {e}")
@@ -249,7 +249,7 @@ class ExecutionWatchdog:
                     self.to_parent.put(['PROJECT_STATE_RESULT', data])
                 elif task == 'WINDOW_MACROS_RESPONSE':
                     self.to_parent.put(['WINDOW_MACROS', data])
-            except ZprocessTimeoutError:
+            except TimeoutError:
                 continue
             except Exception:
                 # Kernel queue likely closed or kernel died

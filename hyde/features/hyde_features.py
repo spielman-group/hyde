@@ -166,8 +166,8 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
             
     import hyde
     hyde.gui_mode(True)
-    import hyde.table_macros as _hyde_table_macros
-    _hyde_table_macros.clear_table_macros()
+    import hyde.table_macros
+    hyde.table_macros.clear_table_macros()
     
     import procedures
     __hyde_exports = {
@@ -177,7 +177,7 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
     }
     __main__.__dict__.update(__hyde_exports)
     __main__.__hyde_procedures_exports__ = set(__hyde_exports)
-    _hyde_table_macros.publish_table_macro_registry()
+    hyde.table_macros.publish_table_macro_registry()
 
 
 def format_procedures_bootstrap_code(project_dir, hyde_source_root, reset_namespace=False):

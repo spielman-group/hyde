@@ -5,7 +5,7 @@ Hyde: A modern, Pythonic data analysis and plotting environment for the labscrip
 from __future__ import annotations
 
 import builtins
-import datetime as _dt
+import datetime
 import inspect
 import os
 import pickle
@@ -100,7 +100,7 @@ def _deserialize_object(path: Path, serializer):
 def _write_manifest(project_dir: Path, object_entries):
     manifest_path = project_dir / "manifest.toml"
     project_name = project_dir.name[:-3] if project_dir.name.endswith(".hy") else project_dir.name
-    timestamp = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     manifest = {
         "format_version": FORMAT_VERSION,
         "project_name": project_name,

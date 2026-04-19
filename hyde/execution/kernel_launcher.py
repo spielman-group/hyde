@@ -1,7 +1,7 @@
 from labscript_utils.ls_zprocess import ProcessTree
 from labscript_utils.setup_logging import setup_logging
 import labscript_utils.excepthook
-from spyder_kernels.console.start import main as start_spyder_kernel
+from spyder_kernels.console.start import main
 
 if __name__ == '__main__':
     # Connect the real kernel process directly to the Watchdog parent.
@@ -14,4 +14,4 @@ if __name__ == '__main__':
 
     # Reuse Spyder's standard kernel entrypoint in-process so this
     # ProcessTree child is the real Jupyter kernel process.
-    start_spyder_kernel()
+    main()
