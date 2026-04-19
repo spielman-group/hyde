@@ -15,11 +15,8 @@ You must thoroughly review the files in `project_management/` before writing any
 2. **The GUI is a String Factory:** If you build a UI interaction (like a button click, a slider move, or menu action), it must construct a human-readable Python string and dispatch it to the execution kernel. **Do not** write imperative backend calculation methods that are called directly from PyQt buttons. Every action must be 100% reproducible via terminal text.
 3. **The Backend is Authoritative:** The actual state lives in an isolated `spyder_kernels` IPython subprocess. The GUI reacts to state changes via metadata notifications over `comm` channels. Do not reinvent Python namespace tracking; you must reference the [Spyder IDE](https://github.com/spyder-ide/spyder) implementations for variable tracking.
 
-## 3. Strict Coding Rules
-- **UI Framework Boundary:** Do not ever import `PyQt5`, `PyQt6`, `PySide2`, or `PySide6` natively. You must route all imports through the labscript-suite's `qtutils` compatibility layer (e.g., `from qtutils.qt.QtWidgets import QMainWindow`).
-- **Threading:** If an IPython response out of the `quconsole` or a zero-MQ callback touches the UI, you MUST route it to the main GUI thread using `qtutils.inmain_decorator` or similar helpers. 
-- **Communication:** Use `zprocess.ProcessTree` for general subprocess spawning and suite-level IPC (like listening for `lyse` equivalent messages), but rely entirely on standard Jupyter zero-MQ messaging (`spyder_kernels` / `qtconsole`) to interact with the Python execution kernel.
-- **Public API Documentation Is Required:** Anything exposed from `hyde/__init__.py` is part of Hyde's public API. Do not add or re-export symbols there unless they are documented with docstrings and parameter/behavior descriptions suitable for generated API documentation.
+## 3. Coding Style and Rules
+Before writing code, you must review [STYLE.md](file:///Users/ispielma/Python/Labscript/hyde/project_management/STYLE.md) for project-specific conventions regarding imports, UI framework boundaries, and threading.
 
 ## 4. Work Strategy & Scope
 We are aggressively iterating through a phased roadmap defined in `project_management/STRATEGY.md`.
