@@ -331,6 +331,14 @@ class HydeApp:
         subwindow.installEventFilter(event_filter)
         self._subwindow_filters.append(event_filter)
 
+    def resolve_startup_project(self):
+        if not self.argv:
+            return None
+        candidate = os.path.abspath(self.argv[0])
+        if candidate.endswith('.hy') and os.path.isdir(candidate):
+            return candidate
+        return None
+
     def _pick_project_dir(self, title, accept_label, suggested_name=None):
         """Show a project directory picker. Returns an absolute .hy path or None."""
         os.makedirs(DEFAULT_PROJECTS_DIR, exist_ok=True)
@@ -357,6 +365,19 @@ class HydeApp:
             )
             return None
         return project_dir
+
+    def confirm_overwrite_project(self, project_dir):
+        response = QtWidgets.QMessageBox.question(
+            self.ui,
+            "Overwrite Project",
+            (
+                f"{project_dir} already exists.\n\n"
+                "Overwrite the existing path?"
+            ),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        return response == QtWidgets.QMessageBox.Yes
 
     def choose_new_project(self, checked=False):
         project_dir = self._pick_project_dir("Create New Hyde Project", "Create New")
@@ -388,7 +409,15 @@ class HydeApp:
         project_dir = self.prompt_for_save_as_project()
         if project_dir is None:
             return
-        self.execute_command(f"import hyde; hyde.save_project({project_dir!r}, mode='save_as')", visible=True)
+        if os.path.abspath(project_dir) == os.path.abspath(self.current_project_dir):
+            self.save_project()
+            return
+        if os.path.exists(project_dir) and not self.confirm_overwrite_project(project_dir):
+            return
+        self.execute_command(
+            f"import hyde; hyde.save_project({project_dir!r}, mode='save_as', overwrite=True)",
+            visible=True,
+        )
 
     def save_project_copy(self, checked=False):
         del checked
@@ -397,15 +426,24 @@ class HydeApp:
         project_dir = self.prompt_for_save_as_project()
         if project_dir is None:
             return
-        self.execute_command(f"import hyde; hyde.save_project({project_dir!r}, mode='copy')", visible=True)
+        if os.path.abspath(project_dir) == os.path.abspath(self.current_project_dir):
+            self.save_project()
+            return
+        if os.path.exists(project_dir) and not self.confirm_overwrite_project(project_dir):
+            return
+        self.execute_command(
+            f"import hyde; hyde.save_project({project_dir!r}, mode='copy', overwrite=True)",
+            visible=True,
+        )
 
-    def load_project(self, project_dir):
+    def load_project(self, project_dir, configure_watchdog=True):
         """Update GUI-side project tracking. Actual variable loading is kernel-driven."""
         self.current_project_dir, self.procedures_dir, self.procedures_init = get_project_paths(project_dir)
         self.procedure_browser.set_procedures_dir(self.procedures_dir)
         self.ui.setWindowTitle(f"Hyde - {os.path.basename(self.current_project_dir)}")
-        self._procedures_ready = False
-        self.configure_execution_watchdog()
+        self._procedures_ready = not configure_watchdog
+        if configure_watchdog:
+            self.configure_execution_watchdog()
         self.table_macros = []
         self.rebuild_table_macros_menu()
 
@@ -462,6 +500,8 @@ class HydeApp:
                         table.on_data_received(table_data, request_id)
                 elif task == 'PROCEDURES_RELOADED':
                     self.on_procedures_reloaded(data.get('ok', False))
+                elif task == 'PROJECT_LOAD_REQUEST':
+                    self.on_project_load_request(data)
                 elif task == 'PROJECT_STATE_RESULT':
                     self.on_project_state_result(data)
                 elif task == 'KERNEL_CRASHED':
@@ -494,7 +534,16 @@ class HydeApp:
             self.ui.show()
             self.splash.hide()
             
-            if self.current_project_dir is None:
+            startup_project = self.resolve_startup_project()
+            if startup_project is not None:
+                QtCore.QTimer.singleShot(
+                    100,
+                    lambda path=startup_project: self.execute_command(
+                        f"import hyde; hyde.load_project({path!r})",
+                        visible=True,
+                    ),
+                )
+            elif self.current_project_dir is None and not self.argv:
                 QtCore.QTimer.singleShot(100, self.choose_project)
             
         except Exception:
@@ -512,6 +561,16 @@ class HydeApp:
             self.data_browser.refresh_namespace()
         self.request_window_macros('table')
 
+    @inmain_decorator()
+    def on_project_load_request(self, data):
+        path = data.get('path')
+        if not path:
+            return
+        if os.path.abspath(path) != os.path.abspath(self.current_project_dir or ""):
+            self.load_project(path, configure_watchdog=False)
+        else:
+            self._procedures_ready = True
+        self.request_window_macros('table')
 
     @inmain_decorator()
     def on_project_state_result(self, data):
@@ -528,15 +587,11 @@ class HydeApp:
                 write_session(self, path)
                 if self.command_window is not None:
                     write_history(self.command_window, path)
-                if mode == 'save_as':
-                    self.load_project(path)
-                    
-        elif operation == 'purge':
-            clear_tables(self)
             
         elif operation == 'load':
             if success:
-                self.load_project(path)
+                if os.path.abspath(path) != os.path.abspath(self.current_project_dir or ""):
+                    self.load_project(path, configure_watchdog=False)
                 self.restore_project_session()
             if errors:
                 QtWidgets.QMessageBox.warning(self.ui, "Project Load Warnings", "\\n".join(errors))
@@ -579,10 +634,10 @@ class HydeApp:
                 "Project Session Restore Warnings",
                 "\n".join(warnings),
             )
+        clear_tables(self)
         if not session:
             return
         restore_main_window(self, session)
         restore_data_browser_state(self, session)
-        clear_tables(self)
         restore_tables(self, session)
         restore_tool_windows(self, session)

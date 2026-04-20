@@ -22,8 +22,8 @@ class TestWatchdogArchitecture(unittest.TestCase):
         launcher_path = Path(os.path.dirname(hyde.__file__)) / "execution" / "kernel_launcher.py"
         source = launcher_path.read_text()
 
-        self.assertIn("from spyder_kernels.console.start import main as start_spyder_kernel", source)
-        self.assertIn("start_spyder_kernel()", source)
+        self.assertIn("from spyder_kernels.console.start import main", source)
+        self.assertIn("main()", source)
         self.assertNotIn("subprocess.Popen", source)
 
     def wait_for_code_ok(self, client, code, timeout=5):

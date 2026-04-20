@@ -15,7 +15,7 @@ if __name__ == '__main__':
     setup_logging('hyde-kernel')
 
     # Ensure hyde is importable from within the kernel before any user code runs.
-    # HYDE_PKG_DIR is two levels up from this file (hyde/execution/ -> hyde/ -> repo root).
+    # The Hyde source root is two levels up from this file.
     _hyde_source_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if _hyde_source_root not in sys.path:
         sys.path.insert(0, _hyde_source_root)

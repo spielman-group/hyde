@@ -18,7 +18,7 @@ from labscript_utils.setup_logging import setup_logging
 from jupyter_client import BlockingKernelClient
 from zprocess.utils import TimeoutError
 from zmq.error import ZMQError
-from hyde.paths import HYDE_PKG_DIR, KERNEL_LAUNCHER
+from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER, get_project_paths
 from hyde.features.hyde_features import format_procedures_bootstrap_code, format_remote_command
 import labscript_utils.excepthook
 
@@ -156,7 +156,7 @@ class ExecutionWatchdog:
             return False
         if not os.path.exists(self.procedures_init):
             return False
-        hyde_source_root = os.path.dirname(HYDE_PKG_DIR)
+        hyde_source_root = os.path.dirname(HYDE_DIR)
         code = format_procedures_bootstrap_code(
             self.project_dir,
             hyde_source_root,
@@ -189,6 +189,15 @@ class ExecutionWatchdog:
         self.procedures_init = data['procedures_init']
         if switching_project:
             self.reset_namespace_requested = True
+        self._rebuild_filewatcher()
+        self.reload_requested.set()
+
+    def sync_loaded_project(self, path):
+        self.project_dir, self.procedures_dir, self.procedures_init = get_project_paths(path)
+        self.reset_namespace_requested = False
+        self._rebuild_filewatcher()
+
+    def _rebuild_filewatcher(self):
         if self.filewatcher is not None:
             self.filewatcher.stop()
         watched_files = [self.procedures_init] if os.path.exists(self.procedures_init) else []
@@ -199,7 +208,6 @@ class ExecutionWatchdog:
             hashable_types=['.py'],
             interval=0.5,
         )
-        self.reload_requested.set()
 
     def listen_for_gui(self):
         while not self.exiting:
@@ -245,6 +253,9 @@ class ExecutionWatchdog:
                     self.to_parent.put(['OPEN_TABLE', data])
                 elif task == 'TABLE_DATA_RESPONSE':
                     self.to_parent.put(['TABLE_DATA', data])
+                elif task == 'PROJECT_LOAD_REQUEST':
+                    self.sync_loaded_project(data['path'])
+                    self.to_parent.put(['PROJECT_LOAD_REQUEST', data])
                 elif task == 'PROJECT_STATE_RESULT':
                     self.to_parent.put(['PROJECT_STATE_RESULT', data])
                 elif task == 'WINDOW_MACROS_RESPONSE':

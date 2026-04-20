@@ -4,28 +4,27 @@ Hyde: A modern, Pythonic data analysis and plotting environment for the labscrip
 
 from __future__ import annotations
 
-import builtins
-import datetime
+import __main__
 import inspect
 import os
-import pickle
 import shutil
-import types
 from pathlib import Path
 
-import __main__
 import numpy as np
-import tomllib
-import tomli_w
 
+from .paths import HYDE_DIR
+from . import project_tools
 from .table_macros import publish_table_macro_registry, register_table_macro
-from .execution.ipc import publish_project_state_result, signal_open_table
+from .execution.ipc import (
+    publish_project_state_result,
+    request_project_load,
+    signal_open_table,
+)
 
 __version__ = "0.1.0.dev0"
 
 HYDE_GUI = False
-FORMAT_VERSION = 1
-EXCLUDED_NAMES = {"In", "Out", "exit", "quit"}
+HYDE_PROJECT_DIR = None
 
 
 def gui_mode(enable=True):
@@ -37,115 +36,29 @@ def gui_mode(enable=True):
     HYDE_GUI = bool(enable)
 
 
-def _project_dir(path=None):
-    if path is None:
-        return Path.cwd()
-    return Path(path).expanduser().resolve()
-
-
-def _ensure_project_dirs(project_dir: Path):
-    for relpath in ("data", "terminal", "procedures"):
-        (project_dir / relpath).mkdir(parents=True, exist_ok=True)
-
-
-def _is_package(value):
-    return isinstance(value, types.ModuleType) and hasattr(value, "__path__")
-
-
-def _is_excluded(name, value):
-    if not name or name.startswith("_"):
-        return True
-    if name in EXCLUDED_NAMES:
-        return True
-    if isinstance(value, types.ModuleType) or _is_package(value):
-        return True
-    if inspect.isroutine(value) or inspect.isbuiltin(value) or inspect.ismethod(value):
-        return True
-    if inspect.isclass(value) or isinstance(value, type):
-        return True
-    builtins_exit = getattr(builtins, "exit", None)
-    builtins_quit = getattr(builtins, "quit", None)
-    if value is builtins_exit or value is builtins_quit:
-        return True
-    return False
-
-
-def _iter_saveable_objects():
-    for name, value in sorted(__main__.__dict__.items()):
-        if _is_excluded(name, value):
-            continue
-        yield name, value
-
-
-def _serialize_object(path: Path, value):
-    if isinstance(value, np.ndarray):
-        with path.open("wb") as handle:
-            np.save(handle, value, allow_pickle=False)
-        return "npy"
-    with path.open("wb") as handle:
-        pickle.dump(value, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    return "pickle"
-
-
-def _deserialize_object(path: Path, serializer):
-    if serializer == "npy":
-        with path.open("rb") as handle:
-            return np.load(handle, allow_pickle=False)
-    if serializer == "pickle":
-        with path.open("rb") as handle:
-            return pickle.load(handle)
-    raise ValueError(f"Unknown Hyde serializer {serializer!r}.")
-
-
-def _write_manifest(project_dir: Path, object_entries):
-    manifest_path = project_dir / "manifest.toml"
-    project_name = project_dir.name[:-3] if project_dir.name.endswith(".hy") else project_dir.name
-    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    manifest = {
-        "format_version": FORMAT_VERSION,
-        "project_name": project_name,
-        "saved_at": timestamp,
-        "objects": object_entries,
-    }
-    with manifest_path.open("wb") as handle:
-        tomli_w.dump(manifest, handle)
-
-
-def _read_manifest(project_dir: Path):
-    manifest_path = project_dir / "manifest.toml"
-    if not manifest_path.exists():
-        return {"objects": []}
-    with manifest_path.open("rb") as handle:
-        return tomllib.load(handle)
-
-
 def new_project(path, load=True):
     """
     Creates a new empty Hyde project at the specified path and optionally injects it as the active session.
     """
-    project_dir = _project_dir(path)
+    project_dir = project_tools.resolve_project_dir(path)
     if project_dir.exists():
         raise RuntimeError(f"Cannot create new project: '{project_dir}' already exists.")
-    
-    _ensure_project_dirs(project_dir)
-    _write_manifest(project_dir, [])
-    
-    master_path = project_dir / "procedures" / "master.py"
-    with master_path.open("w", encoding="utf-8") as f:
-        f.write('"""Master initialization script for Hyde project."""\n\n')
+
+    project_tools.copy_project_template(project_dir)
     
     if load:
         load_project(path=str(project_dir))
 
 
-def save_project(path=None, mode="save"):
+def save_project(path=None, mode="save", overwrite=False):
     """
     Save the current kernel namespace into a Hyde project package.
 
     Args:
         path (str, optional): Target `.hy` project directory. Defaults to the
-            current working directory inside the Hyde-managed kernel if mode="save".
+            active Hyde project when ``mode="save"``.
         mode (str): One of "save", "copy", or "save_as".
+        overwrite (bool): Allow replacing an existing target for ``save_as`` or ``copy``.
     """
     if mode not in ("save", "copy", "save_as"):
         raise ValueError("save_project mode must be 'save', 'copy', or 'save_as'")
@@ -156,12 +69,26 @@ def save_project(path=None, mode="save"):
     if mode in ("save_as", "copy") and path is None:
         raise ValueError(f"Path required for mode={mode!r}.")
         
-    project_dir = _project_dir(path)
+    global HYDE_PROJECT_DIR
+
+    source_project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR)
+    project_dir = project_tools.resolve_project_dir(
+        HYDE_PROJECT_DIR if mode == "save" and path is None else path
+    )
     errors = []
     object_entries = []
     success = True
     try:
-        _ensure_project_dirs(project_dir)
+        if mode in ("save_as", "copy") and project_dir != source_project_dir:
+            if project_dir.exists() and not project_dir.is_dir():
+                if not overwrite:
+                    raise RuntimeError(f"Target path already exists: '{project_dir}'.")
+                project_dir.unlink()
+            elif project_dir.exists() and any(project_dir.iterdir()) and not overwrite:
+                raise RuntimeError(f"Target project already exists and is not empty: '{project_dir}'.")
+        project_tools.ensure_project_dirs(project_dir)
+        if mode in ("save_as", "copy") and project_dir != source_project_dir:
+            project_tools.copy_project_procedures(source_project_dir, project_dir)
         data_dir = project_dir / "data"
         if data_dir.exists():
             for child in data_dir.iterdir():
@@ -170,12 +97,12 @@ def save_project(path=None, mode="save"):
                 elif child.is_dir():
                     shutil.rmtree(child)
 
-        for name, value in _iter_saveable_objects():
+        for name, value in project_tools.iter_saveable_objects():
             serializer = "npy" if isinstance(value, np.ndarray) else "pickle"
             suffix = ".npy" if serializer == "npy" else ".pkl"
             relpath = Path("data") / f"{name}{suffix}"
             try:
-                actual_serializer = _serialize_object(project_dir / relpath, value)
+                actual_serializer = project_tools.serialize_object(project_dir / relpath, value)
                 object_entries.append(
                     {
                         "name": name,
@@ -187,7 +114,14 @@ def save_project(path=None, mode="save"):
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
 
-        _write_manifest(project_dir, object_entries)
+        project_tools.write_manifest(project_dir, object_entries)
+        if mode == "save":
+            HYDE_PROJECT_DIR = str(project_dir)
+        if mode == "save_as" and project_dir != source_project_dir:
+            os.chdir(project_dir)
+            HYDE_PROJECT_DIR = str(project_dir)
+            if HYDE_GUI:
+                request_project_load(str(project_dir))
     except Exception as exc:
         success = False
         errors.append(str(exc))
@@ -212,18 +146,26 @@ def load_project(path=None):
 
     Args:
         path (str, optional): Source `.hy` project directory. Defaults to the
-            current working directory inside the Hyde-managed kernel.
+            active Hyde project.
     """
-    project_dir = _project_dir(path)
-    
-    if HYDE_GUI:
-        publish_project_state_result("purge", str(project_dir))
-        
+    global HYDE_PROJECT_DIR
+
+    project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR if path is None else path)
+    current_project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR)
     errors = []
     loaded = 0
     success = True
     try:
-        manifest = _read_manifest(project_dir)
+        from .features.hyde_features import execute_procedures_bootstrap
+
+        execute_procedures_bootstrap(
+            str(project_dir),
+            os.path.dirname(HYDE_DIR),
+            reset_namespace=(project_dir != current_project_dir),
+            enable_gui_mode=HYDE_GUI,
+        )
+        HYDE_PROJECT_DIR = str(project_dir)
+        manifest = project_tools.read_manifest(project_dir)
         for entry in manifest.get("objects", []):
             name = entry["name"]
             serializer = entry["serializer"]
@@ -232,7 +174,7 @@ def load_project(path=None):
                 errors.append(f"{name}: missing file {object_path}")
                 continue
             try:
-                __main__.__dict__[name] = _deserialize_object(object_path, serializer)
+                __main__.__dict__[name] = project_tools.deserialize_object(object_path, serializer)
                 loaded += 1
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
@@ -241,6 +183,8 @@ def load_project(path=None):
         errors.append(str(exc))
         
     if HYDE_GUI:
+        if success:
+            request_project_load(str(project_dir))
         publish_project_state_result(
             "load",
             str(project_dir),

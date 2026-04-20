@@ -29,6 +29,19 @@ def signal_open_table(names, target, title=None):
         pass
 
 
+def request_project_load(path):
+    """
+    Ask the GUI to activate a project and update GUI-only state.
+    """
+    try:
+        tree = ProcessTree.instance()
+        if tree is None or not hasattr(tree, "to_parent"):
+            return
+        tree.to_parent.put(["PROJECT_LOAD_REQUEST", {"path": path}])
+    except Exception:
+        return
+
+
 def push_table_data(names, request_id):
     """
     Fetch structured table data and push it to the parent executor.

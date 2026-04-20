@@ -131,7 +131,12 @@ def is_eligible_for_table(metadata):
     return is_array and is_numeric and ndim == 1
 
 
-def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=False):
+def execute_procedures_bootstrap(
+    project_dir,
+    hyde_source_root,
+    reset_namespace=False,
+    enable_gui_mode=True,
+):
     import os
     import sys
     import importlib
@@ -165,7 +170,8 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
             del sys.modules[name]
             
     import hyde
-    hyde.gui_mode(True)
+    hyde.gui_mode(enable_gui_mode)
+    hyde.HYDE_PROJECT_DIR = os.path.abspath(project_dir)
     import hyde.table_macros
     hyde.table_macros.clear_table_macros()
     
@@ -190,7 +196,7 @@ def format_procedures_bootstrap_code(project_dir, hyde_source_root, reset_namesp
         f"if {hyde_source_root!r} not in sys.path:\n"
         f"    sys.path.insert(0, {hyde_source_root!r})\n"
         "from hyde.features.hyde_features import execute_procedures_bootstrap\n"
-        f"execute_procedures_bootstrap({project_dir!r}, {hyde_source_root!r}, reset_namespace={reset_namespace})\n"
+        f"execute_procedures_bootstrap({project_dir!r}, {hyde_source_root!r}, reset_namespace={reset_namespace}, enable_gui_mode=True)\n"
     )
 
 
