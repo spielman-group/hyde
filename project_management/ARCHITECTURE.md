@@ -94,12 +94,12 @@ example.hy/
 
 ### Explicit Initialization & Synchronization
 To ensure "Explicit is better than Implicit," Hyde enforces a strict initialization sequence:
-1. **Bootstrap**: Upon startup or project load, the GUI ensures a project structure exists.
-2. **Package Initialization**: The execution layer imports `procedures` from `procedures/__init__.py` in the kernel namespace to establish the environment after the GUI configures the active project.
-3. **Project-Switch Reset**: When the active `.hy` project changes, the execution layer resets the kernel namespace back to Hyde's clean baseline for that session before loading the new project's procedures.
-4. **Kernel-State Restore**: After `procedures/__init__.py` runs, the GUI executes visible `hyde.load_project(...)` / `hyde.save_project(...)` driven persistence so persisted kernel objects override same-name procedure outputs.
-5. **GUI Session Restore**: Once kernel state is restored, the GUI reapplies `session.toml` to reopen tables and restore window layout, filters, and visible command history. If the session file is malformed or missing, the GUI warns and continues with kernel-state restore already complete.
-6. **Run-on-Save**: Monitoring of `procedures/__init__.py` and other procedure files is a GUI-process responsibility. The GUI owns `labscript_utils.filewatcher.FileWatcher` and dispatches the canonical package initialization path through a lightweight runtime-helper thread when watched `.py` files change.
+1. **No-Project Startup**: On startup without a CLI project path, the GUI enters an explicit no-project state. The kernel is running and `import hyde` has already been performed with `hyde.HYDE_GUI = True`, but no project is active yet.
+2. **Authoritative Project Load**: Visible project activation uses `hyde.load_project(...)` in the kernel. That public command clears `hyde.HYDE_PROJECT_DIR`, signals the GUI into no-project state, resets the kernel namespace to Hyde's clean baseline, bootstraps `procedures/__init__.py`, restores saved objects, and then signals GUI project activation.
+3. **Project-Switch Reset**: Loading any `.hy` project, including reloading the current one, resets the kernel namespace back to Hyde's clean baseline for that session before the new project's procedures and saved objects are restored.
+4. **Kernel-State Restore**: During `hyde.load_project(...)`, persisted kernel objects are restored after `procedures/__init__.py` runs so saved objects override same-name procedure outputs.
+5. **GUI Session Restore**: After the kernel reports successful project load, the GUI reapplies `session.toml` to reopen tables and restore window layout, filters, and visible command history. If the session file is malformed or missing, the GUI warns and continues with kernel-state restore already complete.
+6. **Procedure Reload**: Monitoring of `procedures/__init__.py` and other procedure files is a GUI-process responsibility. The GUI owns `labscript_utils.filewatcher.FileWatcher` and dispatches the canonical package initialization path through a lightweight runtime-helper thread when watched `.py` files change.
 
 ### Procedure Browser
 The **Procedure Browser** (an MDI window) provides the primary UI for managing these scripts. It lists the contents of the `procedures/` directory and allows the user to open scripts in their system's default editor via double-click.
@@ -175,6 +175,7 @@ It provides:
 - Up arrow/down arrow to scroll through command history
 - syntax highlighting
 - ... all other expected IPython behaviors
+- `quit`, `quit()`, `exit`, and `exit()` mapped to `hyde.quit()` while `hyde.HYDE_GUI` is true, so terminal-driven quit follows Hyde's orderly GUI shutdown path rather than killing the kernel directly
 
 Unlike Igor Pro, there is no separate command entry box at the bottom, and no line numbers other than what IPython typically generates.
 

@@ -19,6 +19,7 @@
 - `procedures/__init__.py` execution is owned by the GUI-owned runtime helper, which uses its own non-UI Jupyter client connected to the same kernel.
 - Input masking for runtime-helper-driven `procedures/__init__.py` execution is implemented at the kernel protocol level with `silent=True`.
 - The command window is inaccessible in Hyde's explicit no-project state and becomes available only after a project is activated.
+- While `hyde.HYDE_GUI` is true, `quit` / `quit()` / `exit` / `exit()` are rebound in the kernel namespace to `hyde.quit()` so terminal-driven quit follows Hyde's orderly shutdown path.
 
 ## 22_command_window.png
 ![Command Window](22_command_window.png)

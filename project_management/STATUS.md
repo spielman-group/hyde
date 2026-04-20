@@ -73,6 +73,14 @@ Established the first end-to-end `.hy` package persistence flow:
 - **Save Semantics**: In-place project saves rewrite the current saved state rather than preserving an older synchronized copy.
 - **Project Switch Isolation**: Switching to a different `.hy` project resets the kernel namespace back to Hyde's clean baseline before the new project's procedures and saved state are loaded, so stale objects do not leak across projects.
 
+### 9. Shutdown and No-Project Behavior
+Refined Hyde's explicit inert-state and quit handling:
+- **Explicit No-Project State**: Startup without a CLI project enters a true no-project state with only `New Project`, `Load Project`, `Logging`, and `Quit` active.
+- **Kernel-Authoritative Quit**: `File -> Quit` sends visible `hyde.quit()`, which signals both `ENTER_NO_PROJECT_STATE` and `QUIT_REQUESTED` from the kernel before the GUI follows the normal close path.
+- **Terminal Quit Mapping**: In GUI mode, `quit`, `quit()`, `exit`, and `exit()` in the command window map to `hyde.quit()` instead of terminating the kernel directly.
+- **Status-Bar Project Feedback**: Project operations report progress in the status bar rather than through a separate modal working dialog.
+- **Forced Table Teardown**: Entering no-project state force-closes table windows without prompting to save recreation macros.
+
 
 ## Refinements & Bug Fixes
 - **Path Derivation**: Implemented absolute module-based path derivation to prevent CWD-drift issues between the GUI and child processes.
@@ -80,7 +88,7 @@ Established the first end-to-end `.hy` package persistence flow:
 - **UI UX**: Standardized the Logging window size (80x40 equivalent) and ensured it behaves correctly within the MDI container.
 
 ## Active Major Bugs
-- **`exit()` in Command Window**: Typing `exit()` in the embedded IPython command window kills the kernel and produces repeated `Kernel died, restarting` output along with repeated crash alerts. This is a major UX bug. Hyde needs a defined policy for terminal-driven kernel exit so that it is either intercepted, converted into an orderly application quit, or handled as a single controlled kernel restart event rather than a visible crash loop.
+- No currently documented major runtime/lifecycle bugs in this area.
 
 ## Documentation Updated
 - `project_management/PLAN.md`: Marked Phase II architectural refinements as complete.
@@ -90,4 +98,5 @@ Established the first end-to-end `.hy` package persistence flow:
 - `project_management/specs/IPC_PROTOCOL.md`: Updated to document the actual `spyder_api` namespace-view comm path.
 - `project_management/specs/table/SPEC.md` and `project_management/specs/new_table_dialog/SPEC.md`: Updated to match the implemented table workflow.
 - `project_management/specs/project_save_load/SPEC.md`: Added the initial `.hy` package save/load contract and the overwrite-confirmation rule for `Save As...`.
+- `project_management/specs/command_window/SPEC.md`: Updated to document GUI-mode rebinding of `quit` / `exit` to `hyde.quit()`.
 - `2025_04_12_OPUS_EVALUATION.md`: Noted the transition toward `zprocess.Event` for future state notifications.

@@ -76,6 +76,14 @@ GUI behavior:
 - hide project-owned windows
 - leave only `New Project`, `Load Project`, `Logging`, and `Quit` active
 
+#### `['QUIT_REQUESTED', None]`
+Sent when the kernel has already entered Hyde's inert state and requests that the GUI begin application shutdown.
+
+GUI behavior:
+- route into the normal main-window close path
+- keep `closeEvent` as the only GUI-side shutdown implementation
+- continue shutdown with timer-polled kernel-process exit rather than blocking waits on the GUI thread
+
 #### `['ACTIVATE_PROJECT', payload]`
 Sent when the kernel has completed a successful project activation and the GUI may adopt that project.
 
@@ -199,13 +207,16 @@ This is the user's visible interactive console session.
 This is the GUI-owned background control session.
 
 ### Responsibilities
-- execute `procedures/__init__.py` after project configuration
 - reload `procedures/__init__.py` when watched procedure files change
-- establish the kernel namespace in which project procedures run
 - trigger silent helper calls that cause the kernel to push structured table data back over `ProcessTree`
 - relay project-state completion messages emitted by kernel-side save/load helpers
 - trigger silent helper calls that publish the current table-macro registry after procedures reload
 - execute remote requests forwarded from the GUI-owned lyse-compatible listener
+
+Project load itself is not owned by the runtime helper. The authoritative visible
+`hyde.load_project(...)` command performs the project bootstrap and saved-object restore
+inside the kernel, then emits `ENTER_NO_PROJECT_STATE`, `ACTIVATE_PROJECT`, and
+`PROJECT_STATE_RESULT` messages as needed.
 
 ## External Lyse-Compatible Listener
 

@@ -92,8 +92,8 @@ Muted GUI micro-mutations and runtime-helper-owned silent execution are excluded
 ## Editable Operations
 
 ### Save
-- `File -> Save` writes `session.toml` and `terminal/history.py` in the active project.
-- It then executes visible `hyde.save_project()`.
+- `File -> Save` executes visible `hyde.save_project(mode="save")`.
+- After a successful kernel save result, the GUI rewrites `session.toml` and `terminal/history.py` in the active project.
 - The kernel rewrites `manifest.toml` and `data/*` in place for the current project.
 - Hyde does not preserve an older synchronized kernel-state snapshot alongside the new one.
 
@@ -101,20 +101,18 @@ Muted GUI micro-mutations and runtime-helper-owned silent execution are excluded
 - `File -> Save As...` prompts for a target `.hy` directory.
 - If the target exists and is non-empty, Hyde asks for confirmation before overwriting
   the existing project contents.
-- The GUI writes `session.toml` and `terminal/history.py` into that target.
 - It then executes visible `hyde.save_project(target, mode="save_as", overwrite=True)`.
-- After a successful save, Hyde switches to the new project and restores that saved session.
+- After a successful save, the GUI writes `session.toml` and `terminal/history.py` into that target, switches Hyde to the new project, and restores that saved session.
 
 ### Save Copy
 - `File -> Save Copy...` prompts for a target `.hy` directory.
 - If the target exists and is non-empty, Hyde asks for confirmation before overwriting
   the existing project contents.
-- The GUI writes `session.toml` and `terminal/history.py` into that target.
 - It then executes visible `hyde.save_project(target, mode="copy", overwrite=True)`.
-- After a successful copy, Hyde keeps the current project active.
+- After a successful copy, the GUI writes `session.toml` and `terminal/history.py` into that target and Hyde keeps the current project active.
 
 ### Load
-- Opening a project blocks the whole GUI with an application-modal busy state until the operation completes.
+- Opening a project reports progress in the main-window status bar while the visible command is in flight.
 - The visible command is `hyde.load_project(target)`.
 - `hyde.load_project(...)` always begins by setting `hyde.HYDE_PROJECT_DIR = None` and signaling the GUI into its no-project state.
 - The kernel then resets to Hyde's clean baseline, runs `procedures/__init__.py`, restores saved objects from `manifest.toml`, sets `HYDE_PROJECT_DIR` to the active project, and signals the GUI to activate that project.
@@ -138,17 +136,18 @@ visible-command contract for save/load.
 ## Synchronization
 
 ### Save order
-1. GUI writes `session.toml`
-2. GUI writes `terminal/history.py`
-3. GUI executes visible `hyde.save_project(...)`
-4. kernel writes `manifest.toml` and `data/*`
+1. GUI executes visible `hyde.save_project(...)`
+2. kernel writes `manifest.toml` and `data/*`
+3. kernel publishes the save result
+4. GUI writes `session.toml`
+5. GUI writes `terminal/history.py`
 
 ### Load order
 1. GUI executes visible `hyde.load_project(...)`
 2. kernel sets `HYDE_PROJECT_DIR = None`
 3. kernel signals the GUI into no-project state
 4. kernel resets to Hyde's clean baseline for that session
-5. runtime helper silently bootstraps `procedures/__init__.py`
+5. `hyde.load_project(...)` bootstraps `procedures/__init__.py` inside the kernel command path
 6. kernel restores saved objects into `__main__`
 7. kernel sets `HYDE_PROJECT_DIR` to the loaded project and signals GUI activation
 8. GUI restores `session.toml`
