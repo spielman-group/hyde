@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hyde Code Review"
+  short_description: "Hyde-specific architectural code review"
+  default_prompt: "Use $hyde-code-review to review this Hyde patch for bugs, regressions, overbuilt design, and command-path violations."
