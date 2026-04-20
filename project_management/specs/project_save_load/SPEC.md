@@ -8,18 +8,22 @@ scientific object serialization and restoration. File-menu actions therefore gen
 visible command strings such as:
 
 ```python
-import hyde
-hyde.save_state("/abs/path/to/project.hy")
+hyde.save_project("/abs/path/to/project.hy", mode="save_as")
 ```
 
 and
 
 ```python
-import hyde
-hyde.load_state("/abs/path/to/project.hy")
+hyde.load_project("/abs/path/to/project.hy")
 ```
 
 The GUI does not serialize live kernel objects directly.
+
+Hyde has an explicit no-project state. When no project is active:
+- `hyde.HYDE_PROJECT_DIR is None`
+- the GUI's `current_project_dir is None`
+- only `File -> New Project...`, `File -> Load Project...`, `Windows -> Logging`, and `File -> Quit` are active
+- the command, procedures, and data-browser windows remain inaccessible until a project is activated
 
 `File -> Save As...` prompts for confirmation before overwriting an existing non-empty
 target project.
@@ -31,7 +35,9 @@ preserving an older synchronized copy.
 ### Active
 - `File -> Save`
 - `File -> Save As...`
+- `File -> Save Copy...`
 - `File -> Load...`
+- `File -> New Project...`
 
 ### Excluded
 - automatic hidden kernel save/load calls that bypass visible command generation
@@ -48,7 +54,8 @@ example.hy/
 ├── terminal/
 │   └── history.py
 ├── procedures/
-│   └── __init__.py
+│   ├── __init__.py
+│   └── helpers.py
 └── data/
 ```
 
@@ -80,13 +87,13 @@ Records GUI/session state:
 ### `terminal/history.py`
 Stores visible command history only.
 
-Muted GUI micro-mutations and executor-owned silent execution are excluded.
+Muted GUI micro-mutations and runtime-helper-owned silent execution are excluded.
 
 ## Editable Operations
 
 ### Save
 - `File -> Save` writes `session.toml` and `terminal/history.py` in the active project.
-- It then executes visible `import hyde; hyde.save_state(...)`.
+- It then executes visible `hyde.save_project()`.
 - The kernel rewrites `manifest.toml` and `data/*` in place for the current project.
 - Hyde does not preserve an older synchronized kernel-state snapshot alongside the new one.
 
@@ -95,26 +102,37 @@ Muted GUI micro-mutations and executor-owned silent execution are excluded.
 - If the target exists and is non-empty, Hyde asks for confirmation before overwriting
   the existing project contents.
 - The GUI writes `session.toml` and `terminal/history.py` into that target.
-- It then executes visible `import hyde; hyde.save_state(target)`.
+- It then executes visible `hyde.save_project(target, mode="save_as", overwrite=True)`.
 - After a successful save, Hyde switches to the new project and restores that saved session.
 
+### Save Copy
+- `File -> Save Copy...` prompts for a target `.hy` directory.
+- If the target exists and is non-empty, Hyde asks for confirmation before overwriting
+  the existing project contents.
+- The GUI writes `session.toml` and `terminal/history.py` into that target.
+- It then executes visible `hyde.save_project(target, mode="copy", overwrite=True)`.
+- After a successful copy, Hyde keeps the current project active.
+
 ### Load
-- Opening a project configures the Watchdog for the selected package.
-- If the active project changes, the Watchdog resets the kernel namespace back to its clean Hyde baseline before loading the new project.
-- The Watchdog then runs `procedures/__init__.py`.
-- Once procedures are ready, the GUI executes visible `import hyde; hyde.load_state(...)`.
+- Opening a project blocks the whole GUI with an application-modal busy state until the operation completes.
+- The visible command is `hyde.load_project(target)`.
+- `hyde.load_project(...)` always begins by setting `hyde.HYDE_PROJECT_DIR = None` and signaling the GUI into its no-project state.
+- The kernel then resets to Hyde's clean baseline, runs `procedures/__init__.py`, restores saved objects from `manifest.toml`, sets `HYDE_PROJECT_DIR` to the active project, and signals the GUI to activate that project.
 - After kernel objects are restored, the GUI restores `session.toml`.
+- If load fails after entering no-project state, both the kernel and the GUI remain in no-project state.
 
 ## Command Generation
 
 ### GUI-generated visible commands
-- `import hyde; hyde.save_state("/abs/path/to/project.hy")`
-- `import hyde; hyde.load_state("/abs/path/to/project.hy")`
+- `hyde.save_project()`
+- `hyde.save_project("/abs/path/to/project.hy", mode="save_as", overwrite=True)`
+- `hyde.save_project("/abs/path/to/project.hy", mode="copy", overwrite=True)`
+- `hyde.load_project("/abs/path/to/project.hy")`
 
-### Executor-owned silent execution
+### Runtime-helper-owned silent execution
 - canonical `procedures/__init__.py` bootstrap
 
-The executor may coordinate completion/error reporting, but it does not replace the
+The runtime helper may coordinate completion/error reporting, but it does not replace the
 visible-command contract for save/load.
 
 ## Synchronization
@@ -122,15 +140,18 @@ visible-command contract for save/load.
 ### Save order
 1. GUI writes `session.toml`
 2. GUI writes `terminal/history.py`
-3. GUI executes visible `hyde.save_state(...)`
+3. GUI executes visible `hyde.save_project(...)`
 4. kernel writes `manifest.toml` and `data/*`
 
 ### Load order
-1. When the active project changes, the Watchdog resets the kernel namespace back to a clean Hyde baseline for that session
-2. The Watchdog silently bootstraps `procedures/__init__.py`
-3. GUI executes visible `hyde.load_state(...)`
-4. kernel restores saved objects into `__main__`
-5. GUI restores `session.toml`
+1. GUI executes visible `hyde.load_project(...)`
+2. kernel sets `HYDE_PROJECT_DIR = None`
+3. kernel signals the GUI into no-project state
+4. kernel resets to Hyde's clean baseline for that session
+5. runtime helper silently bootstraps `procedures/__init__.py`
+6. kernel restores saved objects into `__main__`
+7. kernel sets `HYDE_PROJECT_DIR` to the loaded project and signals GUI activation
+8. GUI restores `session.toml`
 
 Saved kernel objects override same-name objects produced by `procedures/__init__.py`.
 Objects from the previously loaded project do not survive a project switch unless they are recreated by procedures or restored from the new project's saved state.
@@ -160,6 +181,7 @@ Kernel objects are saved by exclusion, not whitelist.
 - Corrupt or missing `session.toml` is reported during GUI session restore without
   blocking kernel-state restore.
 - Missing data files referenced by `manifest.toml` are reported and skipped.
+- A failed load leaves Hyde in explicit no-project state rather than partially restoring the previous project.
 
 ## Explicit Exclusions
 - figure package persistence

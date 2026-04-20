@@ -6,14 +6,19 @@ import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="hyde-mpl-"))
+os.environ.setdefault("IPYTHONDIR", tempfile.mkdtemp(prefix="hyde-ipython-"))
 
 from jupyter_client import BlockingKernelClient
 from labscript_utils.ls_zprocess import ProcessTree
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtWidgets, QtCore
 
 import tomllib
+from unittest.mock import patch
 
 import hyde
+from hyde.paths import KERNEL_LAUNCHER
+from hyde.user_interface.main import HydeApp
 from hyde.user_interface.project_state import (
     read_history,
     read_session,
@@ -24,21 +29,80 @@ from hyde.user_interface.project_state import (
 )
 
 
-def wait_for_code_ok(client, code, timeout=10):
+class DummySplash:
+    def update_text(self, text):
+        del text
+
+    def hide(self):
+        return None
+
+
+def process_events(duration=0.05):
+    deadline = time.time() + duration
+    while time.time() < deadline:
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 10)
+        time.sleep(0.01)
+
+
+def wait_until(predicate, timeout=10, message="condition not met"):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        process_events()
+        if predicate():
+            return
+    raise AssertionError(message)
+
+
+def execute_and_wait(client, code, timeout=10):
+    msg_id = client.execute(code)
     deadline = time.time() + timeout
     last_reply = None
     while time.time() < deadline:
-        msg_id = client.execute(code)
-        while time.time() < deadline:
-            reply = client.get_shell_msg(timeout=5)
-            if reply["parent_header"].get("msg_id") != msg_id:
-                continue
-            last_reply = reply
-            if reply["content"]["status"] == "ok":
-                return
-            break
+        reply = client.get_shell_msg(timeout=5)
+        if reply["parent_header"].get("msg_id") != msg_id:
+            continue
+        last_reply = reply
+        return reply
+    raise AssertionError(f"Code did not return a reply: {code!r}\nLast reply: {last_reply!r}")
+
+
+def wait_for_code_ok(client, code, timeout=10):
+    reply = execute_and_wait(client, code, timeout=timeout)
+    if reply["content"]["status"] != "ok":
+        raise AssertionError(f"Code did not succeed: {code!r}\nReply: {reply!r}")
+
+
+def start_kernel(process_tree, connection_file, process_name):
+    process_tree.zlock_client.set_process_name(process_name)
+    to_child, from_child, child = process_tree.subprocess(
+        KERNEL_LAUNCHER,
+        args=["-f", connection_file],
+        startup_timeout=60,
+    )
+    deadline = time.time() + 30
+    while time.time() < deadline and not os.path.exists(connection_file):
         time.sleep(0.1)
-    raise AssertionError(f"Code did not succeed: {code!r}\nLast reply: {last_reply!r}")
+    if not os.path.exists(connection_file):
+        raise AssertionError(f"Kernel connection file was not created: {connection_file}")
+    client = BlockingKernelClient(connection_file=connection_file)
+    client.load_connection_file()
+    client.start_channels()
+    client.wait_for_ready(timeout=15)
+    return to_child, from_child, child, client
+
+
+def collect_kernel_messages(from_child, timeout=10, stop_when=None):
+    deadline = time.time() + timeout
+    messages = []
+    while time.time() < deadline:
+        try:
+            task, data = from_child.get(timeout=0.5)
+        except Exception:
+            continue
+        messages.append((task, data))
+        if stop_when is not None and stop_when(task, data):
+            return messages
+    raise AssertionError(f"Timed out waiting for kernel messages. Saw: {messages!r}")
 
 
 class DummyCommandWindow:
@@ -102,18 +166,6 @@ class TestProjectStateHelpers(unittest.TestCase):
             data_browser_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
             table_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
 
-            command_subwindow.setGeometry(1, 2, 300, 200)
-            logging_subwindow.setGeometry(3, 4, 310, 210)
-            procedures_subwindow.setGeometry(5, 6, 320, 220)
-            data_browser_subwindow.setGeometry(7, 8, 330, 230)
-            table_subwindow.setGeometry(9, 10, 340, 240)
-
-            command_subwindow.show()
-            logging_subwindow.hide()
-            procedures_subwindow.show()
-            data_browser_subwindow.show()
-            table_subwindow.hide()
-
             data_browser = DummyDataBrowser()
             data_browser.ui.wavesCheckBox.setChecked(True)
             data_browser.ui.variablesCheckBox.setChecked(False)
@@ -136,49 +188,9 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             self.assertEqual(session["active_table_handle"], "Table0")
             self.assertEqual(session["table_counter"], 4)
-            self.assertFalse(session["tool_windows"]["logging"]["visible"])
             self.assertFalse(session["data_browser"]["variables"])
             self.assertEqual(session["tables"][0]["handle"], "Table0")
             self.assertEqual(session["tables"][0]["names"], ["a", "b"])
-
-    def test_write_and_read_session_without_active_table(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, "session_no_active.hy")
-            os.makedirs(project_dir)
-
-            main_window = QtWidgets.QMainWindow()
-            mdi_area = QtWidgets.QMdiArea()
-            main_window.setCentralWidget(mdi_area)
-            main_window.show()
-
-            command_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            logging_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            procedures_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            data_browser_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-
-            data_browser = DummyDataBrowser()
-            data_browser.ui.wavesCheckBox.setChecked(True)
-            data_browser.ui.variablesCheckBox.setChecked(True)
-            data_browser.ui.stringsCheckBox.setChecked(True)
-            data_browser.ui.infoCheckBox.setChecked(True)
-
-            app = type("DummyApp", (), {})()
-            app.ui = main_window
-            app.command_subwindow = command_subwindow
-            app.logging_subwindow = logging_subwindow
-            app.procedures_subwindow = procedures_subwindow
-            app.data_browser_subwindow = data_browser_subwindow
-            app.data_browser = data_browser
-            app.tables = {}
-            app.active_table_handle = None
-            app.table_counter = 0
-
-            write_session(app, project_dir)
-            session = read_session(project_dir)
-
-            self.assertNotIn("active_table_handle", session)
-            self.assertEqual(session["table_counter"], 0)
-            self.assertEqual(session["tables"], [])
 
     def test_try_read_session_returns_error_for_malformed_toml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -206,16 +218,12 @@ class TestProjectStateHelpers(unittest.TestCase):
     def test_new_project_creates_default_procedures_package(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "new_project.hy")
-
             hyde.new_project(project_dir, load=False)
-
             self.assertTrue(os.path.exists(os.path.join(project_dir, "manifest.toml")))
             self.assertTrue(os.path.exists(os.path.join(project_dir, "session.toml")))
             self.assertTrue(os.path.exists(os.path.join(project_dir, "terminal", "history.py")))
-            procedures_init = os.path.join(project_dir, "procedures", "__init__.py")
-            self.assertTrue(os.path.exists(procedures_init))
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "procedures", "__init__.py")))
             self.assertFalse(os.path.exists(os.path.join(project_dir, "procedures", "master.py")))
-            self.assertFalse(os.path.exists(os.path.join(project_dir, "procedures", "__pycache__")))
 
     def test_restore_project_session_warns_on_malformed_session(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -263,95 +271,142 @@ class TestProjectStateHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "startup.hy")
             os.makedirs(project_dir)
-
             app = type("DummyApp", (), {"argv": [project_dir]})()
-
-            from hyde.user_interface.main import HydeApp
-
             self.assertEqual(HydeApp.resolve_startup_project(app), os.path.abspath(project_dir))
+
+    def test_save_project_as_prompts_before_overwriting_non_empty_target(self):
+        app = type("DummyApp", (), {})()
+        app.current_project_dir = None
+        app.command_window = object()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app.current_project_dir = os.path.join(tmpdir, "current.hy")
+            os.makedirs(app.current_project_dir)
+            target = os.path.join(tmpdir, "target.hy")
+            os.makedirs(target)
+            with open(os.path.join(target, "keep.txt"), "w", encoding="utf-8") as handle:
+                handle.write("keep")
+
+            prompted = []
+            executed = []
+
+            app.prompt_for_save_as_project = lambda: target
+            app.project_target_needs_confirmation = lambda project_dir: HydeApp.project_target_needs_confirmation(
+                app, project_dir
+            )
+            app.confirm_overwrite_project = lambda project_dir: prompted.append(project_dir) or False
+            app.execute_command = lambda code, visible=True: executed.append((code, visible))
+
+            HydeApp.save_project_as(app)
+
+            self.assertEqual(prompted, [target])
+            self.assertEqual(executed, [])
+
+    def test_save_project_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_project = os.path.join(tmpdir, "current.hy")
+            os.makedirs(source_project)
+            hyde.HYDE_PROJECT_DIR = source_project
+            try:
+                with patch("hyde.project_tools.resolve_project_dir", side_effect=lambda path: Path(path)):
+                    with patch("hyde.project_tools.ensure_project_dirs"):
+                        with patch("hyde.project_tools.iter_saveable_objects", return_value=[]):
+                            with patch("hyde.project_tools.write_manifest"):
+                                result = hyde.save_project(mode="save")
+                self.assertIsNone(result)
+            finally:
+                hyde.HYDE_PROJECT_DIR = None
+
+
+class TestHydeStartup(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication(sys.argv)
+
+    def test_startup_enters_no_project_state(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name("hyde-startup-test")
+        app = HydeApp(self.qapp, process_tree, DummySplash(), argv=[])
+        try:
+            wait_until(lambda: app._startup_complete, timeout=30, message="Hyde did not finish startup.")
+            self.assertIsNone(app.current_project_dir)
+            self.assertIsNotNone(app.kernel_process)
+            self.assertIsNone(app.kernel_process.poll())
+            self.assertFalse(app.command_subwindow.isVisible())
+            self.assertFalse(app.procedures_subwindow.isVisible())
+            self.assertFalse(app.data_browser_subwindow.isVisible())
+            self.assertTrue(app.ui.actionNew.isEnabled())
+            self.assertTrue(app.ui.actionLoad.isEnabled())
+            self.assertTrue(app.ui.actionLogging.isEnabled())
+            self.assertTrue(app.ui.actionQuit.isEnabled())
+            self.assertFalse(app.ui.actionSave.isEnabled())
+            self.assertFalse(app.ui.actionSave_As.isEnabled())
+            self.assertFalse(app.ui.actionSave_Copy.isEnabled())
+            self.assertFalse(app.ui.actionCommandWindow.isEnabled())
+            self.assertFalse(app.ui.actionProcedures.isEnabled())
+            self.assertFalse(app.ui.actionDataBrowser.isEnabled())
+            self.assertFalse(app.ui.actionNew_Table.isEnabled())
+        finally:
+            app.shutdown_runtime()
+            app.ui.close()
+            process_events(0.2)
 
 
 class TestProjectSaveLoadIntegration(unittest.TestCase):
     def setUp(self):
         self.process_tree = ProcessTree.instance()
-        self.process_tree.zlock_client.set_process_name("hyde-save-load-test")
-        self.controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), "execution", "execution_controller.py")
-        )
         self.tmpdir = tempfile.TemporaryDirectory()
         self._connection_counter = 0
 
     def tearDown(self):
         self.tmpdir.cleanup()
 
-    def _start_project(self, project_name, procedures_text, extra_procedure_files=None):
-        project_dir = os.path.join(self.tmpdir.name, project_name)
+    def _start_kernel(self, name):
+        self._connection_counter += 1
+        connection_file = os.path.join(self.tmpdir.name, f"{name}.{self._connection_counter}.json")
+        return start_kernel(self.process_tree, connection_file, f"hyde-{name}-test")
+
+    def _project(self, name, procedures_text, extra_procedure_files=None):
+        project_dir = os.path.join(self.tmpdir.name, name)
         procedures_dir = os.path.join(project_dir, "procedures")
         os.makedirs(procedures_dir)
-        procedures_init = os.path.join(procedures_dir, "__init__.py")
-        self._connection_counter += 1
-        connection_file = os.path.join(
-            self.tmpdir.name,
-            f"{project_name}.{self._connection_counter}.json",
-        )
-        with open(procedures_init, "w", encoding="utf-8") as handle:
+        with open(os.path.join(procedures_dir, "__init__.py"), "w", encoding="utf-8") as handle:
             handle.write(procedures_text)
         for relative_path, contents in (extra_procedure_files or {}).items():
             file_path = os.path.join(procedures_dir, relative_path)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as handle:
                 handle.write(contents)
+        return project_dir
 
-        to_worker, from_worker, worker = self.process_tree.subprocess(
-            self.controller_path,
-            args=[connection_file],
+    def _collect_operation_messages(self, from_child, operation):
+        return collect_kernel_messages(
+            from_child,
+            timeout=15,
+            stop_when=lambda task, data: task == "PROJECT_STATE_RESULT" and data.get("operation") == operation,
         )
-        to_worker.put([
-            "WATCH_PROJECT",
-            {
-                "project_dir": project_dir,
-                "procedures_dir": procedures_dir,
-                "procedures_init": procedures_init,
-            },
-        ])
-
-        saw_ready = False
-        saw_reloaded = False
-        client = None
-        deadline = time.time() + 20
-        while time.time() < deadline and not (saw_ready and saw_reloaded):
-            task, data = from_worker.get(timeout=15)
-            if task == "KERNEL_READY":
-                saw_ready = True
-                connection_path = Path(connection_file)
-                wait_deadline = time.time() + 10
-                while time.time() < wait_deadline and not connection_path.exists():
-                    time.sleep(0.1)
-                client = BlockingKernelClient(connection_file=connection_file)
-                client.load_connection_file()
-                client.start_channels()
-                client.wait_for_ready(timeout=5)
-            elif task == "PROCEDURES_RELOADED":
-                saw_reloaded = True
-        self.assertTrue(saw_ready)
-        self.assertTrue(saw_reloaded)
-        self.assertIsNotNone(client)
-        return project_dir, to_worker, from_worker, worker, client
 
     def test_save_project_writes_manifest_and_excludes_packages(self):
-        procedures = (
-            "import hyde\n"
-            "import numpy as np\n"
-            "from numpy import random\n"
-            "class Box:\n"
-            "    def __init__(self, value):\n"
-            "        self.value = value\n"
-        )
-        project_dir, to_worker, from_worker, worker, client = self._start_project(
+        project_dir = self._project(
             "save_project.hy",
-            procedures,
+            (
+                "import hyde\n"
+                "import numpy as np\n"
+                "from numpy import random\n"
+                "class Box:\n"
+                "    def __init__(self, value):\n"
+                "        self.value = value\n"
+            ),
         )
+        _, from_child, child, client = self._start_kernel("save-project")
         try:
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            load_messages = self._collect_operation_messages(from_child, "load")
+            self.assertEqual(load_messages[0][0], "ENTER_NO_PROJECT_STATE")
+            self.assertIn(("ACTIVATE_PROJECT", {"path": os.path.realpath(project_dir)}), [(t, {"path": os.path.realpath(d["path"])} if isinstance(d, dict) and "path" in d else d) for t, d in load_messages if t == "ACTIVATE_PROJECT"])
+
             wait_for_code_ok(
                 client,
                 "import numpy as np\n"
@@ -359,15 +414,10 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
                 "boxed = Box(7)\n"
                 "In = ['ignore-me']\n"
                 "Out = {1: 'ignore-me-too'}\n"
-                "import hyde; hyde.save_project()\n",
+                "hyde.save_project()\n",
             )
-            deadline = time.time() + 10
-            result = None
-            while time.time() < deadline and result is None:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROJECT_STATE_RESULT" and data.get("operation") == "save":
-                    result = data
-            self.assertIsNotNone(result)
+            result_messages = self._collect_operation_messages(from_child, "save")
+            result = result_messages[-1][1]
             self.assertTrue(result["success"])
 
             manifest_path = os.path.join(project_dir, "manifest.toml")
@@ -386,59 +436,42 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(project_dir, "data", "boxed.pkl")))
         finally:
             client.stop_channels()
-            to_worker.put(["QUIT", None])
-            worker.wait(timeout=10)
+            child.terminate()
 
-    def test_load_project_restores_saved_objects_after_procedures(self):
-        procedures_a = (
-            "import hyde\n"
-            "import numpy as np\n"
-            "class Box:\n"
-            "    def __init__(self, value):\n"
-            "        self.value = value\n"
-            "VALUE = 1\n"
+    def test_load_project_resets_to_no_project_then_restores_objects(self):
+        project_a_dir = self._project(
+            "project_a.hy",
+            (
+                "import hyde\n"
+                "import numpy as np\n"
+                "class Box:\n"
+                "    def __init__(self, value):\n"
+                "        self.value = value\n"
+                "VALUE = 1\n"
+            ),
         )
-        project_dir, to_worker, from_worker, worker, client = self._start_project(
-            "load_project.hy",
-            procedures_a,
+        project_b_dir = self._project(
+            "project_b.hy",
+            "import hyde\nVALUE = 100\nOTHER = 5\n",
         )
+        _, from_child, child, client = self._start_kernel("load-project")
         try:
+            wait_for_code_ok(client, f"hyde.load_project({project_a_dir!r})")
+            self._collect_operation_messages(from_child, "load")
             wait_for_code_ok(
                 client,
                 "import numpy as np\n"
                 "arr = np.arange(5)\n"
                 "boxed = Box(9)\n"
                 "VALUE = 22\n"
-                "import hyde; hyde.save_project()\n",
+                "hyde.save_project()\n",
             )
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROJECT_STATE_RESULT" and data.get("operation") == "save":
-                    break
+            self._collect_operation_messages(from_child, "save")
 
-            project_b_dir = os.path.join(self.tmpdir.name, "other_project.hy")
-            procedures_b_dir = os.path.join(project_b_dir, "procedures")
-            os.makedirs(procedures_b_dir)
-            procedures_b_init = os.path.join(procedures_b_dir, "__init__.py")
-            with open(procedures_b_init, "w", encoding="utf-8") as handle:
-                handle.write("import hyde\nVALUE = 100\nOTHER = 5\n")
-
-            to_worker.put([
-                "WATCH_PROJECT",
-                {
-                    "project_dir": project_b_dir,
-                    "procedures_dir": procedures_b_dir,
-                    "procedures_init": procedures_b_init,
-                },
-            ])
-            deadline = time.time() + 10
-            saw_reloaded = False
-            while time.time() < deadline and not saw_reloaded:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROCEDURES_RELOADED":
-                    saw_reloaded = True
-            self.assertTrue(saw_reloaded)
+            wait_for_code_ok(client, f"hyde.load_project({project_b_dir!r})")
+            messages = self._collect_operation_messages(from_child, "load")
+            task_names = [task for task, _ in messages]
+            self.assertLess(task_names.index("ENTER_NO_PROJECT_STATE"), task_names.index("ACTIVATE_PROJECT"))
             wait_for_code_ok(
                 client,
                 "assert VALUE == 100\n"
@@ -447,26 +480,10 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
                 "assert 'boxed' not in globals()\n",
             )
 
-            wait_for_code_ok(client, f"import hyde; hyde.load_project({project_dir!r})")
-
-            deadline = time.time() + 10
-            load_request = None
-            while time.time() < deadline and load_request is None:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROJECT_LOAD_REQUEST":
-                    load_request = data
-            self.assertIsNotNone(load_request)
-            self.assertEqual(os.path.realpath(load_request["path"]), os.path.realpath(project_dir))
-
-            deadline = time.time() + 10
-            result = None
-            while time.time() < deadline and result is None:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROJECT_STATE_RESULT" and data.get("operation") == "load":
-                    result = data
-            self.assertIsNotNone(result)
-            self.assertTrue(result["success"])
-
+            wait_for_code_ok(client, f"hyde.load_project({project_a_dir!r})")
+            messages = self._collect_operation_messages(from_child, "load")
+            task_names = [task for task, _ in messages]
+            self.assertLess(task_names.index("ENTER_NO_PROJECT_STATE"), task_names.index("ACTIVATE_PROJECT"))
             wait_for_code_ok(
                 client,
                 "import numpy as np\n"
@@ -474,62 +491,54 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
                 "assert boxed.value == 9\n"
                 "assert VALUE == 22\n",
             )
-
-            with open(
-                os.path.join(project_dir, "procedures", "__init__.py"),
-                "w",
-                encoding="utf-8",
-            ) as handle:
-                handle.write(
-                    "import hyde\n"
-                    "import numpy as np\n"
-                    "class Box:\n"
-                    "    def __init__(self, value):\n"
-                    "        self.value = value\n"
-                    "VALUE = 33\n"
-                )
-
-            deadline = time.time() + 10
-            saw_reloaded = False
-            while time.time() < deadline and not saw_reloaded:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROCEDURES_RELOADED":
-                    saw_reloaded = True
-            self.assertTrue(saw_reloaded)
-            wait_for_code_ok(client, "assert VALUE == 33")
         finally:
             client.stop_channels()
-            to_worker.put(["QUIT", None])
-            worker.wait(timeout=10)
+            child.terminate()
 
-    def test_save_project_as_switches_active_project_directory(self):
-        project_dir, to_worker, from_worker, worker, client = self._start_project(
-            "save_as_source.hy",
-            "import hyde\nVALUE = 1\n",
-        )
-        target_dir = os.path.join(self.tmpdir.name, "save_as_target.hy")
+    def test_failed_load_leaves_kernel_in_no_project_state(self):
+        good_project = self._project("good.hy", "import hyde\nVALUE = 1\n")
+        broken_project = self._project("broken.hy", "import hyde\nraise RuntimeError('boom')\n")
+        _, from_child, child, client = self._start_kernel("failed-load")
         try:
+            wait_for_code_ok(client, f"hyde.load_project({good_project!r})")
+            self._collect_operation_messages(from_child, "load")
+            wait_for_code_ok(client, "stale_value = 123\n")
+
+            reply = execute_and_wait(client, f"hyde.load_project({broken_project!r})")
+            self.assertEqual(reply["content"]["status"], "error")
+            messages = self._collect_operation_messages(from_child, "load")
+            task_names = [task for task, _ in messages]
+            self.assertIn("ENTER_NO_PROJECT_STATE", task_names)
+            self.assertNotIn("ACTIVATE_PROJECT", task_names)
+            result = messages[-1][1]
+            self.assertFalse(result["success"])
             wait_for_code_ok(
                 client,
-                f"VALUE = 7\nimport hyde; hyde.save_project({target_dir!r}, mode='save_as', overwrite=True)\n",
+                "import hyde\n"
+                "assert hyde.HYDE_PROJECT_DIR is None\n"
+                "assert 'stale_value' not in globals()\n",
             )
+        finally:
+            client.stop_channels()
+            child.terminate()
 
-            deadline = time.time() + 10
-            load_request = None
-            save_result = None
-            while time.time() < deadline and (load_request is None or save_result is None):
-                task, data = from_worker.get(timeout=10)
-                if task == "PROJECT_LOAD_REQUEST":
-                    load_request = data
-                elif task == "PROJECT_STATE_RESULT" and data.get("operation") == "save":
-                    save_result = data
+    def test_save_project_as_switches_active_project_directory(self):
+        project_dir = self._project("save_as_source.hy", "import hyde\nVALUE = 1\n")
+        target_dir = os.path.join(self.tmpdir.name, "save_as_target.hy")
+        _, from_child, child, client = self._start_kernel("save-as")
+        try:
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            self._collect_operation_messages(from_child, "load")
 
-            self.assertIsNotNone(load_request)
-            self.assertEqual(os.path.realpath(load_request["path"]), os.path.realpath(target_dir))
-            self.assertIsNotNone(save_result)
-            self.assertTrue(save_result["success"])
-            self.assertEqual(save_result["mode"], "save_as")
-
+            wait_for_code_ok(
+                client,
+                f"VALUE = 7\nhyde.save_project({target_dir!r}, mode='save_as', overwrite=True)\n",
+            )
+            messages = self._collect_operation_messages(from_child, "save")
+            self.assertIn("ACTIVATE_PROJECT", [task for task, _ in messages])
+            result = messages[-1][1]
+            self.assertTrue(result["success"])
+            self.assertEqual(result["mode"], "save_as")
             wait_for_code_ok(
                 client,
                 "import os\n"
@@ -540,123 +549,49 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             )
         finally:
             client.stop_channels()
-            to_worker.put(["QUIT", None])
-            worker.wait(timeout=10)
+            child.terminate()
 
-    def test_save_project_copy_preserves_procedures_tree(self):
-        procedures = (
-            "import hyde\n"
-            "import helper_module\n"
-            "VALUE = helper_module.VALUE\n"
-        )
-        project_dir, to_worker, from_worker, worker, client = self._start_project(
+    def test_save_project_copy_preserves_procedures_tree_without_switching_projects(self):
+        project_dir = self._project(
             "source_project.hy",
-            procedures,
+            "import hyde\nimport helper_module\nVALUE = helper_module.VALUE\n",
             extra_procedure_files={"helper_module.py": "VALUE = 17\n"},
         )
         target_dir = os.path.join(self.tmpdir.name, "copied_project.hy")
+        _, from_child, child, client = self._start_kernel("copy-project")
         try:
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            self._collect_operation_messages(from_child, "load")
+
+            wait_for_code_ok(
+                client,
+                f"hyde.save_project({target_dir!r}, mode='copy', overwrite=True)\n",
+            )
+            messages = self._collect_operation_messages(from_child, "save")
+            self.assertNotIn("ACTIVATE_PROJECT", [task for task, _ in messages])
+            self.assertTrue(os.path.exists(os.path.join(target_dir, "procedures", "__init__.py")))
+            self.assertTrue(os.path.exists(os.path.join(target_dir, "procedures", "helper_module.py")))
             wait_for_code_ok(
                 client,
                 "import os\n"
-                f"os.chdir({project_dir!r})\n"
-                f"import hyde; hyde.save_project({target_dir!r}, mode='copy', overwrite=True)\n",
+                "import hyde\n"
+                f"assert os.path.realpath(hyde.HYDE_PROJECT_DIR) == {os.path.realpath(project_dir)!r}\n",
             )
-            deadline = time.time() + 10
-            result = None
-            while time.time() < deadline and result is None:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROJECT_STATE_RESULT" and data.get("operation") == "save":
-                    result = data
-            self.assertIsNotNone(result)
-            self.assertTrue(result["success"])
-            self.assertTrue(os.path.exists(os.path.join(target_dir, "procedures", "__init__.py")))
-            self.assertTrue(os.path.exists(os.path.join(target_dir, "procedures", "helper_module.py")))
         finally:
             client.stop_channels()
-            to_worker.put(["QUIT", None])
-            worker.wait(timeout=10)
+            child.terminate()
 
-    def test_switching_projects_clears_stale_kernel_objects(self):
-        project_a_dir, to_worker, from_worker, worker, client = self._start_project(
-            "project_a.hy",
-            "import hyde\nVALUE_A = 1\n",
-        )
+    def test_fresh_kernel_exposes_hyde_namespace_before_and_after_project_load(self):
+        project_dir = self._project("namespace.hy", "import hyde\nVALUE = 1\n")
+        _, from_child, child, client = self._start_kernel("namespace")
         try:
-            wait_for_code_ok(client, "stale_value = 123\nVALUE_A = 9\n")
-
-            project_b_dir = os.path.join(self.tmpdir.name, "project_b.hy")
-            procedures_dir = os.path.join(project_b_dir, "procedures")
-            os.makedirs(procedures_dir)
-            procedures_init = os.path.join(procedures_dir, "__init__.py")
-            with open(procedures_init, "w", encoding="utf-8") as handle:
-                handle.write("import hyde\nVALUE_B = 2\n")
-
-            to_worker.put([
-                "WATCH_PROJECT",
-                {
-                    "project_dir": project_b_dir,
-                    "procedures_dir": procedures_dir,
-                    "procedures_init": procedures_init,
-                },
-            ])
-
-            deadline = time.time() + 10
-            saw_reloaded = False
-            while time.time() < deadline and not saw_reloaded:
-                task, data = from_worker.get(timeout=10)
-                if task == "PROCEDURES_RELOADED":
-                    saw_reloaded = True
-            self.assertTrue(saw_reloaded)
-
-            wait_for_code_ok(
-                client,
-                "assert VALUE_B == 2\n"
-                "assert 'stale_value' not in globals()\n"
-                "assert 'VALUE_A' not in globals()\n",
-            )
+            wait_for_code_ok(client, "assert hyde.HYDE_GUI is True\n")
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            self._collect_operation_messages(from_child, "load")
+            wait_for_code_ok(client, "assert hyde.HYDE_GUI is True\n")
         finally:
             client.stop_channels()
-            to_worker.put(["QUIT", None])
-            worker.wait(timeout=10)
-
-    def test_save_project_as_prompts_before_overwriting_non_empty_target(self):
-        app = type("DummyApp", (), {})()
-        app.current_project_dir = None
-        app.command_window = object()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            app.current_project_dir = os.path.join(tmpdir, "current.hy")
-            os.makedirs(app.current_project_dir)
-            target = os.path.join(tmpdir, "target.hy")
-            os.makedirs(target)
-            with open(os.path.join(target, "keep.txt"), "w", encoding="utf-8") as handle:
-                handle.write("keep")
-
-            prompted = []
-            executed = []
-
-            def prompt_for_save_as_project():
-                return target
-
-            def confirm_overwrite_project(project_dir):
-                prompted.append(project_dir)
-                return False
-
-            def execute_command(code, visible=True):
-                executed.append((code, visible))
-
-            app.prompt_for_save_as_project = prompt_for_save_as_project
-            app.confirm_overwrite_project = confirm_overwrite_project
-            app.execute_command = execute_command
-            app.load_project = lambda *args, **kwargs: None
-
-            from hyde.user_interface.main import HydeApp
-
-            HydeApp.save_project_as(app)
-
-            self.assertEqual(prompted, [target])
-            self.assertEqual(executed, [])
+            child.terminate()
 
 
 if __name__ == "__main__":

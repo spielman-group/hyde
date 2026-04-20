@@ -17,7 +17,8 @@ from qtutils.qt import QtWidgets, QtGui
 
 # Framework error hooks
 splash.update_text('importing labscript mechanics')
-import labscript_utils.excepthook
+if os.environ.get("HYDE_DISABLE_LABSCRIPT_ERROR_DIALOGS") != "1":
+    import labscript_utils.excepthook
 from labscript_utils.setup_logging import setup_logging
 setup_logging('hyde')
 from labscript_utils.ls_zprocess import ProcessTree
@@ -63,11 +64,11 @@ if __name__ == '__main__':
     except AttributeError:
         pass # Handle if splash doesn't have this method defined natively
     
-    splash.update_text('Waiting for Watchdog and spyder_kernels spin-up...')
+    splash.update_text('Waiting for spyder_kernels spin-up...')
     
     hyde_instance = HydeApp(qapplication, process_tree, splash, argv=sys.argv[1:])
     
-    # splash.hide() and hyde_instance.ui.show() are now explicitly handled 
-    # dynamically by HydeApp when KERNEL_READY is caught from the ProcessTree queue.
+    # splash.hide() and hyde_instance.ui.show() are handled by HydeApp once the
+    # direct kernel child is ready.
     
     sys.exit(qapplication.exec_())

@@ -40,9 +40,9 @@ hyde/
 ├── hyde/                      # Main package
 │   ├── __init__.py            # Public exports
 │   ├── __main__.py            # CLI entry point / MDI Launch
-│   ├── execution/             # Backend Control Layer
+│   ├── execution/             # Kernel launch and narrow IPC helpers
 │   │   ├── __init__.py
-│   │   └── execution_controller.py # The Watchdog Process
+│   │   └── kernel_launcher.py
 │   └── user_interface/       # Per-window packages
 │       ├── main/
 │       │   ├── __init__.py
@@ -74,7 +74,7 @@ the Hyde package surface rather than through ad hoc GUI-only hooks. The table fe
 the first implemented example of this pattern, with `hyde.table(...)` serving as the
 kernel-facing entry point for table creation/appending and the recreation decorator used
 to register saved table macros. Project persistence now follows the same pattern with
-public `hyde.save_state(...)` and `hyde.load_state(...)` helpers.
+public `hyde.save_project(...)` and `hyde.load_project(...)` helpers.
 
 ## Project and Persistence
 
@@ -97,9 +97,9 @@ To ensure "Explicit is better than Implicit," Hyde enforces a strict initializat
 1. **Bootstrap**: Upon startup or project load, the GUI ensures a project structure exists.
 2. **Package Initialization**: The execution layer imports `procedures` from `procedures/__init__.py` in the kernel namespace to establish the environment after the GUI configures the active project.
 3. **Project-Switch Reset**: When the active `.hy` project changes, the execution layer resets the kernel namespace back to Hyde's clean baseline for that session before loading the new project's procedures.
-4. **Kernel-State Restore**: After `procedures/__init__.py` runs, the GUI executes visible `hyde.load_state(...)` so persisted kernel objects override same-name procedure outputs.
+4. **Kernel-State Restore**: After `procedures/__init__.py` runs, the GUI executes visible `hyde.load_project(...)` / `hyde.save_project(...)` driven persistence so persisted kernel objects override same-name procedure outputs.
 5. **GUI Session Restore**: Once kernel state is restored, the GUI reapplies `session.toml` to reopen tables and restore window layout, filters, and visible command history. If the session file is malformed or missing, the GUI warns and continues with kernel-state restore already complete.
-6. **Run-on-Save**: Monitoring of `procedures/__init__.py` and other procedure files is an execution-side responsibility. The execution layer watches for relevant file changes and re-runs the canonical package initialization path when needed, using the suite's standard non-GUI file-watching approach (`labscript_utils.filewatcher.FileWatcher`, as in the BLACS connection table plugin).
+6. **Run-on-Save**: Monitoring of `procedures/__init__.py` and other procedure files is a GUI-process responsibility. The GUI owns `labscript_utils.filewatcher.FileWatcher` and dispatches the canonical package initialization path through a lightweight runtime-helper thread when watched `.py` files change.
 
 ### Procedure Browser
 The **Procedure Browser** (an MDI window) provides the primary UI for managing these scripts. It lists the contents of the `procedures/` directory and allows the user to open scripts in their system's default editor via double-click.
@@ -115,16 +115,15 @@ The **Procedure Browser** (an MDI window) provides the primary UI for managing t
 - `terminal/history.py` stores visible command history only
 - Human-readable settings use TOML or Python-literal history files
 
-## IPC: The 3-Process Model
+## IPC: The 2-Process Model
 
-Hyde operates across three distinct processes to ensure the GUI remains responsive and the scientific state remains authoritative and isolated:
+Hyde operates across two distinct processes plus one GUI-owned helper thread to ensure the GUI remains responsive and the scientific state remains authoritative and isolated:
 
-1. **Main Process (GUI):** Owns the `QMdiArea`, the `ProcessTree.instance()`, and the `JupyterClient` sockets.
-2. **Execution Controller (Watchdog):** A child process launched via `zprocess`. It monitors the kernel lifecycle and reports `KERNEL_READY` / `KERNEL_CRASHED` alerts.
-3. **The Kernel (spyder_kernels):** The isolated IPython engine.
+1. **Main Process (GUI):** Owns the `QMdiArea`, the `ProcessTree.instance()`, the visible command window, the `FileWatcher`, the lyse-compatible `ZMQServer`, and the runtime-helper queue/thread.
+2. **The Kernel (spyder_kernels):** The isolated IPython engine and the authoritative Python namespace.
 
 ### Communication Lanes
-- **Lane 1 (Control):** `zprocess.ProcessTree` handles application-level orchestration between the GUI and the Watchdog, along with narrow Hyde-owned relays such as table-open intents and structured table-data payloads.
+- **Lane 1 (Control):** `zprocess.ProcessTree` handles application-level orchestration between the GUI and the kernel, along with narrow Hyde-owned relays such as table-open intents and structured table-data payloads.
 - **Lane 2 (Execution):** Standard Jupyter ZMQ sockets and `comm` channels bridge the GUI directly to the Kernel for visible execution, background execution, and namespace metadata updates.
 
 ## Execution
@@ -135,7 +134,7 @@ The execution subprocess runs in a separate Python process using the `spyder_ker
 - Spyder namespace-view support for the Data Browser
 - Mature, well-tested architecture
 
-The `hyde/execution/kernel_launcher.py` entrypoint is the managed `ProcessTree` child and starts Spyder's kernel startup code in-process. Hyde does not insert a separate launcher-shim process between the Watchdog and the real kernel.
+The `hyde/execution/kernel_launcher.py` entrypoint is the managed `ProcessTree` child and starts Spyder's kernel startup code in-process. Hyde does not insert a separate controller or launcher-shim process between the GUI and the real kernel.
 
 The GUI sends raw Python code to the kernel for execution - there is no special GUI-to-kernel protocol.
 
@@ -193,9 +192,9 @@ The planned direction is a metadata-driven figure path in which the kernel remai
 ## Message Protocol
 
 Incoming message handling replicates the protocol defined in the `lyse` project. In
-particular, the executor owns a lyse-compatible remote listener on the existing
-`ports.lyse` labconfig entry. Its listener thread normalizes incoming agnostic-path
-payloads and queues them into the executor, and the watchdog loop translates them
+particular, the GUI owns a lyse-compatible remote listener on the existing
+`ports.lyse` labconfig entry. Its handler normalizes incoming agnostic-path
+payloads and queues them into the runtime helper, which translates them
 into visible kernel execution of `remote(...)`.
 
 ## Execution Helpers

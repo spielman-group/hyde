@@ -30,3 +30,15 @@ class CommandWindow(RichJupyterWidget):
 
     def restore_history_entries(self, entries):
         self._set_history(entries or [])
+
+    def shutdown(self):
+        if self.kernel_client is not None:
+            for channel_name in ("iopub_channel", "shell_channel", "stdin_channel", "control_channel"):
+                channel = getattr(self.kernel_client, channel_name, None)
+                if channel is not None and hasattr(channel, "close"):
+                    try:
+                        channel.close()
+                    except Exception:
+                        pass
+            self.kernel_client.stop_channels()
+            self.kernel_client = None

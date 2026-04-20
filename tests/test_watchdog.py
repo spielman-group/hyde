@@ -1,553 +1,441 @@
 import os
 import queue
-import sys
-import time
+import tempfile
 import threading
 import unittest
-import subprocess
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from labscript_utils.ls_zprocess import ProcessTree, get_config
-from jupyter_client import BlockingKernelClient
-from zprocess.clientserver import ZMQClient
-
 import hyde
-from hyde.execution.execution_controller import ExecutionWatchdog, RemoteListener
-from hyde.paths import CONNECTION_FILE
+from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
+from hyde.user_interface.main import HydeApp
+from hyde.user_interface.runtime_helper import RemoteRequestServer, RuntimeHelper
 
-class TestWatchdogArchitecture(unittest.TestCase):
+
+class FakeProcess:
+    def __init__(self, returncode=None):
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
+
+
+class FakeKernelClient:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, code, silent=True):
+        self.calls.append((code, silent))
+
+    def shutdown(self, reply=False):
+        self.calls.append(("shutdown", reply))
+
+
+class FakeClosableChannel:
+    def __init__(self, calls, name):
+        self.calls = calls
+        self.name = name
+
+    def close(self):
+        self.calls.append(("close_channel", self.name))
+
+
+class FakeApp:
+    def __init__(self):
+        self.calls = []
+        self.shutting_down = False
+
+    def open_table(self, names, target=None, visible_title=None):
+        self.calls.append(("open_table", list(names), target, visible_title))
+
+    def on_table_data(self, data):
+        self.calls.append(("table_data", data))
+
+    def enter_no_project_state(self):
+        self.calls.append(("enter_no_project_state",))
+
+    def activate_project(self, path):
+        self.calls.append(("activate_project", path))
+
+    def on_project_state_result(self, data):
+        self.calls.append(("project_state_result", data))
+
+    def update_table_macros(self, macros):
+        self.calls.append(("update_table_macros", list(macros)))
+
+    def request_gui_quit(self):
+        self.calls.append(("request_gui_quit",))
+
+    def on_kernel_crashed(self):
+        self.calls.append(("kernel_crashed",))
+
+    def on_kernel_ready(self):
+        self.calls.append(("kernel_ready",))
+
+
+class FakeStatusBar:
+    def __init__(self):
+        self.messages = []
+        self.cleared = 0
+
+    def showMessage(self, message, timeout=0):
+        self.messages.append((message, timeout))
+
+    def clearMessage(self):
+        self.cleared += 1
+
+
+class FakeJoinThread:
+    def join(self, timeout=None):
+        self.timeout = timeout
+
+    def is_alive(self):
+        return False
+
+
+class TestRuntimeArchitecture(unittest.TestCase):
     def test_kernel_launcher_runs_spyder_in_process(self):
         launcher_path = Path(os.path.dirname(hyde.__file__)) / "execution" / "kernel_launcher.py"
-        source = launcher_path.read_text()
+        source = launcher_path.read_text(encoding="utf-8")
 
         self.assertIn("from spyder_kernels.console.start import main", source)
+        self.assertIn("ProcessTree.connect_to_parent()", source)
         self.assertIn("main()", source)
         self.assertNotIn("subprocess.Popen", source)
 
-    def wait_for_code_ok(self, client, code, timeout=5):
-        deadline = time.time() + timeout
-        last_reply = None
-        while time.time() < deadline:
-            msg_id = client.execute(code)
-            reply = client.get_shell_msg(timeout=5)
-            if reply['parent_header'].get('msg_id') != msg_id:
-                continue
-            last_reply = reply
-            if reply['content']['status'] == 'ok':
-                return
-            time.sleep(0.1)
-        self.fail(f"Code did not succeed within {timeout} seconds: {code!r}\nLast reply: {last_reply}")
-
-    def drain_iopub(self, client, timeout=0.2):
-        while True:
-            try:
-                client.get_iopub_msg(timeout=timeout)
-            except Exception:
-                return
-
-    def collect_iopub_until_idle(self, client, timeout=5):
-        deadline = time.time() + timeout
-        messages = []
-        saw_busy = False
-        while time.time() < deadline:
-            try:
-                msg = client.get_iopub_msg(timeout=0.5)
-            except Exception:
-                continue
-            messages.append(msg)
-            if msg['msg_type'] != 'status':
-                continue
-            state = msg['content'].get('execution_state')
-            if state == 'busy':
-                saw_busy = True
-            elif saw_busy and state == 'idle':
-                return messages
-        self.fail(f"Did not observe execution idle state within {timeout} seconds. Messages: {messages!r}")
-
-    def test_kernel_lifecycle_and_execution(self):
-        """
-        Tests the full Phase II / III Architecture:
-        1. Spins up the execution watchdog through ProcessTree.
-        2. Waits for KERNEL_READY synchronous alert from the background.
-        3. Connects an isolated BlockingKernelClient directly to the kernel-hyde.json port schema.
-        4. Injects a raw string payload to execute.
-        5. Gracefully triggers ProcessTree tear-down and verifies clean Watchdog exit.
-        """
-        # 1. Setup ProcessTree mimic (acts as HydeApp)
-        process_tree = ProcessTree.instance()
-        process_tree.zlock_client.set_process_name('hyde-test')
-        
-        controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
-        )
-        
-        # 2. Spawning Watchdog Subprocess
-        print(f"\n[Test] Spawning Watchdog: {controller_path}")
-        to_worker, from_worker, worker = process_tree.subprocess(
-            controller_path,
-            args=[CONNECTION_FILE],
-        )
-        
-        # 3. Wait for KERNEL_READY
-        try:
-            task, data = from_worker.get(timeout=15)
-            self.assertEqual(task, 'KERNEL_READY')
-            print("[Test] KERNEL_READY successfully intercepted.")
-        except Exception as e:
-            self.fail(f"Did not receive KERNEL_READY from Watchdog: {e}")
-        
-        # 4. Verify connection file dropped perfectly into the target directory
-        self.assertEqual(data, CONNECTION_FILE)
-        self.assertTrue(os.path.exists(CONNECTION_FILE))
-        print(f"[Test] IPC File {CONNECTION_FILE} validated.")
-        
-        # 5. Connect ZMQ Client securely explicitly bypassing the PyQt event loop
-        client = BlockingKernelClient(connection_file=CONNECTION_FILE)
-        client.load_connection_file()
-        client.start_channels()
-        
-        try:
-            client.wait_for_ready(timeout=5)
-            
-            # Send execution string
-            print("[Test] Injecting 1+1 Python string into Spyder execution namespace...")
-            msg_id = client.execute("1 + 1")
-            
-            # Get execution reply
-            reply = client.get_shell_msg(timeout=5)
-            
-            # Verify status is exactly "ok"
-            self.assertEqual(reply['content']['status'], 'ok')
-            print("[Test] ZMQ Socket responded OK!")
-            
-        finally:
-            client.stop_channels()
-            
-        # 6. Graceful Teardown
-        print("[Test] Sending QUIT queue dispatch to Watchdog.")
-        to_worker.put(['QUIT', None])
-        
-        # 7. Verify Watchdog terminated natively (timeout heavily since IPython teardown takes a sec)
-        try:
-            worker.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
-            
-        self.assertIsNotNone(worker.poll())
-        print("[Test] Watchdog cleanly terminated.")
-
-    def test_watch_project_reloads_package_init(self):
-        process_tree = ProcessTree.instance()
-        process_tree.zlock_client.set_process_name('hyde-test')
-
-        controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, 'reload_test.hy')
-            procedures_dir = os.path.join(project_dir, 'procedures')
-            os.makedirs(procedures_dir)
-            procedures_init = os.path.join(procedures_dir, '__init__.py')
-            with open(procedures_init, 'w') as f:
-                f.write("VALUE = 1\n")
-
-            to_worker, from_worker, worker = process_tree.subprocess(
-                controller_path,
-                args=[CONNECTION_FILE],
-            )
-
-            to_worker.put([
-                'WATCH_PROJECT',
-                {
-                    'project_dir': project_dir,
-                    'procedures_dir': procedures_dir,
-                    'procedures_init': procedures_init,
-                },
-            ])
-
-            try:
-                task, data = from_worker.get(timeout=15)
-                self.assertEqual(task, 'KERNEL_READY')
-
-                client = BlockingKernelClient(connection_file=CONNECTION_FILE)
-                client.load_connection_file()
-                client.start_channels()
-
-                try:
-                    client.wait_for_ready(timeout=5)
-                    self.wait_for_code_ok(client, "assert VALUE == 1")
-                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == VALUE")
-
-                    with open(procedures_init, 'w') as f:
-                        f.write("VALUE = 2\n")
-
-                    time.sleep(1.5)
-                    self.wait_for_code_ok(client, "assert VALUE == 2", timeout=10)
-                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == VALUE", timeout=10)
-                finally:
-                    client.stop_channels()
-            finally:
-                to_worker.put(['QUIT', None])
-                try:
-                    worker.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
-
-    def test_watch_project_executes_package_init_silently(self):
-        process_tree = ProcessTree.instance()
-        process_tree.zlock_client.set_process_name('hyde-test')
-
-        controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, 'silent_test.hy')
-            procedures_dir = os.path.join(project_dir, 'procedures')
-            os.makedirs(procedures_dir)
-            procedures_init = os.path.join(procedures_dir, '__init__.py')
-            with open(procedures_init, 'w') as f:
-                f.write('print("masked output")\nVALUE = 1\n')
-
-            to_worker, from_worker, worker = process_tree.subprocess(
-                controller_path,
-                args=[CONNECTION_FILE],
-            )
-
-            to_worker.put([
-                'WATCH_PROJECT',
-                {
-                    'project_dir': project_dir,
-                    'procedures_dir': procedures_dir,
-                    'procedures_init': procedures_init,
-                },
-            ])
-
-            try:
-                task, data = from_worker.get(timeout=15)
-                self.assertEqual(task, 'KERNEL_READY')
-
-                client = BlockingKernelClient(connection_file=CONNECTION_FILE)
-                client.load_connection_file()
-                client.start_channels()
-
-                try:
-                    client.wait_for_ready(timeout=5)
-                    self.drain_iopub(client)
-
-                    to_worker.put([
-                        'WATCH_PROJECT',
-                        {
-                            'project_dir': project_dir,
-                            'procedures_dir': procedures_dir,
-                            'procedures_init': procedures_init,
-                        },
-                    ])
-
-                    messages = self.collect_iopub_until_idle(client, timeout=10)
-
-                    self.assertTrue(
-                        any(
-                            msg['msg_type'] == 'stream'
-                            and 'masked output' in msg['content'].get('text', '')
-                            for msg in messages
-                        ),
-                        msg=f"Expected stream output from silent package-init execution. Messages: {messages!r}",
-                    )
-                    self.assertFalse(
-                        any(msg['msg_type'] == 'execute_input' for msg in messages),
-                        msg=f"Silent package-init execution should not emit execute_input. Messages: {messages!r}",
-                    )
-
-                    msg_id = client.execute("1 + 1")
-                    while True:
-                        reply = client.get_shell_msg(timeout=5)
-                        if reply['parent_header'].get('msg_id') == msg_id:
-                            break
-                    self.assertEqual(reply['content']['status'], 'ok')
-                    self.assertEqual(reply['content']['execution_count'], 1)
-                finally:
-                    client.stop_channels()
-            finally:
-                to_worker.put(['QUIT', None])
-                try:
-                    worker.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
-
-    def test_remote_listener_executes_visibly(self):
-        class FakeProcess:
-            def poll(self):
-                return None
-
-        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
-        watchdog.kernel_client = object()
-        watchdog.kernel_process = FakeProcess()
-        watchdog.local_queue = queue.Queue()
-        server = RemoteListener(watchdog, port=None)
-        try:
-            payload = "hello's world"
-            client = ZMQClient(shared_secret=get_config()['shared_secret'])
-            self.assertEqual(
-                client.get(server.port, 'localhost', payload, timeout=5),
-                'added successfully',
-            )
-            self.assertEqual(
-                watchdog.local_queue.get_nowait(),
-                ['EXECUTE_COMMAND', {'code': f"remote({payload!r})", 'silent': False}],
-            )
-        finally:
-            server.shutdown()
-
-    def test_remote_listener_normalizes_filepath_payloads(self):
-        class FakeProcess:
-            def poll(self):
-                return None
-
-        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
-        watchdog.kernel_client = object()
-        watchdog.kernel_process = FakeProcess()
-        watchdog.local_queue = queue.Queue()
-        server = RemoteListener(watchdog, port=None)
-        try:
-            client = ZMQClient(shared_secret=get_config()['shared_secret'])
-            with patch('hyde.execution.execution_controller.shared_drive.path_to_local') as path_to_local:
-                path_to_local.return_value = '/local/shared-drive/file.h5'
-                self.assertEqual(
-                    client.get(
-                        server.port,
-                        'localhost',
-                        {'filepath': 'Z:\\shared-drive\\file.h5'},
-                        timeout=5,
-                    ),
-                    'added successfully',
-                )
-            path_to_local.assert_called_once_with('Z:\\shared-drive\\file.h5')
-            self.assertEqual(
-                watchdog.local_queue.get_nowait(),
-                [
-                    'EXECUTE_COMMAND',
-                    {'code': "remote('/local/shared-drive/file.h5')", 'silent': False},
-                ],
-            )
-        finally:
-            server.shutdown()
-
-    def test_remote_listener_returns_error_when_kernel_unavailable(self):
-        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
-        watchdog.kernel_client = None
-        watchdog.kernel_process = None
-        watchdog.local_queue = queue.Queue()
-
-        server = RemoteListener(watchdog, port=None)
-        try:
-            client = ZMQClient(shared_secret=get_config()['shared_secret'])
-            self.assertEqual(
-                client.get(server.port, 'localhost', 'some/path', timeout=5),
-                'error: kernel unavailable',
-            )
-        finally:
-            server.shutdown()
-
-    def test_remote_queue_executes_visibly_in_command_loop(self):
-        class FakeProcess:
-            def poll(self):
-                return None
-
-        class FakeKernelClient:
+    def test_hyde_start_kernel_runtime_launches_kernel_child_directly(self):
+        class FakeProcessTree:
             def __init__(self):
                 self.calls = []
 
-            def execute(self, code, silent=True):
-                self.calls.append((code, silent))
+            def subprocess(self, path, args=None, output_redirection_port=None, startup_timeout=None):
+                self.calls.append((path, list(args or []), output_redirection_port, startup_timeout))
+                return "to-kernel", "from-kernel", FakeProcess()
 
-        watchdog = ExecutionWatchdog.__new__(ExecutionWatchdog)
-        watchdog.exiting = False
-        watchdog.kernel_client = FakeKernelClient()
-        watchdog.kernel_process = FakeProcess()
-        watchdog.local_queue = queue.Queue()
-        watchdog.reload_requested = threading.Event()
+        class FakeRuntimeHelper:
+            def __init__(self, app, connection_file, from_kernel, kernel_process):
+                self.app = app
+                self.connection_file = connection_file
+                self.from_kernel = from_kernel
+                self.kernel_process = kernel_process
+                self.started = False
 
-        class FakeQueue:
-            def __init__(self):
-                self.calls = 0
+            def start(self):
+                self.started = True
 
-            def get(self, timeout=None):
-                self.calls += 1
-                return ['QUIT', None]
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.process_tree = FakeProcessTree()
+        dummy_app.logging_window = type("Log", (), {"port": 12345})()
+        dummy_app.runtime_helper = None
+        dummy_app.kernel_to_child = None
+        dummy_app.kernel_from_child = None
+        dummy_app.kernel_process = None
 
-        watchdog.from_parent = FakeQueue()
-        watchdog.local_queue.put([
-            'EXECUTE_COMMAND',
-            {'code': "remote(\"hello's world\")", 'silent': False},
-        ])
-        watchdog.listen_for_gui()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            connection_file = os.path.join(tmpdir, "kernel-hyde.json")
+            with patch("hyde.user_interface.main.CONNECTION_FILE", connection_file):
+                with patch("hyde.user_interface.main.RuntimeHelper", FakeRuntimeHelper):
+                    HydeApp.start_kernel_runtime(dummy_app)
+
+        self.assertEqual(len(dummy_app.process_tree.calls), 1)
+        path, args, port, startup_timeout = dummy_app.process_tree.calls[0]
+        self.assertEqual(path, KERNEL_LAUNCHER)
+        self.assertEqual(args, ["-f", connection_file])
+        self.assertEqual(port, 12345)
+        self.assertEqual(startup_timeout, 60)
+        self.assertEqual(dummy_app.kernel_to_child, "to-kernel")
+        self.assertEqual(dummy_app.kernel_from_child, "from-kernel")
+        self.assertIsInstance(dummy_app.runtime_helper, FakeRuntimeHelper)
+        self.assertTrue(dummy_app.runtime_helper.started)
+
+    def test_runtime_helper_dispatches_direct_kernel_messages(self):
+        app = FakeApp()
+        helper = RuntimeHelper.__new__(RuntimeHelper)
+        helper.app = app
+        helper.from_kernel = queue.Queue()
+        helper.kernel_process = FakeProcess()
+        helper._stopping = threading.Event()
+
+        helper.from_kernel.put(("OPEN_TABLE_REQUEST", {"names": ["a"], "target": "Table0", "title": "Visible"}))
+        helper.from_kernel.put(("TABLE_DATA_RESPONSE", {"data": {"a": [1, 2]}, "request_id": "abc"}))
+        helper.from_kernel.put(("ENTER_NO_PROJECT_STATE", None))
+        helper.from_kernel.put(("ACTIVATE_PROJECT", {"path": "/tmp/test.hy"}))
+        helper.from_kernel.put(("QUIT_REQUESTED", None))
+        helper.from_kernel.put(("PROJECT_STATE_RESULT", {"operation": "load", "success": True}))
+        helper.from_kernel.put(("WINDOW_MACROS_RESPONSE", {"kind": "table", "macros": [{"name": "Table0", "args": ["a"]}]}))
+
+        helper._drain_kernel_messages()
+
         self.assertEqual(
-            watchdog.kernel_client.calls,
-            [("remote(\"hello's world\")", False)],
+            app.calls,
+            [
+                ("open_table", ["a"], "Table0", "Visible"),
+                ("table_data", {"data": {"a": [1, 2]}, "request_id": "abc"}),
+                ("enter_no_project_state",),
+                ("activate_project", "/tmp/test.hy"),
+                ("request_gui_quit",),
+            ],
+        )
+        self.assertTrue(helper._stopping.is_set())
+
+    def test_runtime_helper_executes_background_commands_with_single_kernel_client(self):
+        helper = RuntimeHelper.__new__(RuntimeHelper)
+        helper.command_queue = queue.Queue()
+        helper.kernel_client = FakeKernelClient()
+        helper.kernel_process = FakeProcess()
+        helper._stopping = threading.Event()
+
+        helper.command_queue.put(("EXECUTE_COMMAND", {"code": "a = 1", "silent": True}))
+        helper.command_queue.put(("EXECUTE_COMMAND", {"code": "remote('x')", "silent": False}))
+        helper.command_queue.put(("QUIT", None))
+
+        helper._drain_commands()
+
+        self.assertEqual(
+            helper.kernel_client.calls,
+            [
+                ("a = 1", True),
+                ("remote('x')", False),
+            ],
         )
 
-    def test_hyde_table_request_reaches_watchdog(self):
-        process_tree = ProcessTree.instance()
-        process_tree.zlock_client.set_process_name('hyde-test')
+    def test_request_gui_quit_defers_finalize_to_next_qt_turn(self):
+        scheduled = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.finalize_quit = lambda: None
 
-        controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        with patch("hyde.user_interface.main.QtCore.QTimer.singleShot", side_effect=lambda delay, fn: scheduled.append((delay, fn))):
+            HydeApp.request_gui_quit.__wrapped__(dummy_app)
+
+        self.assertEqual(len(scheduled), 1)
+        self.assertEqual(scheduled[0][0], 0)
+        self.assertIs(scheduled[0][1], dummy_app.finalize_quit)
+
+    def test_procedure_change_enqueues_silent_reload_on_runtime_queue(self):
+        queued = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.current_project_dir = "/tmp/project.hy"
+        dummy_app.queue_background_command = lambda code, silent=True: queued.append((code, silent))
+
+        HydeApp.on_procedure_change(dummy_app, "procedures/example.py", {}, event="modified")
+
+        self.assertEqual(len(queued), 1)
+        code, silent = queued[0]
+        self.assertTrue(silent)
+        self.assertIn("execute_procedures_bootstrap", code)
+        self.assertIn("/tmp/project.hy", code)
+        self.assertIn(os.path.dirname(HYDE_DIR), code)
+        self.assertIn("reset_namespace=False", code)
+
+    def test_remote_request_server_queues_visible_remote_execution(self):
+        queued = []
+        app = type("App", (), {})()
+        app.runtime_helper = type(
+            "Runtime",
+            (),
+            {"enqueue_execute": lambda self, code, silent=True: queued.append((code, silent))},
+        )()
+        server = RemoteRequestServer.__new__(RemoteRequestServer)
+        server.app = app
+
+        self.assertEqual(server.handler("hello"), "hello")
+        self.assertEqual(server.handler("/path/to/file.h5"), "added successfully")
+        self.assertEqual(queued, [("remote('/path/to/file.h5')", False)])
+
+    def test_remote_request_server_normalizes_filepath_payload(self):
+        queued = []
+        app = type("App", (), {})()
+        app.runtime_helper = type(
+            "Runtime",
+            (),
+            {"enqueue_execute": lambda self, code, silent=True: queued.append((code, silent))},
+        )()
+        server = RemoteRequestServer.__new__(RemoteRequestServer)
+        server.app = app
+
+        with patch("hyde.user_interface.runtime_helper.shared_drive.path_to_local", return_value="/local/path.h5") as localize:
+            response = server.handler({"filepath": "Z:\\shared\\path.h5"})
+
+        self.assertEqual(response, "added successfully")
+        localize.assert_called_once_with("Z:\\shared\\path.h5")
+        self.assertEqual(queued, [("remote('/local/path.h5')", False)])
+
+    def test_startup_project_load_uses_status_bar_instead_of_busy_dialog(self):
+        calls = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.ui = type("UI", (), {"statusbar": FakeStatusBar()})()
+        dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
+        dummy_app.clear_project_status_message = dummy_app.ui.statusbar.clearMessage
+        dummy_app.begin_project_operation = lambda label: HydeApp.begin_project_operation(dummy_app, label)
+        dummy_app.end_project_operation = lambda: HydeApp.end_project_operation(dummy_app)
+        dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
+        dummy_app.restore_project_session = lambda: calls.append(("restore",))
+
+        with patch("hyde.user_interface.main.format_load_project_command", return_value="LOAD_PROJECT"):
+            HydeApp._load_startup_project(dummy_app, "/tmp/project.hy")
+            HydeApp.on_project_state_result(dummy_app, {"operation": "load", "success": True})
+
+        self.assertEqual(dummy_app.ui.statusbar.messages, [("Loading Hyde project...", 0)])
+        self.assertEqual(dummy_app.ui.statusbar.cleared, 1)
+        self.assertEqual(
+            calls,
+            [
+                ("execute", "LOAD_PROJECT", True),
+                ("restore",),
+            ],
         )
 
-        to_worker, from_worker, worker = process_tree.subprocess(
-            controller_path,
-            args=[CONNECTION_FILE],
+    def test_load_result_activates_project_when_gui_has_not_seen_activate_message(self):
+        calls = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.current_project_dir = None
+        dummy_app.end_project_operation = lambda: calls.append(("end",))
+        dummy_app.activate_project = lambda path: calls.append(("activate", path)) or setattr(
+            dummy_app,
+            "current_project_dir",
+            path,
+        )
+        dummy_app.restore_project_session = lambda: calls.append(("restore",))
+
+        HydeApp.on_project_state_result(
+            dummy_app,
+            {"operation": "load", "success": True, "path": "/tmp/project.hy"},
         )
 
-        try:
-            task, data = from_worker.get(timeout=15)
-            self.assertEqual(task, 'KERNEL_READY')
-
-            client = BlockingKernelClient(connection_file=CONNECTION_FILE)
-            client.load_connection_file()
-            client.start_channels()
-
-            try:
-                client.wait_for_ready(timeout=5)
-                msg_id = client.execute(
-                    "import numpy as np, hyde\n"
-                    "c = np.arange(4)\n"
-                    "hyde.table(c)\n"
-                )
-                while True:
-                    reply = client.get_shell_msg(timeout=5)
-                    if reply['parent_header'].get('msg_id') == msg_id:
-                        break
-                self.assertEqual(reply['content']['status'], 'ok')
-
-                task, payload = from_worker.get(timeout=10)
-                self.assertEqual(task, 'OPEN_TABLE')
-                self.assertEqual(payload['names'], ['c'])
-                self.assertIsNone(payload['target'])
-            finally:
-                client.stop_channels()
-        finally:
-            to_worker.put(['QUIT', None])
-            try:
-                worker.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
-
-    def test_watch_project_starts_with_only_package_init(self):
-        process_tree = ProcessTree.instance()
-        process_tree.zlock_client.set_process_name('hyde-test')
-
-        controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        self.assertEqual(
+            calls,
+            [
+                ("end",),
+                ("activate", "/tmp/project.hy"),
+                ("restore",),
+            ],
         )
+        self.assertEqual(dummy_app.current_project_dir, "/tmp/project.hy")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, 'package_init_only.hy')
-            procedures_dir = os.path.join(project_dir, 'procedures')
-            os.makedirs(procedures_dir)
-            procedures_init = os.path.join(procedures_dir, '__init__.py')
-            with open(procedures_init, 'w') as f:
-                f.write('VALUE = 1\n')
+    def test_choose_project_uses_status_bar_operation_message(self):
+        calls = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.ui = type("UI", (), {"statusbar": FakeStatusBar()})()
+        dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
+        dummy_app._pick_project_dir = lambda title, accept_label: "/tmp/project.hy"
+        dummy_app.begin_project_operation = lambda label: HydeApp.begin_project_operation(dummy_app, label)
+        dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
 
-            self.assertFalse(os.path.exists(os.path.join(procedures_dir, 'master.py')))
+        with patch("hyde.user_interface.main.format_load_project_command", return_value="LOAD_PROJECT"):
+            HydeApp.choose_project(dummy_app)
 
-            to_worker, from_worker, worker = process_tree.subprocess(
-                controller_path,
-                args=[CONNECTION_FILE],
-            )
+        self.assertEqual(dummy_app.ui.statusbar.messages, [("Loading Hyde project...", 0)])
+        self.assertEqual(calls, [("execute", "LOAD_PROJECT", True)])
 
-            to_worker.put([
-                'WATCH_PROJECT',
-                {
-                    'project_dir': project_dir,
-                    'procedures_dir': procedures_dir,
-                    'procedures_init': procedures_init,
-                },
-            ])
+    def test_visible_command_error_clears_project_status_message(self):
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.ui = type("UI", (), {"statusbar": FakeStatusBar()})()
+        dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
+        dummy_app.clear_project_status_message = dummy_app.ui.statusbar.clearMessage
+        dummy_app.begin_project_operation = lambda label: HydeApp.begin_project_operation(dummy_app, label)
+        dummy_app.end_project_operation = lambda: HydeApp.end_project_operation(dummy_app)
 
-            try:
-                task, data = from_worker.get(timeout=15)
-                self.assertEqual(task, 'KERNEL_READY')
+        HydeApp.begin_project_operation(dummy_app, "Creating Hyde project...")
+        HydeApp.on_visible_command_executed(dummy_app, {"content": {"status": "error"}})
 
-                client = BlockingKernelClient(connection_file=CONNECTION_FILE)
-                client.load_connection_file()
-                client.start_channels()
+        self.assertEqual(dummy_app.ui.statusbar.messages, [("Creating Hyde project...", 0)])
+        self.assertEqual(dummy_app.ui.statusbar.cleared, 1)
 
-                try:
-                    client.wait_for_ready(timeout=5)
-                    self.wait_for_code_ok(client, "assert VALUE == 1", timeout=10)
-                    self.wait_for_code_ok(client, "import procedures; assert procedures.VALUE == VALUE", timeout=10)
-                finally:
-                    client.stop_channels()
-            finally:
-                to_worker.put(['QUIT', None])
-                try:
-                    worker.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
+    def test_choose_new_project_conflict_prompts_and_dispatches_overwrite(self):
+        calls = []
+        prompts = []
+        formatted = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app._pick_project_dir = lambda title, accept_label: "/tmp/existing.hy"
+        dummy_app.begin_project_operation = lambda label: calls.append(("begin", label))
+        dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
+        dummy_app.project_target_needs_confirmation = lambda project_dir: True
+        dummy_app.confirm_overwrite_project = lambda project_dir: prompts.append(project_dir) or True
 
-    def test_watch_project_publishes_table_macros(self):
-        process_tree = ProcessTree.instance()
-        process_tree.zlock_client.set_process_name('hyde-test')
+        def fake_format_new_project_command(*args, **kwargs):
+            formatted.append((args, kwargs))
+            return "NEW_PROJECT"
 
-        controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), 'execution', 'execution_controller.py')
+        with patch("hyde.user_interface.main.format_new_project_command", side_effect=fake_format_new_project_command):
+            HydeApp.choose_new_project(dummy_app)
+
+        self.assertEqual(prompts, ["/tmp/existing.hy"])
+        self.assertEqual(formatted, [(("/tmp/existing.hy",), {"load": True, "overwrite": True})])
+        self.assertEqual(calls, [("begin", "Creating Hyde project..."), ("execute", "NEW_PROJECT", True)])
+
+    def test_request_quit_dispatches_visible_hyde_quit_command(self):
+        calls = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.shutting_down = False
+        dummy_app.command_window = object()
+        dummy_app.execute_command = lambda code, visible=True: calls.append((code, visible))
+        dummy_app.finalize_quit = lambda: calls.append(("finalize",))
+
+        HydeApp.request_quit(dummy_app)
+
+        self.assertEqual(calls, [("hyde.quit()", True)])
+
+    def test_request_quit_finalizes_directly_without_command_window(self):
+        calls = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.shutting_down = False
+        dummy_app.command_window = None
+        dummy_app.execute_command = lambda code, visible=True: calls.append((code, visible))
+        dummy_app.finalize_quit = lambda: calls.append(("finalize",))
+
+        HydeApp.request_quit(dummy_app)
+
+        self.assertEqual(calls, [("finalize",)])
+
+    def test_shutdown_runtime_requests_graceful_kernel_shutdown_before_force_terminate(self):
+        kernel_client = FakeKernelClient()
+        process_calls = []
+
+        class DummyProcess:
+            def __init__(self):
+                self.wait_calls = 0
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                self.wait_calls += 1
+                process_calls.append(("wait", timeout))
+                raise TimeoutError("still running")
+
+            def terminate(self):
+                process_calls.append(("terminate",))
+
+        helper = type("Helper", (), {})()
+        helper.kernel_client = None
+        helper.thread = FakeJoinThread()
+        helper.stop = lambda: process_calls.append(("helper_stop",))
+
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app._runtime_shutdown = False
+        dummy_app.stop_project_watcher = lambda: process_calls.append(("stop_watcher",))
+        dummy_app.remote_server = None
+        dummy_app.command_window = type("CommandWindow", (), {"kernel_client": kernel_client})()
+        dummy_app.runtime_helper = helper
+        dummy_app._shutdown_kernel_windows = lambda: process_calls.append(("shutdown_windows",))
+        dummy_app.kernel_process = DummyProcess()
+
+        HydeApp.shutdown_runtime(dummy_app)
+
+        self.assertEqual(kernel_client.calls, [("shutdown", False)])
+        self.assertEqual(
+            process_calls,
+            [
+                ("stop_watcher",),
+                ("helper_stop",),
+                ("wait", 5),
+                ("terminate",),
+                ("wait", 5),
+                ("shutdown_windows",),
+            ],
         )
+        self.assertIsNone(dummy_app.runtime_helper)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, 'table_macros.hy')
-            procedures_dir = os.path.join(project_dir, 'procedures')
-            os.makedirs(procedures_dir)
-            procedures_init = os.path.join(procedures_dir, '__init__.py')
-            with open(procedures_init, 'w') as f:
-                f.write(
-                    "import hyde\n\n"
-                    "@hyde.table\n"
-                    "def Table0(c):\n"
-                    "    hyde.table(c)\n"
-                )
 
-            to_worker, from_worker, worker = process_tree.subprocess(
-                controller_path,
-                args=[CONNECTION_FILE],
-            )
-
-            to_worker.put([
-                'WATCH_PROJECT',
-                {
-                    'project_dir': project_dir,
-                    'procedures_dir': procedures_dir,
-                    'procedures_init': procedures_init,
-                },
-            ])
-
-            try:
-                saw_ready = False
-                saw_macros = False
-                deadline = time.time() + 15
-                while time.time() < deadline and not saw_macros:
-                    task, data = from_worker.get(timeout=15)
-                    if task == 'KERNEL_READY':
-                        saw_ready = True
-                    elif task == 'WINDOW_MACROS':
-                        self.assertEqual(data['kind'], 'table')
-                        self.assertIn(
-                            {'name': 'Table0', 'args': ['c']},
-                            data['macros'],
-                        )
-                        saw_macros = True
-                self.assertTrue(saw_ready)
-                self.assertTrue(saw_macros)
-            finally:
-                to_worker.put(['QUIT', None])
-                try:
-                    worker.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.fail("Watchdog process failed to exit within 10 seconds of receiving QUIT.")
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

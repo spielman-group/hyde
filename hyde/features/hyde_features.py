@@ -43,6 +43,45 @@ def format_table_macro_source(macro_name, names, title=None):
     )
 
 
+def format_new_project_command(project_dir, load=True, overwrite=False):
+    """Formulate a visible `hyde.new_project(...)` command string."""
+    return (
+        f"hyde.new_project({project_dir!r}, "
+        f"load={bool(load)!r}, overwrite={bool(overwrite)!r})"
+    )
+
+
+def format_load_project_command(project_dir):
+    """Formulate a visible `hyde.load_project(...)` command string."""
+    return f"hyde.load_project({project_dir!r})"
+
+
+def format_save_project_command(project_dir=None, mode="save", overwrite=False):
+    """Formulate a visible `hyde.save_project(...)` command string."""
+    arguments = []
+    if project_dir is not None:
+        arguments.append(repr(project_dir))
+    arguments.append(f"mode={mode!r}")
+    if mode != "save":
+        arguments.append(f"overwrite={bool(overwrite)!r}")
+    return f"hyde.save_project({', '.join(arguments)})"
+
+
+def format_quit_command():
+    """Formulate a visible `hyde.quit()` command string."""
+    return "hyde.quit()"
+
+
+def format_publish_table_macros_command():
+    """Formulate the silent table-macro publication command string."""
+    return "hyde.table_macros.publish_table_macro_registry()"
+
+
+def format_push_table_data_command(names, request_id):
+    """Formulate the silent table-data request command string."""
+    return f"hyde.execution.ipc.push_table_data({list(names)!r}, {request_id!r})"
+
+
 def format_cell_edit_command(var_name, index, value):
     """
     Formulates a muted mutation command for table cell editing.
@@ -135,7 +174,6 @@ def execute_procedures_bootstrap(
     project_dir,
     hyde_source_root,
     reset_namespace=False,
-    enable_gui_mode=True,
 ):
     import os
     import sys
@@ -144,14 +182,19 @@ def execute_procedures_bootstrap(
     
     os.chdir(project_dir)
     project_root = os.getcwd()
-    
+    procedures_dir = os.path.join(project_root, "procedures")
+
+    while procedures_dir in sys.path:
+        sys.path.remove(procedures_dir)
+    sys.path.insert(0, procedures_dir)
+
     while project_root in sys.path:
         sys.path.remove(project_root)
-    sys.path.insert(0, project_root)
-    
+    sys.path.insert(1, project_root)
+
     while hyde_source_root in sys.path:
         sys.path.remove(hyde_source_root)
-    sys.path.insert(1, hyde_source_root)
+    sys.path.insert(2, hyde_source_root)
     
     if '__hyde_clean_dict__' not in __main__.__dict__:
         __main__.__dict__['__hyde_clean_dict__'] = __main__.__dict__.copy()
@@ -166,12 +209,11 @@ def execute_procedures_bootstrap(
         
     importlib.invalidate_caches()
     for name in list(sys.modules):
-        if name == 'procedures' or name.startswith('procedures.') or name == 'hyde' or name.startswith('hyde.'):
+        if name == 'procedures' or name.startswith('procedures.'):
             del sys.modules[name]
             
     import hyde
-    hyde.gui_mode(enable_gui_mode)
-    hyde.HYDE_PROJECT_DIR = os.path.abspath(project_dir)
+    hyde.gui_mode(True)
     import hyde.table_macros
     hyde.table_macros.clear_table_macros()
     
@@ -196,7 +238,7 @@ def format_procedures_bootstrap_code(project_dir, hyde_source_root, reset_namesp
         f"if {hyde_source_root!r} not in sys.path:\n"
         f"    sys.path.insert(0, {hyde_source_root!r})\n"
         "from hyde.features.hyde_features import execute_procedures_bootstrap\n"
-        f"execute_procedures_bootstrap({project_dir!r}, {hyde_source_root!r}, reset_namespace={reset_namespace}, enable_gui_mode=True)\n"
+        f"execute_procedures_bootstrap({project_dir!r}, {hyde_source_root!r}, reset_namespace={reset_namespace})\n"
     )
 
 

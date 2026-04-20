@@ -4,10 +4,11 @@ Hyde: A modern, Pythonic data analysis and plotting environment for the labscrip
 
 from __future__ import annotations
 
-import __main__
 import inspect
 import os
 import shutil
+import sys
+import builtins
 from pathlib import Path
 
 import numpy as np
@@ -16,9 +17,11 @@ from .paths import HYDE_DIR
 from . import project_tools
 from .table_macros import publish_table_macro_registry, register_table_macro
 from .execution.ipc import (
+    signal_activate_project,
+    signal_enter_no_project_state,
     publish_project_state_result,
-    request_project_load,
     signal_open_table,
+    signal_quit_requested,
 )
 
 __version__ = "0.1.0.dev0"
@@ -31,23 +34,54 @@ def gui_mode(enable=True):
     """
     Set whether Hyde is running within the managed GUI environment.
     This flag controls whether public helpers attempt to send IPC signals to the GUI.
+    When enabled, the Hyde module is also exposed in the interactive kernel
+    namespace as `hyde` so visible commands can use the public API directly.
     """
     global HYDE_GUI
     HYDE_GUI = bool(enable)
+    if HYDE_GUI:
+        hyde_module = sys.modules[__name__]
+        sys.modules["__main__"].__dict__["hyde"] = hyde_module
+        builtins.hyde = hyde_module
 
 
-def new_project(path, load=True):
+def new_project(path, load=True, overwrite=False):
     """
     Creates a new empty Hyde project at the specified path and optionally injects it as the active session.
     """
     project_dir = project_tools.resolve_project_dir(path)
-    if project_dir.exists():
-        raise RuntimeError(f"Cannot create new project: '{project_dir}' already exists.")
+    try:
+        if project_dir.exists():
+            if not overwrite:
+                raise RuntimeError(f"Cannot create new project: '{project_dir}' already exists.")
+            if project_dir.is_dir():
+                shutil.rmtree(project_dir)
+            else:
+                project_dir.unlink()
 
-    project_tools.copy_project_template(project_dir)
-    
+        project_tools.copy_project_template(project_dir)
+    except Exception as exc:
+        publish_project_state_result(
+            "new",
+            str(project_dir),
+            success=False,
+            errors=[str(exc)],
+            object_count=0,
+            mode="new",
+        )
+        raise
+
     if load:
         load_project(path=str(project_dir))
+    else:
+        publish_project_state_result(
+            "new",
+            str(project_dir),
+            success=True,
+            errors=[],
+            object_count=0,
+            mode="new",
+        )
 
 
 def save_project(path=None, mode="save", overwrite=False):
@@ -70,6 +104,9 @@ def save_project(path=None, mode="save", overwrite=False):
         raise ValueError(f"Path required for mode={mode!r}.")
         
     global HYDE_PROJECT_DIR
+
+    if HYDE_PROJECT_DIR is None:
+        raise RuntimeError("No Hyde project is active.")
 
     source_project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR)
     project_dir = project_tools.resolve_project_dir(
@@ -120,24 +157,22 @@ def save_project(path=None, mode="save", overwrite=False):
         if mode == "save_as" and project_dir != source_project_dir:
             os.chdir(project_dir)
             HYDE_PROJECT_DIR = str(project_dir)
-            if HYDE_GUI:
-                request_project_load(str(project_dir))
+            signal_activate_project(str(project_dir))
     except Exception as exc:
         success = False
         errors.append(str(exc))
-        
-    if HYDE_GUI:
-        publish_project_state_result(
-            "save",
-            str(project_dir),
-            success=success,
-            errors=errors,
-            object_count=len(object_entries),
-            mode=mode,
-        )
+
+    publish_project_state_result(
+        "save",
+        str(project_dir),
+        success=success,
+        errors=errors,
+        object_count=len(object_entries),
+        mode=mode,
+    )
     if not success:
         raise RuntimeError(f"Hyde save_project failed for {project_dir}: {errors}")
-    return object_entries
+    return None
 
 
 def load_project(path=None):
@@ -150,21 +185,24 @@ def load_project(path=None):
     """
     global HYDE_PROJECT_DIR
 
-    project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR if path is None else path)
-    current_project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR)
     errors = []
     loaded = 0
     success = True
+    project_dir = None
     try:
+        if path is None and HYDE_PROJECT_DIR is None:
+            raise RuntimeError("No Hyde project is active.")
+
+        project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR if path is None else path)
         from .features.hyde_features import execute_procedures_bootstrap
 
+        HYDE_PROJECT_DIR = None
+        signal_enter_no_project_state()
         execute_procedures_bootstrap(
             str(project_dir),
             os.path.dirname(HYDE_DIR),
-            reset_namespace=(project_dir != current_project_dir),
-            enable_gui_mode=HYDE_GUI,
+            reset_namespace=True,
         )
-        HYDE_PROJECT_DIR = str(project_dir)
         manifest = project_tools.read_manifest(project_dir)
         for entry in manifest.get("objects", []):
             name = entry["name"]
@@ -174,27 +212,42 @@ def load_project(path=None):
                 errors.append(f"{name}: missing file {object_path}")
                 continue
             try:
-                __main__.__dict__[name] = project_tools.deserialize_object(object_path, serializer)
+                sys.modules["__main__"].__dict__[name] = project_tools.deserialize_object(object_path, serializer)
                 loaded += 1
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
+        HYDE_PROJECT_DIR = str(project_dir)
     except Exception as exc:
         success = False
         errors.append(str(exc))
-        
-    if HYDE_GUI:
-        if success:
-            request_project_load(str(project_dir))
-        publish_project_state_result(
-            "load",
-            str(project_dir),
-            success=success,
-            errors=errors,
-            object_count=loaded,
-        )
+
+    if success:
+        signal_activate_project(str(project_dir))
+    publish_project_state_result(
+        "load",
+        str(project_dir if project_dir is not None else path),
+        success=success,
+        errors=errors,
+        object_count=loaded,
+        mode="load",
+    )
     if not success:
         raise RuntimeError(f"Hyde load_project failed for {project_dir}: {errors}")
     return loaded
+
+
+def quit():
+    """
+    Request an orderly Hyde shutdown.
+
+    In Hyde GUI mode this asks the parent GUI process to tear down the kernel
+    clients and child process before exiting the application. Outside GUI mode
+    it exits the current interpreter.
+    """
+    if HYDE_GUI:
+        signal_quit_requested()
+        return None
+    raise SystemExit(0)
 
 
 def table(*args, target=None, title=None):

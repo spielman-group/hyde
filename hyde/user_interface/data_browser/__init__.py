@@ -6,7 +6,6 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 from qtconsole.client import QtKernelClient
 from spyder_kernels.comms.commbase import CommBase, CommError
 
-
 NAMESPACE_VIEW_SETTINGS = {
     "check_all": False,
     "exclude_private": True,
@@ -167,6 +166,30 @@ class DataBrowser(QtWidgets.QWidget):
     def namespace_view(self):
         """Return the latest cached namespace metadata snapshot."""
         return dict(getattr(self, "_last_view", {}) or {})
+
+    def shutdown(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.kernel_client.iopub_channel.message_received.disconnect(self._handle_iopub_message)
+        except Exception:
+            pass
+        try:
+            self.spyder_comm.close()
+        except Exception:
+            pass
+        try:
+            for channel_name in ("iopub_channel", "shell_channel", "stdin_channel", "control_channel"):
+                channel = getattr(self.kernel_client, channel_name, None)
+                if channel is not None and hasattr(channel, "close"):
+                    try:
+                        channel.close()
+                    except Exception:
+                        pass
+            self.kernel_client.stop_channels()
+        except Exception:
+            pass
 
     @inmain_decorator()
     def _update_ui(self, view):

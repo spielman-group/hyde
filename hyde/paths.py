@@ -14,11 +14,6 @@ CONNECTION_FILE = os.path.join(
 # Path to the splash SVG
 SPLASH_SVG = os.path.join(HYDE_DIR, "hyde.svg")
 
-# Path to the Execution Controller script
-EXECUTION_CONTROLLER = os.path.join(
-    HYDE_DIR, "execution", "execution_controller.py"
-)
-
 # Path to the Kernel Launcher script
 KERNEL_LAUNCHER = os.path.join(
     HYDE_DIR, "execution", "kernel_launcher.py"

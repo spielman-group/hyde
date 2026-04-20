@@ -5,13 +5,15 @@ import tempfile
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="hyde-mpl-"))
+os.environ.setdefault("IPYTHONDIR", tempfile.mkdtemp(prefix="hyde-ipython-"))
 
 from jupyter_client import BlockingKernelClient
 from labscript_utils.ls_zprocess import ProcessTree
 from qtutils.qt import QtWidgets, QtCore
 
-import hyde
-from hyde.paths import CONNECTION_FILE
+from hyde.features.hyde_features import format_procedures_bootstrap_code
+from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.data_browser import DataBrowser
 
 
@@ -71,6 +73,25 @@ def select_name(browser, name):
     raise AssertionError(f"Could not find row {name!r} in browser view: {current_names(browser)!r}")
 
 
+def start_kernel(process_tree, connection_file, process_name):
+    process_tree.zlock_client.set_process_name(process_name)
+    _, _, child = process_tree.subprocess(
+        KERNEL_LAUNCHER,
+        args=["-f", connection_file],
+        startup_timeout=60,
+    )
+    deadline = time.time() + 30
+    while time.time() < deadline and not os.path.exists(connection_file):
+        time.sleep(0.1)
+    if not os.path.exists(connection_file):
+        raise AssertionError(f"Kernel connection file was not created: {connection_file}")
+    client = BlockingKernelClient(connection_file=connection_file)
+    client.load_connection_file()
+    client.start_channels()
+    client.wait_for_ready(timeout=15)
+    return child, client
+
+
 class TestDataBrowserFinal(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -80,17 +101,12 @@ class TestDataBrowserFinal(unittest.TestCase):
 
     def setUp(self):
         self.process_tree = ProcessTree.instance()
-        self.process_tree.zlock_client.set_process_name("hyde-data-browser-test")
-        self.controller_path = os.path.abspath(
-            os.path.join(os.path.dirname(hyde.__file__), "execution", "execution_controller.py")
-        )
-
         self.tmpdir = tempfile.TemporaryDirectory()
         self.project_dir = os.path.join(self.tmpdir.name, "browser_test.hy")
         self.procedures_dir = os.path.join(self.project_dir, "procedures")
         os.makedirs(self.procedures_dir)
         self.procedures_init = os.path.join(self.procedures_dir, "__init__.py")
-        with open(self.procedures_init, "w") as f:
+        with open(self.procedures_init, "w", encoding="utf-8") as f:
             f.write(
                 "import numpy as np\n"
                 "import pandas as pd\n"
@@ -100,30 +116,22 @@ class TestDataBrowserFinal(unittest.TestCase):
                 "s = 'hello'\n"
             )
 
-        self.to_worker, self.from_worker, self.worker = self.process_tree.subprocess(
-            self.controller_path,
-            args=[CONNECTION_FILE],
+        self.connection_file = os.path.join(self.tmpdir.name, "kernel-hyde.json")
+        self.kernel_process, self.client = start_kernel(
+            self.process_tree,
+            self.connection_file,
+            "hyde-data-browser-test",
         )
-        self.to_worker.put(
-            [
-                "WATCH_PROJECT",
-                {
-                    "project_dir": self.project_dir,
-                    "procedures_dir": self.procedures_dir,
-                    "procedures_init": self.procedures_init,
-                },
-            ]
+        wait_for_code_ok(
+            self.client,
+            format_procedures_bootstrap_code(
+                self.project_dir,
+                os.path.dirname(HYDE_DIR),
+                reset_namespace=True,
+            ),
         )
-        task, data = self.from_worker.get(timeout=15)
-        self.assertEqual(task, "KERNEL_READY")
-        self.assertEqual(data, CONNECTION_FILE)
 
-        self.client = BlockingKernelClient(connection_file=CONNECTION_FILE)
-        self.client.load_connection_file()
-        self.client.start_channels()
-        self.client.wait_for_ready(timeout=5)
-
-        self.browser = DataBrowser(connection_file=CONNECTION_FILE)
+        self.browser = DataBrowser(connection_file=self.connection_file)
         self.browser.show()
         process_events(0.2)
         wait_until(
@@ -138,10 +146,9 @@ class TestDataBrowserFinal(unittest.TestCase):
             process_events(0.2)
         if hasattr(self, "client") and self.client is not None:
             self.client.stop_channels()
-        if hasattr(self, "to_worker") and self.to_worker is not None:
-            self.to_worker.put(["QUIT", None])
-        if hasattr(self, "worker") and self.worker is not None:
-            self.worker.wait(timeout=10)
+        if hasattr(self, "kernel_process") and self.kernel_process is not None and self.kernel_process.poll() is None:
+            self.kernel_process.terminate()
+            self.kernel_process.wait(timeout=10)
         if hasattr(self, "tmpdir"):
             self.tmpdir.cleanup()
 
@@ -156,8 +163,8 @@ class TestDataBrowserFinal(unittest.TestCase):
             message="Browser did not refresh after kernel execution.",
         )
 
-    def test_namespace_updates_after_procedure_reload(self):
-        with open(self.procedures_init, "w") as f:
+    def test_namespace_updates_after_procedures_bootstrap_rerun(self):
+        with open(self.procedures_init, "w", encoding="utf-8") as f:
             f.write(
                 "import numpy as np\n"
                 "import pandas as pd\n"
@@ -167,10 +174,18 @@ class TestDataBrowserFinal(unittest.TestCase):
                 "s = 'updated'\n"
                 "reloaded_name = 7\n"
             )
+        wait_for_code_ok(
+            self.client,
+            format_procedures_bootstrap_code(
+                self.project_dir,
+                os.path.dirname(HYDE_DIR),
+                reset_namespace=False,
+            ),
+        )
         wait_until(
             lambda: "reloaded_name" in current_names(self.browser),
             timeout=15,
-            message="Browser did not refresh after procedures reload.",
+            message="Browser did not refresh after procedures bootstrap rerun.",
         )
 
     def test_unrelated_comm_traffic_is_ignored(self):

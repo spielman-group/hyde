@@ -1,18 +1,29 @@
 import os
-import threading
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
+from labscript_utils.filewatcher import FileWatcher
+from zmq.error import ZMQError
 
 from hyde.paths import (
-    EXECUTION_CONTROLLER,
     CONNECTION_FILE,
     DEFAULT_PROJECTS_DIR,
+    HYDE_DIR,
+    KERNEL_LAUNCHER,
     get_project_paths,
+)
+from hyde.features.hyde_features import (
+    format_load_project_command,
+    format_new_project_command,
+    format_procedures_bootstrap_code,
+    format_publish_table_macros_command,
+    format_quit_command,
+    format_save_project_command,
 )
 from hyde.user_interface.command_window import CommandWindow
 from hyde.user_interface.logging_window import LoggingWindow
 from hyde.user_interface.procedure_browser import ProcedureBrowser
 from hyde.user_interface.data_browser import DataBrowser
+from hyde.user_interface.runtime_helper import HYDE_REMOTE_PORT, RemoteRequestServer, RuntimeHelper
 from hyde.user_interface.project_state import (
     clear_tables,
     try_read_history,
@@ -96,6 +107,12 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         super().__init__(*args, **kwargs)
         self.app = app
 
+    def closeEvent(self, event):
+        if self.app.shutting_down:
+            return super().closeEvent(event)
+        self.app.request_quit()
+        event.ignore()
+
 class HydeApp:
     def __init__(self, qapplication, process_tree, splash, argv=None):
         self.qapplication = qapplication
@@ -105,9 +122,12 @@ class HydeApp:
         self.current_project_dir = None
         self.procedures_dir = None
         self.procedures_init = None
-        self.to_worker = None
-        self.from_worker = None
-        self.worker = None
+        self.kernel_to_child = None
+        self.kernel_from_child = None
+        self.kernel_process = None
+        self.runtime_helper = None
+        self.filewatcher = None
+        self.remote_server = None
         self._subwindow_filters = []
         self.tables = {}  # {handle: TableWidget}
         self.active_table_handle = None
@@ -116,9 +136,10 @@ class HydeApp:
         self.command_subwindow = None
         self.data_browser = None
         self.data_browser_subwindow = None
-        self._procedures_ready = False
         self.shutting_down = False
+        self._runtime_shutdown = False
         self.table_macros = []
+        self._startup_complete = False
         
         # Load the UI
         loader = UiLoader()
@@ -140,19 +161,6 @@ class HydeApp:
         self.procedures_subwindow.resize(300, 500)
         self.procedures_subwindow.hide()
 
-        # Spawn the Watchdog execution subprocess
-        self.to_worker, self.from_worker, self.worker = self.process_tree.subprocess(
-            EXECUTION_CONTROLLER,
-            args=[CONNECTION_FILE],
-            output_redirection_port=self.logging_window.port
-        )
-        self.configure_execution_watchdog()
-        
-        # Start daemon thread listening to Watchdog alerts
-        self.listener_thread = threading.Thread(target=self.listen_for_watchdog)
-        self.listener_thread.daemon = True
-        self.listener_thread.start()
-        
         # Track active subwindow for "Active Table" rule
         self.ui.mdiArea.subWindowActivated.connect(self._on_subwindow_activated)
         
@@ -162,7 +170,7 @@ class HydeApp:
         self.ui.actionSave.triggered.connect(self.save_project)
         self.ui.actionSave_As.triggered.connect(self.save_project_as)
         self.ui.actionSave_Copy.triggered.connect(self.save_project_copy)
-        self.ui.actionQuit.triggered.connect(self.qapplication.quit)
+        self.ui.actionQuit.triggered.connect(self.request_quit)
         self.ui.actionCommandWindow.triggered.connect(self.show_command_window)
         self.ui.actionLogging.triggered.connect(self.show_logging_window)
         self.ui.actionProcedures.triggered.connect(self.show_procedures_window)
@@ -170,7 +178,13 @@ class HydeApp:
         self.ui.actionNew_Table.triggered.connect(self.show_new_table_dialog)
         self.ui.menuTableMacros.aboutToShow.connect(self.rebuild_table_macros_menu)
         self.qapplication.aboutToQuit.connect(self._mark_shutting_down)
-        self.qapplication.aboutToQuit.connect(self.shutdown_watchdog)
+
+        try:
+            self.remote_server = RemoteRequestServer(self, HYDE_REMOTE_PORT)
+        except ZMQError as exc:
+            print(f"[Hyde] Could not start lyse-compatible remote listener: {exc}")
+            self.remote_server = None
+        self.start_kernel_runtime()
 
     @inmain_decorator()
     def show_command_window(self, checked=False):
@@ -196,6 +210,63 @@ class HydeApp:
         self.data_browser_subwindow.setFocus()
         self.data_browser_subwindow.raise_()
 
+    def start_kernel_runtime(self):
+        if os.path.exists(CONNECTION_FILE):
+            os.remove(CONNECTION_FILE)
+        self.kernel_to_child, self.kernel_from_child, self.kernel_process = self.process_tree.subprocess(
+            KERNEL_LAUNCHER,
+            args=["-f", CONNECTION_FILE],
+            output_redirection_port=self.logging_window.port,
+            startup_timeout=60,
+        )
+        self.runtime_helper = RuntimeHelper(
+            self,
+            CONNECTION_FILE,
+            self.kernel_from_child,
+            self.kernel_process,
+        )
+        self.runtime_helper.start()
+
+    def stop_project_watcher(self):
+        if self.filewatcher is not None:
+            self.filewatcher.stop()
+            self.filewatcher = None
+
+    def restart_project_watcher(self):
+        self.stop_project_watcher()
+        if self.current_project_dir is None or self.procedures_dir is None or self.procedures_init is None:
+            return
+        watched_files = [self.procedures_init] if os.path.exists(self.procedures_init) else []
+        self.filewatcher = FileWatcher(
+            self.on_procedure_change,
+            files=watched_files,
+            folders=[self.procedures_dir],
+            hashable_types=[".py"],
+            interval=0.5,
+        )
+
+    def queue_background_command(self, code, silent=True):
+        if self.runtime_helper is None:
+            return
+        self.runtime_helper.enqueue_execute(code, silent=silent)
+
+    def on_procedure_change(self, name, info, event=None):
+        del info
+        if event == "original":
+            return
+        if name != "all" and not name.endswith(".py"):
+            return
+        if self.current_project_dir is None:
+            return
+        self.queue_background_command(
+            format_procedures_bootstrap_code(
+                self.current_project_dir,
+                os.path.dirname(HYDE_DIR),
+                reset_namespace=False,
+            ),
+            silent=True,
+        )
+
     def execute_command(self, code, visible=True):
         """
         Execute a command in the kernel with a choice of visibility policy.
@@ -203,8 +274,11 @@ class HydeApp:
         Visible commands appear in the console history and history pane.
         Muted commands (visible=False) execute silently to avoid console clutter.
         """
-        if self.command_window:
-            self.command_window.execute(code, hidden=not visible)
+        if visible:
+            if self.command_window:
+                self.command_window.execute(code, hidden=False)
+            return
+        self.queue_background_command(code, silent=True)
 
     @inmain_decorator()
     def open_table(self, names, target=None, visible_title=None):
@@ -379,15 +453,59 @@ class HydeApp:
         )
         return response == QtWidgets.QMessageBox.Yes
 
+    def project_target_needs_confirmation(self, project_dir):
+        if not os.path.exists(project_dir):
+            return False
+        if not os.path.isdir(project_dir):
+            return True
+        with os.scandir(project_dir) as entries:
+            return any(entries)
+
+    def begin_project_operation(self, label):
+        self.set_project_status_message(label)
+
+    def set_project_status_message(self, label):
+        self.ui.statusbar.showMessage(label)
+
+    def clear_project_status_message(self):
+        self.ui.statusbar.clearMessage()
+
+    def end_project_operation(self):
+        self.clear_project_status_message()
+
+    def _set_project_action_state(self, has_project):
+        self.ui.actionNew.setEnabled(True)
+        self.ui.actionLoad.setEnabled(True)
+        self.ui.actionLogging.setEnabled(True)
+        self.ui.actionQuit.setEnabled(True)
+        self.ui.actionSave.setEnabled(has_project)
+        self.ui.actionSave_As.setEnabled(has_project)
+        self.ui.actionSave_Copy.setEnabled(has_project)
+        self.ui.actionCommandWindow.setEnabled(has_project)
+        self.ui.actionProcedures.setEnabled(has_project)
+        self.ui.actionDataBrowser.setEnabled(has_project)
+        self.ui.actionNew_Table.setEnabled(has_project)
+        self.ui.menuTableMacros.setEnabled(has_project and bool(self.table_macros))
+
     def choose_new_project(self, checked=False):
         project_dir = self._pick_project_dir("Create New Hyde Project", "Create New")
         if project_dir:
-            self.execute_command(f"import hyde; hyde.new_project({project_dir!r}, load=True)", visible=True)
+            overwrite = False
+            if self.project_target_needs_confirmation(project_dir):
+                if not self.confirm_overwrite_project(project_dir):
+                    return
+                overwrite = True
+            self.begin_project_operation("Creating Hyde project...")
+            self.execute_command(
+                format_new_project_command(project_dir, load=True, overwrite=overwrite),
+                visible=True,
+            )
 
     def choose_project(self, checked=False):
         project_dir = self._pick_project_dir("Open Hyde Project", "Open")
         if project_dir:
-            self.execute_command(f"import hyde; hyde.load_project({project_dir!r})", visible=True)
+            self.begin_project_operation("Loading Hyde project...")
+            self.execute_command(format_load_project_command(project_dir), visible=True)
 
     def prompt_for_save_as_project(self):
         suggested_name = (
@@ -400,7 +518,8 @@ class HydeApp:
         del checked
         if not self.current_project_dir or self.command_window is None:
             return
-        self.execute_command("import hyde; hyde.save_project(mode='save')", visible=True)
+        self.begin_project_operation("Saving Hyde project...")
+        self.execute_command(format_save_project_command(mode='save'), visible=True)
 
     def save_project_as(self, checked=False):
         del checked
@@ -412,12 +531,10 @@ class HydeApp:
         if os.path.abspath(project_dir) == os.path.abspath(self.current_project_dir):
             self.save_project()
             return
-        if os.path.exists(project_dir) and not self.confirm_overwrite_project(project_dir):
+        if self.project_target_needs_confirmation(project_dir) and not self.confirm_overwrite_project(project_dir):
             return
-        self.execute_command(
-            f"import hyde; hyde.save_project({project_dir!r}, mode='save_as', overwrite=True)",
-            visible=True,
-        )
+        self.begin_project_operation("Saving Hyde project...")
+        self.execute_command(format_save_project_command(project_dir, mode='save_as', overwrite=True), visible=True)
 
     def save_project_copy(self, checked=False):
         del checked
@@ -429,156 +546,156 @@ class HydeApp:
         if os.path.abspath(project_dir) == os.path.abspath(self.current_project_dir):
             self.save_project()
             return
-        if os.path.exists(project_dir) and not self.confirm_overwrite_project(project_dir):
+        if self.project_target_needs_confirmation(project_dir) and not self.confirm_overwrite_project(project_dir):
             return
-        self.execute_command(
-            f"import hyde; hyde.save_project({project_dir!r}, mode='copy', overwrite=True)",
-            visible=True,
-        )
+        self.begin_project_operation("Saving Hyde project copy...")
+        self.execute_command(format_save_project_command(project_dir, mode='copy', overwrite=True), visible=True)
 
-    def load_project(self, project_dir, configure_watchdog=True):
-        """Update GUI-side project tracking. Actual variable loading is kernel-driven."""
+    def request_quit(self, checked=False):
+        del checked
+        if self.shutting_down:
+            return
+        if self.command_window is None:
+            self.finalize_quit()
+            return
+        self.execute_command(format_quit_command(), visible=True)
+
+    @inmain_decorator()
+    def enter_no_project_state(self):
+        self.current_project_dir = None
+        self.procedures_dir = None
+        self.procedures_init = None
+        self.stop_project_watcher()
+        clear_tables(self)
+        self.table_macros = []
+        self.rebuild_table_macros_menu()
+        self.procedure_browser.set_procedures_dir(None)
+        self.ui.setWindowTitle("Hyde")
+        if self.command_subwindow is not None:
+            self.command_subwindow.hide()
+        if self.procedures_subwindow is not None:
+            self.procedures_subwindow.hide()
+        if self.data_browser_subwindow is not None:
+            self.data_browser_subwindow.hide()
+        self._set_project_action_state(False)
+
+    @inmain_decorator()
+    def activate_project(self, project_dir):
+        if not project_dir:
+            return
+        project_dir = os.path.abspath(project_dir)
+        if self.current_project_dir is not None and os.path.abspath(self.current_project_dir) == project_dir:
+            return
         self.current_project_dir, self.procedures_dir, self.procedures_init = get_project_paths(project_dir)
         self.procedure_browser.set_procedures_dir(self.procedures_dir)
         self.ui.setWindowTitle(f"Hyde - {os.path.basename(self.current_project_dir)}")
-        self._procedures_ready = not configure_watchdog
-        if configure_watchdog:
-            self.configure_execution_watchdog()
-        self.table_macros = []
-        self.rebuild_table_macros_menu()
-
-    def configure_execution_watchdog(self):
-        if self.to_worker is None or self.current_project_dir is None:
-            return
-        self.to_worker.put([
-            'WATCH_PROJECT',
-            {
-                'project_dir': self.current_project_dir,
-                'procedures_dir': self.procedures_dir,
-                'procedures_init': self.procedures_init,
-            },
-        ])
+        self.restart_project_watcher()
+        self._set_project_action_state(True)
+        self.request_window_macros('table')
 
     def reload_procedures(self):
-        if self.to_worker is None:
+        if self.current_project_dir is None:
             return
-        self.to_worker.put(['RELOAD_PROCEDURES', None])
+        self.queue_background_command(
+            format_procedures_bootstrap_code(
+                self.current_project_dir,
+                os.path.dirname(HYDE_DIR),
+                reset_namespace=False,
+            ),
+            silent=True,
+        )
 
     def request_window_macros(self, kind='table'):
-        if self.to_worker is None:
-            return
         if kind != 'table':
             return
-        self.to_worker.put([
-            'EXECUTE_COMMAND',
-            {
-                'code': (
-                    "import hyde.table_macros; "
-                    "hyde.table_macros.publish_table_macro_registry()"
-                ),
-                'silent': True,
-            },
-        ])
-
-
-
-    def listen_for_watchdog(self):
-        while True:
-            try:
-                task, data = self.from_worker.get()
-                if task == 'KERNEL_READY':
-                    self.finalize_startup()
-                elif task == 'OPEN_TABLE':
-                    names = data.get('names', [])
-                    target = data.get('target')
-                    visible_title = data.get('title')
-                    self.open_table(names, target, visible_title=visible_title)
-                elif task == 'TABLE_DATA':
-                    request_id = data.get('request_id')
-                    table_data = data.get('data', {})
-                    for table in self.tables.values():
-                        table.on_data_received(table_data, request_id)
-                elif task == 'PROCEDURES_RELOADED':
-                    self.on_procedures_reloaded(data.get('ok', False))
-                elif task == 'PROJECT_LOAD_REQUEST':
-                    self.on_project_load_request(data)
-                elif task == 'PROJECT_STATE_RESULT':
-                    self.on_project_state_result(data)
-                elif task == 'KERNEL_CRASHED':
-                    self.show_crash_alert()
-                elif task == 'WINDOW_MACROS':
-                    kind = data.get('kind')
-                    macros = data.get('macros', [])
-                    if kind == 'table':
-                        self.update_table_macros(macros)
-            except Exception:
-                pass
+        self.queue_background_command(format_publish_table_macros_command(), silent=True)
                 
     @inmain_decorator()
     def finalize_startup(self):
         try:
             self.splash.update_text('Connecting to Jupyter Kernel Socket...')
-            self.command_window = CommandWindow(connection_file=CONNECTION_FILE)
-            self.command_subwindow = self.ui.mdiArea.addSubWindow(self.command_window)
-            self.configure_persistent_subwindow(self.command_subwindow)
-            self.command_window.show()
-            
-            self.data_browser = DataBrowser(connection_file=CONNECTION_FILE, app=self)
-            self.data_browser_subwindow = self.ui.mdiArea.addSubWindow(self.data_browser)
-            self.configure_persistent_subwindow(self.data_browser_subwindow)
-            self.data_browser.show()
-
-
-            self.request_window_macros('table')
-            
-            self.ui.show()
-            self.splash.hide()
-            
-            startup_project = self.resolve_startup_project()
-            if startup_project is not None:
-                QtCore.QTimer.singleShot(
-                    100,
-                    lambda path=startup_project: self.execute_command(
-                        f"import hyde; hyde.load_project({path!r})",
-                        visible=True,
-                    ),
-                )
-            elif self.current_project_dir is None and not self.argv:
-                QtCore.QTimer.singleShot(100, self.choose_project)
-            
+            self._rebuild_kernel_windows()
+            self.enter_no_project_state()
+            if not self._startup_complete:
+                self.ui.show()
+                self.splash.hide()
+                self._startup_complete = True
+                startup_project = self.resolve_startup_project()
+                if startup_project is not None:
+                    QtCore.QTimer.singleShot(
+                        100,
+                        lambda path=startup_project: self._load_startup_project(path),
+                    )
         except Exception:
             import traceback
             traceback.print_exc()
-        
-    @inmain_decorator()
-    def show_crash_alert(self):
-        QtWidgets.QMessageBox.warning(self.ui, "Kernel Crashed", "The IPython execution kernel has died unexpectedly. It is being restarted in the background. Your interface state is now disconnected.")
 
-    @inmain_decorator()
-    def on_procedures_reloaded(self, ok):
-        self._procedures_ready = bool(ok)
+    def _shutdown_kernel_windows(self):
         if self.data_browser is not None:
-            self.data_browser.refresh_namespace()
-        self.request_window_macros('table')
+            self.data_browser.shutdown()
+            if self.data_browser_subwindow is not None:
+                self.ui.mdiArea.removeSubWindow(self.data_browser)
+            self.data_browser.deleteLater()
+            self.data_browser = None
+            self.data_browser_subwindow = None
+        if self.command_window is not None:
+            self.command_window.shutdown()
+            if self.command_subwindow is not None:
+                self.ui.mdiArea.removeSubWindow(self.command_window)
+            self.command_window.deleteLater()
+            self.command_window = None
+            self.command_subwindow = None
+
+    def _rebuild_kernel_windows(self):
+        self._shutdown_kernel_windows()
+        self.command_window = CommandWindow(connection_file=CONNECTION_FILE)
+        self.command_window.executed.connect(self.on_visible_command_executed)
+        self.command_subwindow = self.ui.mdiArea.addSubWindow(self.command_window)
+        self.configure_persistent_subwindow(self.command_subwindow)
+
+        self.data_browser = DataBrowser(connection_file=CONNECTION_FILE, app=self)
+        self.data_browser_subwindow = self.ui.mdiArea.addSubWindow(self.data_browser)
+        self.configure_persistent_subwindow(self.data_browser_subwindow)
+
+    def _load_startup_project(self, path):
+        self.begin_project_operation("Loading Hyde project...")
+        self.execute_command(format_load_project_command(path), visible=True)
 
     @inmain_decorator()
-    def on_project_load_request(self, data):
-        path = data.get('path')
-        if not path:
+    def on_kernel_ready(self):
+        self.finalize_startup()
+
+    @inmain_decorator()
+    def on_kernel_crashed(self):
+        if self.shutting_down:
             return
-        if os.path.abspath(path) != os.path.abspath(self.current_project_dir or ""):
-            self.load_project(path, configure_watchdog=False)
-        else:
-            self._procedures_ready = True
-        self.request_window_macros('table')
+        self.enter_no_project_state()
+        self.end_project_operation()
+        if self.runtime_helper is not None:
+            self.runtime_helper = None
+        self._shutdown_kernel_windows()
+        QtWidgets.QMessageBox.warning(
+            self.ui,
+            "Kernel Crashed",
+            "The IPython execution kernel died unexpectedly. Hyde is reconnecting to a fresh kernel.",
+        )
+        self.start_kernel_runtime()
+
+    @inmain_decorator()
+    def on_table_data(self, data):
+        request_id = data.get('request_id')
+        table_data = data.get('data', {})
+        for table in self.tables.values():
+            table.on_data_received(table_data, request_id)
 
     @inmain_decorator()
     def on_project_state_result(self, data):
         operation = data.get('operation')
         success = bool(data.get('success', False))
         path = data.get('path')
-        mode = data.get('mode', 'save')
         errors = list(data.get('errors', []))
+
+        self.end_project_operation()
 
         if operation == 'save':
             if errors:
@@ -588,13 +705,26 @@ class HydeApp:
                 if self.command_window is not None:
                     write_history(self.command_window, path)
             
+        elif operation == 'new':
+            if errors:
+                QtWidgets.QMessageBox.warning(self.ui, "Project Creation Warnings", "\\n".join(errors))
+
         elif operation == 'load':
             if success:
-                if os.path.abspath(path) != os.path.abspath(self.current_project_dir or ""):
-                    self.load_project(path, configure_watchdog=False)
+                if path and (
+                    self.current_project_dir is None
+                    or os.path.abspath(self.current_project_dir) != os.path.abspath(path)
+                ):
+                    self.activate_project(path)
                 self.restore_project_session()
             if errors:
                 QtWidgets.QMessageBox.warning(self.ui, "Project Load Warnings", "\\n".join(errors))
+
+    @inmain_decorator()
+    def on_visible_command_executed(self, msg):
+        content = msg.get("content", {})
+        if content.get("status") != "ok":
+            self.end_project_operation()
 
     @inmain_decorator()
     def update_table_macros(self, macros):
@@ -606,16 +736,55 @@ class HydeApp:
             for macro in macros
         ]
         self.rebuild_table_macros_menu()
+        self._set_project_action_state(self.current_project_dir is not None)
 
     def _mark_shutting_down(self):
         self.shutting_down = True
 
-    def shutdown_watchdog(self):
-        print("[Hyde] Sending QUIT signal to execution Watchdog...")
-        try:
-            self.to_worker.put(['QUIT', None])
-        except Exception:
-            pass
+    @inmain_decorator()
+    def request_gui_quit(self):
+        QtCore.QTimer.singleShot(0, self.finalize_quit)
+
+    def finalize_quit(self):
+        if self.shutting_down:
+            return
+        self._mark_shutting_down()
+        self.shutdown_runtime()
+        self.ui.close()
+
+    def shutdown_runtime(self):
+        if self._runtime_shutdown:
+            return
+        self._runtime_shutdown = True
+        self.stop_project_watcher()
+        if self.remote_server is not None:
+            self.remote_server.shutdown()
+            self.remote_server = None
+        kernel_client = None
+        if self.command_window is not None and self.command_window.kernel_client is not None:
+            kernel_client = self.command_window.kernel_client
+        elif self.runtime_helper is not None and self.runtime_helper.kernel_client is not None:
+            kernel_client = self.runtime_helper.kernel_client
+        if kernel_client is not None:
+            try:
+                kernel_client.shutdown(reply=False)
+            except Exception:
+                pass
+        if self.runtime_helper is not None:
+            helper = self.runtime_helper
+            self.runtime_helper = None
+            helper.stop()
+            helper.thread.join(timeout=2)
+        if self.kernel_process is not None and self.kernel_process.poll() is None:
+            try:
+                self.kernel_process.wait(timeout=5)
+            except Exception:
+                self.kernel_process.terminate()
+                try:
+                    self.kernel_process.wait(timeout=5)
+                except Exception:
+                    pass
+        self._shutdown_kernel_windows()
 
 
     def restore_project_session(self):

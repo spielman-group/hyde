@@ -7,6 +7,7 @@ from hyde.features.hyde_features import (
     format_cell_edit_command,
     format_delete_indices_command,
     format_new_array_command,
+    format_push_table_data_command,
     format_table_macro_source,
     suggest_new_array_name,
 )
@@ -149,21 +150,15 @@ class TableWidget(QtWidgets.QWidget):
             self.refresh_data()
 
     def refresh_data(self):
-        """Request array data via the Executor relay path."""
+        """Request array data via Hyde's background runtime helper."""
         if self._closed or self._refresh_in_flight:
             return
         
         self._current_request_id = str(uuid.uuid4())
         self._refresh_in_flight = True
-        if self.app and self.app.to_worker:
-            code = (
-                f"import hyde.execution.ipc; "
-                f"hyde.execution.ipc.push_table_data({self.names!r}, {self._current_request_id!r})"
-            )
-            self.app.to_worker.put(['EXECUTE_COMMAND', {
-                'code': code,
-                'silent': True,
-            }])
+        if self.app:
+            code = format_push_table_data_command(self.names, self._current_request_id)
+            self.app.queue_background_command(code, silent=True)
 
     @inmain_decorator()
     def on_data_received(self, data, request_id):

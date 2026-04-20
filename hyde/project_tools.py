@@ -5,10 +5,10 @@ import datetime
 import inspect
 import pickle
 import shutil
+import sys
 import types
 from pathlib import Path
 
-import __main__
 import numpy as np
 import tomllib
 import tomli_w
@@ -74,7 +74,8 @@ def is_excluded(name, value):
 
 
 def iter_saveable_objects():
-    for name, value in sorted(__main__.__dict__.items()):
+    main_module = sys.modules["__main__"]
+    for name, value in sorted(main_module.__dict__.items()):
         if is_excluded(name, value):
             continue
         yield name, value

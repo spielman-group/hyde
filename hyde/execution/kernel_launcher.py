@@ -2,11 +2,12 @@ import sys
 import os
 from labscript_utils.ls_zprocess import ProcessTree
 from labscript_utils.setup_logging import setup_logging
-import labscript_utils.excepthook
+if os.environ.get("HYDE_DISABLE_LABSCRIPT_ERROR_DIALOGS") != "1":
+    import labscript_utils.excepthook
 from spyder_kernels.console.start import main
 
 if __name__ == '__main__':
-    # Connect the real kernel process directly to the Watchdog parent.
+    # Connect the real kernel process directly to the Hyde GUI parent.
     # This fulfills the ProcessTree handshake and keeps the actual
     # spyder_kernels process inside the managed tree.
     ProcessTree.connect_to_parent()
