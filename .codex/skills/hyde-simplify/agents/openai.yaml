@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hyde Simplify"
+  short_description: "Hyde simplification and smallest-patch pass"
+  default_prompt: "Use $hyde-simplify to shrink this Hyde change to the smallest clear patch that still matches the documented architecture."

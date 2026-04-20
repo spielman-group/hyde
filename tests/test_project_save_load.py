@@ -371,6 +371,20 @@ class TestProjectStateHelpers(unittest.TestCase):
             finally:
                 hyde.HYDE_PROJECT_DIR = None
 
+    def test_heal_project_prints_recreated_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "heal_print.hy")
+            os.makedirs(project_dir)
+            with patch("builtins.print") as mock_print:
+                healed_paths = hyde.heal_project(project_dir)
+            self.assertTrue(healed_paths)
+            mock_print.assert_called_once()
+            printed = mock_print.call_args[0][0]
+            self.assertIn(
+                f"Recreated missing project files in {Path(project_dir).resolve()}:",
+                printed,
+            )
+            self.assertIn("procedures/__init__.py", printed)
 
 class TestHydeStartup(unittest.TestCase):
     @classmethod
@@ -573,8 +587,111 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             wait_for_code_ok(
                 client,
                 "import hyde\n"
+                "import os\n"
+                "import sys\n"
                 "assert hyde.HYDE_PROJECT_DIR is None\n"
-                "assert 'stale_value' not in globals()\n",
+                "assert 'stale_value' not in globals()\n"
+                f"assert os.path.realpath(os.getcwd()) not in ({os.path.realpath(good_project)!r}, {os.path.realpath(broken_project)!r})\n"
+                f"assert {os.path.realpath(good_project)!r} not in [os.path.realpath(path or os.getcwd()) for path in sys.path]\n"
+                f"assert {os.path.realpath(os.path.join(good_project, 'procedures'))!r} not in [os.path.realpath(path or os.getcwd()) for path in sys.path]\n"
+                f"assert {os.path.realpath(broken_project)!r} not in [os.path.realpath(path or os.getcwd()) for path in sys.path]\n"
+                f"assert {os.path.realpath(os.path.join(broken_project, 'procedures'))!r} not in [os.path.realpath(path or os.getcwd()) for path in sys.path]\n",
+            )
+        finally:
+            client.stop_channels()
+            child.terminate()
+
+    def test_load_project_errors_on_missing_required_project_files(self):
+        project_dir = os.path.join(self.tmpdir.name, "missing_init.hy")
+        os.makedirs(project_dir)
+        _, from_child, child, client = self._start_kernel("missing-init")
+        try:
+            reply = execute_and_wait(client, f"hyde.load_project({project_dir!r})")
+            self.assertEqual(reply["content"]["status"], "error")
+            messages = self._collect_operation_messages(from_child, "load")
+            result = messages[-1][1]
+            self.assertFalse(result["success"])
+            self.assertFalse(os.path.exists(os.path.join(project_dir, "procedures", "__init__.py")))
+            self.assertTrue(
+                any("Missing required project file" in error for error in result["errors"]),
+                result["errors"],
+            )
+            self.assertTrue(
+                any("hyde.heal_project(" in error for error in result["errors"]),
+                result["errors"],
+            )
+            wait_for_code_ok(
+                client,
+                "import hyde\n"
+                "assert hyde.HYDE_PROJECT_DIR is None\n",
+            )
+        finally:
+            client.stop_channels()
+            child.terminate()
+
+    def test_heal_project_recreates_missing_template_files_for_existing_project(self):
+        project_dir = os.path.join(self.tmpdir.name, "heal_existing.hy")
+        os.makedirs(project_dir)
+        _, from_child, child, client = self._start_kernel("heal-existing")
+        try:
+            wait_for_code_ok(client, f"hyde.heal_project({project_dir!r})")
+            messages = self._collect_operation_messages(from_child, "heal")
+            result = messages[-1][1]
+            self.assertTrue(result["success"])
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "procedures", "__init__.py")))
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "manifest.toml")))
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "session.toml")))
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "terminal", "history.py")))
+            self.assertTrue(
+                any(
+                    f"Recreated missing project files in {Path(project_dir).resolve()}:" in error
+                    for error in result["errors"]
+                ),
+                result["errors"],
+            )
+        finally:
+            client.stop_channels()
+            child.terminate()
+
+    def test_heal_project_requires_existing_hy_directory(self):
+        project_dir = os.path.join(self.tmpdir.name, "does_not_exist.hy")
+        _, from_child, child, client = self._start_kernel("heal-missing-dir")
+        try:
+            reply = execute_and_wait(client, f"hyde.heal_project({project_dir!r})")
+            self.assertEqual(reply["content"]["status"], "error")
+            messages = self._collect_operation_messages(from_child, "heal")
+            result = messages[-1][1]
+            self.assertFalse(result["success"])
+            self.assertTrue(
+                any("does not exist" in error for error in result["errors"]),
+                result["errors"],
+            )
+        finally:
+            client.stop_channels()
+            child.terminate()
+
+    def test_procedure_reload_removes_deleted_exports_but_keeps_user_globals(self):
+        project_dir = self._project(
+            "reload_exports.hy",
+            "import hyde\nKEEP = 1\nREMOVE_ME = 2\n",
+        )
+        _, from_child, child, client = self._start_kernel("reload-exports")
+        try:
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            self._collect_operation_messages(from_child, "load")
+            wait_for_code_ok(client, "user_value = 99\n")
+
+            with open(os.path.join(project_dir, "procedures", "__init__.py"), "w", encoding="utf-8") as handle:
+                handle.write("import hyde\nKEEP = 3\n")
+
+            wait_for_code_ok(
+                client,
+                "from hyde.features.hyde_features import format_procedures_bootstrap_code\n"
+                "from hyde.paths import HYDE_DIR\n"
+                f"exec(format_procedures_bootstrap_code({project_dir!r}, HYDE_DIR, reset_namespace=False))\n"
+                "assert KEEP == 3\n"
+                "assert 'REMOVE_ME' not in globals()\n"
+                "assert user_value == 99\n",
             )
         finally:
             client.stop_channels()

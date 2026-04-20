@@ -13,6 +13,7 @@ from hyde.paths import (
     get_project_paths,
 )
 from hyde.features.hyde_features import (
+    format_heal_project_command,
     format_load_project_command,
     format_new_project_command,
     format_procedures_bootstrap_code,
@@ -54,12 +55,23 @@ class PersistentSubwindowFilter(QtCore.QObject):
         return super().eventFilter(watched, event)
 
 class ProjectSelectionDialog(QtWidgets.QFileDialog):
-    def __init__(self, parent=None, title="Open or Create Hyde Project", accept_label="Open / Create"):
+    def __init__(
+        self,
+        parent=None,
+        title="Open or Create Hyde Project",
+        accept_label="Open / Create",
+        require_existing=False,
+    ):
         super().__init__(parent, title, DEFAULT_PROJECTS_DIR)
         self._selected_path = None
+        self._require_existing = require_existing
         self.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
         self.setFileMode(QtWidgets.QFileDialog.Directory)
-        self.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
+        self.setAcceptMode(
+            QtWidgets.QFileDialog.AcceptOpen
+            if require_existing
+            else QtWidgets.QFileDialog.AcceptSave
+        )
         self.setLabelText(QtWidgets.QFileDialog.Accept, accept_label)
         self.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
         self._file_name_edit = self.findChild(QtWidgets.QLineEdit, 'fileNameEdit')
@@ -89,6 +101,8 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
             return
         project_dir = self.current_project_path()
         enabled = bool(project_dir and os.path.basename(project_dir).endswith('.hy'))
+        if enabled and self._require_existing:
+            enabled = os.path.isdir(project_dir)
         self._accept_button.setEnabled(enabled)
 
     def accept(self):
@@ -174,6 +188,7 @@ class HydeApp:
         # Connect Application events
         self.ui.actionNew.triggered.connect(self.choose_new_project)
         self.ui.actionLoad.triggered.connect(self.choose_project)
+        self.ui.actionHeal_Project.triggered.connect(self.choose_heal_project)
         self.ui.actionSave.triggered.connect(self.save_project)
         self.ui.actionSave_As.triggered.connect(self.save_project_as)
         self.ui.actionSave_Copy.triggered.connect(self.save_project_copy)
@@ -420,12 +435,17 @@ class HydeApp:
             return candidate
         return None
 
-    def _pick_project_dir(self, title, accept_label, suggested_name=None):
+    def _pick_project_dir(self, title, accept_label, suggested_name=None, require_existing=False):
         """Show a project directory picker. Returns an absolute .hy path or None."""
         os.makedirs(DEFAULT_PROJECTS_DIR, exist_ok=True)
         suggested_name = suggested_name or 'untitled.hy'
         suggested_path = os.path.join(DEFAULT_PROJECTS_DIR, suggested_name)
-        dialog = ProjectSelectionDialog(self.ui, title=title, accept_label=accept_label)
+        dialog = ProjectSelectionDialog(
+            self.ui,
+            title=title,
+            accept_label=accept_label,
+            require_existing=require_existing,
+        )
         dialog.selectFile(suggested_path)
         if not dialog.exec_():
             return None
@@ -443,6 +463,12 @@ class HydeApp:
             QtWidgets.QMessageBox.warning(
                 self.ui, "Invalid Project Path",
                 f"{project_dir} is not a directory.",
+            )
+            return None
+        if require_existing and not os.path.isdir(project_dir):
+            QtWidgets.QMessageBox.warning(
+                self.ui, "Missing Project Directory",
+                f"{project_dir} does not exist.",
             )
             return None
         return project_dir
@@ -483,6 +509,7 @@ class HydeApp:
     def _set_project_action_state(self, has_project):
         self.ui.actionNew.setEnabled(True)
         self.ui.actionLoad.setEnabled(True)
+        self.ui.actionHeal_Project.setEnabled(True)
         self.ui.actionLogging.setEnabled(True)
         self.ui.actionQuit.setEnabled(True)
         self.ui.actionSave.setEnabled(has_project)
@@ -509,10 +536,16 @@ class HydeApp:
             )
 
     def choose_project(self, checked=False):
-        project_dir = self._pick_project_dir("Open Hyde Project", "Open")
+        project_dir = self._pick_project_dir("Open Hyde Project", "Open", require_existing=True)
         if project_dir:
             self.begin_project_operation("Loading Hyde project...")
             self.execute_command(format_load_project_command(project_dir), visible=True)
+
+    def choose_heal_project(self, checked=False):
+        project_dir = self._pick_project_dir("Heal Hyde Project", "Heal", require_existing=True)
+        if project_dir:
+            self.begin_project_operation("Healing Hyde project...")
+            self.execute_command(format_heal_project_command(project_dir), visible=True)
 
     def prompt_for_save_as_project(self):
         suggested_name = (
@@ -720,14 +753,14 @@ class HydeApp:
 
         elif operation == 'load':
             if success:
-                if path and (
-                    self.current_project_dir is None
-                    or os.path.abspath(self.current_project_dir) != os.path.abspath(path)
-                ):
-                    self.activate_project(path)
                 self.restore_project_session()
             if errors:
                 QtWidgets.QMessageBox.warning(self.ui, "Project Load Warnings", "\\n".join(errors))
+        elif operation == 'heal':
+            if success and errors:
+                QtWidgets.QMessageBox.information(self.ui, "Project Heal Complete", "\\n".join(errors))
+            elif not success and errors:
+                QtWidgets.QMessageBox.warning(self.ui, "Project Heal Warnings", "\\n".join(errors))
 
     @inmain_decorator()
     def on_visible_command_executed(self, msg):

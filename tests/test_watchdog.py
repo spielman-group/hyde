@@ -8,8 +8,9 @@ from unittest.mock import patch
 
 import hyde
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.main import HydeApp
+from hyde.user_interface.main import HydeApp, ProjectSelectionDialog
 from hyde.user_interface.runtime_helper import RemoteRequestServer, RuntimeHelper
+from qtutils.qt import QtWidgets
 
 
 class FakeProcess:
@@ -284,16 +285,11 @@ class TestRuntimeArchitecture(unittest.TestCase):
             ],
         )
 
-    def test_load_result_activates_project_when_gui_has_not_seen_activate_message(self):
+    def test_load_result_restores_session_without_reactivating_project(self):
         calls = []
         dummy_app = type("DummyApp", (), {})()
-        dummy_app.current_project_dir = None
+        dummy_app.current_project_dir = "/tmp/project.hy"
         dummy_app.end_project_operation = lambda: calls.append(("end",))
-        dummy_app.activate_project = lambda path: calls.append(("activate", path)) or setattr(
-            dummy_app,
-            "current_project_dir",
-            path,
-        )
         dummy_app.restore_project_session = lambda: calls.append(("restore",))
 
         HydeApp.on_project_state_result(
@@ -305,7 +301,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             calls,
             [
                 ("end",),
-                ("activate", "/tmp/project.hy"),
                 ("restore",),
             ],
         )
@@ -316,7 +311,9 @@ class TestRuntimeArchitecture(unittest.TestCase):
         dummy_app = type("DummyApp", (), {})()
         dummy_app.ui = type("UI", (), {"statusbar": FakeStatusBar()})()
         dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
-        dummy_app._pick_project_dir = lambda title, accept_label: "/tmp/project.hy"
+        dummy_app._pick_project_dir = (
+            lambda title, accept_label, suggested_name=None, require_existing=False: "/tmp/project.hy"
+        )
         dummy_app.begin_project_operation = lambda label: HydeApp.begin_project_operation(dummy_app, label)
         dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
 
@@ -325,6 +322,47 @@ class TestRuntimeArchitecture(unittest.TestCase):
 
         self.assertEqual(dummy_app.ui.statusbar.messages, [("Loading Hyde project...", 0)])
         self.assertEqual(calls, [("execute", "LOAD_PROJECT", True)])
+
+    def test_choose_heal_project_dispatches_visible_heal_command(self):
+        calls = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.ui = type("UI", (), {"statusbar": FakeStatusBar()})()
+        dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
+        dummy_app._pick_project_dir = (
+            lambda title, accept_label, suggested_name=None, require_existing=False: "/tmp/project.hy"
+        )
+        dummy_app.begin_project_operation = lambda label: HydeApp.begin_project_operation(dummy_app, label)
+        dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
+
+        with patch("hyde.user_interface.main.format_heal_project_command", return_value="HEAL_PROJECT"):
+            HydeApp.choose_heal_project(dummy_app)
+
+        self.assertEqual(dummy_app.ui.statusbar.messages, [("Healing Hyde project...", 0)])
+        self.assertEqual(calls, [("execute", "HEAL_PROJECT", True)])
+
+    def test_project_selection_dialog_requires_existing_project_for_open(self):
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing = os.path.join(tmpdir, "missing.hy")
+            existing = os.path.join(tmpdir, "existing.hy")
+            os.makedirs(existing)
+
+            dialog = ProjectSelectionDialog(
+                title="Open Hyde Project",
+                accept_label="Open",
+                require_existing=True,
+            )
+            dialog.selectFile(missing)
+            dialog.update_accept_button()
+            self.assertFalse(dialog._accept_button.isEnabled())
+
+            dialog.selectFile(existing)
+            dialog.update_accept_button()
+            self.assertTrue(dialog._accept_button.isEnabled())
+            dialog.close()
 
     def test_visible_command_error_clears_project_status_message(self):
         dummy_app = type("DummyApp", (), {})()
@@ -345,7 +383,9 @@ class TestRuntimeArchitecture(unittest.TestCase):
         prompts = []
         formatted = []
         dummy_app = type("DummyApp", (), {})()
-        dummy_app._pick_project_dir = lambda title, accept_label: "/tmp/existing.hy"
+        dummy_app._pick_project_dir = (
+            lambda title, accept_label, suggested_name=None, require_existing=False: "/tmp/existing.hy"
+        )
         dummy_app.begin_project_operation = lambda label: calls.append(("begin", label))
         dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
         dummy_app.project_target_needs_confirmation = lambda project_dir: True

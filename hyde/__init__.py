@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import builtins
+import __main__
 from pathlib import Path
 
 import numpy as np
@@ -50,6 +51,10 @@ def gui_mode(enable=True):
         builtins.hyde = hyde_module
         builtins.quit = quit
         builtins.exit = quit
+        if "__hyde_clean_dict__" not in main_module.__dict__:
+            main_module.__dict__["__hyde_clean_cwd__"] = os.getcwd()
+            main_module.__dict__["__hyde_clean_sys_path__"] = list(sys.path)
+            main_module.__dict__["__hyde_clean_dict__"] = main_module.__dict__.copy()
     else:
         if _ORIGINAL_BUILTINS_QUIT is not None:
             builtins.quit = _ORIGINAL_BUILTINS_QUIT
@@ -71,7 +76,7 @@ def new_project(path, load=True, overwrite=False):
             else:
                 project_dir.unlink()
 
-        project_tools.copy_project_template(project_dir)
+        project_tools.materialize_project_template(project_dir)
     except Exception as exc:
         publish_project_state_result(
             "new",
@@ -94,6 +99,49 @@ def new_project(path, load=True, overwrite=False):
             object_count=0,
             mode="new",
         )
+
+
+def heal_project(path):
+    """Fill in missing template files for an existing Hyde project directory."""
+    project_dir = project_tools.resolve_project_dir(path)
+    errors = []
+    healed_paths = []
+    success = True
+    try:
+        if not project_dir.exists():
+            raise RuntimeError(f"Cannot heal project: '{project_dir}' does not exist.")
+        if not project_dir.is_dir():
+            raise RuntimeError(f"Cannot heal project: '{project_dir}' is not a directory.")
+        if project_dir.suffix != ".hy":
+            raise RuntimeError(f"Cannot heal project: '{project_dir}' is not a .hy directory.")
+        healed_paths = project_tools.materialize_project_template(
+            project_dir,
+            missing_only=True,
+            create=True,
+        )
+        if healed_paths:
+            message = (
+                f"Recreated missing project files in {project_dir}: "
+                + ", ".join(healed_paths)
+                + " (from the default template)"
+            )
+            print(message)
+            errors.append(message)
+    except Exception as exc:
+        success = False
+        errors.append(str(exc))
+
+    publish_project_state_result(
+        "heal",
+        str(project_dir),
+        success=success,
+        errors=errors,
+        object_count=0,
+        mode="heal",
+    )
+    if not success:
+        raise RuntimeError(f"Hyde heal_project failed for {project_dir}: {errors}")
+    return healed_paths
 
 
 def save_project(path=None, mode="save", overwrite=False):
@@ -206,11 +254,19 @@ def load_project(path=None):
             raise RuntimeError("No Hyde project is active.")
 
         project_dir = project_tools.resolve_project_dir(HYDE_PROJECT_DIR if path is None else path)
-        from .features.hyde_features import execute_procedures_bootstrap
-
         HYDE_PROJECT_DIR = None
         signal_enter_no_project_state()
-        execute_procedures_bootstrap(
+        if not project_dir.exists():
+            raise RuntimeError(f"Hyde project does not exist: '{project_dir}'.")
+        if not project_dir.is_dir():
+            raise RuntimeError(f"Hyde project path is not a directory: '{project_dir}'.")
+        procedures_init = project_dir / "procedures" / "__init__.py"
+        if not procedures_init.exists():
+            raise RuntimeError(
+                f"Missing required project file: '{procedures_init}'. "
+                f"Run hyde.heal_project({str(project_dir)!r}) to recreate missing template files."
+            )
+        project_tools.execute_procedures_bootstrap(
             str(project_dir),
             os.path.dirname(HYDE_DIR),
             reset_namespace=True,
@@ -231,6 +287,16 @@ def load_project(path=None):
         HYDE_PROJECT_DIR = str(project_dir)
     except Exception as exc:
         success = False
+        if HYDE_PROJECT_DIR is None:
+            clean_cwd = __main__.__dict__.get("__hyde_clean_cwd__")
+            clean_sys_path = __main__.__dict__.get("__hyde_clean_sys_path__")
+            if clean_cwd is not None:
+                try:
+                    os.chdir(clean_cwd)
+                except Exception:
+                    pass
+            if clean_sys_path is not None:
+                sys.path[:] = list(clean_sys_path)
         errors.append(str(exc))
 
     if success:

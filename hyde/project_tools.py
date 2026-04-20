@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import builtins
 import datetime
+import importlib
 import inspect
+import os
 import pickle
 import shutil
 import sys
@@ -30,12 +32,90 @@ def ensure_project_dirs(project_dir: Path):
         (project_dir / relpath).mkdir(parents=True, exist_ok=True)
 
 
-def copy_project_template(project_dir: Path):
-    shutil.copytree(
-        DEFAULT_PROJECT_TEMPLATE,
-        project_dir,
-        ignore=shutil.ignore_patterns("__pycache__"),
-    )
+def materialize_project_template(project_dir: Path, missing_only=False, create=True):
+    project_dir = Path(project_dir)
+    template_root = Path(DEFAULT_PROJECT_TEMPLATE)
+    if not missing_only:
+        shutil.copytree(
+            template_root,
+            project_dir,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        return []
+
+    created_paths = []
+    for template_path in template_root.rglob("*"):
+        relative_path = template_path.relative_to(template_root)
+        if "__pycache__" in relative_path.parts or template_path.suffix == ".pyc":
+            continue
+        target_path = project_dir / relative_path
+        if target_path.exists():
+            continue
+        created_paths.append(relative_path.as_posix())
+        if not create:
+            continue
+        if template_path.is_dir():
+            target_path.mkdir(parents=True, exist_ok=True)
+        else:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(template_path, target_path)
+    return created_paths
+
+
+def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=False):
+    import __main__
+
+    if "__hyde_clean_dict__" not in __main__.__dict__:
+        __main__.__dict__["__hyde_clean_cwd__"] = os.getcwd()
+        __main__.__dict__["__hyde_clean_sys_path__"] = list(sys.path)
+        __main__.__dict__["__hyde_clean_dict__"] = __main__.__dict__.copy()
+
+    os.chdir(project_dir)
+    project_root = os.getcwd()
+    procedures_dir = os.path.join(project_root, "procedures")
+
+    while procedures_dir in sys.path:
+        sys.path.remove(procedures_dir)
+    sys.path.insert(0, procedures_dir)
+
+    while project_root in sys.path:
+        sys.path.remove(project_root)
+    sys.path.insert(1, project_root)
+
+    while hyde_source_root in sys.path:
+        sys.path.remove(hyde_source_root)
+    sys.path.insert(2, hyde_source_root)
+
+    if reset_namespace:
+        clean_dict = __main__.__dict__.get("__hyde_clean_dict__")
+        if clean_dict is None:
+            clean_dict = __main__.__dict__.copy()
+        __main__.__dict__.clear()
+        __main__.__dict__.update(clean_dict)
+        __main__.__dict__["__hyde_clean_dict__"] = clean_dict
+
+    importlib.invalidate_caches()
+    for name in list(sys.modules):
+        if name == "procedures" or name.startswith("procedures."):
+            del sys.modules[name]
+
+    import hyde
+    hyde.gui_mode(True)
+    import hyde.table_macros
+    hyde.table_macros.clear_table_macros()
+
+    import procedures
+    previous_exports = set(__main__.__dict__.get("__hyde_procedures_exports__", ()))
+    exports = {
+        name: value
+        for name, value in procedures.__dict__.items()
+        if not name.startswith("_")
+    }
+    for name in previous_exports - set(exports):
+        __main__.__dict__.pop(name, None)
+    __main__.__dict__.update(exports)
+    __main__.__hyde_procedures_exports__ = set(exports)
+    hyde.table_macros.publish_table_macro_registry()
 
 
 def copy_project_procedures(source_project_dir: Path, target_project_dir: Path):

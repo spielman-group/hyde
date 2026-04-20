@@ -35,6 +35,7 @@
     </property>
     <addaction name="actionNew"/>
     <addaction name="actionLoad"/>
+    <addaction name="actionHeal_Project"/>
     <addaction name="actionSave"/>
     <addaction name="actionSave_As"/>
     <addaction name="actionSave_Copy"/>
@@ -70,6 +71,11 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+N</string>
+   </property>
+  </action>
+  <action name="actionHeal_Project">
+   <property name="text">
+    <string>Heal Project...</string>
    </property>
   </action>
   <action name="actionSave">
