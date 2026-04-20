@@ -1,4 +1,5 @@
 import os
+import time
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from labscript_utils.filewatcher import FileWatcher
@@ -108,9 +109,12 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         self.app = app
 
     def closeEvent(self, event):
-        if self.app.shutting_down:
+        if self.app._close_ready:
             return super().closeEvent(event)
-        self.app.request_quit()
+        if self.app.shutting_down:
+            self.app.begin_shutdown_from_close_event()
+        else:
+            self.app.request_quit()
         event.ignore()
 
 class HydeApp:
@@ -138,6 +142,9 @@ class HydeApp:
         self.data_browser_subwindow = None
         self.shutting_down = False
         self._runtime_shutdown = False
+        self._close_ready = False
+        self._quit_command_sent = False
+        self._quit_deadline = None
         self.table_macros = []
         self._startup_complete = False
         
@@ -170,7 +177,7 @@ class HydeApp:
         self.ui.actionSave.triggered.connect(self.save_project)
         self.ui.actionSave_As.triggered.connect(self.save_project_as)
         self.ui.actionSave_Copy.triggered.connect(self.save_project_copy)
-        self.ui.actionQuit.triggered.connect(self.request_quit)
+        self.ui.actionQuit.triggered.connect(self.ui.close)
         self.ui.actionCommandWindow.triggered.connect(self.show_command_window)
         self.ui.actionLogging.triggered.connect(self.show_logging_window)
         self.ui.actionProcedures.triggered.connect(self.show_procedures_window)
@@ -553,11 +560,13 @@ class HydeApp:
 
     def request_quit(self, checked=False):
         del checked
-        if self.shutting_down:
+        if self.shutting_down or self._quit_command_sent:
             return
         if self.command_window is None:
-            self.finalize_quit()
+            self.shutting_down = True
+            self.begin_shutdown_from_close_event()
             return
+        self._quit_command_sent = True
         self.execute_command(format_quit_command(), visible=True)
 
     @inmain_decorator()
@@ -724,6 +733,7 @@ class HydeApp:
     def on_visible_command_executed(self, msg):
         content = msg.get("content", {})
         if content.get("status") != "ok":
+            self._quit_command_sent = False
             self.end_project_operation()
 
     @inmain_decorator()
@@ -743,48 +753,61 @@ class HydeApp:
 
     @inmain_decorator()
     def request_gui_quit(self):
-        QtCore.QTimer.singleShot(0, self.finalize_quit)
+        self.shutting_down = True
+        self.ui.close()
 
     def finalize_quit(self):
-        if self.shutting_down:
+        if self._close_ready:
             return
-        self._mark_shutting_down()
-        self.shutdown_runtime()
+        self.shutting_down = True
         self.ui.close()
+
+    def begin_shutdown_from_close_event(self):
+        if self._runtime_shutdown:
+            return
+        self.shutdown_runtime()
 
     def shutdown_runtime(self):
         if self._runtime_shutdown:
             return
         self._runtime_shutdown = True
+        self._quit_deadline = time.monotonic() + 2.0
         self.stop_project_watcher()
         if self.remote_server is not None:
             self.remote_server.shutdown()
             self.remote_server = None
-        kernel_client = None
-        if self.command_window is not None and self.command_window.kernel_client is not None:
-            kernel_client = self.command_window.kernel_client
-        elif self.runtime_helper is not None and self.runtime_helper.kernel_client is not None:
-            kernel_client = self.runtime_helper.kernel_client
-        if kernel_client is not None:
+        helper = self.runtime_helper
+        if helper is not None and helper.kernel_client is not None:
             try:
-                kernel_client.shutdown(reply=False)
+                helper.kernel_client.shutdown(reply=False)
+            except Exception:
+                pass
+        elif self.command_window is not None and self.command_window.kernel_client is not None:
+            try:
+                self.command_window.kernel_client.shutdown(reply=False)
             except Exception:
                 pass
         if self.runtime_helper is not None:
-            helper = self.runtime_helper
             self.runtime_helper = None
             helper.stop()
-            helper.thread.join(timeout=2)
-        if self.kernel_process is not None and self.kernel_process.poll() is None:
-            try:
-                self.kernel_process.wait(timeout=5)
-            except Exception:
-                self.kernel_process.terminate()
-                try:
-                    self.kernel_process.wait(timeout=5)
-                except Exception:
-                    pass
         self._shutdown_kernel_windows()
+        QtCore.QTimer.singleShot(0, self._complete_shutdown_runtime)
+
+    def _complete_shutdown_runtime(self):
+        if self.runtime_helper is not None:
+            return
+        kernel_running = self.kernel_process is not None and self.kernel_process.poll() is None
+        quit_deadline = self._quit_deadline
+        if kernel_running and quit_deadline is not None and time.monotonic() < quit_deadline:
+            QtCore.QTimer.singleShot(50, self._complete_shutdown_runtime)
+            return
+        if kernel_running:
+            self.kernel_process.terminate()
+            if self.kernel_process.poll() is None:
+                QtCore.QTimer.singleShot(50, self._complete_shutdown_runtime)
+                return
+        self._close_ready = True
+        self.ui.close()
 
 
     def restore_project_session(self):

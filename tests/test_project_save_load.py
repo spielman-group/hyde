@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 import tempfile
+import builtins
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -24,6 +25,7 @@ from hyde.user_interface.project_state import (
     read_session,
     try_read_history,
     try_read_session,
+    clear_tables,
     write_history,
     write_session,
 )
@@ -131,9 +133,13 @@ class DummyTable:
         self.handle = handle
         self.names = list(names)
         self._subwindow = subwindow
+        self.shutdown_calls = 0
 
     def parentWidget(self):
         return self._subwindow
+
+    def shutdown_client(self):
+        self.shutdown_calls += 1
 
 
 class TestProjectStateHelpers(unittest.TestCase):
@@ -225,6 +231,37 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(project_dir, "procedures", "__init__.py")))
             self.assertFalse(os.path.exists(os.path.join(project_dir, "procedures", "master.py")))
 
+    def test_gui_mode_rebinds_quit_and_exit_to_hyde_quit(self):
+        original_quit = builtins.quit
+        original_exit = builtins.exit
+        original_main_quit = sys.modules["__main__"].__dict__.get("quit")
+        original_main_exit = sys.modules["__main__"].__dict__.get("exit")
+        original_hyde = sys.modules["__main__"].__dict__.get("hyde")
+        try:
+            hyde.gui_mode(True)
+
+            self.assertIs(sys.modules["__main__"].__dict__["hyde"], hyde)
+            self.assertIs(sys.modules["__main__"].__dict__["quit"], hyde.quit)
+            self.assertIs(sys.modules["__main__"].__dict__["exit"], hyde.quit)
+            self.assertIs(builtins.quit, hyde.quit)
+            self.assertIs(builtins.exit, hyde.quit)
+        finally:
+            hyde.gui_mode(False)
+            if original_main_quit is None:
+                sys.modules["__main__"].__dict__.pop("quit", None)
+            else:
+                sys.modules["__main__"].__dict__["quit"] = original_main_quit
+            if original_main_exit is None:
+                sys.modules["__main__"].__dict__.pop("exit", None)
+            else:
+                sys.modules["__main__"].__dict__["exit"] = original_main_exit
+            if original_hyde is None:
+                sys.modules["__main__"].__dict__.pop("hyde", None)
+            else:
+                sys.modules["__main__"].__dict__["hyde"] = original_hyde
+            builtins.quit = original_quit
+            builtins.exit = original_exit
+
     def test_restore_project_session_warns_on_malformed_session(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "broken.hy")
@@ -302,6 +339,23 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertEqual(prompted, [target])
             self.assertEqual(executed, [])
 
+    def test_clear_tables_forces_close_without_macro_prompt_path(self):
+        subwindow = type("Subwindow", (), {"close": lambda self: setattr(self, "closed", True)})()
+        subwindow.closed = False
+        table = DummyTable("Table0", ["a"], subwindow)
+        app = type("DummyApp", (), {})()
+        app.tables = {"Table0": table}
+        app.active_table_handle = "Table0"
+        app.table_counter = 1
+
+        clear_tables(app)
+
+        self.assertEqual(table.shutdown_calls, 1)
+        self.assertTrue(subwindow.closed)
+        self.assertEqual(app.tables, {})
+        self.assertIsNone(app.active_table_handle)
+        self.assertEqual(app.table_counter, 0)
+
     def test_save_project_returns_none(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             source_project = os.path.join(tmpdir, "current.hy")
@@ -349,8 +403,12 @@ class TestHydeStartup(unittest.TestCase):
             self.assertFalse(app.ui.actionDataBrowser.isEnabled())
             self.assertFalse(app.ui.actionNew_Table.isEnabled())
         finally:
-            app.shutdown_runtime()
-            app.ui.close()
+            app.finalize_quit()
+            wait_until(
+                lambda: app.command_window is None and app.data_browser is None,
+                timeout=10,
+                message="Hyde did not finish asynchronous shutdown.",
+            )
             process_events(0.2)
 
 

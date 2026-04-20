@@ -198,6 +198,8 @@ def clear_tables(app):
     for table in list(app.tables.values()):
         subwindow = table.parentWidget()
         if subwindow is not None:
+            if hasattr(table, "shutdown_client"):
+                table.shutdown_client()
             subwindow.close()
     app.tables.clear()
     app.active_table_handle = None

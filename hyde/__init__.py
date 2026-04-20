@@ -28,6 +28,8 @@ __version__ = "0.1.0.dev0"
 
 HYDE_GUI = False
 HYDE_PROJECT_DIR = None
+_ORIGINAL_BUILTINS_QUIT = getattr(builtins, "quit", None)
+_ORIGINAL_BUILTINS_EXIT = getattr(builtins, "exit", None)
 
 
 def gui_mode(enable=True):
@@ -39,10 +41,20 @@ def gui_mode(enable=True):
     """
     global HYDE_GUI
     HYDE_GUI = bool(enable)
+    main_module = sys.modules["__main__"]
     if HYDE_GUI:
         hyde_module = sys.modules[__name__]
-        sys.modules["__main__"].__dict__["hyde"] = hyde_module
+        main_module.__dict__["hyde"] = hyde_module
+        main_module.__dict__["quit"] = quit
+        main_module.__dict__["exit"] = quit
         builtins.hyde = hyde_module
+        builtins.quit = quit
+        builtins.exit = quit
+    else:
+        if _ORIGINAL_BUILTINS_QUIT is not None:
+            builtins.quit = _ORIGINAL_BUILTINS_QUIT
+        if _ORIGINAL_BUILTINS_EXIT is not None:
+            builtins.exit = _ORIGINAL_BUILTINS_EXIT
 
 
 def new_project(path, load=True, overwrite=False):
@@ -245,6 +257,7 @@ def quit():
     it exits the current interpreter.
     """
     if HYDE_GUI:
+        signal_enter_no_project_state()
         signal_quit_requested()
         return None
     raise SystemExit(0)

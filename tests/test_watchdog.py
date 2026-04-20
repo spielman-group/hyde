@@ -27,8 +27,8 @@ class FakeKernelClient:
     def execute(self, code, silent=True):
         self.calls.append((code, silent))
 
-    def shutdown(self, reply=False):
-        self.calls.append(("shutdown", reply))
+    def shutdown(self, reply=False, timeout=None):
+        self.calls.append(("shutdown", reply if timeout is None else (reply, timeout)))
 
 
 class FakeClosableChannel:
@@ -199,17 +199,16 @@ class TestRuntimeArchitecture(unittest.TestCase):
             ],
         )
 
-    def test_request_gui_quit_defers_finalize_to_next_qt_turn(self):
-        scheduled = []
+    def test_request_gui_quit_marks_shutdown_and_closes_window(self):
+        calls = []
         dummy_app = type("DummyApp", (), {})()
-        dummy_app.finalize_quit = lambda: None
+        dummy_app.shutting_down = False
+        dummy_app.ui = type("UI", (), {"close": lambda self: calls.append(("close",))})()
 
-        with patch("hyde.user_interface.main.QtCore.QTimer.singleShot", side_effect=lambda delay, fn: scheduled.append((delay, fn))):
-            HydeApp.request_gui_quit.__wrapped__(dummy_app)
+        HydeApp.request_gui_quit.__wrapped__(dummy_app)
 
-        self.assertEqual(len(scheduled), 1)
-        self.assertEqual(scheduled[0][0], 0)
-        self.assertIs(scheduled[0][1], dummy_app.finalize_quit)
+        self.assertTrue(dummy_app.shutting_down)
+        self.assertEqual(calls, [("close",)])
 
     def test_procedure_change_enqueues_silent_reload_on_runtime_queue(self):
         queued = []
@@ -367,44 +366,31 @@ class TestRuntimeArchitecture(unittest.TestCase):
         calls = []
         dummy_app = type("DummyApp", (), {})()
         dummy_app.shutting_down = False
+        dummy_app._quit_command_sent = False
         dummy_app.command_window = object()
         dummy_app.execute_command = lambda code, visible=True: calls.append((code, visible))
-        dummy_app.finalize_quit = lambda: calls.append(("finalize",))
 
         HydeApp.request_quit(dummy_app)
 
         self.assertEqual(calls, [("hyde.quit()", True)])
+        self.assertTrue(dummy_app._quit_command_sent)
 
-    def test_request_quit_finalizes_directly_without_command_window(self):
+    def test_request_quit_without_command_window_starts_close_event_shutdown(self):
         calls = []
         dummy_app = type("DummyApp", (), {})()
         dummy_app.shutting_down = False
+        dummy_app._quit_command_sent = False
         dummy_app.command_window = None
-        dummy_app.execute_command = lambda code, visible=True: calls.append((code, visible))
-        dummy_app.finalize_quit = lambda: calls.append(("finalize",))
+        dummy_app.begin_shutdown_from_close_event = lambda: calls.append(("begin_shutdown",))
 
         HydeApp.request_quit(dummy_app)
 
-        self.assertEqual(calls, [("finalize",)])
+        self.assertEqual(calls, [("begin_shutdown",)])
+        self.assertTrue(dummy_app.shutting_down)
 
-    def test_shutdown_runtime_requests_graceful_kernel_shutdown_before_force_terminate(self):
+    def test_shutdown_runtime_requests_kernel_shutdown_and_schedules_completion(self):
         kernel_client = FakeKernelClient()
         process_calls = []
-
-        class DummyProcess:
-            def __init__(self):
-                self.wait_calls = 0
-
-            def poll(self):
-                return None
-
-            def wait(self, timeout=None):
-                self.wait_calls += 1
-                process_calls.append(("wait", timeout))
-                raise TimeoutError("still running")
-
-            def terminate(self):
-                process_calls.append(("terminate",))
 
         helper = type("Helper", (), {})()
         helper.kernel_client = None
@@ -418,23 +404,69 @@ class TestRuntimeArchitecture(unittest.TestCase):
         dummy_app.command_window = type("CommandWindow", (), {"kernel_client": kernel_client})()
         dummy_app.runtime_helper = helper
         dummy_app._shutdown_kernel_windows = lambda: process_calls.append(("shutdown_windows",))
-        dummy_app.kernel_process = DummyProcess()
+        dummy_app._complete_shutdown_runtime = lambda: process_calls.append(("complete_shutdown",))
 
-        HydeApp.shutdown_runtime(dummy_app)
+        with patch("hyde.user_interface.main.time.monotonic", return_value=10.0):
+            with patch("hyde.user_interface.main.QtCore.QTimer.singleShot", side_effect=lambda delay, fn: process_calls.append(("singleShot", delay, fn))):
+                HydeApp.shutdown_runtime(dummy_app)
 
         self.assertEqual(kernel_client.calls, [("shutdown", False)])
-        self.assertEqual(
-            process_calls,
-            [
-                ("stop_watcher",),
-                ("helper_stop",),
-                ("wait", 5),
-                ("terminate",),
-                ("wait", 5),
-                ("shutdown_windows",),
-            ],
-        )
+        self.assertEqual(dummy_app._quit_deadline, 12.0)
+        self.assertEqual(process_calls[0:2], [("stop_watcher",), ("helper_stop",)])
+        self.assertEqual(process_calls[2], ("shutdown_windows",))
+        self.assertEqual(process_calls[3][0:2], ("singleShot", 0))
         self.assertIsNone(dummy_app.runtime_helper)
+
+    def test_shutdown_runtime_prefers_runtime_helper_blocking_client(self):
+        helper_client = FakeKernelClient()
+        process_calls = []
+
+        class DummyProcess:
+            def poll(self):
+                return 0
+
+        helper = type("Helper", (), {})()
+        helper.kernel_client = helper_client
+        helper.thread = FakeJoinThread()
+        helper.stop = lambda: process_calls.append(("helper_stop",))
+
+        command_window_client = FakeKernelClient()
+
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app._runtime_shutdown = False
+        dummy_app.stop_project_watcher = lambda: process_calls.append(("stop_watcher",))
+        dummy_app.remote_server = None
+        dummy_app.command_window = type("CommandWindow", (), {"kernel_client": command_window_client})()
+        dummy_app.runtime_helper = helper
+        dummy_app._shutdown_kernel_windows = lambda: process_calls.append(("shutdown_windows",))
+        dummy_app._complete_shutdown_runtime = lambda: process_calls.append(("complete_shutdown",))
+        dummy_app.kernel_process = DummyProcess()
+
+        with patch("hyde.user_interface.main.time.monotonic", return_value=10.0):
+            with patch("hyde.user_interface.main.QtCore.QTimer.singleShot", side_effect=lambda delay, fn: process_calls.append(("singleShot", delay, fn))):
+                HydeApp.shutdown_runtime(dummy_app)
+
+        self.assertEqual(helper_client.calls, [("shutdown", False)])
+        self.assertEqual(command_window_client.calls, [])
+        self.assertIn(("shutdown_windows",), process_calls)
+
+    def test_complete_shutdown_runtime_closes_when_kernel_already_stopped(self):
+        process_calls = []
+
+        class DummyProcess:
+            def poll(self):
+                return 0
+
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.runtime_helper = None
+        dummy_app.kernel_process = DummyProcess()
+        dummy_app._quit_deadline = 0.0
+        dummy_app.ui = type("UI", (), {"close": lambda self: process_calls.append(("close",))})()
+
+        HydeApp._complete_shutdown_runtime(dummy_app)
+
+        self.assertEqual(process_calls, [("close",)])
+
 
 
 if __name__ == "__main__":
