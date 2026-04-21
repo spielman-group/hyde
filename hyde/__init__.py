@@ -28,6 +28,7 @@ from .execution.ipc import (
 __version__ = "0.1.0.dev0"
 
 HYDE_GUI = False
+HYDE_DEBUG = True
 HYDE_PROJECT_DIR = None
 _ORIGINAL_BUILTINS_QUIT = getattr(builtins, "quit", None)
 _ORIGINAL_BUILTINS_EXIT = getattr(builtins, "exit", None)

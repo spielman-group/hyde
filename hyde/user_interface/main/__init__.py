@@ -1,25 +1,31 @@
+import logging
 import os
 import time
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
+from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 from labscript_utils.filewatcher import FileWatcher
 from zmq.error import ZMQError
 
 from hyde.paths import (
     CONNECTION_FILE,
-    DEFAULT_PROJECTS_DIR,
     HYDE_DIR,
     KERNEL_LAUNCHER,
     get_project_paths,
 )
 from hyde.features.hyde_features import (
-    format_heal_project_command,
-    format_load_project_command,
-    format_new_project_command,
     format_procedures_bootstrap_code,
     format_publish_table_macros_command,
-    format_quit_command,
-    format_save_project_command,
+)
+from hyde.user_interface.file_dialogs import (
+    HealProjectDialog,
+    LoadProjectDialog,
+    LoadProjectState,
+    NewProjectDialog,
+    QuitCommand,
+    SaveAsProjectDialog,
+    SaveCopyProjectDialog,
+    SaveProjectCommand,
 )
 from hyde.user_interface.command_window import CommandWindow
 from hyde.user_interface.logging_window import LoggingWindow
@@ -54,68 +60,36 @@ class PersistentSubwindowFilter(QtCore.QObject):
             return True
         return super().eventFilter(watched, event)
 
-class ProjectSelectionDialog(QtWidgets.QFileDialog):
-    def __init__(
-        self,
-        parent=None,
-        title="Open or Create Hyde Project",
-        accept_label="Open / Create",
-        require_existing=False,
-    ):
-        super().__init__(parent, title, DEFAULT_PROJECTS_DIR)
-        self._selected_path = None
-        self._require_existing = require_existing
-        self.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
-        self.setFileMode(QtWidgets.QFileDialog.Directory)
-        self.setAcceptMode(
-            QtWidgets.QFileDialog.AcceptOpen
-            if require_existing
-            else QtWidgets.QFileDialog.AcceptSave
-        )
-        self.setLabelText(QtWidgets.QFileDialog.Accept, accept_label)
-        self.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
-        self._file_name_edit = self.findChild(QtWidgets.QLineEdit, 'fileNameEdit')
-        self._accept_button = None
-        for button in self.findChildren(QtWidgets.QPushButton):
-            if button.text() == self.labelText(QtWidgets.QFileDialog.Accept):
-                self._accept_button = button
-                break
-        if self._file_name_edit is not None:
-            self._file_name_edit.textChanged.connect(self.update_accept_button)
-        self.currentChanged.connect(lambda _path: self.update_accept_button())
-        self.directoryEntered.connect(lambda _path: self.update_accept_button())
-        self.update_accept_button()
 
-    def current_project_path(self):
-        if self._file_name_edit is not None:
-            text = self._file_name_edit.text().strip()
-            if text:
-                return os.path.abspath(self.directory().absoluteFilePath(text))
-        selected_files = super().selectedFiles()
-        if selected_files:
-            return os.path.abspath(selected_files[0])
-        return None
+def connect_logger_to_output_box(logger_name, output_box):
+    class OutputBoxLogHandler(logging.Handler):
+        def emit(self, record):
+            message = self.format(record)
+            raw_message = record.getMessage()
+            # OutputBox.write() is the thread-safe entry point here: it pushes
+            # text through OutputBox's internal socket/queue path and its
+            # add_text() method is already marshalled onto the Qt main thread.
+            if raw_message.startswith("[Hyde state] "):
+                prefix, _, _ = message.partition(raw_message)
+                header, rest = raw_message.split("\nstate:\n", 1)
+                header = f"{prefix}{header}" if prefix else header
+                state_text, python_text = rest.split("\npython:\n", 1)
+                output_box.write(f"{header}\n", color=ORANGE)
+                output_box.write("state:\n", color=ORANGE)
+                output_box.write(f"{state_text}\n", color=GREEN)
+                output_box.write("python:\n", color=ORANGE)
+                output_box.write(f"{python_text}\n", color=BLUE)
+            else:
+                output_box.write(
+                    f"{message}\n",
+                    color=RED if record.levelno >= logging.WARNING else WHITE,
+                )
 
-    def update_accept_button(self):
-        if self._accept_button is None:
-            return
-        project_dir = self.current_project_path()
-        enabled = bool(project_dir and os.path.basename(project_dir).endswith('.hy'))
-        if enabled and self._require_existing:
-            enabled = os.path.isdir(project_dir)
-        self._accept_button.setEnabled(enabled)
-
-    def accept(self):
-        project_dir = self.current_project_path()
-        if project_dir is None:
-            return
-        self._selected_path = project_dir
-        QtWidgets.QDialog.accept(self)
-
-    def selectedFiles(self):
-        if self._selected_path is not None:
-            return [self._selected_path]
-        return super().selectedFiles()
+    logger = logging.getLogger(logger_name)
+    handler = OutputBoxLogHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    logger.addHandler(handler)
+    return handler
 
 class HydeMainWindow(QtWidgets.QMainWindow):
     def __init__(self, app, *args, **kwargs):
@@ -170,6 +144,7 @@ class HydeApp:
         
         # Initialize Logging Window as an MDI sub-window
         self.logging_window = LoggingWindow()
+        self.logging_handler = connect_logger_to_output_box("hyde", self.logging_window.output_box)
         self.logging_subwindow = self.ui.mdiArea.addSubWindow(self.logging_window)
         self.configure_persistent_subwindow(self.logging_subwindow)
         self.logging_subwindow.resize(800, 600)
@@ -435,44 +410,6 @@ class HydeApp:
             return candidate
         return None
 
-    def _pick_project_dir(self, title, accept_label, suggested_name=None, require_existing=False):
-        """Show a project directory picker. Returns an absolute .hy path or None."""
-        os.makedirs(DEFAULT_PROJECTS_DIR, exist_ok=True)
-        suggested_name = suggested_name or 'untitled.hy'
-        suggested_path = os.path.join(DEFAULT_PROJECTS_DIR, suggested_name)
-        dialog = ProjectSelectionDialog(
-            self.ui,
-            title=title,
-            accept_label=accept_label,
-            require_existing=require_existing,
-        )
-        dialog.selectFile(suggested_path)
-        if not dialog.exec_():
-            return None
-        project_dir = dialog.selectedFiles()[0]
-        if not project_dir:
-            return None
-        project_dir = os.path.abspath(project_dir)
-        if not project_dir.endswith('.hy'):
-            QtWidgets.QMessageBox.warning(
-                self.ui, "Invalid Project Directory",
-                "Hyde projects must be directories ending in .hy.",
-            )
-            return None
-        if os.path.exists(project_dir) and not os.path.isdir(project_dir):
-            QtWidgets.QMessageBox.warning(
-                self.ui, "Invalid Project Path",
-                f"{project_dir} is not a directory.",
-            )
-            return None
-        if require_existing and not os.path.isdir(project_dir):
-            QtWidgets.QMessageBox.warning(
-                self.ui, "Missing Project Directory",
-                f"{project_dir} does not exist.",
-            )
-            return None
-        return project_dir
-
     def confirm_overwrite_project(self, project_dir):
         response = QtWidgets.QMessageBox.question(
             self.ui,
@@ -522,85 +459,32 @@ class HydeApp:
         self.ui.menuTableMacros.setEnabled(has_project and bool(self.table_macros))
 
     def choose_new_project(self, checked=False):
-        project_dir = self._pick_project_dir("Create New Hyde Project", "Create New")
-        if project_dir:
-            overwrite = False
-            if self.project_target_needs_confirmation(project_dir):
-                if not self.confirm_overwrite_project(project_dir):
-                    return
-                overwrite = True
-            self.begin_project_operation("Creating Hyde project...")
-            self.execute_command(
-                format_new_project_command(project_dir, load=True, overwrite=overwrite),
-                visible=True,
-            )
+        del checked
+        NewProjectDialog(self).run()
 
     def choose_project(self, checked=False):
-        project_dir = self._pick_project_dir("Open Hyde Project", "Open", require_existing=True)
-        if project_dir:
-            self.begin_project_operation("Loading Hyde project...")
-            self.execute_command(format_load_project_command(project_dir), visible=True)
+        del checked
+        LoadProjectDialog(self).run()
 
     def choose_heal_project(self, checked=False):
-        project_dir = self._pick_project_dir("Heal Hyde Project", "Heal", require_existing=True)
-        if project_dir:
-            self.begin_project_operation("Healing Hyde project...")
-            self.execute_command(format_heal_project_command(project_dir), visible=True)
-
-    def prompt_for_save_as_project(self):
-        suggested_name = (
-            os.path.splitext(os.path.basename(self.current_project_dir))[0] + '.hy'
-            if self.current_project_dir else 'untitled.hy'
-        )
-        return self._pick_project_dir("Save Hyde Project As", "Save As", suggested_name=suggested_name)
+        del checked
+        HealProjectDialog(self).run()
 
     def save_project(self, checked=False):
         del checked
-        if not self.current_project_dir or self.command_window is None:
-            return
-        self.begin_project_operation("Saving Hyde project...")
-        self.execute_command(format_save_project_command(mode='save'), visible=True)
+        SaveProjectCommand(self).run()
 
     def save_project_as(self, checked=False):
         del checked
-        if not self.current_project_dir or self.command_window is None:
-            return
-        project_dir = self.prompt_for_save_as_project()
-        if project_dir is None:
-            return
-        if os.path.abspath(project_dir) == os.path.abspath(self.current_project_dir):
-            self.save_project()
-            return
-        if self.project_target_needs_confirmation(project_dir) and not self.confirm_overwrite_project(project_dir):
-            return
-        self.begin_project_operation("Saving Hyde project...")
-        self.execute_command(format_save_project_command(project_dir, mode='save_as', overwrite=True), visible=True)
+        SaveAsProjectDialog(self).run()
 
     def save_project_copy(self, checked=False):
         del checked
-        if not self.current_project_dir or self.command_window is None:
-            return
-        project_dir = self.prompt_for_save_as_project()
-        if project_dir is None:
-            return
-        if os.path.abspath(project_dir) == os.path.abspath(self.current_project_dir):
-            self.save_project()
-            return
-        if self.project_target_needs_confirmation(project_dir) and not self.confirm_overwrite_project(project_dir):
-            return
-        self.begin_project_operation("Saving Hyde project copy...")
-        self.execute_command(format_save_project_command(project_dir, mode='copy', overwrite=True), visible=True)
+        SaveCopyProjectDialog(self).run()
 
     def request_quit(self, checked=False):
         del checked
-        if self.shutting_down or self._quit_command_sent:
-            return
-        if self.command_window is None:
-            self.shutting_down = True
-            self.begin_shutdown_from_close_event()
-            return
-        self._quit_command_sent = True
-        self.execute_command(format_quit_command(), visible=True)
+        QuitCommand(self).run()
 
     @inmain_decorator()
     def enter_no_project_state(self):
@@ -701,7 +585,9 @@ class HydeApp:
 
     def _load_startup_project(self, path):
         self.begin_project_operation("Loading Hyde project...")
-        self.execute_command(format_load_project_command(path), visible=True)
+        state = LoadProjectState()
+        state.set_project_dir(path)
+        self.execute_command(state.python_source(), visible=True)
 
     @inmain_decorator()
     def on_kernel_ready(self):

@@ -17,6 +17,7 @@ You must thoroughly review the files in `project_management/` before writing any
 
 ## 3. Coding Style and Rules
 Before writing code, you must review [STYLE.md](file:///Users/ispielma/Python/Labscript/hyde/project_management/STYLE.md) for project-specific conventions regarding imports, UI framework boundaries, and threading.
+When adding or changing command-emitting GUI surfaces or GUI-side state/code generation, you must also review `state-control.md` and follow its ownership and placement rules.
 
 ## 4. Work Strategy & Scope
 We are aggressively iterating through a phased roadmap defined in `project_management/STRATEGY.md`.

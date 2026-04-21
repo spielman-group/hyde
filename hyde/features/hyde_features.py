@@ -1,6 +1,133 @@
 import ast
+import copy
+
+from hyde.features.base import FeatureCodec
 
 
+class SimpleHydeCommandCodec(FeatureCodec):
+    feature_name = "hyde_command"
+    state_version = 1
+    _valid_commands = {
+        "new_project",
+        "load_project",
+        "heal_project",
+        "save_project",
+        "quit",
+    }
+    _valid_save_modes = {"save", "save_as", "copy"}
+
+    @classmethod
+    def default_state(cls):
+        return {
+            "feature": cls.feature_name,
+            "state_version": cls.state_version,
+            "command": None,
+            "settings": {
+                "project_dir": None,
+                "mode": "save",
+                "load": True,
+                "overwrite": False,
+            },
+            "items": [],
+            "ui": {},
+        }
+
+    @classmethod
+    def normalize_state(cls, state):
+        normalized = copy.deepcopy(cls.default_state())
+        if state:
+            normalized["feature"] = state.get("feature", normalized["feature"])
+            normalized["state_version"] = state.get("state_version", normalized["state_version"])
+            normalized["command"] = state.get("command")
+            settings = state.get("settings", {})
+            if isinstance(settings, dict):
+                normalized["settings"].update(settings)
+            normalized["items"] = list(state.get("items", []))
+            ui = state.get("ui", {})
+            normalized["ui"] = dict(ui) if isinstance(ui, dict) else {}
+
+        settings = normalized["settings"]
+        project_dir = settings.get("project_dir")
+        settings["project_dir"] = None if project_dir in (None, "") else str(project_dir)
+        settings["mode"] = str(settings.get("mode", "save"))
+        settings["load"] = bool(settings.get("load", True))
+        settings["overwrite"] = bool(settings.get("overwrite", False))
+        return normalized
+
+    @classmethod
+    def validate_state(cls, state):
+        normalized = cls.normalize_state(state)
+        if normalized["feature"] != cls.feature_name:
+            raise ValueError(f"Expected feature={cls.feature_name!r}.")
+        command = normalized["command"]
+        if command not in cls._valid_commands:
+            raise ValueError(f"Unsupported Hyde command: {command!r}.")
+
+        settings = normalized["settings"]
+        if command in {"new_project", "load_project", "heal_project"}:
+            if not settings["project_dir"]:
+                raise ValueError(f"{command} requires settings.project_dir.")
+
+        if command == "save_project":
+            mode = settings["mode"]
+            if mode not in cls._valid_save_modes:
+                raise ValueError(f"Unsupported save mode: {mode!r}.")
+            if mode != "save" and not settings["project_dir"]:
+                raise ValueError(f"{mode} requires settings.project_dir.")
+
+        return normalized
+
+    @classmethod
+    def update_state(cls, state, action):
+        normalized = cls.normalize_state(state)
+        action_type = action.get("type")
+
+        if action_type == "set_command":
+            normalized["command"] = action["command"]
+        elif action_type == "set":
+            target = normalized
+            path = list(action["path"])
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = action["value"]
+        elif action_type == "clear":
+            target = normalized
+            path = list(action["path"])
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = None
+        else:
+            raise ValueError(f"Unsupported simple command action: {action_type!r}.")
+
+        return cls.normalize_state(normalized)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        del context
+        normalized = cls.validate_state(state)
+        command = normalized["command"]
+        settings = normalized["settings"]
+
+        if command == "new_project":
+            return (
+                f"hyde.new_project({settings['project_dir']!r}, "
+                f"load={settings['load']!r}, overwrite={settings['overwrite']!r})"
+            )
+        if command == "load_project":
+            return f"hyde.load_project({settings['project_dir']!r})"
+        if command == "heal_project":
+            return f"hyde.heal_project({settings['project_dir']!r})"
+        if command == "save_project":
+            arguments = []
+            if settings["project_dir"] is not None:
+                arguments.append(repr(settings["project_dir"]))
+            arguments.append(f"mode={settings['mode']!r}")
+            if settings["mode"] != "save":
+                arguments.append(f"overwrite={settings['overwrite']!r}")
+            return f"hyde.save_project({', '.join(arguments)})"
+        if command == "quit":
+            return "hyde.quit()"
+        raise ValueError(f"Unsupported Hyde command: {command!r}.")
 def format_table_command(names, target=None, title=None):
     """
     Formulates a hyde.table(...) command string.
@@ -41,42 +168,6 @@ def format_table_macro_source(macro_name, names, title=None):
         f"def {macro_name}({parameters}):\n"
         f"    hyde.table({arguments})\n"
     )
-
-
-def format_new_project_command(project_dir, load=True, overwrite=False):
-    """Formulate a visible `hyde.new_project(...)` command string."""
-    return (
-        f"hyde.new_project({project_dir!r}, "
-        f"load={bool(load)!r}, overwrite={bool(overwrite)!r})"
-    )
-
-
-def format_load_project_command(project_dir):
-    """Formulate a visible `hyde.load_project(...)` command string."""
-    return f"hyde.load_project({project_dir!r})"
-
-
-def format_heal_project_command(project_dir):
-    """Formulate a visible `hyde.heal_project(...)` command string."""
-    return f"hyde.heal_project({project_dir!r})"
-
-
-def format_save_project_command(project_dir=None, mode="save", overwrite=False):
-    """Formulate a visible `hyde.save_project(...)` command string."""
-    arguments = []
-    if project_dir is not None:
-        arguments.append(repr(project_dir))
-    arguments.append(f"mode={mode!r}")
-    if mode != "save":
-        arguments.append(f"overwrite={bool(overwrite)!r}")
-    return f"hyde.save_project({', '.join(arguments)})"
-
-
-def format_quit_command():
-    """Formulate a visible `hyde.quit()` command string."""
-    return "hyde.quit()"
-
-
 def format_publish_table_macros_command():
     """Formulate the silent table-macro publication command string."""
     return "hyde.table_macros.publish_table_macro_registry()"

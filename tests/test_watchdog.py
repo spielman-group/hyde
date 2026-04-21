@@ -4,11 +4,24 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+import logging
 from unittest.mock import patch
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import hyde
+from hyde.features.hyde_features import SimpleHydeCommandCodec
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.main import HydeApp, ProjectSelectionDialog
+from hyde.user_interface.main import HydeApp, connect_logger_to_output_box
+from qtutils.outputbox import BLUE, GREEN, ORANGE
+from hyde.user_interface.file_dialogs import (
+    HealProjectDialog,
+    LoadProjectDialog,
+    NewProjectDialog,
+    SaveAsProjectDialog,
+    SaveCopyProjectDialog,
+    SaveProjectCommand,
+)
 from hyde.user_interface.runtime_helper import RemoteRequestServer, RuntimeHelper
 from qtutils.qt import QtWidgets
 
@@ -92,6 +105,25 @@ class FakeJoinThread:
 
     def is_alive(self):
         return False
+
+
+def make_project_app():
+    ui = type("UI", (), {})()
+    app = type("DummyApp", (), {})()
+    app.ui = ui
+    app.ui.statusbar = FakeStatusBar()
+    app.current_project_dir = None
+    app.command_window = object()
+    app.set_project_status_message = app.ui.statusbar.showMessage
+    app.clear_project_status_message = app.ui.statusbar.clearMessage
+    app.begin_project_operation = lambda label: HydeApp.begin_project_operation(app, label)
+    app.execute_command_calls = []
+    app.execute_command = lambda code, visible=True: app.execute_command_calls.append((code, visible))
+    app.project_target_needs_confirmation = lambda project_dir: HydeApp.project_target_needs_confirmation(
+        app, project_dir
+    )
+    app.confirm_overwrite_project = lambda project_dir: True
+    return app
 
 
 class TestRuntimeArchitecture(unittest.TestCase):
@@ -271,16 +303,15 @@ class TestRuntimeArchitecture(unittest.TestCase):
         dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
         dummy_app.restore_project_session = lambda: calls.append(("restore",))
 
-        with patch("hyde.user_interface.main.format_load_project_command", return_value="LOAD_PROJECT"):
-            HydeApp._load_startup_project(dummy_app, "/tmp/project.hy")
-            HydeApp.on_project_state_result(dummy_app, {"operation": "load", "success": True})
+        HydeApp._load_startup_project(dummy_app, "/tmp/project.hy")
+        HydeApp.on_project_state_result(dummy_app, {"operation": "load", "success": True})
 
         self.assertEqual(dummy_app.ui.statusbar.messages, [("Loading Hyde project...", 0)])
         self.assertEqual(dummy_app.ui.statusbar.cleared, 1)
         self.assertEqual(
             calls,
             [
-                ("execute", "LOAD_PROJECT", True),
+                ("execute", "hyde.load_project('/tmp/project.hy')", True),
                 ("restore",),
             ],
         )
@@ -306,40 +337,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
         )
         self.assertEqual(dummy_app.current_project_dir, "/tmp/project.hy")
 
-    def test_choose_project_uses_status_bar_operation_message(self):
-        calls = []
-        dummy_app = type("DummyApp", (), {})()
-        dummy_app.ui = type("UI", (), {"statusbar": FakeStatusBar()})()
-        dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
-        dummy_app._pick_project_dir = (
-            lambda title, accept_label, suggested_name=None, require_existing=False: "/tmp/project.hy"
-        )
-        dummy_app.begin_project_operation = lambda label: HydeApp.begin_project_operation(dummy_app, label)
-        dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
-
-        with patch("hyde.user_interface.main.format_load_project_command", return_value="LOAD_PROJECT"):
-            HydeApp.choose_project(dummy_app)
-
-        self.assertEqual(dummy_app.ui.statusbar.messages, [("Loading Hyde project...", 0)])
-        self.assertEqual(calls, [("execute", "LOAD_PROJECT", True)])
-
-    def test_choose_heal_project_dispatches_visible_heal_command(self):
-        calls = []
-        dummy_app = type("DummyApp", (), {})()
-        dummy_app.ui = type("UI", (), {"statusbar": FakeStatusBar()})()
-        dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
-        dummy_app._pick_project_dir = (
-            lambda title, accept_label, suggested_name=None, require_existing=False: "/tmp/project.hy"
-        )
-        dummy_app.begin_project_operation = lambda label: HydeApp.begin_project_operation(dummy_app, label)
-        dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
-
-        with patch("hyde.user_interface.main.format_heal_project_command", return_value="HEAL_PROJECT"):
-            HydeApp.choose_heal_project(dummy_app)
-
-        self.assertEqual(dummy_app.ui.statusbar.messages, [("Healing Hyde project...", 0)])
-        self.assertEqual(calls, [("execute", "HEAL_PROJECT", True)])
-
     def test_project_selection_dialog_requires_existing_project_for_open(self):
         qapp = QtWidgets.QApplication.instance()
         if qapp is None:
@@ -350,16 +347,14 @@ class TestRuntimeArchitecture(unittest.TestCase):
             existing = os.path.join(tmpdir, "existing.hy")
             os.makedirs(existing)
 
-            dialog = ProjectSelectionDialog(
-                title="Open Hyde Project",
-                accept_label="Open",
-                require_existing=True,
-            )
+            dialog = LoadProjectDialog()
             dialog.selectFile(missing)
+            dialog._sync_state_from_widgets()
             dialog.update_accept_button()
             self.assertFalse(dialog._accept_button.isEnabled())
 
             dialog.selectFile(existing)
+            dialog._sync_state_from_widgets()
             dialog.update_accept_button()
             self.assertTrue(dialog._accept_button.isEnabled())
             dialog.close()
@@ -378,29 +373,195 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertEqual(dummy_app.ui.statusbar.messages, [("Creating Hyde project...", 0)])
         self.assertEqual(dummy_app.ui.statusbar.cleared, 1)
 
+    def test_load_project_dialog_dispatches_visible_load_command(self):
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "load_target.hy")
+            os.makedirs(project_dir)
+            dummy_app = make_project_app()
+            parent = QtWidgets.QWidget()
+            dialog = LoadProjectDialog(dummy_app, parent=parent)
+            dialog._selected_path = project_dir
+            with patch.object(LoadProjectDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
+                self.assertTrue(dialog.run())
+
+            self.assertEqual(dummy_app.ui.statusbar.messages, [("Loading Hyde project...", 0)])
+            self.assertEqual(
+                dummy_app.execute_command_calls,
+                [(f"hyde.load_project({project_dir!r})", True)],
+            )
+            dialog.close()
+            parent.close()
+
+    def test_heal_project_dialog_dispatches_visible_heal_command(self):
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "heal_target.hy")
+            os.makedirs(project_dir)
+            dummy_app = make_project_app()
+            parent = QtWidgets.QWidget()
+            dialog = HealProjectDialog(dummy_app, parent=parent)
+            dialog._selected_path = project_dir
+            with patch.object(HealProjectDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
+                self.assertTrue(dialog.run())
+
+            self.assertEqual(dummy_app.ui.statusbar.messages, [("Healing Hyde project...", 0)])
+            self.assertEqual(
+                dummy_app.execute_command_calls,
+                [(f"hyde.heal_project({project_dir!r})", True)],
+            )
+            dialog.close()
+            parent.close()
+
     def test_choose_new_project_conflict_prompts_and_dispatches_overwrite(self):
-        calls = []
-        prompts = []
-        formatted = []
-        dummy_app = type("DummyApp", (), {})()
-        dummy_app._pick_project_dir = (
-            lambda title, accept_label, suggested_name=None, require_existing=False: "/tmp/existing.hy"
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "existing.hy")
+            os.makedirs(project_dir)
+            with open(os.path.join(project_dir, "keep.txt"), "w", encoding="utf-8") as handle:
+                handle.write("keep")
+
+            dummy_app = make_project_app()
+            prompts = []
+            dummy_app.confirm_overwrite_project = lambda target: prompts.append(target) or True
+
+            parent = QtWidgets.QWidget()
+            dialog = NewProjectDialog(dummy_app, parent=parent)
+            dialog._selected_path = project_dir
+            with patch.object(NewProjectDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
+                self.assertTrue(dialog.run())
+
+            self.assertEqual(prompts, [project_dir])
+            self.assertEqual(dummy_app.ui.statusbar.messages, [("Creating Hyde project...", 0)])
+            self.assertEqual(
+                dummy_app.execute_command_calls,
+                [(f"hyde.new_project({project_dir!r}, load=True, overwrite=True)", True)],
+            )
+            dialog.close()
+            parent.close()
+
+    def test_simple_command_codec_is_deterministic(self):
+        state = SimpleHydeCommandCodec.default_state()
+        state = SimpleHydeCommandCodec.update_state(state, {"type": "set_command", "command": "save_project"})
+        state = SimpleHydeCommandCodec.update_state(
+            state,
+            {"type": "set", "path": ("settings", "mode"), "value": "copy"},
         )
-        dummy_app.begin_project_operation = lambda label: calls.append(("begin", label))
-        dummy_app.execute_command = lambda code, visible=True: calls.append(("execute", code, visible))
-        dummy_app.project_target_needs_confirmation = lambda project_dir: True
-        dummy_app.confirm_overwrite_project = lambda project_dir: prompts.append(project_dir) or True
+        state = SimpleHydeCommandCodec.update_state(
+            state,
+            {"type": "set", "path": ("settings", "project_dir"), "value": "/tmp/project.hy"},
+        )
+        state = SimpleHydeCommandCodec.update_state(
+            state,
+            {"type": "set", "path": ("settings", "overwrite"), "value": True},
+        )
 
-        def fake_format_new_project_command(*args, **kwargs):
-            formatted.append((args, kwargs))
-            return "NEW_PROJECT"
+        self.assertEqual(
+            SimpleHydeCommandCodec.state_to_python(state),
+            "hyde.save_project('/tmp/project.hy', mode='copy', overwrite=True)",
+        )
 
-        with patch("hyde.user_interface.main.format_new_project_command", side_effect=fake_format_new_project_command):
-            HydeApp.choose_new_project(dummy_app)
+    def test_hyde_gui_state_python_source_logs_debug_when_enabled(self):
+        state = SaveProjectCommand(make_project_app()).state
+        with patch("hyde.user_interface.base.hyde.HYDE_DEBUG", True):
+            with patch("hyde.user_interface.base.logging.getLogger") as get_logger:
+                logger = get_logger.return_value
+                self.assertEqual(state.python_source(), "hyde.save_project(mode='save')")
+        logger.debug.assert_called_once()
+        message = logger.debug.call_args.args[0]
+        self.assertIn("[Hyde state] %s", message)
+        self.assertIn("state:", message)
+        self.assertIn("python:", message)
+        self.assertIn("SaveProjectState", logger.debug.call_args.args[1])
+        self.assertIn("hyde.save_project(mode='save')", logger.debug.call_args.args[3])
 
-        self.assertEqual(prompts, ["/tmp/existing.hy"])
-        self.assertEqual(formatted, [(("/tmp/existing.hy",), {"load": True, "overwrite": True})])
-        self.assertEqual(calls, [("begin", "Creating Hyde project..."), ("execute", "NEW_PROJECT", True)])
+    def test_hyde_gui_state_python_source_skips_debug_when_disabled(self):
+        state = SaveProjectCommand(make_project_app()).state
+        with patch("hyde.user_interface.base.hyde.HYDE_DEBUG", False):
+            with patch("hyde.user_interface.base.logging.getLogger") as get_logger:
+                self.assertEqual(state.python_source(), "hyde.save_project(mode='save')")
+        get_logger.assert_not_called()
+
+    def test_connect_logger_to_output_box_splits_hyde_state_debug_colors(self):
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
+        output_box = type("OutputBox", (), {"write": lambda self, text, color=None: None})()
+        logger = logging.getLogger("hyde-test-colored")
+        handlers_before = list(logger.handlers)
+        level_before = logger.level
+        try:
+            with patch.object(output_box, "write") as output_write:
+                logger.setLevel(logging.DEBUG)
+                connect_logger_to_output_box("hyde-test-colored", output_box)
+                logger.debug("[Hyde state] SaveProjectState\nstate:\n{'a': 1}\npython:\nhyde.save_project()")
+            self.assertEqual(output_write.call_count, 5)
+            self.assertEqual(output_write.call_args_list[0].kwargs["color"], ORANGE)
+            self.assertEqual(output_write.call_args_list[2].kwargs["color"], GREEN)
+            self.assertEqual(output_write.call_args_list[4].kwargs["color"], BLUE)
+        finally:
+            logger.handlers = handlers_before
+            logger.setLevel(level_before)
+
+    def test_save_project_command_noops_without_active_project(self):
+        dummy_app = make_project_app()
+        dummy_app.current_project_dir = None
+        dummy_app.command_window = None
+
+        self.assertFalse(SaveProjectCommand(dummy_app).run())
+        self.assertEqual(dummy_app.execute_command_calls, [])
+        self.assertEqual(dummy_app.ui.statusbar.messages, [])
+
+    def test_save_as_current_project_path_falls_back_to_plain_save(self):
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dummy_app = make_project_app()
+            dummy_app.current_project_dir = os.path.join(tmpdir, "current.hy")
+            os.makedirs(dummy_app.current_project_dir)
+
+            parent = QtWidgets.QWidget()
+            dialog = SaveAsProjectDialog(dummy_app, parent=parent)
+            dialog._selected_path = dummy_app.current_project_dir
+            with patch.object(SaveAsProjectDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
+                self.assertTrue(dialog.run())
+
+            self.assertEqual(dummy_app.ui.statusbar.messages, [("Saving Hyde project...", 0)])
+            self.assertEqual(dummy_app.execute_command_calls, [("hyde.save_project(mode='save')", True)])
+            dialog.close()
+            parent.close()
+
+    def test_save_copy_current_project_path_falls_back_to_plain_save(self):
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dummy_app = make_project_app()
+            dummy_app.current_project_dir = os.path.join(tmpdir, "current.hy")
+            os.makedirs(dummy_app.current_project_dir)
+
+            parent = QtWidgets.QWidget()
+            dialog = SaveCopyProjectDialog(dummy_app, parent=parent)
+            dialog._selected_path = dummy_app.current_project_dir
+            with patch.object(SaveCopyProjectDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
+                self.assertTrue(dialog.run())
+
+            self.assertEqual(dummy_app.ui.statusbar.messages, [("Saving Hyde project...", 0)])
+            self.assertEqual(dummy_app.execute_command_calls, [("hyde.save_project(mode='save')", True)])
+            dialog.close()
+            parent.close()
 
     def test_request_quit_dispatches_visible_hyde_quit_command(self):
         calls = []

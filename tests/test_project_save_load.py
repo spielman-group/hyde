@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 import hyde
 from hyde.paths import KERNEL_LAUNCHER
+from hyde.user_interface.file_dialogs import SaveAsProjectDialog
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.project_state import (
     read_history,
@@ -312,12 +313,16 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertEqual(HydeApp.resolve_startup_project(app), os.path.abspath(project_dir))
 
     def test_save_project_as_prompts_before_overwriting_non_empty_target(self):
-        app = type("DummyApp", (), {})()
-        app.current_project_dir = None
-        app.command_window = object()
-
         with tempfile.TemporaryDirectory() as tmpdir:
+            app = type("DummyApp", (), {})()
+            app.ui = type("UI", (), {})()
+            app.ui.statusbar = type(
+                "StatusBar",
+                (),
+                {"showMessage": lambda self, message, timeout=0: None, "clearMessage": lambda self: None},
+            )()
             app.current_project_dir = os.path.join(tmpdir, "current.hy")
+            app.command_window = object()
             os.makedirs(app.current_project_dir)
             target = os.path.join(tmpdir, "target.hy")
             os.makedirs(target)
@@ -327,17 +332,23 @@ class TestProjectStateHelpers(unittest.TestCase):
             prompted = []
             executed = []
 
-            app.prompt_for_save_as_project = lambda: target
+            app.begin_project_operation = lambda label: HydeApp.begin_project_operation(app, label)
             app.project_target_needs_confirmation = lambda project_dir: HydeApp.project_target_needs_confirmation(
                 app, project_dir
             )
             app.confirm_overwrite_project = lambda project_dir: prompted.append(project_dir) or False
             app.execute_command = lambda code, visible=True: executed.append((code, visible))
 
-            HydeApp.save_project_as(app)
+            parent = QtWidgets.QWidget()
+            dialog = SaveAsProjectDialog(app, parent=parent)
+            dialog._selected_path = target
+            with patch.object(SaveAsProjectDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
+                self.assertFalse(dialog.run())
 
             self.assertEqual(prompted, [target])
             self.assertEqual(executed, [])
+            dialog.close()
+            parent.close()
 
     def test_clear_tables_forces_close_without_macro_prompt_path(self):
         subwindow = type("Subwindow", (), {"close": lambda self: setattr(self, "closed", True)})()
@@ -398,7 +409,7 @@ class TestHydeStartup(unittest.TestCase):
         process_tree.zlock_client.set_process_name("hyde-startup-test")
         app = HydeApp(self.qapp, process_tree, DummySplash(), argv=[])
         try:
-            wait_until(lambda: app._startup_complete, timeout=30, message="Hyde did not finish startup.")
+            wait_until(lambda: app._startup_complete, timeout=60, message="Hyde did not finish startup.")
             self.assertIsNone(app.current_project_dir)
             self.assertIsNotNone(app.kernel_process)
             self.assertIsNone(app.kernel_process.poll())

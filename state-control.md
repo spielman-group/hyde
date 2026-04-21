@@ -293,6 +293,11 @@ The right ownership split is:
 - calls into the associated `FeatureCodec`
 - normalization / validation / code-generation requests through that codec
 
+`...State` objects do not own command dispatch, GUI warnings/confirmations, or
+filesystem existence/overwrite checks. Those decisions remain in the owning GUI
+surface, which may inspect the state and then decide whether to dispatch the
+generated Python.
+
 ### Codec owns
 
 - canonical edit-state schema
@@ -329,6 +334,10 @@ These classes:
 
 The corresponding `...State` classes should also live with Hyde's GUI-side code under
 `hyde/user_interface/...`, typically alongside the GUI surfaces that use them.
+
+When several GUI-side state classes share the same local state mechanics, they may
+inherit from a Hyde-owned GUI-side base state class. That inheritance is distinct from
+GUI/widget inheritance; the composition rule still applies to GUI surfaces.
 
 This rule applies to complex feature windows and to simple dialogs such as file
 selection dialogs that ultimately generate Hyde commands.
