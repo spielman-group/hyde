@@ -22,6 +22,7 @@ from hyde.user_interface.file_dialogs import (
     SaveCopyProjectDialog,
     SaveProjectCommand,
 )
+from hyde.user_interface.table import TableWidget
 from hyde.user_interface.runtime_helper import RemoteRequestServer, RuntimeHelper
 from qtutils.qt import QtWidgets
 
@@ -337,6 +338,62 @@ class TestRuntimeArchitecture(unittest.TestCase):
         )
         self.assertEqual(dummy_app.current_project_dir, "/tmp/project.hy")
 
+    def test_finalize_startup_hides_splash_and_uses_status_bar(self):
+        calls = []
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app._startup_complete = False
+        dummy_app.splash = type("Splash", (), {"hide": lambda self: calls.append(("hide_splash",))})()
+        dummy_app._rebuild_kernel_windows = lambda: calls.append(("rebuild",))
+        dummy_app.enter_no_project_state = lambda: calls.append(("no_project",))
+        dummy_app.ui = type(
+            "UI",
+            (),
+            {
+                "show": lambda self: calls.append(("show",)),
+                "statusbar": FakeStatusBar(),
+            },
+        )()
+        dummy_app.set_project_status_message = dummy_app.ui.statusbar.showMessage
+        dummy_app.clear_project_status_message = dummy_app.ui.statusbar.clearMessage
+        dummy_app.resolve_startup_project = lambda: None
+
+        HydeApp.finalize_startup(dummy_app)
+
+        self.assertEqual(calls, [("show",), ("hide_splash",), ("rebuild",), ("no_project",)])
+        self.assertTrue(dummy_app._startup_complete)
+        self.assertEqual(dummy_app.ui.statusbar.messages, [("Connecting to Jupyter Kernel Socket...", 0)])
+        self.assertEqual(dummy_app.ui.statusbar.cleared, 1)
+
+    def test_on_kernel_crashed_stops_helper_before_restart(self):
+        calls = []
+        helper = type("Helper", (), {"stop": lambda self: calls.append(("helper_stop",))})()
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.shutting_down = False
+        dummy_app._quit_command_sent = True
+        dummy_app.runtime_helper = helper
+        dummy_app.ui = object()
+        dummy_app.enter_no_project_state = lambda: calls.append(("no_project",))
+        dummy_app.end_project_operation = lambda: calls.append(("end",))
+        dummy_app._shutdown_kernel_windows = lambda: calls.append(("shutdown_windows",))
+        dummy_app.start_kernel_runtime = lambda: calls.append(("restart_runtime",))
+
+        with patch("hyde.user_interface.main.QtWidgets.QMessageBox.warning") as warning:
+            HydeApp.on_kernel_crashed(dummy_app)
+
+        self.assertFalse(dummy_app._quit_command_sent)
+        self.assertIsNone(dummy_app.runtime_helper)
+        self.assertEqual(
+            calls,
+            [
+                ("no_project",),
+                ("end",),
+                ("helper_stop",),
+                ("shutdown_windows",),
+                ("restart_runtime",),
+            ],
+        )
+        warning.assert_called_once()
+
     def test_project_selection_dialog_requires_existing_project_for_open(self):
         qapp = QtWidgets.QApplication.instance()
         if qapp is None:
@@ -448,6 +505,22 @@ class TestRuntimeArchitecture(unittest.TestCase):
             )
             dialog.close()
             parent.close()
+
+    def test_table_visible_title_becomes_default_macro_name(self):
+        table = TableWidget.__new__(TableWidget)
+        table.handle = "Table0"
+        table._default_macro_name = table.handle
+
+        TableWidget.set_default_macro_name(table, "Table_Fun")
+        self.assertEqual(TableWidget.default_macro_name(table), "Table_Fun")
+
+    def test_invalid_table_title_falls_back_to_handle_for_macro_name(self):
+        table = TableWidget.__new__(TableWidget)
+        table.handle = "Table0"
+        table._default_macro_name = table.handle
+
+        TableWidget.set_default_macro_name(table, "Table Fun")
+        self.assertEqual(TableWidget.default_macro_name(table), "Table0")
 
     def test_simple_command_codec_is_deterministic(self):
         state = SimpleHydeCommandCodec.default_state()

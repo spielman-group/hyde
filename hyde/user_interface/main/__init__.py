@@ -308,6 +308,7 @@ class HydeApp:
         
         # UI title vs internal handle
         title = visible_title if visible_title else f"{handle}: {', '.join(names)}"
+        table.set_default_macro_name(visible_title or handle)
         subwindow.setWindowTitle(title)
         
         subwindow.show()
@@ -539,19 +540,22 @@ class HydeApp:
     @inmain_decorator()
     def finalize_startup(self):
         try:
-            self.splash.update_text('Connecting to Jupyter Kernel Socket...')
-            self._rebuild_kernel_windows()
-            self.enter_no_project_state()
+            startup_project = None
             if not self._startup_complete:
                 self.ui.show()
                 self.splash.hide()
                 self._startup_complete = True
                 startup_project = self.resolve_startup_project()
-                if startup_project is not None:
-                    QtCore.QTimer.singleShot(
-                        100,
-                        lambda path=startup_project: self._load_startup_project(path),
-                    )
+            self.set_project_status_message("Connecting to Jupyter Kernel Socket...")
+            self._rebuild_kernel_windows()
+            self.enter_no_project_state()
+            if startup_project is not None:
+                QtCore.QTimer.singleShot(
+                    100,
+                    lambda path=startup_project: self._load_startup_project(path),
+                )
+            else:
+                self.clear_project_status_message()
         except Exception:
             import traceback
             traceback.print_exc()
@@ -597,10 +601,13 @@ class HydeApp:
     def on_kernel_crashed(self):
         if self.shutting_down:
             return
+        self._quit_command_sent = False
         self.enter_no_project_state()
         self.end_project_operation()
         if self.runtime_helper is not None:
+            helper = self.runtime_helper
             self.runtime_helper = None
+            helper.stop()
         self._shutdown_kernel_windows()
         QtWidgets.QMessageBox.warning(
             self.ui,

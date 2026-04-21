@@ -11,6 +11,7 @@ from hyde.features.hyde_features import (
     format_table_macro_source,
     suggest_new_array_name,
 )
+from hyde.user_interface.window_macro_store import MacroStoreError, validate_macro_name
 
 
 class TableViewModel(QtCore.QAbstractTableModel):
@@ -110,6 +111,7 @@ class TableWidget(QtWidgets.QWidget):
         self.handle = handle
         self.names = list(names)
         self.app = app
+        self._default_macro_name = handle
         self._current_request_id = None
         self._refresh_in_flight = False
         self._selected_cell = None
@@ -512,7 +514,13 @@ class TableWidget(QtWidgets.QWidget):
         super().closeEvent(event)
 
     def default_macro_name(self):
-        return self.handle
+        return self._default_macro_name
+
+    def set_default_macro_name(self, name):
+        try:
+            self._default_macro_name = validate_macro_name(name)
+        except MacroStoreError:
+            self._default_macro_name = self.handle
 
     def recreation_function_source(self, macro_name):
         title = macro_name
