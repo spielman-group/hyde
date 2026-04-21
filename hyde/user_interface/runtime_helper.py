@@ -9,6 +9,7 @@ from jupyter_client import BlockingKernelClient
 from labscript_utils.labconfig import LabConfig
 from labscript_utils import shared_drive
 from labscript_utils.ls_zprocess import ZMQServer
+from qtutils.qt import QtCore
 
 from hyde.features.hyde_features import format_remote_command
 
@@ -95,7 +96,11 @@ class RuntimeHelper:
         if not self._ready_notified:
             self._ready_notified = True
             if not self._stopping.is_set():
-                self.app.on_kernel_ready()
+                QtCore.QMetaObject.invokeMethod(
+                    self.app.ui,
+                    "_on_kernel_ready",
+                    QtCore.Qt.QueuedConnection,
+                )
         return True
 
     def _close_kernel_client(self):
@@ -134,6 +139,8 @@ class RuntimeHelper:
                     data.get("names", []),
                     data.get("target"),
                     visible_title=data.get("title"),
+                    geometry=data.get("geometry"),
+                    column_widths=data.get("column_widths"),
                 )
             elif task == "TABLE_DATA_RESPONSE":
                 self.app.on_table_data(data)

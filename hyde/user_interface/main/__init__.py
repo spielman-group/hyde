@@ -15,8 +15,8 @@ from hyde.paths import (
 )
 from hyde.features.hyde_features import (
     format_procedures_bootstrap_code,
-    format_publish_table_macros_command,
 )
+from hyde.user_interface.table import TableState
 from hyde.user_interface.file_dialogs import (
     HealProjectDialog,
     LoadProjectDialog,
@@ -49,6 +49,8 @@ from hyde.user_interface.window_macro_store import (
     inspect_macro_conflict,
     write_macro_source,
 )
+
+qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
 
 class PersistentSubwindowFilter(QtCore.QObject):
     """Turn MDI close requests into hide requests so tool windows persist."""
@@ -96,6 +98,10 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         super().__init__(*args, **kwargs)
         self.app = app
 
+    @qt_slot()
+    def _on_kernel_ready(self):
+        self.app.finalize_startup()
+
     def closeEvent(self, event):
         if self.app._close_ready:
             return super().closeEvent(event)
@@ -140,6 +146,8 @@ class HydeApp:
         loader = UiLoader()
         ui_path = os.path.join(os.path.dirname(__file__), 'main.ui')
         self.ui = loader.load(ui_path, HydeMainWindow(self))
+        self.ui.mdiArea.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.ui.mdiArea.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
 
         
         # Initialize Logging Window as an MDI sub-window
@@ -278,7 +286,7 @@ class HydeApp:
         self.queue_background_command(code, silent=True)
 
     @inmain_decorator()
-    def open_table(self, names, target=None, visible_title=None):
+    def open_table(self, names, target=None, visible_title=None, geometry=None, column_widths=None):
         """
         Open a new table or append to an existing one.
         Called via ProcessTree relay or Data Browser.
@@ -287,6 +295,8 @@ class HydeApp:
             names: Variable names to display.
             target: Optional internal handle (e.g. 'Table0').
             visible_title: Optional UI label for the window.
+            geometry: Optional saved subwindow geometry.
+            column_widths: Optional saved widths keyed by column name.
         """
         from hyde.user_interface.table import TableWidget
 
@@ -299,16 +309,26 @@ class HydeApp:
             return
 
         # Create new table
-        handle = target if target else f"Table{self.table_counter}"
-        self.table_counter += 1
+        if target is not None:
+            handle = target
+        else:
+            handle = visible_title or f"Table{self.table_counter}"
+            self.table_counter += 1
         
-        table = TableWidget(handle, names, app=self)
+        table = TableWidget(
+            handle,
+            names,
+            app=self,
+            visible_title=visible_title,
+            geometry=geometry,
+            column_widths=column_widths,
+        )
         subwindow = self.ui.mdiArea.addSubWindow(table)
+        table.bind_subwindow(subwindow)
         self.tables[handle] = table
         
         # UI title vs internal handle
         title = visible_title if visible_title else f"{handle}: {', '.join(names)}"
-        table.set_default_macro_name(visible_title or handle)
         subwindow.setWindowTitle(title)
         
         subwindow.show()
@@ -316,10 +336,9 @@ class HydeApp:
         # When subwindow is destroyed, remove from registry
         subwindow.destroyed.connect(lambda: self.tables.pop(handle, None))
 
-    def request_save_table_macro(self, table_widget):
-        current_name = table_widget.default_macro_name()
+    def request_save_table_macro(self, table_state):
         while True:
-            dialog = SaveWindowDialog(default_name=current_name, parent=self.ui)
+            dialog = SaveWindowDialog(table_state=table_state, parent=self.ui)
             if dialog.exec_() != QtWidgets.QDialog.Accepted:
                 return False
             if dialog.choice == SaveWindowDialog.NO_SAVE:
@@ -328,9 +347,8 @@ class HydeApp:
                 return False
 
             macro_name = dialog.macro_name()
-            current_name = macro_name
             try:
-                macro_source = table_widget.recreation_function_source(macro_name)
+                macro_source = dialog.macro_source()
             except MacroStoreError as exc:
                 QtWidgets.QMessageBox.warning(self.ui, "Invalid Macro Name", str(exc))
                 continue
@@ -535,7 +553,11 @@ class HydeApp:
     def request_window_macros(self, kind='table'):
         if kind != 'table':
             return
-        self.queue_background_command(format_publish_table_macros_command(), silent=True)
+        state = TableState()
+        self.queue_background_command(
+            state.source_for_command("publish_table_macros"),
+            silent=True,
+        )
                 
     @inmain_decorator()
     def finalize_startup(self):

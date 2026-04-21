@@ -24,7 +24,7 @@ from hyde.user_interface.file_dialogs import (
 )
 from hyde.user_interface.table import TableWidget
 from hyde.user_interface.runtime_helper import RemoteRequestServer, RuntimeHelper
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtWidgets, QtCore
 
 
 class FakeProcess:
@@ -60,8 +60,17 @@ class FakeApp:
         self.calls = []
         self.shutting_down = False
 
-    def open_table(self, names, target=None, visible_title=None):
-        self.calls.append(("open_table", list(names), target, visible_title))
+    def open_table(self, names, target=None, visible_title=None, geometry=None, column_widths=None):
+        self.calls.append(
+            (
+                "open_table",
+                list(names),
+                target,
+                visible_title,
+                geometry,
+                dict(column_widths or {}),
+            )
+        )
 
     def on_table_data(self, data):
         self.calls.append(("table_data", data))
@@ -190,7 +199,18 @@ class TestRuntimeArchitecture(unittest.TestCase):
         helper.kernel_process = FakeProcess()
         helper._stopping = threading.Event()
 
-        helper.from_kernel.put(("OPEN_TABLE_REQUEST", {"names": ["a"], "target": "Table0", "title": "Visible"}))
+        helper.from_kernel.put(
+            (
+                "OPEN_TABLE_REQUEST",
+                {
+                    "names": ["a"],
+                    "target": "Table0",
+                    "title": "Visible",
+                    "geometry": (5, 42, 510, 242),
+                    "column_widths": {"a": 262},
+                },
+            )
+        )
         helper.from_kernel.put(("TABLE_DATA_RESPONSE", {"data": {"a": [1, 2]}, "request_id": "abc"}))
         helper.from_kernel.put(("ENTER_NO_PROJECT_STATE", None))
         helper.from_kernel.put(("ACTIVATE_PROJECT", {"path": "/tmp/test.hy"}))
@@ -203,7 +223,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertEqual(
             app.calls,
             [
-                ("open_table", ["a"], "Table0", "Visible"),
+                ("open_table", ["a"], "Table0", "Visible", (5, 42, 510, 242), {"a": 262}),
                 ("table_data", {"data": {"a": [1, 2]}, "request_id": "abc"}),
                 ("enter_no_project_state",),
                 ("activate_project", "/tmp/test.hy"),
@@ -506,21 +526,133 @@ class TestRuntimeArchitecture(unittest.TestCase):
             dialog.close()
             parent.close()
 
-    def test_table_visible_title_becomes_default_macro_name(self):
-        table = TableWidget.__new__(TableWidget)
-        table.handle = "Table0"
-        table._default_macro_name = table.handle
+    def test_table_widget_initializes_table_and_mutation_state(self):
+        qapp = QtWidgets.QApplication.instance()
+        if qapp is None:
+            qapp = QtWidgets.QApplication([])
 
-        TableWidget.set_default_macro_name(table, "Table_Fun")
-        self.assertEqual(TableWidget.default_macro_name(table), "Table_Fun")
+        class FakeUI:
+            def __init__(self):
+                self.tableView = QtWidgets.QTableView()
+                self.valueEdit = QtWidgets.QLineEdit()
+                self.cellInfoLabel = QtWidgets.QLabel()
+                self.gearButton = QtWidgets.QToolButton()
 
-    def test_invalid_table_title_falls_back_to_handle_for_macro_name(self):
-        table = TableWidget.__new__(TableWidget)
-        table.handle = "Table0"
-        table._default_macro_name = table.handle
+        with patch("hyde.user_interface.table.UiLoader") as loader_cls:
+            loader_cls.return_value.load.return_value = FakeUI()
+            with patch("hyde.user_interface.table.QtCore.QTimer.singleShot", lambda *_args, **_kwargs: None):
+                table = TableWidget("Table0", ["a"], app=None)
 
-        TableWidget.set_default_macro_name(table, "Table Fun")
-        self.assertEqual(TableWidget.default_macro_name(table), "Table0")
+        try:
+            from hyde.user_interface.base import MutationState
+            from hyde.user_interface.table import TableState
+
+            self.assertIsInstance(table.table_state, TableState)
+            self.assertIsInstance(table.mutation_state, MutationState)
+        finally:
+            table.close()
+
+    def test_open_table_uses_visible_title_as_handle(self):
+        created = {}
+
+        class FakeSubwindow:
+            def __init__(self):
+                self.window_title = None
+                self.shown = False
+                self.destroyed = type("Signal", (), {"connect": lambda self, callback: None})()
+
+            def setWindowTitle(self, title):
+                self.window_title = title
+
+            def show(self):
+                self.shown = True
+
+        class FakeMdiArea:
+            def __init__(self):
+                self.subwindow = FakeSubwindow()
+
+            def addSubWindow(self, widget):
+                created["widget"] = widget
+                return self.subwindow
+
+        class FakeTableWidget:
+            def __init__(
+                self,
+                handle,
+                names,
+                app,
+                visible_title=None,
+                geometry=None,
+                column_widths=None,
+            ):
+                self.handle = handle
+                self.names = list(names)
+                self.app = app
+                self.visible_title = visible_title
+                self.geometry = geometry
+                self.column_widths = column_widths
+                self.bound_subwindow = None
+
+            def bind_subwindow(self, subwindow):
+                self.bound_subwindow = subwindow
+
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.tables = {}
+        dummy_app.table_counter = 0
+        dummy_app.ui = type("UI", (), {"mdiArea": FakeMdiArea()})()
+
+        with patch("hyde.user_interface.table.TableWidget", FakeTableWidget):
+            HydeApp.open_table.__wrapped__(dummy_app, ["b", "c"], visible_title="Table_Fun")
+
+        self.assertEqual(created["widget"].handle, "Table_Fun")
+        self.assertEqual(created["widget"].visible_title, "Table_Fun")
+        self.assertIs(created["widget"].bound_subwindow, dummy_app.ui.mdiArea.subwindow)
+        self.assertIs(dummy_app.tables["Table_Fun"], created["widget"])
+        self.assertEqual(dummy_app.ui.mdiArea.subwindow.window_title, "Table_Fun")
+        self.assertEqual(dummy_app.table_counter, 1)
+
+    def test_request_save_table_macro_launches_dialog_with_table_state(self):
+        table_state = object()
+        calls = {}
+
+        class FakeDialog:
+            SAVE = 1
+            NO_SAVE = 2
+            CANCEL = 0
+
+            def __init__(self, table_state, parent=None):
+                calls["table_state"] = table_state
+                calls["parent"] = parent
+                self.choice = self.SAVE
+
+            def exec_(self):
+                return QtWidgets.QDialog.Accepted
+
+            def macro_name(self):
+                return "Table_Save"
+
+            def macro_source(self):
+                return "macro source"
+
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.ui = object()
+        dummy_app.procedures_init = "/tmp/procedures/__init__.py"
+        dummy_app.reload_procedures = lambda: calls.setdefault("reloaded", 0) or calls.__setitem__("reloaded", 1)
+
+        with patch("hyde.user_interface.main.SaveWindowDialog", FakeDialog):
+            with patch("hyde.user_interface.main.inspect_macro_conflict", return_value=None):
+                with patch("hyde.user_interface.main.write_macro_source") as write_macro_source:
+                    result = HydeApp.request_save_table_macro(dummy_app, table_state)
+
+        self.assertTrue(result)
+        self.assertIs(calls["table_state"], table_state)
+        self.assertIs(calls["parent"], dummy_app.ui)
+        write_macro_source.assert_called_once_with(
+            dummy_app.procedures_init,
+            "Table_Save",
+            "macro source",
+        )
+        self.assertEqual(calls["reloaded"], 1)
 
     def test_simple_command_codec_is_deterministic(self):
         state = SimpleHydeCommandCodec.default_state()

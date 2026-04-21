@@ -330,14 +330,14 @@ def quit():
     raise SystemExit(0)
 
 
-def table(*args, target=None, title=None):
+def table(*args, target=None, title=None, geometry=None, column_widths=None):
     """
     Open or append to a Hyde table window, or register a recreation macro.
 
     This public Hyde API supports two forms:
 
     1. Direct call form:
-       ``hyde.table(a, b, target=..., title=...)``
+       ``hyde.table(a, b, target=..., title=..., geometry=..., column_widths=...)``
        Opens a new table or appends to an existing one.
     2. Decorator form:
        ``@hyde.table``
@@ -351,6 +351,10 @@ def table(*args, target=None, title=None):
             window is created.
         title (str, optional): A user-friendly visible title for a new table. 
             If provided, this label is used in the window title bar.
+        geometry (tuple[int, int, int, int], optional): Saved MDI geometry for
+            recreated tables. Ignored when appending to an existing table.
+        column_widths (dict[str, int], optional): Saved table column widths keyed
+            by data-column name. Ignored when appending to an existing table.
 
     Behavior:
         - Resolves each object's top-level name in the caller's namespace by identity (`is`).
@@ -365,7 +369,13 @@ def table(*args, target=None, title=None):
         - Raises TypeError if decorator form uses unsupported non-positional parameters.
         - Raises ValueError if an object cannot be uniquely resolved to a top-level name.
     """
-    if not args and target is None and title is None:
+    if (
+        not args
+        and target is None
+        and title is None
+        and geometry is None
+        and column_widths is None
+    ):
         def decorator(func):
             register_table_macro(func)
             publish_table_macro_registry()
@@ -378,6 +388,8 @@ def table(*args, target=None, title=None):
         and callable(args[0])
         and target is None
         and title is None
+        and geometry is None
+        and column_widths is None
     ):
         register_table_macro(args[0])
         publish_table_macro_registry()
@@ -392,4 +404,10 @@ def table(*args, target=None, title=None):
     
     if HYDE_GUI:
         # Signal the parent executor (Watchdog) to relay the open intent to the GUI
-        signal_open_table(names, target, title=title)
+        signal_open_table(
+            names,
+            target,
+            title=title,
+            geometry=geometry,
+            column_widths=column_widths,
+        )

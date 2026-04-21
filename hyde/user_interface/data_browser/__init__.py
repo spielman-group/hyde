@@ -112,8 +112,8 @@ class DataBrowser(QtWidgets.QWidget):
 
         self.kernel_client = QtKernelClient(connection_file=self.connection_file)
         self.kernel_client.load_connection_file()
-        self.kernel_client.start_channels()
         self.spyder_comm = SpyderFrontendComm(self.kernel_client)
+        self.kernel_client.start_channels()
 
         self.kernel_client.iopub_channel.message_received.connect(self._handle_iopub_message)
 
@@ -127,7 +127,7 @@ class DataBrowser(QtWidgets.QWidget):
         self.ui.plotCheckBox.setEnabled(False)
 
         self._toggle_info_pane(self.ui.infoCheckBox.isChecked())
-        QtCore.QTimer.singleShot(0, self._initialize_namespace_sync)
+        self._initialize_namespace_sync()
 
     def _initialize_namespace_sync(self):
         self.spyder_comm.open()
@@ -325,10 +325,14 @@ class DataBrowser(QtWidgets.QWidget):
         names = self._selected_names()
         if not names or not self.app or not self.app.active_table_handle:
             return
-        
-        target = self.app.active_table_handle
-        from hyde.features.hyde_features import format_table_command
-        command = format_table_command(names, target=target)
+
+        from hyde.user_interface.table import TableState
+
+        state = TableState()
+        state.set_items(names)
+        state.set_command("append")
+        state.set_target(self.app.active_table_handle)
+        command = state.python_source()
         self.app.execute_command(command, visible=True)
 
     def closeEvent(self, event):

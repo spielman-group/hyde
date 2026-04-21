@@ -1,10 +1,10 @@
 import os
 import tempfile
 import unittest
+import copy
 
 import hyde
-from hyde._table_macros import clear_table_macros, table_macro_entries, table_macro_names
-from hyde.features.hyde_features import format_table_macro_source
+from hyde.table_macros import clear_table_macros, table_macro_entries, table_macro_names
 from hyde.user_interface.window_macro_store import (
     BEGIN_MARKER,
     END_MARKER,
@@ -13,6 +13,24 @@ from hyde.user_interface.window_macro_store import (
     validate_macro_name,
     write_macro_source,
 )
+
+
+def build_table_macro_source(macro_name, names, title=None, geometry=None, column_widths=None):
+    from hyde.features.hyde_features import TableCodec
+    from hyde.user_interface.table import TableState
+
+    state = TableState()
+    state._state = copy.deepcopy(TableCodec.default_state())
+    state._state["items"] = list(names)
+    state._state["settings"].update(
+        {
+            "command": "open",
+            "title": title,
+            "geometry": geometry,
+            "column_widths": dict(column_widths or {}),
+        }
+    )
+    return state.macro_source(macro_name)
 
 
 class TestTableDecorator(unittest.TestCase):
@@ -43,8 +61,7 @@ class TestWindowMacroStore(unittest.TestCase):
             validate_macro_name("not valid")
 
     def test_insert_new_macro_adds_bounded_block(self):
-        source = "import hyde\n"
-        macro = format_table_macro_source("Table0", ["a", "b"], title="Table0")
+        macro = build_table_macro_source("Table0", ["a", "b"], title="Table0")
 
         updated = update_macro_source("", "Table0", macro)
 
@@ -61,7 +78,7 @@ class TestWindowMacroStore(unittest.TestCase):
             "def Table0(a):\n"
             "    hyde.table(a)\n"
         )
-        macro = format_table_macro_source("Table0", ["a", "b"], title="Table0")
+        macro = build_table_macro_source("Table0", ["a", "b"], title="Table0")
 
         updated = update_macro_source(source, "Table0", macro)
 
@@ -69,6 +86,20 @@ class TestWindowMacroStore(unittest.TestCase):
         self.assertIn("hyde.table(a, b, title='Table0')", updated)
         conflict = inspect_macro_conflict_from_text(updated, "Table0")
         self.assertIsNotNone(conflict)
+
+    def test_insert_new_macro_preserves_optional_layout_kwargs(self):
+        macro = build_table_macro_source(
+            "Table0",
+            ["delay2", "fit_delay2"],
+            title="Table0",
+            geometry=(5, 42, 510, 242),
+            column_widths={"fit_delay2": 262},
+        )
+
+        updated = update_macro_source("", "Table0", macro)
+
+        self.assertIn("geometry=(5, 42, 510, 242)", updated)
+        self.assertIn("column_widths={'fit_delay2': 262}", updated)
 
     def test_write_macro_source_replaces_existing_named_function(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -80,7 +111,7 @@ class TestWindowMacroStore(unittest.TestCase):
                     "    return 'old'\n"
                 )
 
-            macro = format_table_macro_source("Table0", ["a"], title="Table0")
+            macro = build_table_macro_source("Table0", ["a"], title="Table0")
             write_macro_source(procedures_init, "Table0", macro)
 
             with open(procedures_init, "r", encoding="utf-8") as handle:

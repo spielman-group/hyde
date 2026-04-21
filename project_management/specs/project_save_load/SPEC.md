@@ -81,6 +81,7 @@ Records GUI/session state:
   - tracked kernel names
   - hidden/visible state
   - geometry
+  - column widths keyed by tracked kernel name
 - active table handle
 - table counter
 
@@ -155,6 +156,11 @@ visible-command contract for save/load.
 Saved kernel objects override same-name objects produced by `procedures/__init__.py`.
 Objects from the previously loaded project do not survive a project switch unless they are recreated by procedures or restored from the new project's saved state.
 
+Table layout restore is a GUI/session concern. Table recreation macros and
+`hyde.table(...)` may also carry saved table layout through `geometry` and
+`column_widths`, but that recreation state is not yet unified with the `session.toml`
+restore path.
+
 ## Kernel Save/Load Rules
 
 ### Inclusion model
@@ -187,3 +193,24 @@ Kernel objects are saved by exclusion, not whitelist.
 - package persistence for table contents beyond reopening saved table windows from kernel names recorded in `session.toml`
 - restoration of transient table editor state
 - hidden, non-reproducible GUI-to-kernel save/load shortcuts
+
+## Table Layout Persistence Boundary
+
+Table layout state is intentionally duplicated during this phase.
+
+`session.toml` stores the GUI session copy of:
+
+- table geometry
+- table visibility
+- saved data-column widths
+
+Table recreation source generated from `TableState` may also include:
+
+- `geometry=(x, y, width, height)`
+- `column_widths={"wave_name": width, ...}`
+
+This duplication is temporary and architectural. `session.toml` remains the GUI's
+session-restore source, while recreation macros remain the explicit table-reopen
+source stored in `procedures/__init__.py`. The duplication is not an accident or
+leftover simplification debt; Hyde currently wants both save paths to be able to
+restore table layout independently.

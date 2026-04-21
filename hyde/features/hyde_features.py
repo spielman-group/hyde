@@ -4,6 +4,18 @@ import copy
 from hyde.features.base import FeatureCodec
 
 
+def _coerce_path(path):
+    return tuple(path or ())
+
+
+def _set_path(state, path, value):
+    target = state
+    path = _coerce_path(path)
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+
 class SimpleHydeCommandCodec(FeatureCodec):
     feature_name = "hyde_command"
     state_version = 1
@@ -85,17 +97,9 @@ class SimpleHydeCommandCodec(FeatureCodec):
         if action_type == "set_command":
             normalized["command"] = action["command"]
         elif action_type == "set":
-            target = normalized
-            path = list(action["path"])
-            for key in path[:-1]:
-                target = target[key]
-            target[path[-1]] = action["value"]
+            _set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            target = normalized
-            path = list(action["path"])
-            for key in path[:-1]:
-                target = target[key]
-            target[path[-1]] = None
+            _set_path(normalized, action["path"], None)
         else:
             raise ValueError(f"Unsupported simple command action: {action_type!r}.")
 
@@ -128,125 +132,331 @@ class SimpleHydeCommandCodec(FeatureCodec):
         if command == "quit":
             return "hyde.quit()"
         raise ValueError(f"Unsupported Hyde command: {command!r}.")
-def format_table_command(names, target=None, title=None):
-    """
-    Formulates a hyde.table(...) command string.
-    
-    Args:
-        names: List of variable names.
-        target: Optional internal handle of the target table.
-        title: Optional visible window title for a new table.
-        
-    Returns:
-        str: The Python command string.
-    """
-    args_str = ", ".join(names)
-    kwargs = []
-    if target:
-        kwargs.append(f"target={target!r}")
-    if title:
-        kwargs.append(f"title={title!r}")
-
-    if kwargs:
-        return f"hyde.table({args_str}, {', '.join(kwargs)})"
-    return f"hyde.table({args_str})"
 
 
-def format_table_macro_source(macro_name, names, title=None):
-    """
-    Build a parameterized decorated table recreation macro definition.
-    """
-    parameters = ", ".join(names)
-    kwargs = []
-    if title:
-        kwargs.append(f"title={title!r}")
-    arguments = parameters
-    if kwargs:
-        arguments = f"{arguments}, {', '.join(kwargs)}"
-    return (
-        "@hyde.table\n"
-        f"def {macro_name}({parameters}):\n"
-        f"    hyde.table({arguments})\n"
-    )
-def format_publish_table_macros_command():
-    """Formulate the silent table-macro publication command string."""
-    return "hyde.table_macros.publish_table_macro_registry()"
+class TableCodec(FeatureCodec):
+    feature_name = "table"
+    state_version = 1
+    _valid_commands = {
+        "open",
+        "append",
+        "push_table_data",
+        "publish_table_macros",
+    }
+
+    @classmethod
+    def default_state(cls):
+        return {
+            "feature": cls.feature_name,
+            "state_version": cls.state_version,
+            "settings": {
+                "command": "open",
+                "title": None,
+                "target": None,
+                "geometry": None,
+                "column_widths": {},
+                "request_id": None,
+            },
+            "items": [],
+            "ui": {},
+        }
+
+    @classmethod
+    def normalize_state(cls, state):
+        normalized = copy.deepcopy(cls.default_state())
+        if state:
+            normalized["feature"] = state.get("feature", normalized["feature"])
+            normalized["state_version"] = state.get("state_version", normalized["state_version"])
+            settings = state.get("settings", {})
+            if isinstance(settings, dict):
+                normalized["settings"].update(settings)
+            normalized["items"] = [str(item) for item in state.get("items", []) if str(item)]
+            ui = state.get("ui", {})
+            normalized["ui"] = dict(ui) if isinstance(ui, dict) else {}
+
+        settings = normalized["settings"]
+        settings["command"] = str(settings.get("command", "open"))
+        title = settings.get("title")
+        settings["title"] = None if title in (None, "") else str(title)
+        target = settings.get("target")
+        settings["target"] = None if target in (None, "") else str(target)
+        geometry = settings.get("geometry")
+        if geometry in (None, []):
+            settings["geometry"] = None
+        else:
+            settings["geometry"] = tuple(int(value) for value in geometry)
+        column_widths = settings.get("column_widths", {})
+        if isinstance(column_widths, dict):
+            settings["column_widths"] = {
+                str(name): int(width)
+                for name, width in column_widths.items()
+                if str(name) and width is not None
+            }
+        else:
+            settings["column_widths"] = {}
+        request_id = settings.get("request_id")
+        settings["request_id"] = None if request_id in (None, "") else str(request_id)
+        return normalized
+
+    @classmethod
+    def validate_state(cls, state):
+        normalized = cls.normalize_state(state)
+        if normalized["feature"] != cls.feature_name:
+            raise ValueError(f"Expected feature={cls.feature_name!r}.")
+
+        settings = normalized["settings"]
+        command = settings["command"]
+        if command not in cls._valid_commands:
+            raise ValueError(f"Unsupported table command: {command!r}.")
+
+        if command in {"open", "append", "push_table_data"} and not normalized["items"]:
+            raise ValueError(f"Table command {command!r} requires at least one item.")
+        if command == "append" and not settings["target"]:
+            raise ValueError("Table append requires settings.target.")
+        if command == "open" and settings["target"] is not None:
+            raise ValueError("Table open does not support settings.target.")
+        if command == "push_table_data" and not settings["request_id"]:
+            raise ValueError("Table data push requires settings.request_id.")
+
+        geometry = settings["geometry"]
+        if geometry is not None and len(geometry) != 4:
+            raise ValueError("Table geometry must contain four integers.")
+        for width in settings["column_widths"].values():
+            if width <= 0:
+                raise ValueError("Table column widths must be positive integers.")
+        return normalized
+
+    @classmethod
+    def update_state(cls, state, action):
+        normalized = cls.normalize_state(state)
+        action_type = action.get("type")
+
+        if action_type == "set_command":
+            normalized["settings"]["command"] = action["command"]
+        elif action_type == "set":
+            _set_path(normalized, action["path"], action["value"])
+        elif action_type == "clear":
+            _set_path(normalized, action["path"], None)
+        elif action_type == "replace_items":
+            normalized["items"] = list(action.get("items", []))
+        elif action_type == "set_column_width":
+            name = str(action["name"])
+            width = int(action["width"])
+            normalized["settings"]["column_widths"][name] = width
+        else:
+            raise ValueError(f"Unsupported table action: {action_type!r}.")
+
+        return cls.normalize_state(normalized)
+
+    @classmethod
+    def _table_python_arguments(cls, normalized, include_layout=True):
+        arguments = list(normalized["items"])
+        settings = normalized["settings"]
+        kwargs = []
+        if settings["target"]:
+            kwargs.append(f"target={settings['target']!r}")
+        if settings["title"]:
+            kwargs.append(f"title={settings['title']!r}")
+        if include_layout and settings["geometry"] is not None:
+            kwargs.append(f"geometry={settings['geometry']!r}")
+        if include_layout and settings["column_widths"]:
+            kwargs.append(f"column_widths={settings['column_widths']!r}")
+        if kwargs:
+            arguments.extend(kwargs)
+        return ", ".join(arguments)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        del context
+        normalized = cls.validate_state(state)
+        settings = normalized["settings"]
+        command = settings["command"]
+
+        if command in {"open", "append"}:
+            include_layout = command == "open"
+            return f"hyde.table({cls._table_python_arguments(normalized, include_layout=include_layout)})"
+        if command == "push_table_data":
+            return (
+                "hyde.execution.ipc.push_table_data("
+                f"{list(normalized['items'])!r}, {settings['request_id']!r})"
+            )
+        if command == "publish_table_macros":
+            return "hyde.table_macros.publish_table_macro_registry()"
+        raise ValueError(f"Unsupported table command: {command!r}.")
+
+    @classmethod
+    def state_to_macro_source(cls, state, macro_name, context=None):
+        del context
+        normalized = cls.validate_state(state)
+        parameters = ", ".join(normalized["items"])
+        macro_state = copy.deepcopy(normalized)
+        macro_state["settings"]["command"] = "open"
+        macro_state["settings"]["target"] = None
+        if macro_state["settings"]["title"] is None:
+            macro_state["settings"]["title"] = macro_name
+        # Table recreation macros intentionally preserve saved GUI layout even
+        # though session.toml also stores it, because macros must fully reopen
+        # the table window as the user last arranged it.
+        body = cls.state_to_python(macro_state)
+        return (
+            "@hyde.table\n"
+            f"def {macro_name}({parameters}):\n"
+            f"    {body}\n"
+        )
 
 
-def format_push_table_data_command(names, request_id):
-    """Formulate the silent table-data request command string."""
-    return f"hyde.execution.ipc.push_table_data({list(names)!r}, {request_id!r})"
+class MutationCodec(FeatureCodec):
+    feature_name = "mutation"
+    state_version = 1
+    _valid_commands = {
+        "edit_value",
+        "append_value",
+        "create_array",
+        "delete_indices",
+    }
 
+    @classmethod
+    def default_state(cls):
+        return {
+            "feature": cls.feature_name,
+            "state_version": cls.state_version,
+            "settings": {
+                "command": None,
+                "var_name": None,
+                "value_text": None,
+                "index": None,
+                "indices": None,
+                "existing_names": [],
+            },
+            "items": [],
+            "ui": {},
+        }
 
-def format_cell_edit_command(var_name, index, value):
-    """
-    Formulates a muted mutation command for table cell editing.
-    """
-    return f"{var_name}[{index}] = {format_entry_literal(value)}"
+    @classmethod
+    def normalize_state(cls, state):
+        normalized = copy.deepcopy(cls.default_state())
+        if state:
+            normalized["feature"] = state.get("feature", normalized["feature"])
+            normalized["state_version"] = state.get("state_version", normalized["state_version"])
+            settings = state.get("settings", {})
+            if isinstance(settings, dict):
+                normalized["settings"].update(settings)
+            normalized["items"] = list(state.get("items", []))
+            ui = state.get("ui", {})
+            normalized["ui"] = dict(ui) if isinstance(ui, dict) else {}
 
+        settings = normalized["settings"]
+        command = settings.get("command")
+        settings["command"] = None if command in (None, "") else str(command)
+        var_name = settings.get("var_name")
+        settings["var_name"] = None if var_name in (None, "") else str(var_name)
+        value_text = settings.get("value_text")
+        settings["value_text"] = None if value_text is None else str(value_text)
+        index = settings.get("index")
+        settings["index"] = None if index is None else int(index)
+        indices = settings.get("indices")
+        if indices in (None, []):
+            settings["indices"] = None if indices is None else []
+        else:
+            settings["indices"] = [int(value) for value in indices]
+        existing_names = settings.get("existing_names", [])
+        settings["existing_names"] = [str(name) for name in existing_names if str(name)]
+        if settings["command"] == "create_array" and not settings["var_name"]:
+            settings["var_name"] = cls.suggest_new_array_name(
+                settings["existing_names"],
+                settings["value_text"],
+            )
+        return normalized
 
-def format_cell_append_command(var_name, value):
-    """
-    Formulates a muted append command for table row extension.
+    @classmethod
+    def validate_state(cls, state):
+        normalized = cls.normalize_state(state)
+        if normalized["feature"] != cls.feature_name:
+            raise ValueError(f"Expected feature={cls.feature_name!r}.")
 
-    The appended value is explicitly converted through the existing array dtype so
-    incompatible entries fail in the kernel instead of silently widening dtype.
-    """
-    literal = format_entry_literal(value)
-    return (
-        f"{var_name} = np.concatenate(("
-        f"{var_name}, np.array([{literal}], dtype={var_name}.dtype)"
-        f"))"
-    )
+        settings = normalized["settings"]
+        command = settings["command"]
+        if command not in cls._valid_commands:
+            raise ValueError(f"Unsupported mutation command: {command!r}.")
+        if command != "create_array" and not settings["var_name"]:
+            raise ValueError("Mutation commands require settings.var_name.")
 
+        if command in {"edit_value", "append_value", "create_array"}:
+            cls.format_entry_literal(settings["value_text"])
+        if command == "edit_value" and settings["index"] is None:
+            raise ValueError("Cell edits require settings.index.")
+        if command == "delete_indices":
+            if settings["indices"] is None:
+                raise ValueError("Delete commands require settings.indices.")
+        return normalized
 
-def format_new_array_command(var_name, value):
-    """Formulates a muted command creating a new 1D array from one entered value."""
-    return f"{var_name} = np.array([{format_entry_literal(value)}])"
+    @classmethod
+    def update_state(cls, state, action):
+        normalized = cls.normalize_state(state)
+        action_type = action.get("type")
 
+        if action_type == "set_command":
+            normalized["settings"]["command"] = action["command"]
+        elif action_type == "set":
+            _set_path(normalized, action["path"], action["value"])
+        elif action_type == "clear":
+            _set_path(normalized, action["path"], None)
+        else:
+            raise ValueError(f"Unsupported mutation action: {action_type!r}.")
 
-def format_delete_indices_command(var_name, indices):
-    """Formulates a muted delete command for one array column."""
-    index_list = sorted(set(indices))
-    return f"{var_name} = np.delete({var_name}, {index_list!r})"
+        return cls.normalize_state(normalized)
 
+    @classmethod
+    def format_entry_literal(cls, value_text):
+        text = str(value_text or "").strip()
+        if not text:
+            raise ValueError("Empty cell edits are not supported.")
+        try:
+            value = ast.literal_eval(text)
+        except Exception:
+            value = text
+        return repr(value)
 
-def format_entry_literal(value_text):
-    """
-    Convert user-entered cell text into a Python literal expression.
+    @classmethod
+    def suggest_new_array_name(cls, existing_names, value_text):
+        existing = {str(name) for name in existing_names}
+        try:
+            value = ast.literal_eval(str(value_text).strip())
+        except Exception:
+            value = value_text
 
-    Bare text is treated as a string literal, while valid Python literals
-    such as numbers, quoted strings, booleans, and None are preserved.
-    """
-    text = value_text.strip()
-    if not text:
-        raise ValueError("Empty cell edits are not supported.")
-    try:
-        value = ast.literal_eval(text)
-    except Exception:
-        value = text
-    return repr(value)
+        prefix = "textWave" if isinstance(value, str) else "wave"
+        index = 0
+        while f"{prefix}{index}" in existing:
+            index += 1
+        return f"{prefix}{index}"
 
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        del context
+        normalized = cls.validate_state(state)
+        settings = normalized["settings"]
+        command = settings["command"]
+        var_name = settings["var_name"]
 
-def suggest_new_array_name(existing_names, value_text):
-    """
-    Suggest a deterministic kernel variable name for a newly created table column.
-
-    String-like entries use an Igor-style `textWaveN` prefix to match user
-    expectation from the reference UI. All other entries use `waveN`.
-    """
-    existing = set(existing_names)
-    try:
-        value = ast.literal_eval(value_text.strip())
-    except Exception:
-        value = value_text
-
-    prefix = "textWave" if isinstance(value, str) else "wave"
-
-    index = 0
-    while f"{prefix}{index}" in existing:
-        index += 1
-    return f"{prefix}{index}"
+        if command == "edit_value":
+            return (
+                f"{var_name}[{settings['index']}] = "
+                f"{cls.format_entry_literal(settings['value_text'])}"
+            )
+        if command == "append_value":
+            literal = cls.format_entry_literal(settings["value_text"])
+            return (
+                f"{var_name} = np.concatenate(("
+                f"{var_name}, np.array([{literal}], dtype={var_name}.dtype)"
+                f"))"
+            )
+        if command == "create_array":
+            return f"{var_name} = np.array([{cls.format_entry_literal(settings['value_text'])}])"
+        if command == "delete_indices":
+            indices = sorted(set(settings["indices"] or []))
+            return f"{var_name} = np.delete({var_name}, {indices!r})"
+        raise ValueError(f"Unsupported mutation command: {command!r}.")
 
 
 def is_eligible_for_table(metadata):
@@ -257,12 +467,11 @@ def is_eligible_for_table(metadata):
     python_type = metadata.get("python_type", "").lower()
     numpy_type = metadata.get("numpy_type", "")
     ndim = metadata.get("ndim", 1)
-    kind = metadata.get("numpy_kind", "f") # Default to float if kind metadata is missing
+    kind = metadata.get("numpy_kind", "f")
 
-    # Scoped to 1D numeric (numpy ndarray, pandas Series, etc.)
     is_array = python_type in ("ndarray", "series") or numpy_type == "Array"
-    is_numeric = kind in 'biuf'
-    
+    is_numeric = kind in "biuf"
+
     return is_array and is_numeric and ndim == 1
 
 

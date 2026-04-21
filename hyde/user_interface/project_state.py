@@ -50,14 +50,21 @@ def _subwindow_state(subwindow):
 def capture_session(app):
     tables = []
     for handle, table in sorted(app.tables.items()):
+        table.capture_layout_state()
         subwindow = table.parentWidget()
+        table_settings = table.table_state.normalized_state()["settings"]
         tables.append(
             {
                 "handle": handle,
                 "title": subwindow.windowTitle(),
                 "names": list(table.names),
                 "hidden": not subwindow.isVisible(),
-                "geometry": _rect_to_list(subwindow.geometry()),
+                "geometry": (
+                    list(table_settings["geometry"])
+                    if table_settings["geometry"] is not None
+                    else _rect_to_list(subwindow.geometry())
+                ),
+                "column_widths": dict(table_settings.get("column_widths", {})),
             }
         )
 
@@ -181,14 +188,17 @@ def restore_tables(app, session):
     saved_counter = int(session.get("table_counter", 0))
     for table_state in session.get("tables", []):
         handle = table_state["handle"]
-        app.open_table(table_state.get("names", []), target=handle, visible_title=table_state.get("title"))
+        app.open_table(
+            table_state.get("names", []),
+            target=handle,
+            visible_title=table_state.get("title"),
+            geometry=table_state.get("geometry"),
+            column_widths=table_state.get("column_widths", {}),
+        )
         table = app.tables.get(handle)
         if table is None:
             continue
         subwindow = table.parentWidget()
-        geometry = table_state.get("geometry")
-        if geometry:
-            subwindow.setGeometry(_list_to_rect(geometry))
         subwindow.setVisible(not bool(table_state.get("hidden", False)))
     app.table_counter = saved_counter
     app.active_table_handle = session.get("active_table_handle")

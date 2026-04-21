@@ -27,6 +27,7 @@ from hyde.user_interface.project_state import (
     try_read_history,
     try_read_session,
     clear_tables,
+    restore_tables,
     write_history,
     write_session,
 )
@@ -130,14 +131,36 @@ class DummyDataBrowser:
 
 
 class DummyTable:
-    def __init__(self, handle, names, subwindow):
+    def __init__(self, handle, names, subwindow, column_widths=None):
         self.handle = handle
         self.names = list(names)
         self._subwindow = subwindow
+        self.column_widths = dict(column_widths or {})
+        self.table_state = type(
+            "DummyTableState",
+            (),
+            {
+                "normalized_state": lambda state_self: {
+                    "feature": "table",
+                    "settings": {
+                        "geometry": [
+                            self._subwindow.geometry().x(),
+                            self._subwindow.geometry().y(),
+                            self._subwindow.geometry().width(),
+                            self._subwindow.geometry().height(),
+                        ],
+                        "column_widths": dict(self.column_widths),
+                    },
+                }
+            },
+        )()
         self.shutdown_calls = 0
 
     def parentWidget(self):
         return self._subwindow
+
+    def capture_layout_state(self):
+        return None
 
     def shutdown_client(self):
         self.shutdown_calls += 1
@@ -186,7 +209,14 @@ class TestProjectStateHelpers(unittest.TestCase):
             app.procedures_subwindow = procedures_subwindow
             app.data_browser_subwindow = data_browser_subwindow
             app.data_browser = data_browser
-            app.tables = {"Table0": DummyTable("Table0", ["a", "b"], table_subwindow)}
+            app.tables = {
+                "Table0": DummyTable(
+                    "Table0",
+                    ["a", "b"],
+                    table_subwindow,
+                    column_widths={"a": 120, "b": 260},
+                )
+            }
             app.active_table_handle = "Table0"
             app.table_counter = 4
 
@@ -198,6 +228,77 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertFalse(session["data_browser"]["variables"])
             self.assertEqual(session["tables"][0]["handle"], "Table0")
             self.assertEqual(session["tables"][0]["names"], ["a", "b"])
+            self.assertEqual(session["tables"][0]["column_widths"], {"a": 120, "b": 260})
+
+    def test_session_round_trip_restores_table_column_widths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "roundtrip.hy")
+            os.makedirs(project_dir)
+
+            main_window = QtWidgets.QMainWindow()
+            mdi_area = QtWidgets.QMdiArea()
+            main_window.setCentralWidget(mdi_area)
+            table_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            table_subwindow.setWindowTitle("Table_Fun")
+            table_subwindow.setGeometry(QtCore.QRect(5, 42, 510, 242))
+
+            source_app = type("SourceApp", (), {})()
+            source_app.ui = main_window
+            source_app.command_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            source_app.logging_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            source_app.procedures_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            source_app.data_browser_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
+            source_app.data_browser = DummyDataBrowser()
+            source_app.tables = {
+                "Table0": DummyTable(
+                    "Table0",
+                    ["a", "b"],
+                    table_subwindow,
+                    column_widths={"a": 120, "b": 260},
+                )
+            }
+            source_app.active_table_handle = "Table0"
+            source_app.table_counter = 4
+
+            write_session(source_app, project_dir)
+            session = read_session(project_dir)
+
+            open_calls = []
+
+            class RestoredApp:
+                pass
+
+            restored_app = RestoredApp()
+            restored_app.tables = {}
+            restored_app.active_table_handle = None
+            restored_app.table_counter = 0
+
+            def open_table(names, target=None, visible_title=None, geometry=None, column_widths=None):
+                subwindow = QtWidgets.QMdiSubWindow()
+                table = DummyTable(target, names, subwindow, column_widths=column_widths)
+                restored_app.tables[target] = table
+                open_calls.append(
+                    (list(names), target, visible_title, geometry, dict(column_widths or {}))
+                )
+
+            restored_app.open_table = open_table
+
+            restore_tables(restored_app, session)
+
+            self.assertEqual(
+                open_calls,
+                [
+                    (
+                        ["a", "b"],
+                        "Table0",
+                        table_subwindow.windowTitle(),
+                        [5, 42, 510, 242],
+                        {"a": 120, "b": 260},
+                    )
+                ],
+            )
+            self.assertEqual(restored_app.table_counter, 4)
+            self.assertEqual(restored_app.active_table_handle, "Table0")
 
     def test_try_read_session_returns_error_for_malformed_toml(self):
         with tempfile.TemporaryDirectory() as tmpdir:

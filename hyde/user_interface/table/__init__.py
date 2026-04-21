@@ -1,17 +1,70 @@
 import os
 import uuid
+import copy
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
-from hyde.features.hyde_features import (
-    format_cell_append_command,
-    format_cell_edit_command,
-    format_delete_indices_command,
-    format_new_array_command,
-    format_push_table_data_command,
-    format_table_macro_source,
-    suggest_new_array_name,
-)
-from hyde.user_interface.window_macro_store import MacroStoreError, validate_macro_name
+
+from hyde.features.hyde_features import TableCodec
+from hyde.user_interface.base import HydeGuiState, MutationState
+
+
+class TableState(HydeGuiState):
+    codec = TableCodec
+
+    def configure_defaults(self):
+        self.set_command("open")
+
+    def _temporary_state(self, command=None, **settings):
+        state = copy.deepcopy(self.normalized_state())
+        if command is not None:
+            state["settings"]["command"] = command
+        state["settings"].update(settings)
+        return state
+
+    def set_command(self, command):
+        self.apply_action({"type": "set_command", "command": command})
+
+    def set_items(self, names):
+        self.apply_action({"type": "replace_items", "items": list(names)})
+
+    def set_title(self, title):
+        if title:
+            self.apply_action({"type": "set", "path": ("settings", "title"), "value": title})
+        else:
+            self.apply_action({"type": "clear", "path": ("settings", "title")})
+
+    def set_target(self, target):
+        if target:
+            self.apply_action({"type": "set", "path": ("settings", "target"), "value": target})
+        else:
+            self.apply_action({"type": "clear", "path": ("settings", "target")})
+
+    def set_geometry(self, geometry):
+        if geometry:
+            self.apply_action({"type": "set", "path": ("settings", "geometry"), "value": list(geometry)})
+        else:
+            self.apply_action({"type": "clear", "path": ("settings", "geometry")})
+
+    def set_column_widths(self, column_widths):
+        self.apply_action(
+            {"type": "set", "path": ("settings", "column_widths"), "value": dict(column_widths or {})}
+        )
+
+    def set_column_width(self, name, width):
+        self.apply_action({"type": "set_column_width", "name": name, "width": width})
+
+    def set_request_id(self, request_id):
+        if request_id:
+            self.apply_action({"type": "set", "path": ("settings", "request_id"), "value": request_id})
+        else:
+            self.apply_action({"type": "clear", "path": ("settings", "request_id")})
+
+    def source_for_command(self, command, **settings):
+        return self.codec.state_to_python(self._temporary_state(command=command, **settings))
+
+    def default_macro_name(self):
+        settings = self.normalized_state()["settings"]
+        return settings["title"] or settings["target"] or "Table"
 
 
 class TableViewModel(QtCore.QAbstractTableModel):
@@ -106,18 +159,37 @@ class TableViewModel(QtCore.QAbstractTableModel):
 
 
 class TableWidget(QtWidgets.QWidget):
-    def __init__(self, handle, names, app, *args, **kwargs):
+    def __init__(
+        self,
+        handle,
+        names,
+        app,
+        visible_title=None,
+        geometry=None,
+        column_widths=None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.handle = handle
         self.names = list(names)
         self.app = app
-        self._default_macro_name = handle
+        self.table_state = TableState()
+        self.table_state.set_items(self.names)
+        self.table_state.set_title(visible_title or handle)
+        self.table_state.set_geometry(geometry)
+        self.table_state.set_column_widths(column_widths or {})
+        # Keep both states on the table widget: TableState owns recreation and
+        # layout, while MutationState stays reusable for other mutation UIs too.
+        self.mutation_state = MutationState()
         self._current_request_id = None
         self._refresh_in_flight = False
         self._selected_cell = None
         self._value_edit_dirty = False
         self._initial_size_applied = False
         self._closed = False
+        self._restore_layout_requested = bool(geometry or column_widths)
+        self._subwindow = None
         self._tracked_namespace_state = self._current_tracked_namespace_state()
 
         loader = UiLoader()
@@ -130,6 +202,7 @@ class TableWidget(QtWidgets.QWidget):
         self.ui.tableView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.ui.tableView.viewport().installEventFilter(self)
         self.ui.valueEdit.installEventFilter(self)
+        self.ui.tableView.horizontalHeader().sectionResized.connect(self._on_section_resized)
 
         self.ui.tableView.selectionModel().currentChanged.connect(self._on_selection_changed)
         self.ui.tableView.customContextMenuRequested.connect(self._show_context_menu)
@@ -148,8 +221,17 @@ class TableWidget(QtWidgets.QWidget):
             if name not in self.names:
                 self.names.append(name)
         self.model.names = self.names
+        self.table_state.set_items(self.names)
         if refresh:
             self.refresh_data()
+
+    def bind_subwindow(self, subwindow):
+        self._subwindow = subwindow
+        subwindow.installEventFilter(self)
+        geometry = self.table_state.normalized_state()["settings"]["geometry"]
+        if geometry is not None:
+            subwindow.setGeometry(QtCore.QRect(*geometry))
+        self.capture_layout_state()
 
     def refresh_data(self):
         """Request array data via Hyde's background runtime helper."""
@@ -159,7 +241,10 @@ class TableWidget(QtWidgets.QWidget):
         self._current_request_id = str(uuid.uuid4())
         self._refresh_in_flight = True
         if self.app:
-            code = format_push_table_data_command(self.names, self._current_request_id)
+            code = self.table_state.source_for_command(
+                "push_table_data",
+                request_id=self._current_request_id,
+            )
             self.app.queue_background_command(code, silent=True)
 
     @inmain_decorator()
@@ -174,6 +259,7 @@ class TableWidget(QtWidgets.QWidget):
 
         self._refresh_in_flight = False
         self.model.update_data(data)
+        self._apply_saved_column_widths()
 
         if (
             selected_row is not None
@@ -187,7 +273,10 @@ class TableWidget(QtWidgets.QWidget):
         self._update_selection_info()
         if not self._initial_size_applied:
             self._initial_size_applied = True
-            QtCore.QTimer.singleShot(0, self._fit_subwindow_to_contents)
+            if self._restore_layout_requested:
+                self.capture_layout_state()
+            else:
+                QtCore.QTimer.singleShot(0, self._fit_subwindow_to_contents)
 
     def _current_tracked_namespace_state(self):
         if not self.app or not hasattr(self.app, "data_browser"):
@@ -249,8 +338,13 @@ class TableWidget(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0, self._activate_value_editor)
 
     def eventFilter(self, watched, event):
+        subwindow = getattr(self, "_subwindow", None)
+        ui = getattr(self, "ui", None)
+        if watched is subwindow and event.type() in (QtCore.QEvent.Move, QtCore.QEvent.Resize):
+            self.capture_layout_state()
         if (
-            watched is self.ui.tableView.viewport()
+            ui is not None
+            and watched is ui.tableView.viewport()
             and event.type() == QtCore.QEvent.MouseButtonRelease
             and event.button() == QtCore.Qt.LeftButton
         ):
@@ -262,7 +356,7 @@ class TableWidget(QtWidgets.QWidget):
                     self._schedule_value_editor_activation(index)
                 else:
                     QtCore.QTimer.singleShot(0, self._update_selection_info)
-        elif watched is self.ui.valueEdit and event.type() == QtCore.QEvent.KeyPress:
+        elif ui is not None and watched is ui.valueEdit and event.type() == QtCore.QEvent.KeyPress:
             if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
                 self._submit_and_move_selection(row_step=1, col_step=0)
                 return True
@@ -320,6 +414,34 @@ class TableWidget(QtWidgets.QWidget):
             target_height = min(target_height, max_size.height())
 
         subwindow.resize(target_width, target_height)
+        self.capture_layout_state()
+
+    def _apply_saved_column_widths(self):
+        widths = self.table_state.normalized_state()["settings"]["column_widths"]
+        if not widths:
+            return
+        for column, name in enumerate(self.names, start=1):
+            width = widths.get(name)
+            if width is not None:
+                self.ui.tableView.setColumnWidth(column, width)
+
+    def _on_section_resized(self, section, old_size, new_size):
+        del old_size
+        if section <= 0 or section >= self.model.active_column_count():
+            return
+        name = self.names[section - 1]
+        self.table_state.set_column_width(name, new_size)
+
+    def capture_layout_state(self):
+        if self._subwindow is not None:
+            geometry = self._subwindow.geometry()
+            self.table_state.set_geometry(
+                [geometry.x(), geometry.y(), geometry.width(), geometry.height()]
+            )
+        widths = {}
+        for column, name in enumerate(self.names, start=1):
+            widths[name] = self.ui.tableView.columnWidth(column)
+        self.table_state.set_column_widths(widths)
 
     def _on_value_text_edited(self, text):
         del text
@@ -401,7 +523,8 @@ class TableWidget(QtWidgets.QWidget):
             return
 
         for name, rows in sorted(rows_by_name.items()):
-            command = format_delete_indices_command(name, rows)
+            self.mutation_state.set_delete_indices(name, rows)
+            command = self.mutation_state.python_source()
             if self.app:
                 self.app.execute_command(command, visible=False)
         self._value_edit_dirty = False
@@ -460,17 +583,19 @@ class TableWidget(QtWidgets.QWidget):
                 namespace_names = set(self.names)
                 if self.app and hasattr(self.app, "data_browser"):
                     namespace_names.update(self.app.data_browser.namespace_view().keys())
-                new_name = suggest_new_array_name(namespace_names, val_text)
-                command = format_new_array_command(new_name, val_text)
+                new_name = self.mutation_state.set_create_array(val_text, namespace_names)
+                command = self.mutation_state.python_source()
                 pending_new_name = new_name
             else:
                 name = self.names[idx.column() - 1]
                 column_length = len(self.model.data_cache.get(name, []))
                 pending_new_name = None
                 if row < column_length:
-                    command = format_cell_edit_command(name, row, val_text)
+                    self.mutation_state.set_edit_value(name, row, val_text)
+                    command = self.mutation_state.python_source()
                 elif row == column_length:
-                    command = format_cell_append_command(name, val_text)
+                    self.mutation_state.set_append_value(name, val_text)
+                    command = self.mutation_state.python_source()
                 else:
                     return False
         except ValueError as exc:
@@ -506,25 +631,13 @@ class TableWidget(QtWidgets.QWidget):
             return
 
         if self.app and hasattr(self.app, "request_save_table_macro"):
-            if not self.app.request_save_table_macro(self):
+            self.capture_layout_state()
+            if not self.app.request_save_table_macro(self.table_state):
                 event.ignore()
                 return
 
         self.shutdown_client()
         super().closeEvent(event)
-
-    def default_macro_name(self):
-        return self._default_macro_name
-
-    def set_default_macro_name(self, name):
-        try:
-            self._default_macro_name = validate_macro_name(name)
-        except MacroStoreError:
-            self._default_macro_name = self.handle
-
-    def recreation_function_source(self, macro_name):
-        title = macro_name
-        return format_table_macro_source(macro_name, self.names, title=title)
 
     def shutdown_client(self):
         if self._closed:

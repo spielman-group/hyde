@@ -3,7 +3,8 @@
 ## Purpose
 
 This document defines the planning direction for a state-centered control pattern in
-`hyde/features/*_features.py`.
+`hyde/features/*_features.py` and the matching `HydeGuiState` ownership pattern in
+`hyde/user_interface/...`.
 
 The immediate goal is to establish a simple, reusable pattern for GUI-driven command
 generation before figure and fitting editors arrive. Those future editors will have
@@ -63,26 +64,35 @@ That codec owns:
 - deterministic state mutation
 - Python generation
 
-### 2. Do not force every string builder into the codec abstraction
+### 2. All Python generation belongs to Hyde GUI state and codec pairs
 
-The codec pattern should apply to GUI features, not to every trivial
-one-shot helper.
+If the GUI generates Python for a user-visible feature or a GUI-owned background
+request, that generation belongs to a `HydeGuiState` / `FeatureCodec` pair.
 
-In particular, runtime-helper transport strings such as:
+This includes:
 
-- procedure bootstrap code
+- visible `hyde.table(...)` construction
+- table recreation macro source
 - table-data fetch requests
-- remote request forwarding
-- menu-registry publication
+- table-macro publication requests
+- table mutation commands
 
-should not be forced through `update_state(...)`. They are transport/plumbing helpers,
-not GUI-edit languages.
+Pure transport such as message envelopes or queueing remains outside the codec layer,
+but Python string generation does not.
+
+The macro hook stays in the shared base interface as well:
+
+- `FeatureCodec.state_to_macro_source(...)`
+- `HydeGuiState.macro_source(...)`
+
+This is intentional. Recreation-capable feature states should expose one shared
+state-to-source interface rather than reintroducing ad hoc widget-local macro helpers.
 
 ### 3. Use feature-specific codecs for recreated features
 
 Every recreated source should have its own codec class, for example:
 
-- `TableFeatureCodec`
+- `TableCodec`
 - `FigureFeatureCodec`
 - `FitFeatureCodec`
 
@@ -94,11 +104,12 @@ shared omnibus codec.
 Every command-emitting Hyde GUI class must:
 
 - be a Hyde-owned subclass under `hyde/user_interface/...`
-- own exactly one Hyde-specific `...State` instance
+- own one or more Hyde-specific `HydeGuiState` subclasses as needed to cover its
+  command domains
 - use composition rather than inheritance for that state ownership
 
-There is no GUI-state multiple inheritance pattern. The GUI class owns the state
-object explicitly.
+There is no GUI-state multiple inheritance pattern. The GUI class owns those state
+objects explicitly.
 
 ### 5. Share one state class across GUI surfaces when they express the same feature
 
@@ -107,13 +118,39 @@ Hyde-specific `...State` class whenever one state schema naturally covers them.
 
 For example:
 
-- `NewTableDialog` and `TableWindow` should both own `TableState`
+- `NewTableDialog` and `TableWidget` should both own `TableState`
 - the simpler dialog edits a subset of `TableState`
-- the richer table window edits a larger subset of `TableState`
+- the richer table widget edits a larger subset of `TableState`
 
 The split should happen only if the semantic state truly diverges.
 
-### 6. Use a shared lightweight codec only for trivial visible commands
+State placement should still follow ownership:
+
+- feature-specific GUI state such as `TableState` should live with that feature
+- reusable GUI state such as `MutationState` should live in a shared UI-state module,
+  not inside one feature package
+
+### 6. Use a generic mutation codec for data edits across GUI features
+
+Hyde should use a generic `MutationCodec` plus `MutationState(HydeGuiState)` for
+data-mutating GUI paths that are not specific to one semantic feature object.
+
+The initial table implementation uses this for:
+
+- cell edit
+- append value
+- create array
+- delete indices
+
+Future figure-control surfaces may reuse the same mutation pattern where the GUI
+describes a data mutation and lowers it into explicit Python.
+
+This generic mutation path is an intentional exception to any "collapse table logic
+into one state object" simplification advice. `MutationState` is preserved as a
+cross-feature abstraction because future mutation-capable editors are expected to
+reuse it.
+
+### 7. Use a shared lightweight codec only for trivial visible commands
 
 Fairly trivial visible command generation such as:
 
@@ -126,7 +163,7 @@ Fairly trivial visible command generation such as:
 may share a small command-oriented codec because these commands do not define the same
 kind of recreated feature state as tables, figures, or fits.
 
-### 7. Do not require a universal reverse parser
+### 8. Do not require a universal reverse parser
 
 The common interface should be forward-oriented:
 
@@ -136,6 +173,11 @@ Reverse reconstruction remains feature-specific. Some features may reconstruct s
 from metadata, some from explicit backend notifications, some from command semantics,
 and some from parser-produced structures. Hyde should not impose one reverse mechanism
 before the real features demand it.
+
+For tables, recreation source is also allowed to include GUI-restorable layout such as
+window geometry and column widths. This intentionally duplicates layout information
+that also appears in `session.toml`: session restore owns workspace restore, while
+recreation macros own explicit user-invoked reopen behavior.
 
 
 ## Recommended Base Interface
@@ -166,6 +208,10 @@ class FeatureCodec:
     @classmethod
     def state_to_python(cls, state, context=None):
         ...
+
+    @classmethod
+    def state_to_macro_source(cls, state, macro_name, context=None):
+        raise NotImplementedError
 ```
 
 ### Why this is enough
@@ -177,6 +223,8 @@ class FeatureCodec:
 - `update_state()` supports rich GUI mutation without ad hoc dict manipulation spread
   across widgets.
 - `state_to_python()` keeps Hyde's string-factory rule intact.
+- `state_to_macro_source()` gives recreation-capable states a shared way to emit
+  explicit reopen source when needed.
 
 ### Why this should stay small
 
@@ -210,7 +258,7 @@ Recommended top-level shape for a recreated feature codec:
 
 ### Optional `command` discriminator
 
-Single-feature codecs such as `TableFeatureCodec` or `FigureFeatureCodec` generally do
+Single-feature codecs such as `TableCodec` or `FigureFeatureCodec` generally do
 not need a top-level `command` discriminator. The feature identity already tells the
 codec what semantic object it is editing.
 
@@ -280,18 +328,19 @@ The right ownership split is:
 
 - widgets
 - signal wiring
-- one Hyde-specific `...State` object per command-emitting GUI class
+- one or more Hyde-specific `HydeGuiState` objects per command-emitting GUI class
 - widget-to-state synchronization
 - construction of action dictionaries
 - display of validation failures
 - transient selection and focus bookkeeping
 
-### Hyde-specific `...State` object owns
+### Hyde-specific `HydeGuiState` object owns
 
 - the current local edit session state for that GUI surface
 - the shared canonical state structure for that semantic feature
 - calls into the associated `FeatureCodec`
 - normalization / validation / code-generation requests through that codec
+- `macro_source(...)` delegation where the codec supports recreation-source generation
 
 `...State` objects do not own command dispatch, GUI warnings/confirmations, or
 filesystem existence/overwrite checks. Those decisions remain in the owning GUI
@@ -330,7 +379,7 @@ These classes:
 
 - live under `hyde/user_interface/...`
 - are Hyde-specific subclasses of the appropriate Qt base classes
-- must own exactly one Hyde-specific `...State` instance
+- must own the `HydeGuiState` instances required for the command domains they express
 
 The corresponding `...State` classes should also live with Hyde's GUI-side code under
 `hyde/user_interface/...`, typically alongside the GUI surfaces that use them.
@@ -343,8 +392,8 @@ This rule applies to complex feature windows and to simple dialogs such as file
 selection dialogs that ultimately generate Hyde commands.
 
 It does not imply that every child widget, `QAction`, or helper control owns its own
-state object. Child widgets forward their events to the owning surface and its single
-state object.
+state object. Child widgets forward their events to the owning surface and its
+state objects.
 
 ### File-dialog pattern
 
@@ -362,7 +411,8 @@ This is preferred over one large dialog class full of command-specific branching
 
 The GUI ownership rule is composition only:
 
-- a command-emitting GUI class owns one Hyde-specific `...State` instance
+- a command-emitting GUI class owns the Hyde-specific `HydeGuiState` instances
+  required for its command domains
 
 The GUI class does not also inherit from the state class. This keeps ownership clear
 and avoids Qt multiple-inheritance coupling.
@@ -390,14 +440,15 @@ But that should remain outside the required shared base interface.
 
 ## Scope For The `hyde_features.py` Pilot
 
-The pilot should establish the pattern in the simplest credible Hyde setting without
-forcing unrelated helpers into it.
+The pilot should establish the pattern in the first credible Hyde setting where one
+GUI surface both recreates a semantic object and issues live mutations.
 
 ### Recommended pilot scope
 
-The pilot should use two layers rather than one omnibus codec:
+The pilot should use three layers rather than one omnibus codec:
 
-- a `TableFeatureCodec` for recreated table state and `hyde.table(...)` generation
+- a `TableCodec` for recreated table state and `hyde.table(...)` generation
+- a generic `MutationCodec` for live data-mutation Python generation
 - a shared lightweight command codec for trivial visible commands such as
   `new_project`, `load_project`, `heal_project`, `save_project`, and `quit`
 
@@ -405,27 +456,16 @@ This better matches the intended long-term structure for figures and fits.
 
 ### Recommended exclusions from the pilot
 
-Do not force these into the first codec:
+Do not force these into the first pilot pass:
 
 - procedure bootstrap helper generation
 - remote request helper generation
-- table-data fetch relay generation
-- table macro publication helper generation
-- table cell edit / append / delete micro-mutations
-- name-suggestion helpers
-- data-browser eligibility predicates
-
-Reasons:
-
-- runtime-helper transport strings are not GUI edit languages
-- table cell mutations are a separate table-editor feature surface
-- eligibility predicates are validation/support logic, not command-family state
-
-The pilot remains meaningful if it narrows `hyde_features.py` to the visible public
-Hyde command path and leaves other helpers outside that boundary or moves them later.
+- reverse parsers for reconstruction from arbitrary user Python
+- generic persistence unification between recreation state and `session.toml`
+- table eligibility predicates unless they are directly needed by state validation
 
 
-## Proposed `TableFeatureCodec` State Shape
+## Proposed `TableCodec` State Shape
 
 For the recreated table feature, a dedicated codec is the preferred pilot:
 
@@ -434,8 +474,12 @@ For the recreated table feature, a dedicated codec is the preferred pilot:
     "feature": "table",
     "state_version": 1,
     "settings": {
+        "command": "open",
         "target": None,
         "title": None,
+        "geometry": None,
+        "column_widths": {},
+        "request_id": None,
     },
     "items": ["x", "y"],
     "ui": {},
@@ -445,19 +489,29 @@ For the recreated table feature, a dedicated codec is the preferred pilot:
 Notes:
 
 - `items` is primarily for argument order where it matters, especially `hyde.table(...)`
-- `settings` is feature-specific rather than command-family-specific
+- `settings.command` selects the table command family
 - `ui` remains optional and non-semantic
 
 Expected table semantics:
 
 - `items`: ordered object names
+- `settings.command`: one of `open`, `append`, `push_table_data`, or
+  `publish_table_macros`
 - `settings.target`: optional existing table handle
 - `settings.title`: optional visible title
+- `settings.geometry`: optional `(x, y, width, height)` tuple for saved layout
+- `settings.column_widths`: optional `{name: width}` mapping for saved layout
+- `settings.request_id`: request token for background table-data or macro-publication
+  requests
+
+The same table state schema covers both semantic table definition and saved layout
+needed to recreate a table window. That layout state is also stored in `session.toml`
+for session restore in the current architecture.
 
 
 ## Proposed `TableState` Pattern
 
-`TableState` is the Hyde-specific GUI-side state object for the table feature.
+`TableState` is a `HydeGuiState` subclass for the table feature.
 
 It is shared by every command-emitting GUI surface that expresses the table feature
 when one table-state schema naturally covers those surfaces.
@@ -465,24 +519,43 @@ when one table-state schema naturally covers those surfaces.
 For the current planning direction:
 
 - `NewTableDialog` should own `TableState`
-- `TableWindow` should own `TableState`
-- both should use `TableFeatureCodec`
+- `TableWidget` should own `TableState`
+- both should use `TableCodec`
 
 This is desirable because both surfaces express the same `hyde.table(...)` language,
-with the table window acting as a semantic superset of the creation dialog.
+with the table widget acting as a semantic superset of the creation dialog.
 
 `TableState` should therefore be able to represent:
 
 - the selected ordered table items
 - target table handle
 - visible title
-- any additional feature-semantic table state needed by richer table editing
+- saved table geometry
+- saved data-column widths
+- background table fetch / publication requests
 
 At the same time, `TableState` should not become a bucket for transient widget-only
 details that are not part of table semantics. Widget-local details such as current
-selection focus, scroll position, and splitter positions should stay outside the
-canonical semantic portion of `TableState` unless they are explicitly needed for Hyde's
-recreation language.
+selection focus, current edit text, and temporary menus should stay outside the
+canonical semantic portion of `TableState` unless they are explicitly needed for
+Hyde's recreation language.
+
+## Proposed `MutationCodec` And `MutationState`
+
+`MutationCodec` is the generic `FeatureCodec` subclass for GUI-driven data mutations.
+`MutationState` is the matching `HydeGuiState` subclass.
+
+The initial table implementation uses:
+
+- `feature == "mutation"`
+- `settings.command` as one of `edit_value`, `append_value`, `create_array`, or
+  `delete_indices`
+- `settings.var_name`, `settings.value_text`, `settings.index`, `settings.indices`,
+  and `settings.existing_names` as the minimum mutation fields
+
+`MutationCodec` owns literal parsing, generated-name selection, validation, and
+lowering to explicit Python mutation strings. `TableWidget` owns `MutationState`
+alongside `TableState`.
 
 
 ## Proposed `SimpleHydeCommandCodec` State Shape
@@ -551,39 +624,44 @@ Example outputs:
 
 ### Multiple render targets
 
-Some features may later need more than one Python rendering target, such as:
+Some features need more than one Python rendering target, such as:
 
 - visible command string
 - decorated macro source
 - muted mutation command
 
-The base interface can still stay small if `context` selects the rendering purpose.
-The default purpose should remain the visible command path.
+The base interface stays small by giving codecs `state_to_python(...)` plus optional
+`state_to_macro_source(...)`. The default purpose remains the visible command path.
 
 
 ## How GUI Code Should Bind To The Codec
 
 The required pattern is:
 
-1. A Hyde GUI surface owns one Hyde-specific `...State` object.
-2. That `...State` object uses the associated `FeatureCodec`.
-3. Widget events are translated into action dictionaries and applied to the state.
-4. The GUI surface requests Python generation from that state object.
+1. A Hyde GUI surface owns the `HydeGuiState` objects required for its command domains.
+2. Each `HydeGuiState` object uses its associated `FeatureCodec`.
+3. Widget events are translated into action dictionaries and applied to the relevant
+   state object.
+4. The GUI surface requests Python generation from those state objects.
 
 For example, the current New Table dialog should evolve from:
 
-- direct calls to `format_table_command(...)`
-- direct use of `is_eligible_for_table(...)`
+- direct table command-string formatting
 
 toward:
 
 - a `TableState` instance owned by the dialog
-- one explicit dependency from `TableState` to `TableFeatureCodec`
+- one explicit dependency from `TableState` to `TableCodec`
 - action-based updates from selection/title widgets into `TableState`
 - a final Python-generation request through `TableState`
 
-The table window should follow the same pattern and should share `TableState` when it
-expresses the same underlying table language.
+The table widget should follow the same pattern and should own:
+
+- one `TableState` for table construction, recreation, and saved layout
+- one `MutationState` for live data edits
+
+No table or mutation Python generation should live in free helper functions once this
+pattern is adopted.
 
 No PyQt classes should be imported into the codec layer.
 
@@ -641,13 +719,15 @@ internal class layout.
 - `update_state(...)` is deterministic
 - ordered item operations preserve exact order
 
-### `TableFeatureCodec` pilot tests
+### `TableCodec` and `MutationCodec` pilot tests
 
 - table state lowers to the expected `hyde.table(...)` string
-- table GUI/editor entry points can share the same `TableState`
+- table macro source includes non-default layout only when present
+- table GUI/editor entry points can share the same `TableState` schema
 - ordered item updates preserve exact argument order
 - the simpler table dialog can edit a subset of `TableState`
-- the richer table window can edit a superset of that same state
+- the richer table widget can edit a superset of that same state
+- mutation state lowers edit, append, create-array, and delete commands deterministically
 
 ### `SimpleHydeCommandCodec` pilot tests
 
@@ -663,15 +743,18 @@ internal class layout.
 The best next implementation shape is:
 
 1. Add a very small shared codec base class.
-2. Add one codec subclass per recreated feature source such as table, figure, or fit.
-3. Add one Hyde-specific `...State` class per semantic feature where GUI surfaces need
-   shared local edit state.
-4. Require every command-emitting Hyde GUI class to own one such `...State` instance.
-5. Share that `...State` across GUI surfaces when one semantic schema naturally covers
-   them.
-6. Add one shared lightweight codec for trivial visible Hyde commands.
-7. Keep runtime-helper transport helpers outside the codec boundary.
-8. Leave reverse reconstruction feature-specific.
+2. Add `state_to_macro_source(...)` as the optional recreation-source interface on that
+   base class.
+3. Add one codec subclass per recreated feature source such as table, figure, or fit.
+4. Add one generic `MutationCodec` for reusable data-mutation command generation.
+5. Add Hyde-specific `HydeGuiState` subclasses such as `TableState` and `MutationState`
+   where GUI surfaces need shared local edit state.
+6. Require every command-emitting Hyde GUI class to own the state objects required for
+   its command domains.
+7. Share those state classes across GUI surfaces when one semantic schema naturally
+   covers them.
+8. Add one shared lightweight codec for trivial visible Hyde commands.
+9. Leave reverse reconstruction feature-specific.
 
 This gives Hyde a real state-language pilot without overcommitting to a large framework
 before figures and fitting reveal the true pressure points.

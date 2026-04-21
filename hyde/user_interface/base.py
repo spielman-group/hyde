@@ -2,6 +2,7 @@ import logging
 import pprint
 
 import hyde
+from hyde.features.hyde_features import MutationCodec
 
 
 class HydeGuiState:
@@ -37,3 +38,59 @@ class HydeGuiState:
                 source,
             )
         return source
+
+    def macro_source(self, macro_name):
+        normalized = self.validate_state()
+        # Keep the shared macro hook in the base API so feature states can expose
+        # recreation-source generation through the same interface as python_source().
+        source = self.codec.state_to_macro_source(self._state, macro_name)
+        if hyde.HYDE_DEBUG:
+            logging.getLogger("hyde").debug(
+                "[Hyde state] %s\nstate:\n%s\npython:\n%s",
+                type(self).__name__,
+                pprint.pformat(normalized, sort_dicts=True),
+                source,
+            )
+        return source
+
+
+class MutationState(HydeGuiState):
+    # Keep MutationState in the shared base module because it is a reusable
+    # cross-feature GUI state, not a table-owned specialization.
+    codec = MutationCodec
+
+    def set_command(self, command):
+        self.apply_action({"type": "set_command", "command": command})
+
+    def set_edit_value(self, var_name, index, value_text):
+        self.set_command("edit_value")
+        self.apply_action({"type": "set", "path": ("settings", "var_name"), "value": var_name})
+        self.apply_action({"type": "set", "path": ("settings", "index"), "value": index})
+        self.apply_action({"type": "set", "path": ("settings", "value_text"), "value": value_text})
+        self.apply_action({"type": "clear", "path": ("settings", "indices")})
+
+    def set_append_value(self, var_name, value_text):
+        self.set_command("append_value")
+        self.apply_action({"type": "set", "path": ("settings", "var_name"), "value": var_name})
+        self.apply_action({"type": "set", "path": ("settings", "value_text"), "value": value_text})
+        self.apply_action({"type": "clear", "path": ("settings", "index")})
+        self.apply_action({"type": "clear", "path": ("settings", "indices")})
+
+    def set_create_array(self, value_text, existing_names):
+        new_name = self.codec.suggest_new_array_name(existing_names, value_text)
+        self.set_command("create_array")
+        self.apply_action({"type": "set", "path": ("settings", "var_name"), "value": new_name})
+        self.apply_action({"type": "set", "path": ("settings", "value_text"), "value": value_text})
+        self.apply_action(
+            {"type": "set", "path": ("settings", "existing_names"), "value": list(existing_names)}
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "index")})
+        self.apply_action({"type": "clear", "path": ("settings", "indices")})
+        return new_name
+
+    def set_delete_indices(self, var_name, indices):
+        self.set_command("delete_indices")
+        self.apply_action({"type": "set", "path": ("settings", "var_name"), "value": var_name})
+        self.apply_action({"type": "set", "path": ("settings", "indices"), "value": list(indices)})
+        self.apply_action({"type": "clear", "path": ("settings", "index")})
+        self.apply_action({"type": "clear", "path": ("settings", "value_text")})

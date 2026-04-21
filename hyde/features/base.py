@@ -29,3 +29,11 @@ class FeatureCodec(ABC):
     @abstractmethod
     def state_to_python(cls, state, context=None):
         """Lower canonical state to standard Python source."""
+
+    @classmethod
+    def state_to_macro_source(cls, state, macro_name, context=None):
+        """Lower canonical state to recreation macro source when supported."""
+        # Keep the base macro hook even when only a subset of features use it:
+        # recreation-capable states should expose one shared codec interface.
+        del state, macro_name, context
+        raise NotImplementedError(f"{cls.__name__} does not support macro source generation.")

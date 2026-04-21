@@ -4,7 +4,7 @@ import numpy as np
 from labscript_utils.ls_zprocess import ProcessTree
 
 
-def signal_open_table(names, target, title=None):
+def signal_open_table(names, target, title=None, geometry=None, column_widths=None):
     """
     Signal the parent GUI process to open or update a table.
 
@@ -22,6 +22,8 @@ def signal_open_table(names, target, title=None):
                 "names": list(names),
                 "target": target,
                 "title": title,
+                "geometry": geometry,
+                "column_widths": dict(column_widths or {}),
             },
         ])
     except Exception:
