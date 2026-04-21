@@ -52,9 +52,8 @@ state.
 
 ### 1. Use a class-based codec pattern for stateful GUI features
 
-Each recreated semantic feature should own its own `FeatureCodec` subclass. Multiple
-GUI classes may participate in editing that feature, but they should all talk to the
-same codec for that feature.
+Each recreated semantic feature should own its own `FeatureCodec` subclass in
+`hyde/features/...`.
 
 That codec owns:
 
@@ -90,7 +89,31 @@ Every recreated source should have its own codec class, for example:
 This keeps each GUI/editor surface coupled to one semantic owner rather than to a
 shared omnibus codec.
 
-### 4. Use a shared lightweight codec only for trivial visible commands
+### 4. Use Hyde-specific GUI state objects as the universal GUI-side pattern
+
+Every command-emitting Hyde GUI class must:
+
+- be a Hyde-owned subclass under `hyde/user_interface/...`
+- own exactly one Hyde-specific `...State` instance
+- use composition rather than inheritance for that state ownership
+
+There is no GUI-state multiple inheritance pattern. The GUI class owns the state
+object explicitly.
+
+### 5. Share one state class across GUI surfaces when they express the same feature
+
+If multiple GUI classes express the same semantic feature, they should share the same
+Hyde-specific `...State` class whenever one state schema naturally covers them.
+
+For example:
+
+- `NewTableDialog` and `TableWindow` should both own `TableState`
+- the simpler dialog edits a subset of `TableState`
+- the richer table window edits a larger subset of `TableState`
+
+The split should happen only if the semantic state truly diverges.
+
+### 6. Use a shared lightweight codec only for trivial visible commands
 
 Fairly trivial visible command generation such as:
 
@@ -103,7 +126,7 @@ Fairly trivial visible command generation such as:
 may share a small command-oriented codec because these commands do not define the same
 kind of recreated feature state as tables, figures, or fits.
 
-### 5. Do not require a universal reverse parser
+### 7. Do not require a universal reverse parser
 
 The common interface should be forward-oriented:
 
@@ -257,10 +280,18 @@ The right ownership split is:
 
 - widgets
 - signal wiring
-- local editor/controller state
+- one Hyde-specific `...State` object per command-emitting GUI class
+- widget-to-state synchronization
 - construction of action dictionaries
 - display of validation failures
 - transient selection and focus bookkeeping
+
+### Hyde-specific `...State` object owns
+
+- the current local edit session state for that GUI surface
+- the shared canonical state structure for that semantic feature
+- calls into the associated `FeatureCodec`
+- normalization / validation / code-generation requests through that codec
 
 ### Codec owns
 
@@ -279,6 +310,53 @@ The right ownership split is:
 
 This preserves Hyde's architecture: the GUI has edit memory, but not scientific
 memory.
+
+
+## Universal GUI-Side Rule
+
+Hyde should adopt one explicit project-wide pattern.
+
+### Command-emitting GUI classes
+
+A command-emitting GUI class is a Hyde-owned window, dialog, or comparable interactive
+surface that can generate Hyde-visible or Hyde-owned Python from user interaction.
+
+These classes:
+
+- live under `hyde/user_interface/...`
+- are Hyde-specific subclasses of the appropriate Qt base classes
+- must own exactly one Hyde-specific `...State` instance
+
+The corresponding `...State` classes should also live with Hyde's GUI-side code under
+`hyde/user_interface/...`, typically alongside the GUI surfaces that use them.
+
+This rule applies to complex feature windows and to simple dialogs such as file
+selection dialogs that ultimately generate Hyde commands.
+
+It does not imply that every child widget, `QAction`, or helper control owns its own
+state object. Child widgets forward their events to the owning surface and its single
+state object.
+
+### File-dialog pattern
+
+Very simple command-emitting dialogs may share a package such as
+`hyde/user_interface/file_dialogs/`.
+
+In that case the recommended structure is:
+
+- one Hyde base file-dialog class
+- a small set of narrow Hyde subclasses for cases such as new/load/save/heal
+
+This is preferred over one large dialog class full of command-specific branching.
+
+### No GUI-state inheritance
+
+The GUI ownership rule is composition only:
+
+- a command-emitting GUI class owns one Hyde-specific `...State` instance
+
+The GUI class does not also inherit from the state class. This keeps ownership clear
+and avoids Qt multiple-inheritance coupling.
 
 
 ## Reverse Reconstruction
@@ -368,6 +446,36 @@ Expected table semantics:
 - `settings.title`: optional visible title
 
 
+## Proposed `TableState` Pattern
+
+`TableState` is the Hyde-specific GUI-side state object for the table feature.
+
+It is shared by every command-emitting GUI surface that expresses the table feature
+when one table-state schema naturally covers those surfaces.
+
+For the current planning direction:
+
+- `NewTableDialog` should own `TableState`
+- `TableWindow` should own `TableState`
+- both should use `TableFeatureCodec`
+
+This is desirable because both surfaces express the same `hyde.table(...)` language,
+with the table window acting as a semantic superset of the creation dialog.
+
+`TableState` should therefore be able to represent:
+
+- the selected ordered table items
+- target table handle
+- visible title
+- any additional feature-semantic table state needed by richer table editing
+
+At the same time, `TableState` should not become a bucket for transient widget-only
+details that are not part of table semantics. Widget-local details such as current
+selection focus, scroll position, and splitter positions should stay outside the
+canonical semantic portion of `TableState` unless they are explicitly needed for Hyde's
+recreation language.
+
+
 ## Proposed `SimpleHydeCommandCodec` State Shape
 
 For trivial visible command generation, a shared codec is reasonable:
@@ -446,15 +554,12 @@ The default purpose should remain the visible command path.
 
 ## How GUI Code Should Bind To The Codec
 
-Do not build a generic widget-binding framework yet.
+The required pattern is:
 
-The smallest workable pattern is a local controller/presenter per editor or dialog:
-
-- it holds the current state
-- it converts widget events into action dictionaries
-- it calls `codec.update_state(...)`
-- it repopulates widgets from normalized state when needed
-- it calls `codec.state_to_python(...)` when dispatch is requested
+1. A Hyde GUI surface owns one Hyde-specific `...State` object.
+2. That `...State` object uses the associated `FeatureCodec`.
+3. Widget events are translated into action dictionaries and applied to the state.
+4. The GUI surface requests Python generation from that state object.
 
 For example, the current New Table dialog should evolve from:
 
@@ -463,10 +568,13 @@ For example, the current New Table dialog should evolve from:
 
 toward:
 
-- a local state object
-- one explicit dependency on `TableFeatureCodec`
-- action-based updates from selection/title widgets
-- a final `state_to_python(...)` call
+- a `TableState` instance owned by the dialog
+- one explicit dependency from `TableState` to `TableFeatureCodec`
+- action-based updates from selection/title widgets into `TableState`
+- a final Python-generation request through `TableState`
+
+The table window should follow the same pattern and should share `TableState` when it
+expresses the same underlying table language.
 
 No PyQt classes should be imported into the codec layer.
 
@@ -484,8 +592,8 @@ For Hyde, that means the state language must preserve:
 This should be solved in the state shape itself, not by relying on dict insertion order
 or the incidental ordering returned by PyQt selection APIs.
 
-If a widget does not naturally preserve user order, the GUI controller must define an
-explicit policy such as:
+If a widget does not naturally preserve user order, the owning GUI surface and its
+state object must define an explicit policy such as:
 
 - use current list display order
 - use explicit move-up / move-down actions
@@ -527,8 +635,10 @@ internal class layout.
 ### `TableFeatureCodec` pilot tests
 
 - table state lowers to the expected `hyde.table(...)` string
-- table GUI/editor entry points can share the same codec contract
+- table GUI/editor entry points can share the same `TableState`
 - ordered item updates preserve exact argument order
+- the simpler table dialog can edit a subset of `TableState`
+- the richer table window can edit a superset of that same state
 
 ### `SimpleHydeCommandCodec` pilot tests
 
@@ -545,10 +655,14 @@ The best next implementation shape is:
 
 1. Add a very small shared codec base class.
 2. Add one codec subclass per recreated feature source such as table, figure, or fit.
-3. Add one shared lightweight codec for trivial visible Hyde commands.
-4. Keep runtime-helper transport helpers outside the codec boundary.
-5. Leave reverse reconstruction feature-specific.
-6. Introduce local GUI controllers where needed rather than a global binding framework.
+3. Add one Hyde-specific `...State` class per semantic feature where GUI surfaces need
+   shared local edit state.
+4. Require every command-emitting Hyde GUI class to own one such `...State` instance.
+5. Share that `...State` across GUI surfaces when one semantic schema naturally covers
+   them.
+6. Add one shared lightweight codec for trivial visible Hyde commands.
+7. Keep runtime-helper transport helpers outside the codec boundary.
+8. Leave reverse reconstruction feature-specific.
 
 This gives Hyde a real state-language pilot without overcommitting to a large framework
 before figures and fitting reveal the true pressure points.
