@@ -66,5 +66,12 @@ This document is a living checklist tracking the specific steps we will follow (
 - [ ] Test: Expand coverage for GUI row rendering, muted cell-edit execution, and broader table interaction behavior.
 - [x] Refinement: Replace the old executor-triggered table-data fetch hop with a direct kernel call from the runtime helper against the managed kernel child.
 
+### Feature F: UI Plugin Refactor
+- [ ] Spec: Draft `issues/PluginRefactor_prd.md` for the internal UI plugin migration.
+- [ ] Impl: Amend `labscript_utils.plugins.BasePlugin` to include the `get_services()` registry hook.
+- [ ] Impl: Implement `HydePluginManager` with unconditional UI module discovery.
+- [ ] Impl: Refactor `main.ui` and `HydeApp` into an agnostic host for `MDIContext` and `MenuContext`.
+- [ ] Impl: Migrate existing viewports (Command Window, Data Browser, Procedure Browser, Logging) into the plugin model.
+
 ## Phase V: Announcement and Release
 - [ ] TBD.

@@ -80,6 +80,7 @@ Refined Hyde's explicit inert-state and quit handling:
 - **Terminal Quit Mapping**: In GUI mode, `quit`, `quit()`, `exit`, and `exit()` in the command window map to `hyde.quit()` instead of terminating the kernel directly.
 - **Status-Bar Project Feedback**: Project operations report progress in the status bar rather than through a separate modal working dialog.
 - **Forced Table Teardown**: Entering no-project state force-closes table windows without prompting to save recreation macros.
+- **UI Plugin Architecture (Planned)**: Finalized the PRD for refactoring the monolithic `HydeApp` into a decoupled plugin host using `labscript_utils.plugins`. This will isolate development of viewports (Data Browser, etc.) into independent directories and replace hardcoded wiring with a shared services registry and event bus.
 
 
 ## Refinements & Bug Fixes
