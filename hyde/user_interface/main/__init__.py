@@ -52,6 +52,12 @@ from hyde.user_interface.window_macro_store import (
 
 qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
 
+
+def hyde_logger(obj=None):
+    if obj is not None and hasattr(obj, "logger"):
+        return obj.logger
+    return logging.getLogger("hyde")
+
 class PersistentSubwindowFilter(QtCore.QObject):
     """Turn MDI close requests into hide requests so tool windows persist."""
 
@@ -113,6 +119,7 @@ class HydeMainWindow(QtWidgets.QMainWindow):
 
 class HydeApp:
     def __init__(self, qapplication, process_tree, splash, argv=None):
+        self.logger = logging.getLogger("hyde")
         self.qapplication = qapplication
         self.process_tree = process_tree
         self.splash = splash
@@ -187,7 +194,9 @@ class HydeApp:
         try:
             self.remote_server = RemoteRequestServer(self, HYDE_REMOTE_PORT)
         except ZMQError as exc:
-            print(f"[Hyde] Could not start lyse-compatible remote listener: {exc}")
+            hyde_logger(self).warning(
+                "Could not start lyse-compatible remote listener: %s", exc
+            )
             self.remote_server = None
         self.start_kernel_runtime()
 
@@ -216,13 +225,25 @@ class HydeApp:
         self.data_browser_subwindow.raise_()
 
     def start_kernel_runtime(self):
+        hyde_logger(self).info(
+            "Starting Hyde kernel runtime with connection_file=%s", CONNECTION_FILE
+        )
         if os.path.exists(CONNECTION_FILE):
+            hyde_logger(self).debug(
+                "Removing stale kernel connection file %s before restart.",
+                CONNECTION_FILE,
+            )
             os.remove(CONNECTION_FILE)
         self.kernel_to_child, self.kernel_from_child, self.kernel_process = self.process_tree.subprocess(
             KERNEL_LAUNCHER,
             args=["-f", CONNECTION_FILE],
             output_redirection_port=self.logging_window.port,
             startup_timeout=60,
+        )
+        hyde_logger(self).info(
+            "Started Hyde kernel subprocess pid=%s with output redirection port=%s",
+            getattr(self.kernel_process, "pid", None),
+            self.logging_window.port,
         )
         self.runtime_helper = RuntimeHelper(
             self,
@@ -503,6 +524,9 @@ class HydeApp:
 
     def request_quit(self, checked=False):
         del checked
+        hyde_logger(self).warning(
+            "GUI request_quit invoked; dispatching visible Hyde quit command."
+        )
         QuitCommand(self).run()
 
     @inmain_decorator()
@@ -564,6 +588,7 @@ class HydeApp:
         try:
             startup_project = None
             if not self._startup_complete:
+                hyde_logger(self).info("Finalizing Hyde startup after kernel ready.")
                 self.ui.show()
                 self.splash.hide()
                 self._startup_complete = True
@@ -579,10 +604,14 @@ class HydeApp:
             else:
                 self.clear_project_status_message()
         except Exception:
-            import traceback
-            traceback.print_exc()
+            hyde_logger(self).exception("Hyde finalize_startup failed unexpectedly.")
 
     def _shutdown_kernel_windows(self):
+        hyde_logger(self).debug(
+            "Shutting down kernel windows: command_window=%s data_browser=%s",
+            self.command_window is not None,
+            self.data_browser is not None,
+        )
         if self.data_browser is not None:
             self.data_browser.shutdown()
             if self.data_browser_subwindow is not None:
@@ -599,6 +628,7 @@ class HydeApp:
             self.command_subwindow = None
 
     def _rebuild_kernel_windows(self):
+        hyde_logger(self).info("Rebuilding kernel-backed Hyde windows.")
         self._shutdown_kernel_windows()
         self.command_window = CommandWindow(connection_file=CONNECTION_FILE)
         self.command_window.executed.connect(self.on_visible_command_executed)
@@ -617,12 +647,27 @@ class HydeApp:
 
     @inmain_decorator()
     def on_kernel_ready(self):
+        hyde_logger(self).info(
+            "Hyde kernel reported ready for pid=%s",
+            getattr(self.kernel_process, "pid", None),
+        )
         self.finalize_startup()
 
     @inmain_decorator()
     def on_kernel_crashed(self):
         if self.shutting_down:
+            hyde_logger(self).warning(
+                "Ignoring on_kernel_crashed because Hyde is already shutting down."
+            )
             return
+        kernel_process = getattr(self, "kernel_process", None)
+        hyde_logger(self).error(
+            "Hyde detected kernel crash: pid=%s returncode=%s quit_command_sent=%s current_project_dir=%s",
+            getattr(kernel_process, "pid", None),
+            None if kernel_process is None else kernel_process.poll(),
+            getattr(self, "_quit_command_sent", None),
+            getattr(self, "current_project_dir", None),
+        )
         self._quit_command_sent = False
         self.enter_no_project_state()
         self.end_project_operation()
@@ -697,44 +742,62 @@ class HydeApp:
         self._set_project_action_state(self.current_project_dir is not None)
 
     def _mark_shutting_down(self):
+        hyde_logger(self).warning("Qt aboutToQuit received; marking Hyde as shutting down.")
         self.shutting_down = True
 
     @inmain_decorator()
     def request_gui_quit(self):
+        hyde_logger(self).warning("Kernel requested GUI quit; closing Hyde main window.")
         self.shutting_down = True
         self.ui.close()
 
     def finalize_quit(self):
         if self._close_ready:
             return
+        hyde_logger(self).warning("Finalizing Hyde quit by closing the main window.")
         self.shutting_down = True
         self.ui.close()
 
     def begin_shutdown_from_close_event(self):
         if self._runtime_shutdown:
             return
+        hyde_logger(self).warning("Beginning Hyde runtime shutdown from close event.")
         self.shutdown_runtime()
 
     def shutdown_runtime(self):
         if self._runtime_shutdown:
             return
+        kernel_process = getattr(self, "kernel_process", None)
+        hyde_logger(self).warning(
+            "Starting Hyde runtime shutdown: kernel_pid=%s kernel_returncode=%s quit_command_sent=%s",
+            getattr(kernel_process, "pid", None),
+            None if kernel_process is None else kernel_process.poll(),
+            getattr(self, "_quit_command_sent", None),
+        )
         self._runtime_shutdown = True
         self._quit_deadline = time.monotonic() + 2.0
         self.stop_project_watcher()
         if self.remote_server is not None:
+            hyde_logger(self).debug("Shutting down Hyde remote request server.")
             self.remote_server.shutdown()
             self.remote_server = None
         helper = self.runtime_helper
         if helper is not None and helper.kernel_client is not None:
             try:
+                hyde_logger(self).debug("Requesting kernel_client shutdown(reply=False).")
                 helper.kernel_client.shutdown(reply=False)
             except Exception:
-                pass
+                hyde_logger(self).exception("Kernel client shutdown request failed.")
         elif self.command_window is not None and self.command_window.kernel_client is not None:
             try:
+                hyde_logger(self).debug(
+                    "Requesting command_window kernel_client shutdown(reply=False)."
+                )
                 self.command_window.kernel_client.shutdown(reply=False)
             except Exception:
-                pass
+                hyde_logger(self).exception(
+                    "Command window kernel client shutdown request failed."
+                )
         if self.runtime_helper is not None:
             self.runtime_helper = None
             helper.stop()
@@ -747,13 +810,22 @@ class HydeApp:
         kernel_running = self.kernel_process is not None and self.kernel_process.poll() is None
         quit_deadline = self._quit_deadline
         if kernel_running and quit_deadline is not None and time.monotonic() < quit_deadline:
+            hyde_logger(self).debug(
+                "Waiting for kernel pid=%s to exit cleanly before forcing shutdown.",
+                getattr(self.kernel_process, "pid", None),
+            )
             QtCore.QTimer.singleShot(50, self._complete_shutdown_runtime)
             return
         if kernel_running:
+            hyde_logger(self).warning(
+                "Kernel pid=%s still running after quit deadline; terminating it.",
+                getattr(self.kernel_process, "pid", None),
+            )
             self.kernel_process.terminate()
             if self.kernel_process.poll() is None:
                 QtCore.QTimer.singleShot(50, self._complete_shutdown_runtime)
                 return
+        hyde_logger(self).warning("Hyde runtime shutdown complete; allowing main window close.")
         self._close_ready = True
         self.ui.close()
 

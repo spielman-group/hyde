@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import threading
@@ -19,6 +20,12 @@ except Exception:
     HYDE_REMOTE_PORT = 42519
 
 
+def hyde_logger(obj=None):
+    if obj is not None and hasattr(obj, "logger"):
+        return obj.logger
+    return logging.getLogger("hyde")
+
+
 class RuntimeHelper:
     """GUI-owned background helper for silent kernel work and kernel signals."""
 
@@ -27,6 +34,7 @@ class RuntimeHelper:
         self.connection_file = connection_file
         self.from_kernel = from_kernel
         self.kernel_process = kernel_process
+        self.logger = logging.getLogger("hyde")
         self.command_queue = queue.Queue()
         self.kernel_client = None
         self._ready_notified = False
@@ -56,11 +64,21 @@ class RuntimeHelper:
 
     def mainloop(self):
         try:
+            hyde_logger(self).debug(
+                "RuntimeHelper mainloop starting for kernel pid=%s connection_file=%s",
+                getattr(self.kernel_process, "pid", None),
+                self.connection_file,
+            )
             while not self._stopping.is_set():
                 if not self._ensure_kernel_client():
                     if self._stopping.is_set():
                         break
                     if self.kernel_process.poll() is not None:
+                        hyde_logger(self).warning(
+                            "RuntimeHelper detected kernel process exited before client became ready: pid=%s returncode=%s",
+                            getattr(self.kernel_process, "pid", None),
+                            self.kernel_process.poll(),
+                        )
                         self.app.on_kernel_crashed()
                         return
                     time.sleep(0.1)
@@ -70,6 +88,11 @@ class RuntimeHelper:
                 self._drain_commands()
 
                 if self.kernel_process.poll() is not None:
+                    hyde_logger(self).warning(
+                        "RuntimeHelper detected kernel process exit during steady state: pid=%s returncode=%s",
+                        getattr(self.kernel_process, "pid", None),
+                        self.kernel_process.poll(),
+                    )
                     self._close_kernel_client()
                     if not self._stopping.is_set():
                         self.app.on_kernel_crashed()
@@ -78,6 +101,10 @@ class RuntimeHelper:
                 time.sleep(0.05)
         finally:
             self._close_kernel_client()
+            hyde_logger(self).debug(
+                "RuntimeHelper mainloop exiting for kernel pid=%s",
+                getattr(self.kernel_process, "pid", None),
+            )
 
     def _ensure_kernel_client(self):
         if self.kernel_client is not None:
@@ -90,9 +117,19 @@ class RuntimeHelper:
         try:
             client.wait_for_ready(timeout=5)
         except Exception:
+            hyde_logger(self).debug(
+                "RuntimeHelper wait_for_ready failed for connection_file=%s",
+                self.connection_file,
+                exc_info=True,
+            )
             client.stop_channels()
             return False
         self.kernel_client = client
+        hyde_logger(self).info(
+            "RuntimeHelper connected to kernel client for pid=%s connection_file=%s",
+            getattr(self.kernel_process, "pid", None),
+            self.connection_file,
+        )
         if not self._ready_notified:
             self._ready_notified = True
             if not self._stopping.is_set():
@@ -106,6 +143,10 @@ class RuntimeHelper:
     def _close_kernel_client(self):
         if self.kernel_client is None:
             return
+        hyde_logger(self).debug(
+            "RuntimeHelper closing kernel client for pid=%s",
+            getattr(self.kernel_process, "pid", None),
+        )
         try:
             self.kernel_client.stop_channels()
         finally:
@@ -118,11 +159,22 @@ class RuntimeHelper:
             except queue.Empty:
                 return
             if task == "QUIT":
+                hyde_logger(self).debug("RuntimeHelper received internal QUIT command.")
                 return
             if task != "EXECUTE_COMMAND":
                 continue
             if self.kernel_client is None or self.kernel_process.poll() is not None:
+                hyde_logger(self).debug(
+                    "RuntimeHelper dropped execute request because kernel is unavailable: pid=%s returncode=%s",
+                    getattr(self.kernel_process, "pid", None),
+                    None if self.kernel_process is None else self.kernel_process.poll(),
+                )
                 continue
+            hyde_logger(self).debug(
+                "RuntimeHelper executing background kernel command (silent=%s, len=%s).",
+                data.get("silent", True),
+                len(data["code"]),
+            )
             self.kernel_client.execute(
                 data["code"],
                 silent=data.get("silent", True),
@@ -145,14 +197,29 @@ class RuntimeHelper:
             elif task == "TABLE_DATA_RESPONSE":
                 self.app.on_table_data(data)
             elif task == "ENTER_NO_PROJECT_STATE":
+                hyde_logger(self).info("RuntimeHelper received ENTER_NO_PROJECT_STATE from kernel.")
                 self.app.enter_no_project_state()
             elif task == "ACTIVATE_PROJECT":
+                hyde_logger(self).info(
+                    "RuntimeHelper received ACTIVATE_PROJECT from kernel for path=%s",
+                    data.get("path"),
+                )
                 self.app.activate_project(data.get("path"))
             elif task == "QUIT_REQUESTED":
+                hyde_logger(self).warning(
+                    "RuntimeHelper received QUIT_REQUESTED from kernel; requesting GUI shutdown."
+                )
                 self._stopping.set()
                 self.app.request_gui_quit()
                 return
             elif task == "PROJECT_STATE_RESULT":
+                hyde_logger(self).info(
+                    "RuntimeHelper received PROJECT_STATE_RESULT from kernel: operation=%s success=%s path=%s errors=%s",
+                    data.get("operation"),
+                    data.get("success"),
+                    data.get("path"),
+                    data.get("errors"),
+                )
                 self.app.on_project_state_result(data)
             elif task == "WINDOW_MACROS_RESPONSE":
                 if data.get("kind") == "table":

@@ -1,7 +1,10 @@
+import logging
 import sys
 
 import numpy as np
 from labscript_utils.ls_zprocess import ProcessTree
+
+logger = logging.getLogger("hyde-kernel")
 
 
 def signal_open_table(names, target, title=None, geometry=None, column_widths=None):
@@ -15,7 +18,12 @@ def signal_open_table(names, target, title=None, geometry=None, column_widths=No
         tree = ProcessTree.instance()
         if tree is None or not hasattr(tree, "to_parent"):
             return
-
+        logger.debug(
+            "Kernel signaling OPEN_TABLE_REQUEST target=%s title=%s names=%s",
+            target,
+            title,
+            list(names),
+        )
         tree.to_parent.put([
             "OPEN_TABLE_REQUEST",
             {
@@ -27,6 +35,7 @@ def signal_open_table(names, target, title=None, geometry=None, column_widths=No
             },
         ])
     except Exception:
+        logger.debug("Kernel failed to signal OPEN_TABLE_REQUEST.", exc_info=True)
         # Silently fail if running outside a Hyde-managed kernel.
         pass
 
@@ -37,8 +46,10 @@ def signal_enter_no_project_state():
         tree = ProcessTree.instance()
         if tree is None or not hasattr(tree, "to_parent"):
             return
+        logger.info("Kernel signaling ENTER_NO_PROJECT_STATE to GUI.")
         tree.to_parent.put(["ENTER_NO_PROJECT_STATE", None])
     except Exception:
+        logger.debug("Kernel failed to signal ENTER_NO_PROJECT_STATE.", exc_info=True)
         return
 
 
@@ -48,8 +59,10 @@ def signal_activate_project(path):
         tree = ProcessTree.instance()
         if tree is None or not hasattr(tree, "to_parent"):
             return
+        logger.info("Kernel signaling ACTIVATE_PROJECT path=%s", path)
         tree.to_parent.put(["ACTIVATE_PROJECT", {"path": path}])
     except Exception:
+        logger.debug("Kernel failed to signal ACTIVATE_PROJECT.", exc_info=True)
         return
 
 
@@ -59,8 +72,10 @@ def signal_quit_requested():
         tree = ProcessTree.instance()
         if tree is None or not hasattr(tree, "to_parent"):
             return
+        logger.warning("Kernel signaling QUIT_REQUESTED to GUI.")
         tree.to_parent.put(["QUIT_REQUESTED", None])
     except Exception:
+        logger.debug("Kernel failed to signal QUIT_REQUESTED.", exc_info=True)
         return
 
 
@@ -106,6 +121,13 @@ def publish_project_state_result(operation, path, success=True, errors=None, obj
         tree = ProcessTree.instance()
         if tree is None or not hasattr(tree, "to_parent"):
             return
+        logger.info(
+            "Kernel publishing PROJECT_STATE_RESULT operation=%s success=%s path=%s errors=%s",
+            operation,
+            bool(success),
+            path,
+            list(errors or []),
+        )
         tree.to_parent.put([
             "PROJECT_STATE_RESULT",
             {
@@ -118,4 +140,5 @@ def publish_project_state_result(operation, path, success=True, errors=None, obj
             },
         ])
     except Exception:
+        logger.debug("Kernel failed to publish PROJECT_STATE_RESULT.", exc_info=True)
         pass

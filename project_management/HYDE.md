@@ -19,5 +19,5 @@ Hyde is intended to be an optional modern replacement for `lyse` while remaining
 - Hyde is **not** an experiment-control application.
 - It does **not** perform instrument control.
 - It does **not** replace `runmanager` or `blacs`.
-- It does **not** feature a generic plugin architecture (just standard Python extensibility).
+- It does **not** feature a public-facing plugin system for third-party extensions (it uses an internal plugin architecture strictly for modularity and development isolation).
 - It does **not** host a built-in code editor (it will launch the user's OS-default text editor for `.py` files).

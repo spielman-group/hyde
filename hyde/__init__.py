@@ -5,6 +5,7 @@ Hyde: A modern, Pythonic data analysis and plotting environment for the labscrip
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import shutil
 import sys
@@ -324,9 +325,15 @@ def quit():
     it exits the current interpreter.
     """
     if HYDE_GUI:
+        logging.getLogger("hyde-kernel").warning(
+            "hyde.quit() called in GUI mode; signaling ENTER_NO_PROJECT_STATE and QUIT_REQUESTED."
+        )
         signal_enter_no_project_state()
         signal_quit_requested()
         return None
+    logging.getLogger("hyde-kernel").warning(
+        "hyde.quit() called outside GUI mode; raising SystemExit."
+    )
     raise SystemExit(0)
 
 
