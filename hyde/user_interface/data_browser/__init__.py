@@ -1,10 +1,13 @@
 import os
 import time
 
+from labscript_utils.plugins import BasePlugin
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from qtconsole.client import QtKernelClient
 from spyder_kernels.comms.commbase import CommBase, CommError
+from hyde.paths import CONNECTION_FILE
+from hyde.user_interface.plugin_tools import capture_subwindow_state, restore_subwindow_state
 
 NAMESPACE_VIEW_SETTINGS = {
     "check_all": False,
@@ -384,3 +387,80 @@ class NamespaceFilterProxyModel(QtCore.QSortFilterProxyModel):
             or (self._variables and is_variable)
             or (self._strings and is_string)
         )
+
+
+class Plugin(BasePlugin):
+    def __init__(self, initial_settings):
+        super().__init__(initial_settings)
+        self.services = {}
+
+    def plugin_setup_complete(self, data=None):
+        data = data or {}
+        self.services = data.get("services", {})
+
+    def get_ui_contributions(self):
+        return [
+            {
+                "context": "mdi",
+                "key": "data_browser",
+                "title": "Data Browser",
+                "factory": self.create_widget,
+            }
+        ]
+
+    def get_menu_contributions(self):
+        return [
+            {
+                "location": "window",
+                "group": "tool_windows",
+                "order": 60,
+                "name": "Data Browser",
+                "action": self.show_window,
+            }
+        ]
+
+    def create_widget(self, parent=None, data=None):
+        del data
+        return DataBrowser(
+            connection_file=CONNECTION_FILE,
+            app=self.services["app"],
+            parent=parent,
+        )
+
+    def show_window(self, checked=False):
+        del checked
+        self.services["show_window"]("data_browser")
+
+    def get_event_handlers(self):
+        return {
+            "request_project_save": self.on_request_project_save,
+            "project_loaded": self.on_project_loaded,
+        }
+
+    def on_request_project_save(self, data):
+        widget = self.services["mdi_context"].widget("data_browser")
+        session = data["session"]
+        session.setdefault("tool_windows", {})["data_browser"] = capture_subwindow_state(
+            self.services["mdi_context"].subwindow("data_browser")
+        )
+        session["data_browser"] = {
+            "waves": bool(widget.ui.wavesCheckBox.isChecked()),
+            "variables": bool(widget.ui.variablesCheckBox.isChecked()),
+            "strings": bool(widget.ui.stringsCheckBox.isChecked()),
+            "info": bool(widget.ui.infoCheckBox.isChecked()),
+        }
+
+    def on_project_loaded(self, data):
+        session = data["session"]
+        widget = self.services["mdi_context"].widget("data_browser")
+        restore_subwindow_state(
+            self.services["mdi_context"].subwindow("data_browser"),
+            session.get("tool_windows", {}).get("data_browser", {}),
+        )
+        info = session.get("data_browser", {})
+        widget.ui.wavesCheckBox.setChecked(bool(info.get("waves", True)))
+        widget.ui.variablesCheckBox.setChecked(bool(info.get("variables", True)))
+        widget.ui.stringsCheckBox.setChecked(bool(info.get("strings", True)))
+        widget.ui.infoCheckBox.setChecked(bool(info.get("info", True)))
+        widget._on_filter_changed()
+        widget._toggle_info_pane(widget.ui.infoCheckBox.isChecked())

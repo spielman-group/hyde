@@ -9,6 +9,7 @@ Hyde is intended to be an optional modern replacement for `lyse` while remaining
 
 ## Core Goals (Version 1)
 - **Unified Interface:** A single PyQt MDI application window housing all figures, tables, and the command pipeline.
+- **Modular UI Composition:** Hyde UI components live in `hyde.user_interface`, are discovered as first-party plugins, contribute their own windows and menu actions, and consume shared execution services through defined plugin contexts.
 - **Python-Native:** A built-in IPython terminal driving all actions.
 - **GUI-Generated Replayability:** Every action in the GUI (e.g. editing a graph, fitting a curve) must generate raw Python code that is sent to the terminal. Users should be able to view and save the script that generated their UI state.
 - **Session Persistence:** Application state, figures, table contents, and the terminal history must be saved as a portable `.hy` project directory package format.
@@ -19,5 +20,5 @@ Hyde is intended to be an optional modern replacement for `lyse` while remaining
 - Hyde is **not** an experiment-control application.
 - It does **not** perform instrument control.
 - It does **not** replace `runmanager` or `blacs`.
-- It does **not** feature a public-facing plugin system for third-party extensions (it uses an internal plugin architecture strictly for modularity and development isolation).
+- It does **not** provide end-user plugin enable/disable management or third-party plugin loading from arbitrary external paths.
 - It does **not** host a built-in code editor (it will launch the user's OS-default text editor for `.py` files).
