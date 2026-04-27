@@ -1,7 +1,6 @@
 import os
 import uuid
 import copy
-from labscript_utils.plugins import BasePlugin
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 
@@ -651,90 +650,3 @@ class TableWidget(QtWidgets.QWidget):
                 )
         except Exception:
             pass
-
-
-class Plugin(BasePlugin):
-    def __init__(self, initial_settings):
-        super().__init__(initial_settings)
-        self.services = {}
-
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
-
-    def get_menu_contributions(self):
-        return [
-            {
-                "location": "window",
-                "group": "tables",
-                "order": 20,
-                "name": "New Table...",
-                "action": self.show_new_table_dialog,
-            }
-        ]
-
-    def show_new_table_dialog(self, checked=False):
-        del checked
-        self.services["show_new_table_dialog"]()
-
-    def get_event_handlers(self):
-        return {
-            "request_project_save": self.on_request_project_save,
-            "project_loaded": self.on_project_loaded,
-            "project_activated": self.on_project_activated,
-        }
-
-    def on_request_project_save(self, data):
-        app = self.services["app"]
-        tables = []
-        for handle, table in sorted(app.tables.items()):
-            table.capture_layout_state()
-            subwindow = table.parentWidget()
-            table_settings = table.table_state.normalized_state()["settings"]
-            tables.append(
-                {
-                    "handle": handle,
-                    "title": subwindow.windowTitle(),
-                    "names": list(table.names),
-                    "hidden": not subwindow.isVisible(),
-                    "geometry": list(table_settings["geometry"])
-                    if table_settings["geometry"] is not None
-                    else [
-                        subwindow.geometry().x(),
-                        subwindow.geometry().y(),
-                        subwindow.geometry().width(),
-                        subwindow.geometry().height(),
-                    ],
-                    "column_widths": dict(table_settings.get("column_widths", {})),
-                }
-            )
-
-        session = data["session"]
-        if app.active_table_handle is not None:
-            session["active_table_handle"] = app.active_table_handle
-        session["table_counter"] = app.table_counter
-        session["tables"] = tables
-
-    def on_project_loaded(self, data):
-        app = self.services["app"]
-        session = data["session"]
-        saved_counter = int(session.get("table_counter", 0))
-        for table_state in session.get("tables", []):
-            handle = table_state["handle"]
-            app.open_table(
-                table_state.get("names", []),
-                target=handle,
-                visible_title=table_state.get("title"),
-                geometry=table_state.get("geometry"),
-                column_widths=table_state.get("column_widths", {}),
-            )
-            table = app.tables.get(handle)
-            if table is None:
-                continue
-            table.parentWidget().setVisible(not bool(table_state.get("hidden", False)))
-        app.table_counter = saved_counter
-        app.active_table_handle = session.get("active_table_handle")
-
-    def on_project_activated(self, data):
-        del data
-        self.services["request_window_macros"]("table")

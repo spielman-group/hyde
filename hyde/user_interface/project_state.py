@@ -48,17 +48,6 @@ def _subwindow_state(subwindow):
 
 
 def capture_session(app):
-    if hasattr(app, "emit_plugin_event"):
-        session = {
-            "format_version": 1,
-            "main_window": {
-                "geometry": _encode_qbytearray(app.ui.saveGeometry()),
-                "state": _encode_qbytearray(app.ui.saveState()),
-            },
-        }
-        app.emit_plugin_event("request_project_save", {"session": session})
-        return session
-
     tables = []
     for handle, table in sorted(app.tables.items()):
         table.capture_layout_state()
