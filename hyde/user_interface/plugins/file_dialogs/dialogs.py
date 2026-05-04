@@ -93,15 +93,13 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
     REQUIRE_EXISTING = False
     OPERATION_LABEL = None
 
-    def __init__(self, app=None, parent=None):
-        self.app = app
+    def __init__(self, services, parent=None):
+        self.services = services
         self.state = self.STATE_CLASS()
         self._selected_path = None
         dialog_parent = parent
-        if dialog_parent is None and app is not None:
-            dialog_parent = getattr(app, "ui", None)
-
-        os.makedirs(DEFAULT_PROJECTS_DIR, exist_ok=True)
+        if dialog_parent is None:
+            dialog_parent = services.get("ui")
         super().__init__(dialog_parent, self.DIALOG_TITLE, DEFAULT_PROJECTS_DIR)
         self.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
         self.setFileMode(QtWidgets.QFileDialog.Directory)
@@ -178,21 +176,21 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
             return False
         if not project_dir.endswith(".hy"):
             QtWidgets.QMessageBox.warning(
-                self.app.ui if self.app is not None else None,
+                self.services["ui"],
                 "Invalid Project Directory",
                 "Hyde projects must be directories ending in .hy.",
             )
             return False
         if os.path.exists(project_dir) and not os.path.isdir(project_dir):
             QtWidgets.QMessageBox.warning(
-                self.app.ui if self.app is not None else None,
+                self.services["ui"],
                 "Invalid Project Path",
                 f"{project_dir} is not a directory.",
             )
             return False
         if self.REQUIRE_EXISTING and not os.path.isdir(project_dir):
             QtWidgets.QMessageBox.warning(
-                self.app.ui if self.app is not None else None,
+                self.services["ui"],
                 "Missing Project Directory",
                 f"{project_dir} does not exist.",
             )
@@ -205,8 +203,8 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
 
     def dispatch_python(self):
         if self.OPERATION_LABEL:
-            self.app.begin_project_operation(self.OPERATION_LABEL)
-        self.app.execute_command(self.state.python_source(), visible=True)
+            self.services["begin_project_operation"](self.OPERATION_LABEL)
+        self.services["execute_command"](self.state.python_source(), visible=True)
         return True
 
     def run(self):
@@ -230,10 +228,14 @@ class NewProjectDialog(ProjectSelectionDialog):
     ACCEPT_LABEL = "Create New"
     OPERATION_LABEL = "Creating Hyde project..."
 
+    def suggested_project_path(self):
+        os.makedirs(DEFAULT_PROJECTS_DIR, exist_ok=True)
+        return super().suggested_project_path()
+
     def prepare_for_dispatch(self, project_dir):
         overwrite = False
-        if self.app.project_target_needs_confirmation(project_dir):
-            if not self.app.confirm_overwrite_project(project_dir):
+        if self.services["project_target_needs_confirmation"](project_dir):
+            if not self.services["confirm_overwrite_project"](project_dir):
                 return False
             overwrite = True
         self.state.set_overwrite(overwrite)
@@ -260,24 +262,43 @@ class _ProjectSaveDialog(ProjectSelectionDialog):
     OPERATION_LABEL = "Saving Hyde project..."
 
     def suggested_project_path(self):
+        os.makedirs(DEFAULT_PROJECTS_DIR, exist_ok=True)
+        current_project_dir = self.services["get_current_project_dir"]()
         suggested_name = (
-            os.path.splitext(os.path.basename(self.app.current_project_dir))[0] + ".hy"
-            if self.app is not None and self.app.current_project_dir
+            os.path.splitext(os.path.basename(current_project_dir))[0] + ".hy"
+            if current_project_dir
             else "untitled.hy"
         )
         return os.path.join(DEFAULT_PROJECTS_DIR, suggested_name)
 
     def run(self):
-        if not self.app.current_project_dir or self.app.command_window is None:
+        current_project_dir = self.services["get_current_project_dir"]()
+        if not current_project_dir:
             return False
-        return super().run()
+        if not self.exec_():
+            return False
+        selected_files = self.selectedFiles()
+        if not selected_files:
+            return False
+        project_dir = os.path.abspath(selected_files[0])
+        if os.path.abspath(project_dir) == os.path.abspath(current_project_dir):
+            return self.handle_current_project_target()
+        self.state.set_project_dir(project_dir)
+        if not self.validate_selected_project_dir(project_dir):
+            return False
+        if not self.prepare_for_dispatch(project_dir):
+            return False
+        return self.dispatch_python()
 
     def prepare_for_dispatch(self, project_dir):
-        if self.app.project_target_needs_confirmation(project_dir):
-            if not self.app.confirm_overwrite_project(project_dir):
+        if self.services["project_target_needs_confirmation"](project_dir):
+            if not self.services["confirm_overwrite_project"](project_dir):
                 return False
             self.state.set_overwrite(True)
         return True
+
+    def handle_current_project_target(self):
+        return SaveProjectCommand(self.services).run()
 
 
 class SaveAsProjectDialog(_ProjectSaveDialog):
@@ -286,77 +307,45 @@ class SaveAsProjectDialog(_ProjectSaveDialog):
     ACCEPT_LABEL = "Save As"
     OPERATION_LABEL = "Saving Hyde project..."
 
-    def run(self):
-        if not self.app.current_project_dir or self.app.command_window is None:
-            return False
-        if not self.exec_():
-            return False
-        selected_files = self.selectedFiles()
-        if not selected_files:
-            return False
-        project_dir = os.path.abspath(selected_files[0])
-        if os.path.abspath(project_dir) == os.path.abspath(self.app.current_project_dir):
-            return SaveProjectCommand(self.app).run()
-        self.state.set_project_dir(project_dir)
-        if not self.validate_selected_project_dir(project_dir):
-            return False
-        if not self.prepare_for_dispatch(project_dir):
-            return False
-        return self.dispatch_python()
-
 
 class SaveCopyProjectDialog(_ProjectSaveDialog):
     STATE_CLASS = SaveCopyProjectState
-    DIALOG_TITLE = "Save Hyde Project As"
+    DIALOG_TITLE = "Save Hyde Project Copy"
     ACCEPT_LABEL = "Save Copy"
     OPERATION_LABEL = "Saving Hyde project copy..."
 
-    def run(self):
-        if not self.app.current_project_dir or self.app.command_window is None:
-            return False
-        if not self.exec_():
-            return False
-        selected_files = self.selectedFiles()
-        if not selected_files:
-            return False
-        project_dir = os.path.abspath(selected_files[0])
-        if os.path.abspath(project_dir) == os.path.abspath(self.app.current_project_dir):
-            return SaveProjectCommand(self.app).run()
-        self.state.set_project_dir(project_dir)
-        if not self.validate_selected_project_dir(project_dir):
-            return False
-        if not self.prepare_for_dispatch(project_dir):
-            return False
-        return self.dispatch_python()
+    def handle_current_project_target(self):
+        QtWidgets.QMessageBox.warning(
+            self.services["ui"],
+            "Invalid Copy Target",
+            "Save a Copy... requires a different .hy directory than the current project.",
+        )
+        return False
 
 
 class SaveProjectCommand:
-    def __init__(self, app):
-        self.app = app
+    def __init__(self, services):
+        self.services = services
         self.state = SaveProjectState()
 
     def run(self):
-        if not self.app.current_project_dir or self.app.command_window is None:
+        if not self.services["get_current_project_dir"]():
             return False
-        self.app.begin_project_operation("Saving Hyde project...")
-        self.app.execute_command(self.state.python_source(), visible=True)
+        self.services["begin_project_operation"]("Saving Hyde project...")
+        self.services["execute_command"](self.state.python_source(), visible=True)
         return True
 
 
 class QuitCommand:
-    def __init__(self, app):
-        self.app = app
+    def __init__(self, services):
+        self.services = services
         self.state = QuitState()
 
     def run(self):
-        if self.app.shutting_down or self.app._quit_command_sent:
+        if self.services["get_shutting_down"]() or self.services["get_quit_command_sent"]():
             return False
-        if self.app.command_window is None:
-            self.app.shutting_down = True
-            self.app.begin_shutdown_from_close_event()
-            return True
-        self.app._quit_command_sent = True
-        self.app.execute_command(self.state.python_source(), visible=True)
+        self.services["set_quit_command_sent"](True)
+        self.services["execute_command"](self.state.python_source(), visible=True)
         return True
 
 

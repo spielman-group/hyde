@@ -6,17 +6,7 @@ import threading
 import time
 
 from jupyter_client import BlockingKernelClient
-from labscript_utils.labconfig import LabConfig
-from labscript_utils import shared_drive
-from labscript_utils.ls_zprocess import ZMQServer
 from qtutils.qt import QtCore
-
-from hyde.features.hyde_features import format_remote_command
-
-try:
-    HYDE_REMOTE_PORT = int(LabConfig().get("ports", "lyse"))
-except Exception:
-    HYDE_REMOTE_PORT = 42519
 
 
 class RuntimeHelper:
@@ -134,23 +124,7 @@ class RuntimeHelper:
                 task, data = self.from_kernel.get(timeout=0.01)
             except Exception:
                 return
-            plugin_manager = getattr(self.app, "plugin_manager", None)
-            services = getattr(plugin_manager, "services", {})
-            if task == "OPEN_TABLE_REQUEST":
-                table_workspace = services.get("table_workspace")
-                if table_workspace is not None:
-                    table_workspace.open_table(
-                        data.get("names", []),
-                        data.get("target"),
-                        visible_title=data.get("title"),
-                        geometry=data.get("geometry"),
-                        column_widths=data.get("column_widths"),
-                    )
-            elif task == "TABLE_DATA_RESPONSE":
-                table_workspace = services.get("table_workspace")
-                if table_workspace is not None:
-                    table_workspace.on_table_data(data)
-            elif task == "ENTER_NO_PROJECT_STATE":
+            if task == "ENTER_NO_PROJECT_STATE":
                 self.app.enter_no_project_state()
             elif task == "ACTIVATE_PROJECT":
                 self.app.activate_project(data.get("path"))
@@ -160,31 +134,11 @@ class RuntimeHelper:
                 return
             elif task == "PROJECT_STATE_RESULT":
                 self.app.on_project_state_result(data)
-            elif task == "WINDOW_MACROS_RESPONSE":
-                self.app.emit_plugin_event("window_macros_updated", data)
-
-
-class RemoteRequestServer(ZMQServer):
-    """Lyse-compatible request server owned by the GUI process."""
-
-    def __init__(self, app, port):
-        self.app = app
-        super().__init__(port=port, bind_address="tcp://*")
-
-    def handler(self, request_data):
-        if request_data == "hello":
-            return "hello"
-        if isinstance(request_data, dict) and "filepath" in request_data:
-            request_data = shared_drive.path_to_local(str(request_data["filepath"]))
-            if isinstance(request_data, bytes):
-                request_data = request_data.decode("utf8")
-        if isinstance(request_data, str):
-            runtime_helper = getattr(self.app, "runtime_helper", None)
-            if runtime_helper is None:
-                return "error: kernel unavailable"
-            runtime_helper.enqueue_execute(format_remote_command(request_data), silent=False)
-            return "added successfully"
-        return (
-            "error: operation not supported. Recognised requests are:\n "
-            "'hello'\n {'filepath': <some_agnostic_path>}\n <some_agnostic_path>"
-        )
+            else:
+                self.app.emit_plugin_event(
+                    "kernel_message",
+                    {
+                        "task": task,
+                        "data": data,
+                    },
+                )

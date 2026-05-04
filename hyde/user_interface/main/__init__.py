@@ -1,12 +1,10 @@
 import logging
 import os
 import time
-from labscript_utils.plugins import MenuContext
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore
 from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 from labscript_utils.filewatcher import FileWatcher
-from zmq.error import ZMQError
 
 from hyde.paths import (
     CONNECTION_FILE,
@@ -14,23 +12,20 @@ from hyde.paths import (
     KERNEL_LAUNCHER,
     get_project_paths,
 )
-from hyde.features.hyde_features import (
-    format_procedures_bootstrap_code,
-)
-from hyde.user_interface.file_dialogs import (
-    LoadProjectState,
-    QuitCommand,
-)
-from hyde.user_interface.runtime_helper import HYDE_REMOTE_PORT, RemoteRequestServer, RuntimeHelper
-from hyde.user_interface.project_state import (
-    clear_tables,
+from hyde.user_interface.base import RuntimeCommandState
+from hyde.user_interface.runtime_helper import RuntimeHelper
+from hyde.user_interface.main.project_state import (
     try_read_history,
     try_read_session,
     restore_main_window,
     write_history,
     write_session,
 )
-from hyde.user_interface.plugin_tools import HydeMDIContext, HydePluginManager
+from hyde.user_interface.plugin_tools import (
+    HydeMDIContext,
+    HydeMenuContext,
+    HydePluginManager,
+)
 
 qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
 
@@ -107,7 +102,6 @@ class HydeApp:
         self.kernel_process = None
         self.runtime_helper = None
         self.filewatcher = None
-        self.remote_server = None
         self._subwindow_filters = []
         self.shutting_down = False
         self._runtime_shutdown = False
@@ -132,80 +126,42 @@ class HydeApp:
         self.plugin_manager.discover_modules()
         self.plugin_manager.instantiate_plugins()
         self.setup_plugins()
-        self._ensure_static_plugin_windows()
-        self.logging_handler = connect_logger_to_output_box(
-            "hyde",
-            self.logging_window.output_box,
-        )
+        self.logging_handler = None
+        logging_service = self.plugin_service("runtime_output_service")
+        if logging_service is not None:
+            try:
+                self.logging_handler = connect_logger_to_output_box(
+                    "hyde",
+                    logging_service.output_box(),
+                )
+            except Exception as exc:
+                print(
+                    "[Hyde] Could not connect runtime output service; "
+                    f"continuing without log redirection: {exc}"
+                )
 
         self.qapplication.aboutToQuit.connect(self._mark_shutting_down)
-
-        try:
-            self.remote_server = RemoteRequestServer(self, HYDE_REMOTE_PORT)
-        except ZMQError as exc:
-            print(f"[Hyde] Could not start lyse-compatible remote listener: {exc}")
-            self.remote_server = None
         self.start_kernel_runtime()
 
-    def _plugin_widget(self, key):
-        mdi_context = getattr(self, "mdi_context", None)
-        if mdi_context is None:
-            return None
-        return mdi_context.widget(key)
+    def plugin_services(self):
+        plugin_manager = getattr(self, "plugin_manager", None)
+        return getattr(plugin_manager, "services", {})
 
-    def _plugin_subwindow(self, key):
-        mdi_context = getattr(self, "mdi_context", None)
-        if mdi_context is None:
-            return None
-        return mdi_context.subwindow(key)
-
-    @property
-    def command_window(self):
-        return self._plugin_widget("command_window")
-
-    @property
-    def command_subwindow(self):
-        return self._plugin_subwindow("command_window")
-
-    @property
-    def data_browser(self):
-        return self._plugin_widget("data_browser")
-
-    @property
-    def data_browser_subwindow(self):
-        return self._plugin_subwindow("data_browser")
-
-    @property
-    def logging_window(self):
-        return self._plugin_widget("logging")
-
-    @property
-    def logging_subwindow(self):
-        return self._plugin_subwindow("logging")
-
-    @property
-    def procedure_browser(self):
-        return self._plugin_widget("procedures")
-
-    @property
-    def procedures_subwindow(self):
-        return self._plugin_subwindow("procedures")
+    def plugin_service(self, key):
+        return self.plugin_services().get(key)
 
     def build_plugin_services(self):
         return {
             "ui": self.ui,
             "mdi_area": self.ui.mdiArea,
             "menu_context": getattr(self, "menu_context", None),
+            "lookup_menu_action": self.lookup_menu_action,
             "mdi_context": getattr(self, "mdi_context", None),
             "configure_persistent_subwindow": self.configure_persistent_subwindow,
             "execute_command": self.execute_command,
             "queue_background_command": self.queue_background_command,
             "get_current_project_dir": self.get_current_project_dir,
             "get_procedures_init": self.get_procedures_init,
-            "get_command_window": self.get_command_window,
-            "get_namespace_view": self.get_namespace_view,
-            "connect_namespace_view_updated": self.connect_namespace_view_updated,
-            "disconnect_namespace_view_updated": self.disconnect_namespace_view_updated,
             "get_shutting_down": self.get_shutting_down,
             "set_shutting_down": self.set_shutting_down,
             "get_quit_command_sent": self.get_quit_command_sent,
@@ -225,26 +181,6 @@ class HydeApp:
     def get_procedures_init(self):
         return self.procedures_init
 
-    def get_command_window(self):
-        return self.command_window
-
-    def get_namespace_view(self):
-        if self.data_browser is None:
-            return {}
-        return self.data_browser.namespace_view()
-
-    def connect_namespace_view_updated(self, callback):
-        if self.data_browser is None:
-            return False
-        self.data_browser.namespace_view_updated.connect(callback)
-        return True
-
-    def disconnect_namespace_view_updated(self, callback):
-        if self.data_browser is None:
-            return False
-        self.data_browser.namespace_view_updated.disconnect(callback)
-        return True
-
     def get_shutting_down(self):
         return self.shutting_down
 
@@ -257,8 +193,14 @@ class HydeApp:
     def set_quit_command_sent(self, value):
         self._quit_command_sent = bool(value)
 
+    def lookup_menu_action(self, location, name, path=()):
+        menu_context = getattr(self, "menu_context", None)
+        if menu_context is None:
+            return None
+        return menu_context.lookup_action(location, name, path=path)
+
     def setup_plugins(self):
-        self.menu_context = MenuContext(logger=logging.getLogger("hyde"))
+        self.menu_context = HydeMenuContext(logger=logging.getLogger("hyde"))
         self.menu_context.register_location("file", self.ui.menuFile)
         self.menu_context.register_location("window", self.ui.menuWindow)
 
@@ -277,44 +219,12 @@ class HydeApp:
         }
         self.plugin_manager.setup_contexts(plugin_data)
         self.menu_context.render()
-        if getattr(self.ui, "menuTableMacros", None) is not None:
-            self.ui.menuWindow.addMenu(self.ui.menuTableMacros)
-        self._bind_plugin_action_aliases()
         self.plugin_manager.setup_complete(plugin_data)
-
-    def _bind_plugin_action_aliases(self):
-        mapping = {
-            "actionNew": (self.ui.menuFile, "New..."),
-            "actionLoad": (self.ui.menuFile, "Load..."),
-            "actionHeal_Project": (self.ui.menuFile, "Heal Project..."),
-            "actionSave": (self.ui.menuFile, "Save"),
-            "actionSave_As": (self.ui.menuFile, "Save As..."),
-            "actionSave_Copy": (self.ui.menuFile, "Save a Copy..."),
-            "actionQuit": (self.ui.menuFile, "Quit"),
-            "actionCommandWindow": (self.ui.menuWindow, "Command Window"),
-            "actionLogging": (self.ui.menuWindow, "Logging"),
-            "actionProcedures": (self.ui.menuWindow, "Procedures"),
-            "actionDataBrowser": (self.ui.menuWindow, "Data Browser"),
-            "actionNew_Table": (self.ui.menuWindow, "New Table..."),
-        }
-        for attr_name, (menu, text) in mapping.items():
-            setattr(self.ui, attr_name, self._find_menu_action(menu, text))
-
-    def _find_menu_action(self, menu, text):
-        for action in menu.actions():
-            if action.text() == text:
-                return action
-        return None
-
-    def _ensure_static_plugin_windows(self):
-        self.mdi_context.ensure_widget("logging")
-        self.logging_subwindow.hide()
-        self.mdi_context.ensure_widget("procedures")
-        self.procedures_subwindow.hide()
 
     def show_plugin_window(self, key):
         return self.mdi_context.show(key)
 
+    @inmain_decorator()
     def emit_plugin_event(self, name, data=None):
         payload = {} if data is None else data
         logger = logging.getLogger("hyde")
@@ -327,33 +237,23 @@ class HydeApp:
                 )
         return payload
 
-    @inmain_decorator()
-    def show_command_window(self, checked=False):
-        del checked
-        self.show_plugin_window("command_window")
-
-    @inmain_decorator()
-    def show_logging_window(self, checked=False):
-        del checked
-        self.show_plugin_window("logging")
-
-    @inmain_decorator()
-    def show_procedures_window(self, checked=False):
-        del checked
-        self.show_plugin_window("procedures")
-
-    @inmain_decorator()
-    def show_data_browser(self, checked=False):
-        del checked
-        self.show_plugin_window("data_browser")
-
     def start_kernel_runtime(self):
         if os.path.exists(CONNECTION_FILE):
             os.remove(CONNECTION_FILE)
+        output_redirection_port = None
+        logging_service = self.plugin_service("runtime_output_service")
+        if logging_service is not None:
+            try:
+                output_redirection_port = logging_service.port()
+            except Exception as exc:
+                print(
+                    "[Hyde] Could not connect runtime output redirection; "
+                    f"continuing without it: {exc}"
+                )
         self.kernel_to_child, self.kernel_from_child, self.kernel_process = self.process_tree.subprocess(
             KERNEL_LAUNCHER,
             args=["-f", CONNECTION_FILE],
-            output_redirection_port=self.logging_window.port,
+            output_redirection_port=output_redirection_port,
             startup_timeout=60,
         )
         self.runtime_helper = RuntimeHelper(
@@ -384,8 +284,9 @@ class HydeApp:
 
     def queue_background_command(self, code, silent=True):
         if self.runtime_helper is None:
-            return
+            return False
         self.runtime_helper.enqueue_execute(code, silent=silent)
+        return True
 
     def on_procedure_change(self, name, info, event=None):
         del info
@@ -395,14 +296,13 @@ class HydeApp:
             return
         if self.current_project_dir is None:
             return
-        self.queue_background_command(
-            format_procedures_bootstrap_code(
-                self.current_project_dir,
-                os.path.dirname(HYDE_DIR),
-                reset_namespace=False,
-            ),
-            silent=True,
+        state = RuntimeCommandState()
+        state.set_reload_procedures(
+            self.current_project_dir,
+            os.path.dirname(HYDE_DIR),
+            reset_namespace=False,
         )
+        self.queue_background_command(state.python_source(), silent=True)
 
     def execute_command(self, code, visible=True):
         """
@@ -412,8 +312,9 @@ class HydeApp:
         Muted commands (visible=False) execute silently to avoid console clutter.
         """
         if visible:
-            if self.command_window:
-                self.command_window.execute(code, hidden=False)
+            command_window_service = self.plugin_service("visible_command_service")
+            if command_window_service is not None:
+                command_window_service.execute_visible(code)
             return
         self.queue_background_command(code, silent=True)
 
@@ -464,24 +365,9 @@ class HydeApp:
     def end_project_operation(self):
         self.clear_project_status_message()
 
-    def _set_project_action_state(self, has_project):
-        self.ui.actionNew.setEnabled(True)
-        self.ui.actionLoad.setEnabled(True)
-        self.ui.actionHeal_Project.setEnabled(True)
-        self.ui.actionLogging.setEnabled(True)
-        self.ui.actionQuit.setEnabled(True)
-        self.ui.actionSave.setEnabled(has_project)
-        self.ui.actionSave_As.setEnabled(has_project)
-        self.ui.actionSave_Copy.setEnabled(has_project)
-        self.ui.actionCommandWindow.setEnabled(has_project)
-        self.ui.actionProcedures.setEnabled(has_project)
-        self.ui.actionDataBrowser.setEnabled(has_project)
-        self.ui.actionNew_Table.setEnabled(has_project)
-        self.ui.menuTableMacros.setEnabled(has_project)
-
     def request_quit(self, checked=False):
         del checked
-        QuitCommand(self).run()
+        self.emit_plugin_event("request_application_quit", {})
 
     @inmain_decorator()
     def enter_no_project_state(self):
@@ -489,18 +375,8 @@ class HydeApp:
         self.procedures_dir = None
         self.procedures_init = None
         self.stop_project_watcher()
-        clear_tables(self)
-        self.procedure_browser.set_procedures_dir(None)
         self.ui.setWindowTitle("Hyde")
-        if self.command_subwindow is not None:
-            self.command_subwindow.hide()
-        if self.procedures_subwindow is not None:
-            self.procedures_subwindow.hide()
-        if self.data_browser_subwindow is not None:
-            self.data_browser_subwindow.hide()
-        self._set_project_action_state(False)
-        if hasattr(self, "emit_plugin_event"):
-            self.emit_plugin_event("enter_no_project_state", {})
+        self.emit_plugin_event("enter_no_project_state", {})
 
     @inmain_decorator()
     def activate_project(self, project_dir):
@@ -510,30 +386,26 @@ class HydeApp:
         if self.current_project_dir is not None and os.path.abspath(self.current_project_dir) == project_dir:
             return
         self.current_project_dir, self.procedures_dir, self.procedures_init = get_project_paths(project_dir)
-        self.procedure_browser.set_procedures_dir(self.procedures_dir)
         self.ui.setWindowTitle(f"Hyde - {os.path.basename(self.current_project_dir)}")
         self.restart_project_watcher()
-        self._set_project_action_state(True)
-        if hasattr(self, "emit_plugin_event"):
-            self.emit_plugin_event(
-                "project_activated",
-                {
-                    "project_dir": self.current_project_dir,
-                    "procedures_dir": self.procedures_dir,
-                },
-            )
+        self.emit_plugin_event(
+            "project_activated",
+            {
+                "project_dir": self.current_project_dir,
+                "procedures_dir": self.procedures_dir,
+            },
+        )
 
     def reload_procedures(self):
         if self.current_project_dir is None:
             return
-        self.queue_background_command(
-            format_procedures_bootstrap_code(
-                self.current_project_dir,
-                os.path.dirname(HYDE_DIR),
-                reset_namespace=False,
-            ),
-            silent=True,
+        state = RuntimeCommandState()
+        state.set_reload_procedures(
+            self.current_project_dir,
+            os.path.dirname(HYDE_DIR),
+            reset_namespace=False,
         )
+        self.queue_background_command(state.python_source(), silent=True)
 
     @inmain_decorator()
     def finalize_startup(self):
@@ -545,7 +417,7 @@ class HydeApp:
                 self._startup_complete = True
                 startup_project = self.resolve_startup_project()
             self.set_project_status_message("Connecting to Jupyter Kernel Socket...")
-            self._rebuild_kernel_windows()
+            self.emit_plugin_event("kernel_ready", {})
             self.enter_no_project_state()
             if startup_project is not None:
                 QtCore.QTimer.singleShot(
@@ -558,22 +430,8 @@ class HydeApp:
             import traceback
             traceback.print_exc()
 
-    def _shutdown_kernel_windows(self):
-        if self.data_browser is not None:
-            self.mdi_context.destroy("data_browser")
-        if self.command_window is not None:
-            self.mdi_context.destroy("command_window")
-
-    def _rebuild_kernel_windows(self):
-        self._shutdown_kernel_windows()
-        self.mdi_context.ensure_widget("command_window")
-        self.mdi_context.ensure_widget("data_browser")
-
     def _load_startup_project(self, path):
-        self.begin_project_operation("Loading Hyde project...")
-        state = LoadProjectState()
-        state.set_project_dir(path)
-        self.execute_command(state.python_source(), visible=True)
+        self.emit_plugin_event("request_project_load", {"project_dir": path})
 
     @inmain_decorator()
     def on_kernel_ready(self):
@@ -590,19 +448,18 @@ class HydeApp:
             helper = self.runtime_helper
             self.runtime_helper = None
             helper.stop()
-        self._shutdown_kernel_windows()
+        self.emit_plugin_event("kernel_crashed", {})
         QtWidgets.QMessageBox.warning(
             self.ui,
             "Kernel Crashed",
             "The IPython execution kernel died unexpectedly. Hyde is reconnecting to a fresh kernel.",
         )
-        if hasattr(self, "emit_plugin_event"):
-            self.emit_plugin_event("kernel_crashed", {})
         self.start_kernel_runtime()
 
     @inmain_decorator()
     def on_project_state_result(self, data):
         operation = data.get('operation')
+        mode = data.get('mode')
         success = bool(data.get('success', False))
         path = data.get('path')
         errors = list(data.get('errors', []))
@@ -614,8 +471,9 @@ class HydeApp:
                 QtWidgets.QMessageBox.warning(self.ui, "Project Save Warnings", "\\n".join(errors))
             if success:
                 write_session(self, path)
-                if self.command_window is not None:
-                    write_history(self.command_window, path)
+                write_history(self, path)
+                if mode == 'save_as':
+                    self.restore_project_session()
             
         elif operation == 'new':
             if errors:
@@ -664,24 +522,27 @@ class HydeApp:
         self._runtime_shutdown = True
         self._quit_deadline = time.monotonic() + 2.0
         self.stop_project_watcher()
-        if self.remote_server is not None:
-            self.remote_server.shutdown()
-            self.remote_server = None
+        self.emit_plugin_event("application_shutdown", {})
         helper = self.runtime_helper
         if helper is not None and helper.kernel_client is not None:
             try:
                 helper.kernel_client.shutdown(reply=False)
             except Exception:
                 pass
-        elif self.command_window is not None and self.command_window.kernel_client is not None:
+        else:
+            command_window_service = self.plugin_service("visible_command_service")
+            kernel_client = (
+                None if command_window_service is None else command_window_service.kernel_client()
+            )
             try:
-                self.command_window.kernel_client.shutdown(reply=False)
+                if kernel_client is not None:
+                    kernel_client.shutdown(reply=False)
             except Exception:
                 pass
         if self.runtime_helper is not None:
             self.runtime_helper = None
             helper.stop()
-        self._shutdown_kernel_windows()
+        self.emit_plugin_event("kernel_crashed", {})
         QtCore.QTimer.singleShot(0, self._complete_shutdown_runtime)
 
     def _complete_shutdown_runtime(self):
@@ -706,8 +567,9 @@ class HydeApp:
         history_entries, history_error = try_read_history(self.current_project_dir)
         if history_error:
             warnings.append(f"terminal/history.py: {history_error}")
-        if self.command_window is not None:
-            self.command_window.restore_history_entries(history_entries)
+        command_window_service = self.plugin_service("visible_command_service")
+        if command_window_service is not None:
+            command_window_service.restore_history_entries(history_entries)
         session, session_error = try_read_session(self.current_project_dir)
         if session_error:
             warnings.append(f"session.toml: {session_error}")
@@ -717,9 +579,7 @@ class HydeApp:
                 "Project Session Restore Warnings",
                 "\n".join(warnings),
             )
-        clear_tables(self)
         if not session:
             return
         restore_main_window(self, session)
-        if hasattr(self, "emit_plugin_event"):
-            self.emit_plugin_event("project_loaded", {"session": session})
+        self.emit_plugin_event("project_loaded", {"session": session})

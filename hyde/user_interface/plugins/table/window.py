@@ -3,12 +3,11 @@ import os
 import uuid
 
 from qtutils import UiLoader, inmain_decorator
-from qtutils.qt import QtWidgets, QtCore, QtGui
+from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_features import TableCodec
 from hyde.user_interface.base import HydeGuiState, MutationState
-from hyde.user_interface.save_window_dialog import SaveWindowDialog
-from hyde.user_interface.window_macro_store import (
+from .window_macro_store import (
     MacroStoreError,
     inspect_macro_conflict,
     write_macro_source,
@@ -216,21 +215,18 @@ class TableWidget(QtWidgets.QWidget):
         self.mutation_state = MutationState()
         self._current_request_id = None
         self._refresh_in_flight = False
+        self._refresh_requested = False
         self._selected_cell = None
         self._value_edit_dirty = False
         self._initial_size_applied = False
         self._closed = False
         self._restore_layout_requested = bool(geometry or column_widths)
         self._subwindow = None
+        self._pending_created_columns = []
         self._tracked_namespace_state = self._current_tracked_namespace_state()
 
         loader = UiLoader()
-        ui_path = os.path.join(
-            os.path.dirname(__file__),
-            "plugins",
-            "table",
-            "table.ui",
-        )
+        ui_path = os.path.join(os.path.dirname(__file__), "table.ui")
         self.ui = loader.load(ui_path, self)
 
         self.model = TableViewModel(self.names)
@@ -249,11 +245,11 @@ class TableWidget(QtWidgets.QWidget):
         self.ui.tableView.customContextMenuRequested.connect(self._show_context_menu)
         self.ui.valueEdit.textEdited.connect(self._on_value_text_edited)
 
-        connect_namespace_view_updated = self.services.get(
-            "connect_namespace_view_updated"
-        )
-        if connect_namespace_view_updated is not None:
-            connect_namespace_view_updated(self._on_namespace_view_updated)
+        data_browser_service = self.services.get("namespace_view_service")
+        if data_browser_service is not None:
+            data_browser_service.connect_namespace_view_updated(
+                self._on_namespace_view_updated
+            )
 
         QtCore.QTimer.singleShot(0, self.refresh_data)
 
@@ -274,20 +270,42 @@ class TableWidget(QtWidgets.QWidget):
             subwindow.setGeometry(QtCore.QRect(*geometry))
         self.capture_layout_state()
 
-    def refresh_data(self):
-        if self._closed or self._refresh_in_flight:
-            return
-
-        self._current_request_id = str(uuid.uuid4())
-        self._refresh_in_flight = True
+    def _queue_silent_command(self, code):
         queue_background_command = self.services.get("queue_background_command")
         if queue_background_command is None:
-            return
-        code = self.table_state.source_for_command(
+            return False
+        return bool(queue_background_command(code, silent=True))
+
+    def _queue_refresh(self, prefix_commands=None):
+        if self._closed:
+            return False
+        prefix = [command for command in (prefix_commands or []) if command]
+        request_id = str(uuid.uuid4())
+        self._current_request_id = request_id
+        self._refresh_in_flight = True
+        self._refresh_requested = False
+        refresh_command = self.table_state.source_for_command(
             "push_table_data",
-            request_id=self._current_request_id,
+            request_id=request_id,
         )
-        queue_background_command(code, silent=True)
+        for command in prefix:
+            if not self._queue_silent_command(command):
+                self._refresh_in_flight = False
+                self._current_request_id = None
+                return False
+        if self._queue_silent_command(refresh_command):
+            return True
+        self._refresh_in_flight = False
+        self._current_request_id = None
+        return False
+
+    def refresh_data(self):
+        if self._closed:
+            return
+        if self._refresh_in_flight:
+            self._refresh_requested = True
+            return
+        self._queue_refresh()
 
     @inmain_decorator()
     def on_data_received(self, data, request_id):
@@ -318,16 +336,21 @@ class TableWidget(QtWidgets.QWidget):
                 self.capture_layout_state()
             else:
                 QtCore.QTimer.singleShot(0, self._fit_subwindow_to_contents)
+        if self._refresh_requested and not self._closed:
+            self._refresh_requested = False
+            self.refresh_data()
 
     def _current_tracked_namespace_state(self):
-        get_namespace_view = self.services.get("get_namespace_view")
-        if get_namespace_view is None:
+        data_browser_service = self.services.get("namespace_view_service")
+        if data_browser_service is None:
             return ()
-        return self._tracked_namespace_state_from_view(get_namespace_view())
+        return self._tracked_namespace_state_from_view(
+            data_browser_service.namespace_view()
+        )
 
     def _tracked_namespace_state_from_view(self, view):
         tracked = []
-        for name in self.names:
+        for name in list(self.names) + list(self._pending_created_columns):
             metadata = dict(view.get(name, {}) or {})
             tracked.append((name, tuple(sorted(metadata.items()))))
         return tuple(tracked)
@@ -336,6 +359,18 @@ class TableWidget(QtWidgets.QWidget):
     def _on_namespace_view_updated(self, view):
         if self._closed:
             return
+        confirmed_columns = [
+            name
+            for name in self._pending_created_columns
+            if dict(view.get(name, {}) or {})
+        ]
+        if confirmed_columns:
+            self.append_columns(confirmed_columns, refresh=False)
+            self._pending_created_columns = [
+                name
+                for name in self._pending_created_columns
+                if name not in confirmed_columns
+            ]
         new_state = self._tracked_namespace_state_from_view(view or {})
         if new_state == self._tracked_namespace_state:
             return
@@ -380,28 +415,30 @@ class TableWidget(QtWidgets.QWidget):
     def eventFilter(self, watched, event):
         subwindow = getattr(self, "_subwindow", None)
         ui = getattr(self, "ui", None)
+        table_view = getattr(ui, "tableView", None)
+        value_edit = getattr(ui, "valueEdit", None)
         if watched is subwindow and event.type() in (
             QtCore.QEvent.Move,
             QtCore.QEvent.Resize,
         ):
             self.capture_layout_state()
         if (
-            ui is not None
-            and watched is ui.tableView.viewport()
+            table_view is not None
+            and watched is table_view.viewport()
             and event.type() == QtCore.QEvent.MouseButtonRelease
             and event.button() == QtCore.Qt.LeftButton
         ):
-            index = self.ui.tableView.indexAt(event.pos())
+            index = table_view.indexAt(event.pos())
             if index.isValid():
                 if event.modifiers() == QtCore.Qt.NoModifier:
-                    self.ui.tableView.setCurrentIndex(index)
+                    table_view.setCurrentIndex(index)
                     self._update_selection_info()
                     self._schedule_value_editor_activation(index)
                 else:
                     QtCore.QTimer.singleShot(0, self._update_selection_info)
         elif (
-            ui is not None
-            and watched is ui.valueEdit
+            value_edit is not None
+            and watched is value_edit
             and event.type() == QtCore.QEvent.KeyPress
         ):
             if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
@@ -569,12 +606,12 @@ class TableWidget(QtWidgets.QWidget):
         if confirm != QtWidgets.QMessageBox.Yes:
             return
 
+        commands = []
         for name, rows in sorted(rows_by_name.items()):
             self.mutation_state.set_delete_indices(name, rows)
-            command = self.mutation_state.python_source()
-            execute_command = self.services.get("execute_command")
-            if execute_command is not None:
-                execute_command(command, visible=False)
+            commands.append(self.mutation_state.python_source())
+        if commands and not self._queue_refresh(commands):
+            return
         self._value_edit_dirty = False
 
     def _editable_index_at(self, row, col):
@@ -632,9 +669,9 @@ class TableWidget(QtWidgets.QWidget):
                 if row != 0:
                     return False
                 namespace_names = set(self.names)
-                get_namespace_view = self.services.get("get_namespace_view")
-                if get_namespace_view is not None:
-                    namespace_names.update(get_namespace_view().keys())
+                data_browser_service = self.services.get("namespace_view_service")
+                if data_browser_service is not None:
+                    namespace_names.update(data_browser_service.namespace_view().keys())
                 new_name = self.mutation_state.set_create_array(
                     val_text, namespace_names
                 )
@@ -656,12 +693,14 @@ class TableWidget(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Invalid Value", str(exc))
             return False
 
-        execute_command = self.services.get("execute_command")
-        if execute_command is not None:
-            execute_command(command, visible=False)
-            if pending_new_name is not None:
-                self.append_columns([pending_new_name], refresh=False)
-                self._tracked_namespace_state = self._current_tracked_namespace_state()
+        if pending_new_name is not None:
+            if not self._queue_silent_command(command):
+                return False
+            self._pending_created_columns.append(pending_new_name)
+            self._tracked_namespace_state = self._current_tracked_namespace_state()
+        else:
+            if not self._queue_refresh([command]):
+                return False
         self._value_edit_dirty = False
         return True
 
@@ -677,12 +716,8 @@ class TableWidget(QtWidgets.QWidget):
             return
 
         if QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier:
-            parent = self.parentWidget()
-            if parent is not None:
-                parent.hide()
-            else:
-                self.hide()
-            event.ignore()
+            self.shutdown_client()
+            super().closeEvent(event)
             return
 
         request_save_table_macro = self.services.get("request_save_table_macro")
@@ -700,13 +735,58 @@ class TableWidget(QtWidgets.QWidget):
             return
         self._closed = True
         try:
-            disconnect_namespace_view_updated = self.services.get(
-                "disconnect_namespace_view_updated"
-            )
-            if disconnect_namespace_view_updated is not None:
-                disconnect_namespace_view_updated(self._on_namespace_view_updated)
+            data_browser_service = self.services.get("namespace_view_service")
+            if data_browser_service is not None:
+                data_browser_service.disconnect_namespace_view_updated(
+                    self._on_namespace_view_updated
+                )
         except Exception:
             pass
+
+
+class SaveWindowDialog(QtWidgets.QDialog):
+    SAVE = 1
+    NO_SAVE = 2
+    CANCEL = 0
+
+    def __init__(self, table_state, parent=None):
+        super().__init__(parent)
+        self.choice = self.CANCEL
+        self.table_state = table_state
+
+        loader = UiLoader()
+        ui_path = os.path.join(os.path.dirname(__file__), "save_window_dialog.ui")
+        self.ui = loader.load(ui_path, self)
+
+        self.ui.nameEdit.setText(self.table_state.default_macro_name())
+        self.ui.nameEdit.selectAll()
+        self.ui.saveButton.clicked.connect(self._accept_save)
+        self.ui.noSaveButton.clicked.connect(self._accept_no_save)
+        self.ui.cancelButton.clicked.connect(self.reject)
+        self.ui.helpButton.clicked.connect(self._show_help)
+
+    def macro_name(self):
+        return self.ui.nameEdit.text().strip()
+
+    def macro_source(self):
+        return self.table_state.macro_source(self.macro_name())
+
+    def _accept_save(self):
+        self.choice = self.SAVE
+        self.accept()
+
+    def _accept_no_save(self):
+        self.choice = self.NO_SAVE
+        self.accept()
+
+    def _show_help(self):
+        QtWidgets.QMessageBox.information(
+            self,
+            "Window Recreation Macros",
+            "Save stores a parameterized recreation macro in procedures/__init__.py.\n\n"
+            "No Save closes the window without writing a macro.\n\n"
+            "Cancel leaves the window open.",
+        )
 
 
 def prompt_to_save_table_macro(table_state, parent, procedures_init, reload_procedures):
@@ -728,6 +808,14 @@ def prompt_to_save_table_macro(table_state, parent, procedures_init, reload_proc
 
         conflict = inspect_macro_conflict(procedures_init, macro_name)
         if conflict is not None:
+            if not conflict.get("in_autogenerated_block", False):
+                QtWidgets.QMessageBox.warning(
+                    parent,
+                    "Macro Name In Use",
+                    f"{macro_name} already exists outside Hyde's autogenerated window-macro block.\n\n"
+                    "Choose a different macro name.",
+                )
+                continue
             response = QtWidgets.QMessageBox.question(
                 parent,
                 "Overwrite Recreation Macro",
@@ -739,6 +827,10 @@ def prompt_to_save_table_macro(table_state, parent, procedures_init, reload_proc
             if response != QtWidgets.QMessageBox.Yes:
                 continue
 
-        write_macro_source(procedures_init, macro_name, macro_source)
+        try:
+            write_macro_source(procedures_init, macro_name, macro_source)
+        except MacroStoreError as exc:
+            QtWidgets.QMessageBox.warning(parent, "Unable To Save Macro", str(exc))
+            continue
         reload_procedures()
         return True

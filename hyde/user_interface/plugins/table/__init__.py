@@ -1,6 +1,8 @@
 from labscript_utils.plugins import BasePlugin
+from qtutils.qt import QtCore, QtWidgets
+from hyde.user_interface.base import RuntimeCommandState
 
-from hyde.user_interface.table import (
+from .window import (
     TableState,
     TableWidget,
     prompt_to_save_table_macro,
@@ -23,6 +25,14 @@ class TableWorkspaceService:
     def iter_open_tables(self):
         return sorted(self.tables.items())
 
+    def _next_table_handle(self):
+        handle = f"Table{self.table_counter}"
+        while handle in self.tables:
+            self.table_counter += 1
+            handle = f"Table{self.table_counter}"
+        self.table_counter += 1
+        return handle
+
     def open_table(
         self,
         names,
@@ -43,8 +53,7 @@ class TableWorkspaceService:
         if target is not None:
             handle = target
         else:
-            handle = visible_title or f"Table{self.table_counter}"
-            self.table_counter += 1
+            handle = self._next_table_handle()
 
         services = dict(self.plugin.services)
         services["request_save_table_macro"] = self.plugin.request_save_table_macro
@@ -57,11 +66,10 @@ class TableWorkspaceService:
             column_widths=column_widths,
         )
         subwindow = self.plugin.services["mdi_area"].addSubWindow(table)
-        configure_subwindow = self.plugin.services.get(
-            "configure_persistent_subwindow"
-        )
-        if configure_subwindow is not None:
-            configure_subwindow(subwindow)
+        # Table windows own a real close path with prompt/cleanup, so they keep
+        # Qt's normal delete-on-close behavior instead of the persistent tool-
+        # window wrapper that turns close into hide.
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
         table.bind_subwindow(subwindow)
         self.tables[handle] = table
 
@@ -81,6 +89,7 @@ class TableWorkspaceService:
 
     def on_subwindow_activated(self, subwindow):
         if subwindow is None:
+            self.active_table_handle = None
             return
         widget = subwindow.widget()
         if isinstance(widget, TableWidget):
@@ -96,6 +105,7 @@ class TableWorkspaceService:
             original_callback = table.services.pop("request_save_table_macro", None)
             if hasattr(table, "shutdown_client"):
                 table.shutdown_client()
+            subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
             subwindow.close()
             if (
                 original_callback is not None
@@ -158,26 +168,27 @@ class Plugin(BasePlugin):
         self.table_feature = TableFeatureService(self)
         self.table_macros = []
         self._signals_connected = False
+        self._new_table_action = None
+        self._macro_menu = None
 
     def plugin_setup_complete(self, data=None):
         data = data or {}
         self.services = data.get("services", {})
         if self._signals_connected:
             return
+        lookup_menu_action = self.services.get("lookup_menu_action")
+        if lookup_menu_action is not None:
+            self._new_table_action = lookup_menu_action("window", "New Table...")
+        self._macro_menu = self._ensure_macro_menu()
         self.services["mdi_area"].subWindowActivated.connect(
             self.workspace.on_subwindow_activated
         )
-        self.services["ui"].menuTableMacros.aboutToShow.connect(
-            self.rebuild_table_macros_menu
-        )
+        self._macro_menu.aboutToShow.connect(self.rebuild_table_macros_menu)
         self.rebuild_table_macros_menu()
         self._signals_connected = True
 
     def get_services(self):
-        return {
-            "table_feature": self.table_feature,
-            "table_workspace": self.workspace,
-        }
+        return {"table_feature": self.table_feature}
 
     def get_menu_contributions(self):
         return [
@@ -192,17 +203,18 @@ class Plugin(BasePlugin):
 
     def show_new_table_dialog(self, checked=False):
         del checked
+        data_browser_service = self.services.get("namespace_view_service")
         self.table_feature.show_new_table_dialog(
-            self.services["get_namespace_view"](),
+            {} if data_browser_service is None else data_browser_service.namespace_view(),
             parent=self.services["ui"],
         )
 
     def get_event_handlers(self):
         return {
             "enter_no_project_state": self.on_enter_no_project_state,
+            "kernel_message": self.on_kernel_message,
             "project_loaded": self.on_project_loaded,
             "project_activated": self.on_project_activated,
-            "window_macros_updated": self.on_window_macros_updated,
         }
 
     def get_save_data(self):
@@ -245,6 +257,7 @@ class Plugin(BasePlugin):
 
     def on_project_loaded(self, data):
         session = data["session"]
+        self.workspace.clear()
         saved_counter = int(session.get("table_counter", 0))
         for table_state in session.get("tables", []):
             handle = table_state["handle"]
@@ -272,7 +285,23 @@ class Plugin(BasePlugin):
             silent=True,
         )
 
-    def on_window_macros_updated(self, data):
+    def on_kernel_message(self, payload):
+        task = payload.get("task")
+        data = payload.get("data", {})
+        if task == "OPEN_TABLE_REQUEST":
+            self.workspace.open_table(
+                data.get("names", []),
+                data.get("target"),
+                visible_title=data.get("title"),
+                geometry=data.get("geometry"),
+                column_widths=data.get("column_widths"),
+            )
+            return
+        if task == "TABLE_DATA_RESPONSE":
+            self.workspace.on_table_data(data)
+            return
+        if task != "WINDOW_MACROS_RESPONSE":
+            return
         if data.get("kind") != "table":
             return
         self.table_macros = [
@@ -285,9 +314,11 @@ class Plugin(BasePlugin):
         self.rebuild_table_macros_menu()
 
     def rebuild_table_macros_menu(self):
-        menu = self.services["ui"].menuTableMacros
+        menu = self._macro_menu
         menu.clear()
         has_project = self.services["get_current_project_dir"]() is not None
+        if self._new_table_action is not None:
+            self._new_table_action.setEnabled(has_project)
         if not has_project:
             menu.setEnabled(False)
             return
@@ -300,12 +331,11 @@ class Plugin(BasePlugin):
         for macro in self.table_macros:
             macro_name = macro["name"]
             macro_args = list(macro.get("args", []))
-            invocation = f"{macro_name}({', '.join(macro_args)})"
             action = menu.addAction(macro_name)
             action.triggered.connect(
-                lambda checked=False, command=invocation: self.services[
-                    "execute_command"
-                ](command, visible=True)
+                lambda checked=False, name=macro_name, args=tuple(macro_args): (
+                    self._execute_macro(name, args)
+                )
             )
 
     def request_save_table_macro(self, table_state):
@@ -320,4 +350,16 @@ class Plugin(BasePlugin):
         )
 
     def plugin_queue_background_command(self, code, silent=True):
-        self.services["queue_background_command"](code, silent=silent)
+        return self.services["queue_background_command"](code, silent=silent)
+
+    def _execute_macro(self, macro_name, macro_args):
+        state = RuntimeCommandState()
+        state.set_callable_invocation(macro_name, macro_args)
+        self.services["execute_command"](state.python_source(), visible=True)
+
+    def _ensure_macro_menu(self):
+        if self._macro_menu is None:
+            ui = self.services["ui"]
+            self._macro_menu = QtWidgets.QMenu("Table Macros", ui.menuWindow)
+            ui.menuWindow.addMenu(self._macro_menu)
+        return self._macro_menu

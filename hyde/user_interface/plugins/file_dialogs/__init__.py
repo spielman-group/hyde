@@ -1,7 +1,8 @@
 from labscript_utils.plugins import BasePlugin
 
-from hyde.user_interface.file_dialogs import (
+from .dialogs import (
     HealProjectDialog,
+    LoadProjectState,
     LoadProjectDialog,
     NewProjectDialog,
     QuitCommand,
@@ -10,63 +11,19 @@ from hyde.user_interface.file_dialogs import (
     SaveProjectCommand,
 )
 
-
-class _ProjectShellProxy:
-    def __init__(self, services):
-        self.services = services
-
-    @property
-    def ui(self):
-        return self.services["ui"]
-
-    @property
-    def current_project_dir(self):
-        return self.services["get_current_project_dir"]()
-
-    @property
-    def command_window(self):
-        return self.services["get_command_window"]()
-
-    @property
-    def shutting_down(self):
-        return self.services["get_shutting_down"]()
-
-    @shutting_down.setter
-    def shutting_down(self, value):
-        self.services["set_shutting_down"](value)
-
-    @property
-    def _quit_command_sent(self):
-        return self.services["get_quit_command_sent"]()
-
-    @_quit_command_sent.setter
-    def _quit_command_sent(self, value):
-        self.services["set_quit_command_sent"](value)
-
-    def begin_project_operation(self, label):
-        self.services["begin_project_operation"](label)
-
-    def execute_command(self, code, visible=True):
-        self.services["execute_command"](code, visible=visible)
-
-    def project_target_needs_confirmation(self, project_dir):
-        return self.services["project_target_needs_confirmation"](project_dir)
-
-    def confirm_overwrite_project(self, project_dir):
-        return self.services["confirm_overwrite_project"](project_dir)
-
-    def begin_shutdown_from_close_event(self):
-        self.services["begin_shutdown_from_close_event"]()
-
-
 class Plugin(BasePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.services = {}
+        self._actions = {}
 
     def plugin_setup_complete(self, data=None):
         data = data or {}
         self.services = data.get("services", {})
+        self._bind_actions()
+        self._set_project_action_state(
+            self.services["get_current_project_dir"]() is not None
+        )
 
     def get_menu_contributions(self):
         return [
@@ -120,37 +77,93 @@ class Plugin(BasePlugin):
                 "group": "application",
                 "order": 100,
                 "name": "Quit",
+                "shortcut": "Ctrl+Q",
                 "action": self.quit_application,
             },
         ]
 
-    def _shell_proxy(self):
-        return _ProjectShellProxy(self.services)
+    def _bind_actions(self):
+        lookup_menu_action = self.services.get("lookup_menu_action")
+        self._actions = {}
+        bindings = {
+            "new": ("file", "New..."),
+            "load": ("file", "Load..."),
+            "heal_project": ("file", "Heal Project..."),
+            "save": ("file", "Save"),
+            "save_as": ("file", "Save As..."),
+            "save_copy": ("file", "Save a Copy..."),
+            "quit": ("file", "Quit"),
+        }
+        for action_key, (location, text) in bindings.items():
+            action = None if lookup_menu_action is None else lookup_menu_action(location, text)
+            if action is not None:
+                self._actions[action_key] = action
+
+    def _set_project_action_state(self, has_project):
+        for name in ("new", "load", "quit"):
+            action = self._actions.get(name)
+            if action is not None:
+                action.setEnabled(True)
+        for name in ("heal_project", "save", "save_as", "save_copy"):
+            action = self._actions.get(name)
+            if action is not None:
+                action.setEnabled(has_project)
+
+    def _dispatch_load_project(self, project_dir):
+        state = LoadProjectState()
+        state.set_project_dir(project_dir)
+        self.services["begin_project_operation"]("Loading Hyde project...")
+        self.services["execute_command"](state.python_source(), visible=True)
 
     def new_project(self, checked=False):
         del checked
-        NewProjectDialog(self._shell_proxy()).run()
+        NewProjectDialog(self.services).run()
 
     def load_project(self, checked=False):
         del checked
-        LoadProjectDialog(self._shell_proxy()).run()
+        LoadProjectDialog(self.services).run()
 
     def heal_project(self, checked=False):
         del checked
-        HealProjectDialog(self._shell_proxy()).run()
+        HealProjectDialog(self.services).run()
 
     def save_project(self, checked=False):
         del checked
-        SaveProjectCommand(self._shell_proxy()).run()
+        SaveProjectCommand(self.services).run()
 
     def save_project_as(self, checked=False):
         del checked
-        SaveAsProjectDialog(self._shell_proxy()).run()
+        SaveAsProjectDialog(self.services).run()
 
     def save_project_copy(self, checked=False):
         del checked
-        SaveCopyProjectDialog(self._shell_proxy()).run()
+        SaveCopyProjectDialog(self.services).run()
 
     def quit_application(self, checked=False):
         del checked
-        QuitCommand(self._shell_proxy()).run()
+        QuitCommand(self.services).run()
+
+    def get_event_handlers(self):
+        return {
+            "enter_no_project_state": self.on_enter_no_project_state,
+            "project_activated": self.on_project_activated,
+            "request_application_quit": self.on_request_application_quit,
+            "request_project_load": self.on_request_project_load,
+        }
+
+    def on_enter_no_project_state(self, data):
+        del data
+        self._set_project_action_state(False)
+
+    def on_project_activated(self, data):
+        del data
+        self._set_project_action_state(True)
+
+    def on_request_application_quit(self, data):
+        del data
+        self.quit_application()
+
+    def on_request_project_load(self, data):
+        project_dir = data.get("project_dir")
+        if project_dir:
+            self._dispatch_load_project(project_dir)

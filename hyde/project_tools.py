@@ -101,8 +101,8 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
 
     import hyde
     hyde.gui_mode(True)
-    import hyde.table_macros
-    hyde.table_macros.clear_table_macros()
+    import hyde.recreation_registry
+    hyde.recreation_registry.clear_table_macros()
 
     import procedures
     previous_exports = set(__main__.__dict__.get("__hyde_procedures_exports__", ()))
@@ -115,7 +115,7 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
         __main__.__dict__.pop(name, None)
     __main__.__dict__.update(exports)
     __main__.__hyde_procedures_exports__ = set(exports)
-    hyde.table_macros.publish_table_macro_registry()
+    hyde.recreation_registry.publish_table_macro_registry()
 
 
 def copy_project_procedures(source_project_dir: Path, target_project_dir: Path):

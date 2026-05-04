@@ -31,7 +31,7 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Test: Verify environment synchronization between script and kernel.
 - [x] Refinement: Move procedure-file change tracking into the GUI-owned `FileWatcher`, with canonical `procedures/__init__.py` bootstrap dispatched through the runtime helper.
 - [x] Refinement: Mask runtime-helper-owned `procedures/__init__.py` execution input at the kernel protocol level with `silent=True`.
-- [x] Refinement: Add a GUI-owned lyse-compatible remote listener on the existing `ports.lyse` labconfig entry that queues incoming agnostic paths into the runtime helper, which dispatches visible `remote(...)` in the kernel.
+- [x] Refinement: Add a plugin-owned lyse-compatible remote listener on the existing `ports.lyse` labconfig entry that queues incoming agnostic paths into the runtime helper, which dispatches visible `remote(...)` in the kernel.
 - [ ] Refinement: Define the command-window display policy for output originating from runtime-helper-owned silent execution.
 
 ### Feature B: Matplotlib Figure Capture

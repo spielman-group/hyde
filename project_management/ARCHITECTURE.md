@@ -121,7 +121,7 @@ The **Procedure Browser** (an MDI window) provides the primary UI for managing t
 
 Hyde operates across two distinct processes plus one GUI-owned helper thread to ensure the GUI remains responsive and the scientific state remains authoritative and isolated:
 
-1. **Main Process (GUI):** Owns the `QMdiArea`, the `ProcessTree.instance()`, the visible command window, the `FileWatcher`, the lyse-compatible `ZMQServer`, and the runtime-helper queue/thread.
+1. **Main Process (GUI):** Owns the `QMdiArea`, the `ProcessTree.instance()`, the visible command window, the `FileWatcher`, the plugin-managed lyse-compatible `ZMQServer`, and the runtime-helper queue/thread.
 2. **The Kernel (spyder_kernels):** The isolated IPython engine and the authoritative Python namespace.
 
 ### Communication Lanes

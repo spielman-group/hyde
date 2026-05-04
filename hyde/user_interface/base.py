@@ -2,7 +2,7 @@ import logging
 import pprint
 
 import hyde
-from hyde.features.hyde_features import MutationCodec
+from hyde.features.hyde_features import MutationCodec, RuntimeCommandCodec
 
 
 class HydeGuiState:
@@ -94,3 +94,84 @@ class MutationState(HydeGuiState):
         self.apply_action({"type": "set", "path": ("settings", "indices"), "value": list(indices)})
         self.apply_action({"type": "clear", "path": ("settings", "index")})
         self.apply_action({"type": "clear", "path": ("settings", "value_text")})
+
+    def set_delete_name(self, var_name):
+        self.set_command("delete_name")
+        self.apply_action(
+            {"type": "set", "path": ("settings", "var_name"), "value": var_name}
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "index")})
+        self.apply_action({"type": "clear", "path": ("settings", "indices")})
+        self.apply_action({"type": "clear", "path": ("settings", "value_text")})
+
+
+class RuntimeCommandState(HydeGuiState):
+    codec = RuntimeCommandCodec
+
+    def set_command(self, command):
+        self.apply_action({"type": "set_command", "command": command})
+
+    def set_reload_procedures(
+        self,
+        project_dir,
+        hyde_source_root,
+        *,
+        reset_namespace=False,
+    ):
+        self.set_command("reload_procedures")
+        self.apply_action(
+            {"type": "set", "path": ("settings", "project_dir"), "value": project_dir}
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "hyde_source_root"),
+                "value": hyde_source_root,
+            }
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "reset_namespace"),
+                "value": bool(reset_namespace),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "request_filepath")})
+
+    def set_remote_request(self, request_filepath):
+        self.set_command("remote_request")
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "request_filepath"),
+                "value": request_filepath,
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
+        self.apply_action(
+            {"type": "clear", "path": ("settings", "hyde_source_root")}
+        )
+
+    def set_callable_invocation(self, callable_name, args):
+        self.set_command("callable_invocation")
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "callable_name"),
+                "value": callable_name,
+            }
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "callable_args"),
+                "value": list(args or []),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
+        self.apply_action(
+            {"type": "clear", "path": ("settings", "hyde_source_root")}
+        )
+        self.apply_action(
+            {"type": "clear", "path": ("settings", "request_filepath")}
+        )

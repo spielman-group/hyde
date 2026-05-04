@@ -16,7 +16,7 @@ import numpy as np
 
 from .paths import HYDE_DIR
 from . import project_tools
-from .table_macros import publish_table_macro_registry, register_table_macro
+from .recreation_registry import publish_table_macro_registry, register_table_macro
 from .execution.ipc import (
     signal_activate_project,
     signal_enter_no_project_state,

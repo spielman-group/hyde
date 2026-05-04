@@ -4,7 +4,8 @@ from qtutils import UiLoader
 from qtutils.qt import QtWidgets
 
 from hyde.features.hyde_features import is_eligible_for_table
-from hyde.user_interface.table import TableState
+
+from .window import TableState
 
 
 class NewTableDialog(QtWidgets.QDialog):
@@ -15,11 +16,7 @@ class NewTableDialog(QtWidgets.QDialog):
         self.table_state = TableState()
 
         loader = UiLoader()
-        ui_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "new_table_dialog",
-            "new_table_dialog.ui",
-        )
+        ui_path = os.path.join(os.path.dirname(__file__), "new_table_dialog.ui")
         self.ui = loader.load(ui_path, self)
 
         ok_button = self.ui.buttonBox.button(QtWidgets.QDialogButtonBox.Ok)

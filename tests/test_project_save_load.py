@@ -10,6 +10,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="hyde-mpl-"))
 os.environ.setdefault("IPYTHONDIR", tempfile.mkdtemp(prefix="hyde-ipython-"))
 
+try:
+    import labscript_utils.plugins  # noqa: F401
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("labscript_utils.plugins is required") from exc
+
 from jupyter_client import BlockingKernelClient
 from labscript_utils.ls_zprocess import ProcessTree
 from qtutils.qt import QtWidgets, QtCore
@@ -18,18 +23,33 @@ import tomllib
 from unittest.mock import patch
 
 import hyde
-from hyde.paths import KERNEL_LAUNCHER
-from hyde.user_interface.file_dialogs import SaveAsProjectDialog
+from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
+from hyde.user_interface.base import RuntimeCommandState
+from hyde.user_interface.plugins.command_window import (
+    CommandWindow,
+    CommandWindowService,
+    Plugin as CommandWindowPlugin,
+)
+from hyde.user_interface.plugins.procedure_browser import Plugin as ProcedureBrowserPlugin
+from hyde.user_interface.plugins.file_dialogs.dialogs import SaveAsProjectDialog
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.project_state import (
+from hyde.user_interface.main.project_state import (
     read_history,
     read_session,
     try_read_history,
     try_read_session,
-    clear_tables,
     write_history,
     write_session,
 )
+
+
+def lookup_menu_action(app, location, text, path=()):
+    action = app.lookup_menu_action(location, text, path=path)
+    if action is None:
+        raise AssertionError(
+            f"Could not find menu action {location!r} / {path!r} / {text!r}"
+        )
+    return action
 
 
 class DummySplash:
@@ -108,12 +128,16 @@ def collect_kernel_messages(from_child, timeout=10, stop_when=None):
     raise AssertionError(f"Timed out waiting for kernel messages. Saw: {messages!r}")
 
 
-class DummyCommandWindow:
-    def __init__(self, history):
-        self._history = list(history)
+class DummyCommandWindowService:
+    def __init__(self, history=None):
+        self._history = list(history or [])
+        self.restored_entries = None
 
     def history_entries(self):
         return list(self._history)
+
+    def restore_history_entries(self, entries):
+        self.restored_entries = list(entries)
 
 
 class DummyDataBrowserUI:
@@ -191,8 +215,154 @@ class TestProjectStateHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "history.hy")
             os.makedirs(os.path.join(project_dir, "terminal"))
-            write_history(DummyCommandWindow(["a = 1", "hyde.table(a)"]), project_dir)
+            app = type("DummyApp", (), {})()
+            app.plugin_manager = PluginManagerStub(
+                services={
+                    "visible_command_service": DummyCommandWindowService(
+                        ["a = 1", "hyde.table(a)"]
+                    )
+                }
+            )
+            write_history(app, project_dir)
             self.assertEqual(read_history(project_dir), ["a = 1", "hyde.table(a)"])
+
+    def test_command_window_records_visible_commands_from_execute_source(self):
+        class FakeSignal:
+            def connect(self, callback):
+                del callback
+
+        class FakeChannel:
+            def __init__(self):
+                self.message_received = FakeSignal()
+
+        class FakeHeartbeatChannel:
+            def __init__(self):
+                self.kernel_died = FakeSignal()
+
+        class FakeKernelClient:
+            def __init__(self, connection_file):
+                self.connection_file = connection_file
+                self.started_channels = FakeSignal()
+                self.stopped_channels = FakeSignal()
+                self.iopub_channel = FakeChannel()
+                self.shell_channel = FakeChannel()
+                self.stdin_channel = FakeChannel()
+                self.hb_channel = FakeHeartbeatChannel()
+                self.channels_running = False
+
+            def load_connection_file(self):
+                return None
+
+            def start_channels(self):
+                return None
+
+        recorded = []
+
+        with patch(
+            "hyde.user_interface.plugins.command_window.QtKernelClient",
+            FakeKernelClient,
+        ):
+            with patch(
+                "qtconsole.rich_jupyter_widget.RichJupyterWidget.execute",
+                return_value="executed",
+            ):
+                widget = CommandWindow(
+                    connection_file="kernel-hyde.json",
+                    history_sink=recorded.append,
+                )
+                self.assertEqual(widget.execute(source="x = 1", hidden=False), "executed")
+                widget.execute(source="hyde.save_project()", hidden=False)
+                widget.execute(source="hidden = 1", hidden=True)
+
+        self.assertEqual(recorded, ["x = 1", "hyde.save_project()"])
+
+    def test_command_window_plugin_uses_lookup_menu_action_service(self):
+        action = QtWidgets.QAction("Command Window")
+        lookup_menu_action = unittest.mock.Mock(return_value=action)
+        ui = type("UI", (), {"menuWindow": QtWidgets.QMenu()})()
+        plugin = CommandWindowPlugin(initial_settings={})
+
+        plugin.plugin_setup_complete(
+            {"services": {"ui": ui, "lookup_menu_action": lookup_menu_action}}
+        )
+
+        self.assertIs(plugin._action, action)
+
+    def test_procedure_browser_plugin_uses_lookup_menu_action_service(self):
+        class FakeMdiContext:
+            def __init__(self):
+                self.ensure_calls = []
+                self._subwindow = QtWidgets.QMdiSubWindow()
+
+            def ensure_widget(self, key):
+                self.ensure_calls.append(key)
+                return object()
+
+            def subwindow(self, key):
+                del key
+                return self._subwindow
+
+        action = QtWidgets.QAction("Procedures")
+        lookup_menu_action = unittest.mock.Mock(return_value=action)
+        ui = type("UI", (), {"menuWindow": QtWidgets.QMenu()})()
+        mdi_context = FakeMdiContext()
+        plugin = ProcedureBrowserPlugin(initial_settings={})
+
+        plugin.plugin_setup_complete(
+            {
+                "services": {
+                    "ui": ui,
+                    "mdi_context": mdi_context,
+                    "lookup_menu_action": lookup_menu_action,
+                }
+            }
+        )
+
+        self.assertEqual(mdi_context.ensure_calls, ["procedures"])
+        self.assertIs(plugin._action, action)
+
+    def test_command_window_service_keeps_authoritative_history_without_widget(self):
+        class FakeWidget:
+            def __init__(self):
+                self.restored_entries = None
+
+            def restore_history_entries(self, entries):
+                self.restored_entries = list(entries)
+
+        class FakeMdiContext:
+            def __init__(self, widget):
+                self.current_widget = widget
+
+            def ensure_widget(self, key):
+                del key
+                return self.current_widget
+
+            def widget(self, key):
+                del key
+                return self.current_widget
+
+            def subwindow(self, key):
+                del key
+                return None
+
+            def destroy(self, key):
+                del key
+                self.current_widget = None
+
+        widget = FakeWidget()
+        mdi_context = FakeMdiContext(widget)
+        plugin = type("PluginStub", (), {"services": {"mdi_context": mdi_context}})()
+        service = CommandWindowService(plugin)
+
+        service.restore_history_entries(["a = 1"])
+        service.record_history_entry("hyde.save_project()")
+        mdi_context.current_widget = None
+
+        self.assertEqual(widget.restored_entries, ["a = 1"])
+        self.assertEqual(
+            service.history_entries(),
+            ["a = 1", "hyde.save_project()"],
+        )
 
     def test_write_and_read_session(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -310,11 +480,10 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app = RestoredApp()
             restored_app.ui = main_window
             restored_app.current_project_dir = project_dir
-            restored_app.command_window = type(
-                "HistorySink",
-                (),
-                {"restore_history_entries": lambda self, entries: setattr(self, "entries", list(entries))},
-            )()
+            command_window_service = DummyCommandWindowService()
+            restored_app.plugin_service = lambda key: (
+                command_window_service if key == "visible_command_service" else None
+            )
 
             class RestoringPlugin:
                 def __init__(self):
@@ -434,8 +603,14 @@ class TestProjectStateHelpers(unittest.TestCase):
             with open(os.path.join(project_dir, "session.toml"), "w", encoding="utf-8") as handle:
                 handle.write("not = [valid toml")
 
-            command_window = DummyCommandWindow(["a = 1", "hyde.save_project()"])
-            write_history(command_window, project_dir)
+            command_window_service = DummyCommandWindowService(
+                ["a = 1", "hyde.save_project()"]
+            )
+            history_app = type("HistoryApp", (), {})()
+            history_app.plugin_manager = PluginManagerStub(
+                services={"visible_command_service": command_window_service}
+            )
+            write_history(history_app, project_dir)
 
             warnings = []
 
@@ -444,11 +619,10 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             app = DummyApp()
             app.current_project_dir = project_dir
-            app.command_window = type(
-                "HistorySink",
-                (),
-                {"restore_history_entries": lambda self, entries: setattr(self, "entries", list(entries))},
-            )()
+            restore_service = DummyCommandWindowService()
+            app.plugin_service = lambda key: (
+                restore_service if key == "visible_command_service" else None
+            )
             app.ui = QtWidgets.QMainWindow()
 
             from hyde.user_interface import main as main_module
@@ -463,7 +637,106 @@ class TestProjectStateHelpers(unittest.TestCase):
                 main_module.QtWidgets.QMessageBox.warning = original_warning
 
             self.assertTrue(warnings)
-            self.assertEqual(app.command_window.entries, ["a = 1", "hyde.save_project()"])
+            self.assertEqual(
+                restore_service.restored_entries,
+                ["a = 1", "hyde.save_project()"],
+            )
+
+    def test_project_state_result_save_and_copy_write_target_without_restoring_session(self):
+        from hyde.user_interface import main as main_module
+
+        for mode in ("save", "copy"):
+            with self.subTest(mode=mode):
+                calls = []
+                app = type("DummyApp", (), {})()
+                app.ui = QtWidgets.QMainWindow()
+                app.current_project_dir = f"/tmp/current-{mode}.hy"
+                app.end_project_operation = lambda: calls.append(("end", None))
+                app.restore_project_session = lambda: calls.append(("restore", None))
+
+                with patch.object(
+                    main_module,
+                    "write_session",
+                    side_effect=lambda _app, path: calls.append(("session", path)),
+                ):
+                    with patch.object(
+                        main_module,
+                        "write_history",
+                        side_effect=lambda _app, path: calls.append(("history", path)),
+                    ):
+                        with patch.object(
+                            main_module.QtWidgets.QMessageBox,
+                            "warning",
+                            side_effect=lambda *args, **kwargs: calls.append(("warning", args[2])),
+                        ):
+                            main_module.HydeApp.on_project_state_result(
+                                app,
+                                {
+                                    "operation": "save",
+                                    "mode": mode,
+                                    "success": True,
+                                    "path": f"/tmp/{mode}-target.hy",
+                                    "errors": [],
+                                },
+                            )
+
+                self.assertEqual(
+                    calls,
+                    [
+                        ("end", None),
+                        ("session", f"/tmp/{mode}-target.hy"),
+                        ("history", f"/tmp/{mode}-target.hy"),
+                    ],
+                )
+
+    def test_project_state_result_save_as_restores_saved_target_session(self):
+        from hyde.user_interface import main as main_module
+
+        calls = []
+        target_dir = "/tmp/save-as-target.hy"
+        app = type("DummyApp", (), {})()
+        app.ui = QtWidgets.QMainWindow()
+        app.current_project_dir = target_dir
+        app.end_project_operation = lambda: calls.append(("end", None))
+        app.restore_project_session = lambda: calls.append(
+            ("restore", app.current_project_dir)
+        )
+
+        with patch.object(
+            main_module,
+            "write_session",
+            side_effect=lambda _app, path: calls.append(("session", path)),
+        ):
+            with patch.object(
+                main_module,
+                "write_history",
+                side_effect=lambda _app, path: calls.append(("history", path)),
+            ):
+                with patch.object(
+                    main_module.QtWidgets.QMessageBox,
+                    "warning",
+                    side_effect=lambda *args, **kwargs: calls.append(("warning", args[2])),
+                ):
+                    main_module.HydeApp.on_project_state_result(
+                        app,
+                        {
+                            "operation": "save",
+                            "mode": "save_as",
+                            "success": True,
+                            "path": target_dir,
+                            "errors": [],
+                        },
+                    )
+
+        self.assertEqual(
+            calls,
+            [
+                ("end", None),
+                ("session", target_dir),
+                ("history", target_dir),
+                ("restore", target_dir),
+            ],
+        )
 
     def test_resolve_startup_project_uses_cli_project(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -482,7 +755,12 @@ class TestProjectStateHelpers(unittest.TestCase):
                 {"showMessage": lambda self, message, timeout=0: None, "clearMessage": lambda self: None},
             )()
             app.current_project_dir = os.path.join(tmpdir, "current.hy")
-            app.command_window = object()
+            app.get_current_project_dir = lambda: app.current_project_dir
+            app.visible_command_service = lambda: type(
+                "VisibleCommandService",
+                (),
+                {"widget": lambda self: object()},
+            )()
             os.makedirs(app.current_project_dir)
             target = os.path.join(tmpdir, "target.hy")
             os.makedirs(target)
@@ -498,33 +776,39 @@ class TestProjectStateHelpers(unittest.TestCase):
             )
             app.confirm_overwrite_project = lambda project_dir: prompted.append(project_dir) or False
             app.execute_command = lambda code, visible=True: executed.append((code, visible))
+            app.services = {
+                "ui": app.ui,
+                "begin_project_operation": app.begin_project_operation,
+                "execute_command": app.execute_command,
+                "project_target_needs_confirmation": lambda project_dir: app.project_target_needs_confirmation(
+                    project_dir
+                ),
+                "confirm_overwrite_project": lambda project_dir: app.confirm_overwrite_project(
+                    project_dir
+                ),
+                "get_current_project_dir": lambda: app.get_current_project_dir(),
+                "visible_command_service": app.visible_command_service(),
+            }
 
             parent = QtWidgets.QWidget()
-            dialog = SaveAsProjectDialog(app, parent=parent)
-            dialog._selected_path = target
-            with patch.object(SaveAsProjectDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
-                self.assertFalse(dialog.run())
+            dialog = SaveAsProjectDialog(app.services, parent=parent)
+            dialog.selectFile(target)
+            with patch.object(
+                SaveAsProjectDialog,
+                "exec_",
+                return_value=QtWidgets.QDialog.Accepted,
+            ):
+                with patch.object(
+                    SaveAsProjectDialog,
+                    "selectedFiles",
+                    return_value=[target],
+                ):
+                    self.assertFalse(dialog.run())
 
             self.assertEqual(prompted, [target])
             self.assertEqual(executed, [])
             dialog.close()
             parent.close()
-
-    def test_clear_tables_forces_close_without_macro_prompt_path(self):
-        app = type("DummyApp", (), {})()
-        app.plugin_manager = PluginManagerStub(
-            services={
-                "table_workspace": type(
-                    "Workspace",
-                    (),
-                    {"clear": lambda self: setattr(self, "cleared", True)},
-                )()
-            }
-        )
-
-        clear_tables(app)
-
-        self.assertTrue(app.plugin_manager.services["table_workspace"].cleared)
 
     def test_save_project_returns_none(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -563,6 +847,155 @@ class TestHydeStartup(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
+    def test_startup_tolerates_missing_runtime_output_service(self):
+        class FakeMenu:
+            def clear(self):
+                return None
+
+        class FakeMdiArea:
+            def setHorizontalScrollBarPolicy(self, policy):
+                del policy
+
+            def setVerticalScrollBarPolicy(self, policy):
+                del policy
+
+        class FakeUI:
+            def __init__(self):
+                self.mdiArea = FakeMdiArea()
+                self.menuFile = FakeMenu()
+                self.menuWindow = FakeMenu()
+
+        class FakeUiLoader:
+            def load(self, path, parent):
+                del path, parent
+                return FakeUI()
+
+        class FakePluginManager:
+            def __init__(self, *args, **kwargs):
+                del args, kwargs
+                self.services = {}
+
+            def discover_modules(self):
+                return {}
+
+            def instantiate_plugins(self):
+                return None
+
+        with patch("hyde.user_interface.main.UiLoader", FakeUiLoader):
+            with patch("hyde.user_interface.main.HydePluginManager", FakePluginManager):
+                with patch.object(HydeApp, "setup_plugins", lambda self: None):
+                    with patch.object(HydeApp, "start_kernel_runtime", lambda self: None):
+                        app = HydeApp(
+                            self.qapp,
+                            process_tree=object(),
+                            splash=DummySplash(),
+                            argv=[],
+                        )
+
+        self.assertIsNone(app.logging_handler)
+
+    def test_startup_tolerates_broken_runtime_output_service_output_box(self):
+        class FakeMenu:
+            def clear(self):
+                return None
+
+        class FakeMdiArea:
+            def setHorizontalScrollBarPolicy(self, policy):
+                del policy
+
+            def setVerticalScrollBarPolicy(self, policy):
+                del policy
+
+        class FakeUI:
+            def __init__(self):
+                self.mdiArea = FakeMdiArea()
+                self.menuFile = FakeMenu()
+                self.menuWindow = FakeMenu()
+
+        class FakeUiLoader:
+            def load(self, path, parent):
+                del path, parent
+                return FakeUI()
+
+        class BrokenLoggingService:
+            def output_box(self):
+                raise RuntimeError("broken output box")
+
+        class FakePluginManager:
+            def __init__(self, *args, **kwargs):
+                del args, kwargs
+                self.services = {
+                    "runtime_output_service": BrokenLoggingService(),
+                }
+
+            def discover_modules(self):
+                return {}
+
+            def instantiate_plugins(self):
+                return None
+
+        with patch("hyde.user_interface.main.UiLoader", FakeUiLoader):
+            with patch("hyde.user_interface.main.HydePluginManager", FakePluginManager):
+                with patch.object(HydeApp, "setup_plugins", lambda self: None):
+                    with patch.object(HydeApp, "start_kernel_runtime", lambda self: None):
+                        app = HydeApp(
+                            self.qapp,
+                            process_tree=object(),
+                            splash=DummySplash(),
+                            argv=[],
+                        )
+
+        self.assertIsNone(app.logging_handler)
+
+    def test_start_kernel_runtime_tolerates_broken_runtime_output_service_port(self):
+        class FakeProcessTree:
+            def __init__(self):
+                self.calls = []
+
+            def subprocess(self, path, args=None, output_redirection_port=None, startup_timeout=None):
+                self.calls.append(
+                    (path, list(args or []), output_redirection_port, startup_timeout)
+                )
+                return "to-kernel", "from-kernel", object()
+
+        class FakeRuntimeHelper:
+            def __init__(self, app, connection_file, from_kernel, kernel_process):
+                self.app = app
+                self.connection_file = connection_file
+                self.from_kernel = from_kernel
+                self.kernel_process = kernel_process
+                self.started = False
+
+            def start(self):
+                self.started = True
+
+        class BrokenLoggingService:
+            def port(self):
+                raise RuntimeError("broken port")
+
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.process_tree = FakeProcessTree()
+        dummy_app.plugin_service = lambda key: (
+            BrokenLoggingService() if key == "runtime_output_service" else None
+        )
+        dummy_app.runtime_helper = None
+        dummy_app.kernel_to_child = None
+        dummy_app.kernel_from_child = None
+        dummy_app.kernel_process = None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            connection_file = os.path.join(tmpdir, "kernel-hyde.json")
+            with patch("hyde.user_interface.main.CONNECTION_FILE", connection_file):
+                with patch("hyde.user_interface.main.RuntimeHelper", FakeRuntimeHelper):
+                    HydeApp.start_kernel_runtime(dummy_app)
+
+        self.assertEqual(len(dummy_app.process_tree.calls), 1)
+        _, _, output_redirection_port, startup_timeout = dummy_app.process_tree.calls[0]
+        self.assertIsNone(output_redirection_port)
+        self.assertEqual(startup_timeout, 60)
+        self.assertIsInstance(dummy_app.runtime_helper, FakeRuntimeHelper)
+        self.assertTrue(dummy_app.runtime_helper.started)
+
     def test_startup_enters_no_project_state(self):
         process_tree = ProcessTree.instance()
         process_tree.zlock_client.set_process_name("hyde-startup-test")
@@ -572,24 +1005,35 @@ class TestHydeStartup(unittest.TestCase):
             self.assertIsNone(app.current_project_dir)
             self.assertIsNotNone(app.kernel_process)
             self.assertIsNone(app.kernel_process.poll())
-            self.assertFalse(app.command_subwindow.isVisible())
-            self.assertFalse(app.procedures_subwindow.isVisible())
-            self.assertFalse(app.data_browser_subwindow.isVisible())
-            self.assertTrue(app.ui.actionNew.isEnabled())
-            self.assertTrue(app.ui.actionLoad.isEnabled())
-            self.assertTrue(app.ui.actionLogging.isEnabled())
-            self.assertTrue(app.ui.actionQuit.isEnabled())
-            self.assertFalse(app.ui.actionSave.isEnabled())
-            self.assertFalse(app.ui.actionSave_As.isEnabled())
-            self.assertFalse(app.ui.actionSave_Copy.isEnabled())
-            self.assertFalse(app.ui.actionCommandWindow.isEnabled())
-            self.assertFalse(app.ui.actionProcedures.isEnabled())
-            self.assertFalse(app.ui.actionDataBrowser.isEnabled())
-            self.assertFalse(app.ui.actionNew_Table.isEnabled())
+            self.assertFalse(
+                app.plugin_service("visible_command_service").subwindow().isVisible()
+            )
+            self.assertFalse(
+                app.mdi_context.subwindow("procedures").isVisible()
+            )
+            self.assertFalse(
+                app.plugin_service("namespace_view_service").subwindow().isVisible()
+            )
+            self.assertTrue(lookup_menu_action(app, "file", "New...").isEnabled())
+            self.assertTrue(lookup_menu_action(app, "file", "Load...").isEnabled())
+            self.assertTrue(lookup_menu_action(app, "window", "Logging").isEnabled())
+            self.assertTrue(lookup_menu_action(app, "file", "Quit").isEnabled())
+            self.assertFalse(lookup_menu_action(app, "file", "Save").isEnabled())
+            self.assertFalse(lookup_menu_action(app, "file", "Save As...").isEnabled())
+            self.assertFalse(lookup_menu_action(app, "file", "Save a Copy...").isEnabled())
+            self.assertFalse(
+                lookup_menu_action(app, "window", "Command Window").isEnabled()
+            )
+            self.assertFalse(lookup_menu_action(app, "window", "Procedures").isEnabled())
+            self.assertFalse(lookup_menu_action(app, "window", "Data Browser").isEnabled())
+            self.assertFalse(lookup_menu_action(app, "window", "New Table...").isEnabled())
         finally:
             app.finalize_quit()
             wait_until(
-                lambda: app.command_window is None and app.data_browser is None,
+                lambda: (
+                    app.plugin_service("visible_command_service").widget() is None
+                    and app.plugin_service("namespace_view_service").widget() is None
+                ),
                 timeout=10,
                 message="Hyde did not finish asynchronous shutdown.",
             )
@@ -854,11 +1298,15 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             with open(os.path.join(project_dir, "procedures", "__init__.py"), "w", encoding="utf-8") as handle:
                 handle.write("import hyde\nKEEP = 3\n")
 
+            reload_state = RuntimeCommandState()
+            reload_state.set_reload_procedures(
+                project_dir,
+                os.path.dirname(HYDE_DIR),
+                reset_namespace=False,
+            )
             wait_for_code_ok(
                 client,
-                "from hyde.features.hyde_features import format_procedures_bootstrap_code\n"
-                "from hyde.paths import HYDE_DIR\n"
-                f"exec(format_procedures_bootstrap_code({project_dir!r}, HYDE_DIR, reset_namespace=False))\n"
+                f"exec({reload_state.python_source()!r})\n"
                 "assert KEEP == 3\n"
                 "assert 'REMOVE_ME' not in globals()\n"
                 "assert user_value == 99\n",

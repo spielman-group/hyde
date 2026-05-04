@@ -1,9 +1,28 @@
 import importlib
 import logging
 import os
+import weakref
 
-from labscript_utils.plugins import PluginManager
+from labscript_utils.plugins import DEFAULT_PRIORITY, MenuContext, PluginManager
 from qtutils.qt import QtCore
+
+
+_MENU_ACTIONS_BY_ID = {}
+
+
+def _menu_entry(menu, create=False):
+    menu_id = id(menu)
+    entry = _MENU_ACTIONS_BY_ID.get(menu_id)
+    if entry is not None:
+        menu_ref, actions = entry
+        if menu_ref() is menu:
+            return actions
+        _MENU_ACTIONS_BY_ID.pop(menu_id, None)
+    if not create:
+        return None
+    actions = {}
+    _MENU_ACTIONS_BY_ID[menu_id] = (weakref.ref(menu), actions)
+    return actions
 
 
 class _NullConfig:
@@ -58,6 +77,138 @@ class HydePluginManager(PluginManager):
 
         self.modules = modules
         return modules
+
+
+class HydeMenuContext(MenuContext):
+    """Hyde-local menu context that retains rendered QAction objects."""
+
+    def __init__(self, icon_factory=None, logger=None):
+        super().__init__(icon_factory=icon_factory, logger=logger)
+        self._actions = {}
+
+    def register_location(self, name, menu):
+        super().register_location(name, menu)
+        _menu_entry(menu, create=True)
+
+    def lookup_action(self, location, name, path=()):
+        if isinstance(path, str):
+            path = (path,)
+        else:
+            path = tuple(path)
+        return self._actions.get((location, path, name))
+
+    def _register_action(self, location, path, menu, name, action):
+        self._actions[(location, path, name)] = action
+        actions = _menu_entry(menu, create=True)
+        actions[name] = action
+
+    def render(self):
+        self._actions = {}
+        grouped = {}
+        group_orders = {}
+
+        for plugin_name, contribution in self.contributions:
+            if not isinstance(contribution, dict):
+                self.logger.error(
+                    "Menu contribution from plugin '%s' is not a dictionary. "
+                    "Skipping." % plugin_name
+                )
+                continue
+            if "location" not in contribution:
+                self.logger.error(
+                    "Menu contribution from plugin '%s' missing location. "
+                    "Skipping." % plugin_name
+                )
+                continue
+            if "name" not in contribution:
+                self.logger.error(
+                    "Menu contribution from plugin '%s' missing name. "
+                    "Skipping." % plugin_name
+                )
+                continue
+
+            location = contribution["location"]
+            if location not in self.locations:
+                self.logger.error(
+                    "Menu contribution from plugin '%s' requested unknown "
+                    "location '%s'. Skipping." % (plugin_name, location)
+                )
+                continue
+
+            path = contribution.get("path", ())
+            if isinstance(path, str):
+                path = (path,)
+            else:
+                path = tuple(path)
+
+            key = (location, path)
+            group = contribution.get("group", None)
+            if key not in group_orders:
+                group_orders[key] = {}
+            if group not in group_orders[key]:
+                group_orders[key][group] = len(group_orders[key])
+
+            grouped.setdefault(key, []).append((plugin_name, contribution))
+
+        menus = {}
+        for name, menu in self.locations.items():
+            menus[(name, ())] = menu
+            _menu_entry(menu, create=True).clear()
+
+        for key in sorted(grouped):
+            location, path = key
+            parent_path = ()
+            for submenu_name in path:
+                submenu_path = parent_path + (submenu_name,)
+                submenu_key = (location, submenu_path)
+                if submenu_key not in menus:
+                    submenu = menus[(location, parent_path)].addMenu(submenu_name)
+                    menus[submenu_key] = submenu
+                    _menu_entry(submenu, create=True).clear()
+                parent_path = submenu_path
+            menu = menus[(location, path)]
+
+            contributions = sorted(
+                grouped[key],
+                key=lambda item: (
+                    group_orders[key][item[1].get("group", None)],
+                    item[1].get("order", DEFAULT_PRIORITY),
+                    item[0],
+                    item[1]["name"],
+                ),
+            )
+
+            previous_group = None
+            for index, (plugin_name, contribution) in enumerate(contributions):
+                group = contribution.get("group", None)
+                if index and group != previous_group:
+                    menu.addSeparator()
+                previous_group = group
+
+                name = contribution["name"]
+                icon = contribution.get("icon", None)
+                if icon is not None and self.icon_factory is not None:
+                    action = menu.addAction(self.icon_factory(icon), name)
+                else:
+                    action = menu.addAction(name)
+
+                callback = contribution.get("action", None)
+                if callback is not None:
+                    action.triggered.connect(callback)
+
+                shortcut = contribution.get("shortcut", None)
+                if shortcut is not None and hasattr(action, "setShortcut"):
+                    action.setShortcut(shortcut)
+
+                checkable = contribution.get("checkable", False)
+                if hasattr(action, "setCheckable"):
+                    action.setCheckable(checkable)
+
+                enabled = contribution.get("enabled", True)
+                if hasattr(action, "setEnabled"):
+                    action.setEnabled(enabled)
+
+                self._register_action(location, path, menu, name, action)
 
 
 class HydeMDIContext:

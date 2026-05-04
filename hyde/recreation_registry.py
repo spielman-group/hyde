@@ -1,4 +1,4 @@
-"""Private table recreation macro registry helpers."""
+"""Private recreation registry helpers for kernel-side saveable windows."""
 
 from __future__ import annotations
 

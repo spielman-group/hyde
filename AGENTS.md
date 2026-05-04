@@ -19,6 +19,9 @@ You must thoroughly review the files in `project_management/` before writing any
 Before writing code, you must review [STYLE.md](file:///Users/ispielma/Python/Labscript/hyde/project_management/STYLE.md) for project-specific conventions regarding imports, UI framework boundaries, and threading.
 When adding or changing command-emitting GUI surfaces or GUI-side state/code generation, you must also review `state-control.md` and follow its ownership and placement rules.
 
+## 3.1 Test Environment
+Run Hyde tests in the `labscript` conda environment. In terminal sessions, prefer `conda activate labscript` before invoking `pytest`, `python -m unittest`, or other Hyde verification commands. Do not add test-only shims or fake dependency modules to compensate for running under the wrong environment.
+
 ## 4. Work Strategy & Scope
 We are aggressively iterating through a phased roadmap defined in `project_management/STRATEGY.md`.
 - **Use Feature Branches for Feature Work:** Hyde now has working scaffolding. When adding or changing a specific feature, create a dedicated git feature branch first and do the work on that branch rather than directly on the baseline branch.

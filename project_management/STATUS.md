@@ -6,7 +6,7 @@ We have successfully built the core architectural skeleton of Hyde, transitionin
 
 ### 1. The 2-Process Architecture
 Successfully isolated the GUI from execution logic using a direct managed hierarchy:
-- **Main GUI Process**: A PyQt MDI shell with a `RichJupyterWidget` view, a GUI-owned `FileWatcher`, a lyse-compatible `ZMQServer`, and a lightweight runtime-helper thread for silent kernel work.
+- **Main GUI Process**: A PyQt MDI shell with a `RichJupyterWidget` view, a GUI-owned `FileWatcher`, a plugin-managed lyse-compatible `ZMQServer`, and a lightweight runtime-helper thread for silent kernel work.
 - **Jupyter Kernel (`spyder_kernels`)**: The authoritative source of truth, isolated for crash resiliency.
 
 ![Hyde Phase II Shell Prototype](snapshots/hyde_phase2_execution_prototype.png)
@@ -36,7 +36,7 @@ Established the foundation for a transparent, reproducible scientific environmen
 - **MDI Procedure Browser**: Added a native script browser for managing `.py` files within the project, featuring double-click integration with the system-default editor.
 - **GUI-Owned Procedure Reload**: The GUI owns procedure-file monitoring through `labscript_utils.filewatcher.FileWatcher` and re-executes the canonical `procedures/__init__.py` load path through the runtime helper when watched `.py` files change.
 - **Masked Background Execution**: Runtime-helper-driven `procedures/__init__.py` execution uses Jupyter `silent=True`, so backend-controlled execution does not emit visible `execute_input` or consume the user's prompt history.
-- **Lyse-Compatible Remote Listener**: The GUI now owns a `ZMQServer` bound to the existing `ports.lyse` labconfig entry. Its handler normalizes incoming agnostic-path payloads and queues visible `remote(...)` execution through the runtime helper.
+- **Lyse-Compatible Remote Listener**: A first-party GUI plugin now owns a `ZMQServer` bound to the existing `ports.lyse` labconfig entry. Its handler normalizes incoming agnostic-path payloads and queues visible `remote(...)` execution through the runtime helper.
 - **Procedure Browser Path Semantics**: The browser is rooted at `procedures/`; displayed entries are relative to that directory, not to the `.hy` project root.
 
 ### 6. Phase IV-C: Data Browser Initial Implementation

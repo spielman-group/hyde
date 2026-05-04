@@ -3,7 +3,10 @@ from labscript_utils.plugins import BasePlugin
 from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout, QTreeView, QFileSystemModel
 from qtutils.qt.QtGui import QDesktopServices
-from hyde.user_interface.plugin_tools import capture_subwindow_state, restore_subwindow_state
+from hyde.user_interface.plugin_tools import (
+    capture_subwindow_state,
+    restore_subwindow_state,
+)
 
 class ProcedureBrowser(QWidget):
     def __init__(self, procedures_dir, *args, **kwargs):
@@ -36,7 +39,8 @@ class ProcedureBrowser(QWidget):
     def set_procedures_dir(self, procedures_dir):
         self.procedures_dir = procedures_dir
         if procedures_dir is None:
-            self.tree_view.setRootIndex(self.model.index(""))
+            root_index = self.model.setRootPath("")
+            self.tree_view.setRootIndex(root_index)
             return
         root_index = self.model.setRootPath(procedures_dir)
         self.tree_view.setRootIndex(root_index)
@@ -47,23 +51,22 @@ class ProcedureBrowser(QWidget):
         if os.path.isfile(file_path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
 
-    def closeEvent(self, event):
-        # Hide instead of close to allow persistent state
-        if self.parentWidget():
-            self.parentWidget().hide()
-        else:
-            self.hide()
-        event.ignore()
-
-
 class Plugin(BasePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.services = {}
+        self._action = None
 
     def plugin_setup_complete(self, data=None):
         data = data or {}
         self.services = data.get("services", {})
+        lookup_menu_action = self.services.get("lookup_menu_action")
+        if lookup_menu_action is not None:
+            self._action = lookup_menu_action("window", "Procedures")
+        self.services["mdi_context"].ensure_widget("procedures")
+        subwindow = self.services["mdi_context"].subwindow("procedures")
+        if subwindow is not None:
+            subwindow.hide()
 
     def get_ui_contributions(self):
         return [
@@ -120,12 +123,19 @@ class Plugin(BasePlugin):
         )
 
     def on_project_activated(self, data):
+        if self._action is not None:
+            self._action.setEnabled(True)
         widget = self.services["mdi_context"].widget("procedures")
         if widget is not None:
             widget.set_procedures_dir(data.get("procedures_dir"))
 
     def on_enter_no_project_state(self, data):
         del data
+        if self._action is not None:
+            self._action.setEnabled(False)
         widget = self.services["mdi_context"].widget("procedures")
         if widget is not None:
             widget.set_procedures_dir(None)
+        subwindow = self.services["mdi_context"].subwindow("procedures")
+        if subwindow is not None:
+            subwindow.hide()

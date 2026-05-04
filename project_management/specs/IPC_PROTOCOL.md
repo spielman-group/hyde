@@ -4,7 +4,7 @@
 Hyde runs as two cooperating processes plus one GUI-owned helper thread:
 
 1. **GUI Process**
-   Owns the PyQt event loop, the MDI interface, the embedded `qtconsole` command window, project-selection UI, `FileWatcher`, and the lyse-compatible `ZMQServer`.
+   Owns the PyQt event loop, the MDI interface, the embedded `qtconsole` command window, project-selection UI, `FileWatcher`, and the plugin-managed lyse-compatible `ZMQServer`.
 2. **Kernel Process**
    The `spyder_kernels` IPython kernel that holds the authoritative Python namespace. It is started in-process by `hyde/execution/kernel_launcher.py`, so the real kernel process is the direct `ProcessTree` child of the GUI.
 3. **Runtime Helper Thread**
@@ -19,12 +19,12 @@ Hyde uses three communication paths:
    Standard Jupyter ZeroMQ clients connected through the shared kernel connection file.
 3. **External -> GUI**
    A lyse-compatible `labscript_utils.ls_zprocess.ZMQServer` bound to the existing
-   `ports.lyse` labconfig entry.
+   `ports.lyse` labconfig entry and owned by a first-party GUI plugin.
 
 The command window and the runtime helper both connect to the same kernel, but they use separate Jupyter client sessions for different purposes.
 
 External clients that already target lyse's labconfig port may also talk to Hyde
-through the GUI-owned listener.
+through the plugin-owned GUI listener.
 
 ## Hyde Package Surface in the Kernel
 The kernel may import the Hyde package directly:

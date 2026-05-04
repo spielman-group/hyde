@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import logging
-import os
 from pathlib import Path
 
 import tomllib
@@ -20,14 +19,6 @@ def _decode_qbytearray(value):
     return QtCore.QByteArray.fromBase64(value.encode("ascii"))
 
 
-def _rect_to_list(rect):
-    return [rect.x(), rect.y(), rect.width(), rect.height()]
-
-
-def _list_to_rect(values):
-    return QtCore.QRect(*values)
-
-
 def _write_toml(path: Path, session):
     with path.open("wb") as handle:
         tomli_w.dump(session, handle)
@@ -39,13 +30,6 @@ def _session_path(project_dir):
 
 def _history_path(project_dir):
     return Path(project_dir) / "terminal" / "history.py"
-
-
-def _subwindow_state(subwindow):
-    return {
-        "visible": bool(subwindow.isVisible()),
-        "geometry": _rect_to_list(subwindow.geometry()),
-    }
 
 
 def _merge_session_data(session, plugin_data):
@@ -90,8 +74,6 @@ def write_session(app, project_dir):
     path = _session_path(project_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     session = capture_session(app)
-    if session.get("active_table_handle") is None:
-        session.pop("active_table_handle", None)
     _write_toml(path, session)
 
 
@@ -110,10 +92,15 @@ def try_read_session(project_dir):
         return {}, str(exc)
 
 
-def write_history(command_window, project_dir):
+def write_history(app, project_dir):
     history_path = _history_path(project_dir)
     history_path.parent.mkdir(parents=True, exist_ok=True)
-    history = command_window.history_entries() if command_window is not None else []
+    plugin_manager = getattr(app, "plugin_manager", None)
+    services = getattr(plugin_manager, "services", {})
+    command_window_service = services.get("visible_command_service")
+    history = (
+        [] if command_window_service is None else command_window_service.history_entries()
+    )
     with history_path.open("w", encoding="utf-8") as handle:
         handle.write("# Hyde terminal history starts here.\n")
         handle.write("history = ")
@@ -150,11 +137,3 @@ def restore_main_window(app, session):
         app.ui.restoreGeometry(_decode_qbytearray(geometry))
     if state:
         app.ui.restoreState(_decode_qbytearray(state))
-
-
-def clear_tables(app):
-    plugin_manager = getattr(app, "plugin_manager", None)
-    services = getattr(plugin_manager, "services", {})
-    table_workspace = services.get("table_workspace")
-    if table_workspace is not None:
-        table_workspace.clear()

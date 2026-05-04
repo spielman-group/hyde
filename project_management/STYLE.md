@@ -6,8 +6,8 @@ This document defines the coding standards and best practices for the Hyde proje
 
 ### 1.1 No Internal Aliasing
 Avoiding the use of `import module as alias` is heavily discouraged in this codebase for internal packages to ensure explicit namespace tracing. Always use fully-qualified references.
-- **Incorrect:** `import hyde.table_macros as macros`
-- **Correct:** `import hyde.table_macros`
+- **Incorrect:** `import hyde.recreation_registry as registry`
+- **Correct:** `import hyde.recreation_registry`
 
 ### 1.2 Standard Library Exceptions
 Explicit renames for common standard library modules are generally avoided unless there is a strong reason (e.g., namespace collision). `import datetime` is preferred over `import datetime as dt`.

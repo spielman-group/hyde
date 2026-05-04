@@ -134,6 +134,132 @@ class SimpleHydeCommandCodec(FeatureCodec):
         raise ValueError(f"Unsupported Hyde command: {command!r}.")
 
 
+class RuntimeCommandCodec(FeatureCodec):
+    feature_name = "runtime_command"
+    state_version = 1
+    _valid_commands = {
+        "reload_procedures",
+        "remote_request",
+        "callable_invocation",
+    }
+
+    @classmethod
+    def default_state(cls):
+        return {
+            "feature": cls.feature_name,
+            "state_version": cls.state_version,
+            "command": None,
+            "settings": {
+                "project_dir": None,
+                "hyde_source_root": None,
+                "reset_namespace": False,
+                "request_filepath": None,
+                "callable_name": None,
+                "callable_args": [],
+            },
+            "items": [],
+            "ui": {},
+        }
+
+    @classmethod
+    def normalize_state(cls, state):
+        normalized = copy.deepcopy(cls.default_state())
+        if state:
+            normalized["feature"] = state.get("feature", normalized["feature"])
+            normalized["state_version"] = state.get(
+                "state_version", normalized["state_version"]
+            )
+            normalized["command"] = state.get("command")
+            settings = state.get("settings", {})
+            if isinstance(settings, dict):
+                normalized["settings"].update(settings)
+            normalized["items"] = list(state.get("items", []))
+            ui = state.get("ui", {})
+            normalized["ui"] = dict(ui) if isinstance(ui, dict) else {}
+
+        settings = normalized["settings"]
+        for key in (
+            "project_dir",
+            "hyde_source_root",
+            "request_filepath",
+            "callable_name",
+        ):
+            value = settings.get(key)
+            settings[key] = None if value in (None, "") else str(value)
+        settings["reset_namespace"] = bool(settings.get("reset_namespace", False))
+        settings["callable_args"] = [
+            str(value) for value in settings.get("callable_args", []) if str(value)
+        ]
+        return normalized
+
+    @classmethod
+    def validate_state(cls, state):
+        normalized = cls.normalize_state(state)
+        if normalized["feature"] != cls.feature_name:
+            raise ValueError(f"Expected feature={cls.feature_name!r}.")
+
+        command = normalized["command"]
+        if command not in cls._valid_commands:
+            raise ValueError(f"Unsupported runtime command: {command!r}.")
+
+        settings = normalized["settings"]
+        if command == "reload_procedures":
+            if not settings["project_dir"]:
+                raise ValueError("reload_procedures requires settings.project_dir.")
+            if not settings["hyde_source_root"]:
+                raise ValueError(
+                    "reload_procedures requires settings.hyde_source_root."
+                )
+        elif command == "remote_request" and not settings["request_filepath"]:
+            raise ValueError("remote_request requires settings.request_filepath.")
+        elif command == "callable_invocation":
+            if not settings["callable_name"]:
+                raise ValueError(
+                    "callable_invocation requires settings.callable_name."
+                )
+        return normalized
+
+    @classmethod
+    def update_state(cls, state, action):
+        normalized = cls.normalize_state(state)
+        action_type = action.get("type")
+
+        if action_type == "set_command":
+            normalized["command"] = action["command"]
+        elif action_type == "set":
+            _set_path(normalized, action["path"], action["value"])
+        elif action_type == "clear":
+            _set_path(normalized, action["path"], None)
+        else:
+            raise ValueError(f"Unsupported runtime action: {action_type!r}.")
+
+        return cls.normalize_state(normalized)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        del context
+        normalized = cls.validate_state(state)
+        settings = normalized["settings"]
+        command = normalized["command"]
+
+        if command == "reload_procedures":
+            return (
+                "import sys\n"
+                f"if {settings['hyde_source_root']!r} not in sys.path:\n"
+                f"    sys.path.insert(0, {settings['hyde_source_root']!r})\n"
+                "from hyde.project_tools import execute_procedures_bootstrap\n"
+                f"execute_procedures_bootstrap({settings['project_dir']!r}, "
+                f"{settings['hyde_source_root']!r}, "
+                f"reset_namespace={settings['reset_namespace']!r})\n"
+            )
+        if command == "remote_request":
+            return f"remote({settings['request_filepath']!r})"
+        if command == "callable_invocation":
+            args = ", ".join(settings["callable_args"])
+            return f"{settings['callable_name']}({args})"
+        raise ValueError(f"Unsupported runtime command: {command!r}.")
+
+
 class TableCodec(FeatureCodec):
     feature_name = "table"
     state_version = 1
@@ -281,7 +407,7 @@ class TableCodec(FeatureCodec):
                 f"{list(normalized['items'])!r}, {settings['request_id']!r})"
             )
         if command == "publish_table_macros":
-            return "hyde.table_macros.publish_table_macro_registry()"
+            return "hyde.recreation_registry.publish_table_macro_registry()"
         raise ValueError(f"Unsupported table command: {command!r}.")
 
     @classmethod
@@ -313,6 +439,7 @@ class MutationCodec(FeatureCodec):
         "append_value",
         "create_array",
         "delete_indices",
+        "delete_name",
     }
 
     @classmethod
@@ -388,6 +515,9 @@ class MutationCodec(FeatureCodec):
         if command == "delete_indices":
             if settings["indices"] is None:
                 raise ValueError("Delete commands require settings.indices.")
+        if command == "delete_name":
+            if settings["indices"] not in (None, []):
+                raise ValueError("delete_name does not support settings.indices.")
         return normalized
 
     @classmethod
@@ -456,6 +586,8 @@ class MutationCodec(FeatureCodec):
         if command == "delete_indices":
             indices = sorted(set(settings["indices"] or []))
             return f"{var_name} = np.delete({var_name}, {indices!r})"
+        if command == "delete_name":
+            return f"del {var_name}"
         raise ValueError(f"Unsupported mutation command: {command!r}.")
 
 
@@ -473,24 +605,3 @@ def is_eligible_for_table(metadata):
     is_numeric = kind in "biuf"
 
     return is_array and is_numeric and ndim == 1
-
-
-def format_procedures_bootstrap_code(project_dir, hyde_source_root, reset_namespace=False):
-    """
-    Formulates the canonical procedure environment bootstrap string by
-    invoking the real execution logic.
-    """
-    return (
-        "import sys\n"
-        f"if {hyde_source_root!r} not in sys.path:\n"
-        f"    sys.path.insert(0, {hyde_source_root!r})\n"
-        "from hyde.project_tools import execute_procedures_bootstrap\n"
-        f"execute_procedures_bootstrap({project_dir!r}, {hyde_source_root!r}, reset_namespace={reset_namespace})\n"
-    )
-
-
-def format_remote_command(request_filepath):
-    """
-    Formulates a muted command to trigger remote execution for a file payload.
-    """
-    return f"remote({request_filepath!r})"

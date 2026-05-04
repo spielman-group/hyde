@@ -1,7 +1,10 @@
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout
 from labscript_utils.qtwidgets.outputbox import OutputBox
 from labscript_utils.plugins import BasePlugin
-from hyde.user_interface.plugin_tools import capture_subwindow_state, restore_subwindow_state
+from hyde.user_interface.plugin_tools import (
+    capture_subwindow_state,
+    restore_subwindow_state,
+)
 
 class LoggingWindow(QWidget):
     def __init__(self, *args, **kwargs):
@@ -17,24 +20,42 @@ class LoggingWindow(QWidget):
     def port(self):
         return self.output_box.port
 
-    def closeEvent(self, event):
-        # Instead of destroying, we just hide the entire MDI sub-window.
-        # This allows the window to be toggled via the 'Windows' menu.
-        if self.parentWidget():
-            self.parentWidget().hide()
-        else:
-            self.hide()
-        event.ignore()
+
+class LoggingWindowService:
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def ensure_widget(self):
+        return self.plugin.services["mdi_context"].ensure_widget("logging")
+
+    def widget(self):
+        return self.plugin.services["mdi_context"].widget("logging")
+
+    def subwindow(self):
+        return self.plugin.services["mdi_context"].subwindow("logging")
+
+    def output_box(self):
+        widget = self.ensure_widget()
+        return widget.output_box
+
+    def port(self):
+        widget = self.ensure_widget()
+        return widget.port
 
 
 class Plugin(BasePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.services = {}
+        self.logging_window_service = LoggingWindowService(self)
 
     def plugin_setup_complete(self, data=None):
         data = data or {}
         self.services = data.get("services", {})
+        self.logging_window_service.ensure_widget()
+        subwindow = self.logging_window_service.subwindow()
+        if subwindow is not None:
+            subwindow.hide()
 
     def get_ui_contributions(self):
         return [
@@ -57,6 +78,9 @@ class Plugin(BasePlugin):
                 "action": self.show_window,
             }
         ]
+
+    def get_services(self):
+        return {"runtime_output_service": self.logging_window_service}
 
     def create_widget(self, parent=None, data=None):
         del data
