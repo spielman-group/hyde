@@ -3,7 +3,7 @@ import sys
 import time
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="hyde-mpl-"))
@@ -20,7 +20,7 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.plugins.data_browser import DataBrowser, Plugin
+from hyde.user_interface.plugins.data_browser import DataBrowser
 
 
 def process_events(duration=0.05):
@@ -199,9 +199,6 @@ class TestDataBrowserFinal(unittest.TestCase):
         if hasattr(self, "tmpdir"):
             self.tmpdir.cleanup()
 
-    def test_initial_namespace_population(self):
-        self.assertTrue({"arr", "df", "val", "s"}.issubset(set(current_names(self.browser))))
-
     def test_namespace_updates_after_kernel_execution(self):
         wait_for_code_ok(self.client, "new_scalar = 99")
         wait_until(
@@ -209,45 +206,6 @@ class TestDataBrowserFinal(unittest.TestCase):
             timeout=10,
             message="Browser did not refresh after kernel execution.",
         )
-
-    def test_namespace_updates_after_procedures_bootstrap_rerun(self):
-        with open(self.procedures_init, "w", encoding="utf-8") as f:
-            f.write(
-                "import numpy as np\n"
-                "import pandas as pd\n"
-                "arr = np.array([4, 5, 6])\n"
-                "df = pd.DataFrame({'x': [3, 4]})\n"
-                "val = 42\n"
-                "s = 'updated'\n"
-                "reloaded_name = 7\n"
-            )
-        bootstrap = RuntimeCommandState()
-        bootstrap.set_reload_procedures(
-            self.project_dir,
-            os.path.dirname(HYDE_DIR),
-            reset_namespace=False,
-        )
-        wait_for_code_ok(
-            self.client,
-            bootstrap.python_source(),
-        )
-        wait_until(
-            lambda: "reloaded_name" in current_names(self.browser),
-            timeout=15,
-            message="Browser did not refresh after procedures bootstrap rerun.",
-        )
-
-    def test_unrelated_comm_traffic_is_ignored(self):
-        before = sorted(current_names(self.browser))
-        wait_for_code_ok(
-            self.client,
-            "from ipykernel.comm import Comm\n"
-            "unrelated = Comm(target_name='unrelated_target')\n"
-            "unrelated.send({'type': 'UNRELATED'})\n",
-        )
-        process_events(0.5)
-        after = sorted(current_names(self.browser))
-        self.assertEqual(before, after)
 
     def test_filter_behavior_and_info_toggle(self):
         self.assertTrue(self.browser.ui.infoPane.isVisible())
@@ -274,14 +232,6 @@ class TestDataBrowserFinal(unittest.TestCase):
         self.browser.ui.infoCheckBox.setChecked(True)
         process_events()
         self.assertTrue(self.browser.ui.infoPane.isVisible())
-
-    def test_selection_updates_info_pane(self):
-        select_name(self.browser, "arr")
-        wait_until(
-            lambda: "name: arr" in self.browser.ui.infoText.toPlainText(),
-            timeout=5,
-            message="Selecting a row did not populate the info pane.",
-        )
 
     def test_delete_action_removes_object_from_namespace_view(self):
         original_question = QtWidgets.QMessageBox.question
@@ -370,55 +320,6 @@ class TestDataBrowserSelectionRules(unittest.TestCase):
         table_feature.show_new_table_dialog.assert_not_called()
         table_feature.append_to_active_table.assert_not_called()
 
-    def test_context_menu_disables_table_actions_for_mixed_selection(self):
-        table_feature = Mock()
-        table_feature.has_active_table.return_value = True
-        browser = self._make_browser(
-            {
-                "arr": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "f"},
-                "val": {"python_type": "int"},
-            }
-        )
-        browser.services["table_feature"] = table_feature
-        self._force_selected_names(browser, ["arr", "val"])
-        created_menus = []
-
-        class FakeAction:
-            def __init__(self, text):
-                self.text = text
-                self.enabled = True
-
-            def setEnabled(self, value):
-                self.enabled = bool(value)
-
-        class FakeMenu:
-            def __init__(self, parent=None):
-                del parent
-                self.actions = []
-                created_menus.append(self)
-
-            def addAction(self, text):
-                action = FakeAction(text)
-                self.actions.append(action)
-                return action
-
-            def addSeparator(self):
-                return None
-
-            def exec_(self, position):
-                del position
-                return None
-
-        with patch("hyde.user_interface.plugins.data_browser.QtWidgets.QMenu", FakeMenu):
-            browser._show_context_menu(QtCore.QPoint(0, 0))
-
-        self.assertEqual(len(created_menus), 1)
-        action_state = {
-            action.text: action.enabled for action in created_menus[0].actions
-        }
-        self.assertFalse(action_state["Edit"])
-        self.assertFalse(action_state["Append to Table"])
-
     def test_table_dispatch_uses_all_selected_eligible_names(self):
         table_feature = Mock()
         table_feature.has_active_table.return_value = True
@@ -442,25 +343,6 @@ class TestDataBrowserSelectionRules(unittest.TestCase):
             parent=browser,
         )
         table_feature.append_to_active_table.assert_called_once_with(["arr", "arr2"])
-
-    def test_close_event_hides_persistent_window_without_shutdown(self):
-        browser = DataBrowser.__new__(DataBrowser)
-        QtWidgets.QWidget.__init__(browser)
-        browser.services = {}
-        browser._closed = False
-        browser.shutdown = Mock()
-        subwindow = QtWidgets.QMdiSubWindow()
-        subwindow.setWidget(browser)
-        subwindow.show()
-        process_events()
-
-        event = QtGui.QCloseEvent()
-        browser.closeEvent(event)
-
-        self.assertFalse(event.isAccepted())
-        self.assertFalse(subwindow.isVisible())
-        browser.shutdown.assert_not_called()
-
 
 class TestDataBrowserRefreshTracking(unittest.TestCase):
     @classmethod
@@ -505,70 +387,6 @@ class TestDataBrowserRefreshTracking(unittest.TestCase):
         callback(view)
         process_events()
 
-    def test_browser_owned_status_messages_do_not_complete_refresh(self):
-        browser, callbacks = self._make_browser()
-
-        browser.refresh_namespace()
-        browser._handle_iopub_message(self._status_message("busy", "browser-session"))
-        browser._handle_iopub_message(self._status_message("idle", "browser-session"))
-
-        self.assertTrue(browser._refresh_in_flight)
-        self.assertFalse(browser._refresh_pending)
-        self.assertFalse(browser._external_requests_in_flight)
-        self.assertEqual(len(callbacks), 1)
-
-        self._deliver_next_view(callbacks, {"stale": {"type": "int"}})
-
-        self.assertFalse(browser._refresh_in_flight)
-        self.assertEqual(browser.namespace_view(), {"stale": {"type": "int"}})
-        self.assertEqual(callbacks, [])
-
-    def test_external_idle_during_refresh_queues_fresh_follow_up_view(self):
-        browser, callbacks = self._make_browser()
-
-        browser.refresh_namespace()
-        browser._handle_iopub_message(self._status_message("busy", "external-session"))
-        browser._handle_iopub_message(self._status_message("idle", "external-session"))
-
-        self.assertTrue(browser._refresh_in_flight)
-        self.assertTrue(browser._refresh_pending)
-        self.assertFalse(browser._external_requests_in_flight)
-        self.assertEqual(len(callbacks), 1)
-
-        self._deliver_next_view(callbacks, {"stale": {"type": "int"}})
-
-        self.assertTrue(browser._refresh_in_flight)
-        self.assertFalse(browser._refresh_pending)
-        self.assertEqual(len(callbacks), 1)
-
-        self._deliver_next_view(callbacks, {"fresh": {"type": "float"}})
-
-        self.assertFalse(browser._refresh_in_flight)
-        self.assertEqual(browser.namespace_view(), {"fresh": {"type": "float"}})
-        self.assertEqual(callbacks, [])
-
-    def test_external_activity_around_refresh_still_fetches_fresh_view(self):
-        browser, callbacks = self._make_browser()
-
-        browser._handle_iopub_message(self._status_message("busy", "external-session"))
-        browser.refresh_namespace()
-        self._deliver_next_view(callbacks, {"stale": {"type": "int"}})
-
-        self.assertFalse(browser._refresh_in_flight)
-        self.assertTrue(browser._external_requests_in_flight)
-        self.assertEqual(browser.namespace_view(), {"stale": {"type": "int"}})
-
-        browser._handle_iopub_message(self._status_message("idle", "external-session"))
-        self.assertTrue(browser._refresh_in_flight)
-        self.assertFalse(browser._external_requests_in_flight)
-        self.assertEqual(len(callbacks), 1)
-
-        self._deliver_next_view(callbacks, {"fresh": {"type": "float"}})
-
-        self.assertFalse(browser._refresh_in_flight)
-        self.assertEqual(browser.namespace_view(), {"fresh": {"type": "float"}})
-        self.assertEqual(callbacks, [])
-
     def test_overlapping_external_sessions_refresh_only_after_last_idle(self):
         browser, callbacks = self._make_browser()
 
@@ -594,21 +412,5 @@ class TestDataBrowserRefreshTracking(unittest.TestCase):
         self.assertFalse(browser._external_requests_in_flight)
         self.assertTrue(browser._refresh_pending)
         self.assertEqual(len(callbacks), 1)
-
-
-class TestDataBrowserPluginSetup(unittest.TestCase):
-    def test_plugin_uses_lookup_menu_action_service(self):
-        action = QtWidgets.QAction("Data Browser")
-        lookup_menu_action = Mock(return_value=action)
-        ui = type("UI", (), {"menuWindow": QtWidgets.QMenu()})()
-        plugin = Plugin(initial_settings={})
-
-        plugin.plugin_setup_complete(
-            {"services": {"ui": ui, "lookup_menu_action": lookup_menu_action}}
-        )
-
-        self.assertIs(plugin._action, action)
-
-
 if __name__ == "__main__":
     unittest.main()

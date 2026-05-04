@@ -1,10 +1,6 @@
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout
 from labscript_utils.qtwidgets.outputbox import OutputBox
-from labscript_utils.plugins import BasePlugin
-from hyde.user_interface.plugin_tools import (
-    capture_subwindow_state,
-    restore_subwindow_state,
-)
+from hyde.user_interface.plugin_tools import HydePlugin
 
 class LoggingWindow(QWidget):
     def __init__(self, *args, **kwargs):
@@ -26,13 +22,13 @@ class LoggingWindowService:
         self.plugin = plugin
 
     def ensure_widget(self):
-        return self.plugin.services["mdi_context"].ensure_widget("logging")
+        return self.plugin.ensure_mdi_widget("logging")
 
     def widget(self):
-        return self.plugin.services["mdi_context"].widget("logging")
+        return self.plugin.mdi_widget("logging")
 
     def subwindow(self):
-        return self.plugin.services["mdi_context"].subwindow("logging")
+        return self.plugin.mdi_subwindow("logging")
 
     def output_box(self):
         widget = self.ensure_widget()
@@ -43,19 +39,15 @@ class LoggingWindowService:
         return widget.port
 
 
-class Plugin(BasePlugin):
+class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.services = {}
         self.logging_window_service = LoggingWindowService(self)
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
+    def on_setup_complete(self, data=None):
+        del data
         self.logging_window_service.ensure_widget()
-        subwindow = self.logging_window_service.subwindow()
-        if subwindow is not None:
-            subwindow.hide()
+        self.hide_mdi_subwindow("logging")
 
     def get_ui_contributions(self):
         return [
@@ -96,18 +88,7 @@ class Plugin(BasePlugin):
         }
 
     def get_save_data(self):
-        subwindow = self.services["mdi_context"].subwindow("logging")
-        if subwindow is None:
-            return {}
-        return {
-            "tool_windows": {
-                "logging": capture_subwindow_state(subwindow),
-            }
-        }
+        return self.tool_window_save_data("logging")
 
     def on_project_loaded(self, data):
-        info = data["session"].get("tool_windows", {}).get("logging", {})
-        restore_subwindow_state(
-            self.services["mdi_context"].subwindow("logging"),
-            info,
-        )
+        self.restore_tool_window(data["session"], "logging")

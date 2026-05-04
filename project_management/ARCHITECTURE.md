@@ -49,8 +49,9 @@ hyde/
 │       │   └── main.ui
 │       ├── plugins/           # First-party UI plugins discovered by Hyde
 │       │   ├── command_window/
+│       │   ├── table/
 │       │   └── ...
-│       ├── table.py           # Non-plugin support module shared by table plugin
+│       ├── plugin_tools.py    # Shared plugin infrastructure
 │       └── ...
 └── tests/
     ├── test_watchdog.py      # Architecture integration tests
@@ -157,12 +158,15 @@ remain outside that namespace.
 ```
 user_interface/
 ├── main/                    # Shell infrastructure
+│   ├── __init__.py
+│   ├── project_state.py     # Shell-owned session persistence helpers
+│   └── runtime_helper.py    # GUI-owned runtime queue/thread helper
 ├── plugins/
 │   └── window_name/
 │       ├── __init__.py      # Plugin entrypoint
 │       └── window_name.ui   # Qt Designer file when needed
 ├── plugin_tools.py          # Shared plugin infrastructure
-└── table.py                 # Support module used by the table plugin
+└── ...
 ```
 
 ## Widget Types

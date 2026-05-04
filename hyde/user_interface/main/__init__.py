@@ -13,7 +13,6 @@ from hyde.paths import (
     get_project_paths,
 )
 from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.runtime_helper import RuntimeHelper
 from hyde.user_interface.main.project_state import (
     try_read_history,
     try_read_session,
@@ -21,10 +20,12 @@ from hyde.user_interface.main.project_state import (
     write_history,
     write_session,
 )
+from hyde.user_interface.main.runtime_helper import RuntimeHelper
 from hyde.user_interface.plugin_tools import (
     HydeMDIContext,
     HydeMenuContext,
     HydePluginManager,
+    blank_window_icon,
 )
 
 qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
@@ -319,6 +320,7 @@ class HydeApp:
         self.queue_background_command(code, silent=True)
 
     def configure_persistent_subwindow(self, subwindow):
+        subwindow.setWindowIcon(blank_window_icon())
         subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
         event_filter = PersistentSubwindowFilter(subwindow)
         subwindow.installEventFilter(event_filter)

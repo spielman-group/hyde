@@ -1,7 +1,6 @@
 import os
 import time
 
-from labscript_utils.plugins import BasePlugin
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from qtconsole.client import QtKernelClient
@@ -9,10 +8,7 @@ from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.hyde_features import is_eligible_for_table
 from hyde.paths import CONNECTION_FILE
 from hyde.user_interface.base import MutationState
-from hyde.user_interface.plugin_tools import (
-    capture_subwindow_state,
-    restore_subwindow_state,
-)
+from hyde.user_interface.plugin_tools import HydePlugin
 
 NAMESPACE_VIEW_SETTINGS = {
     "check_all": False,
@@ -441,16 +437,16 @@ class DataBrowserService:
         self.plugin = plugin
 
     def ensure_widget(self):
-        return self.plugin.services["mdi_context"].ensure_widget("data_browser")
+        return self.plugin.ensure_mdi_widget("data_browser")
 
     def widget(self):
-        return self.plugin.services["mdi_context"].widget("data_browser")
+        return self.plugin.mdi_widget("data_browser")
 
     def subwindow(self):
-        return self.plugin.services["mdi_context"].subwindow("data_browser")
+        return self.plugin.mdi_subwindow("data_browser")
 
     def destroy(self):
-        self.plugin.services["mdi_context"].destroy("data_browser")
+        self.plugin.destroy_mdi_widget("data_browser")
 
     def namespace_view(self):
         widget = self.ensure_widget()
@@ -471,19 +467,15 @@ class DataBrowserService:
         return True
 
 
-class Plugin(BasePlugin):
+class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.services = {}
         self.data_browser_service = DataBrowserService(self)
         self._action = None
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
-        lookup_menu_action = self.services.get("lookup_menu_action")
-        if lookup_menu_action is not None:
-            self._action = lookup_menu_action("window", "Data Browser")
+    def on_setup_complete(self, data=None):
+        del data
+        self.bind_menu_action("_action", "window", "Data Browser")
 
     def get_ui_contributions(self):
         return [
@@ -533,47 +525,36 @@ class Plugin(BasePlugin):
         }
 
     def get_save_data(self):
-        widget = self.services["mdi_context"].widget("data_browser")
-        subwindow = self.services["mdi_context"].subwindow("data_browser")
-        if widget is None or subwindow is None:
+        widget = self.mdi_widget("data_browser")
+        if widget is None:
             return {}
-        return {
-            "tool_windows": {
-                "data_browser": capture_subwindow_state(subwindow),
-            },
-            "data_browser": {
-                "waves": bool(widget.ui.wavesCheckBox.isChecked()),
-                "variables": bool(widget.ui.variablesCheckBox.isChecked()),
-                "strings": bool(widget.ui.stringsCheckBox.isChecked()),
-                "info": bool(widget.ui.infoCheckBox.isChecked()),
-            },
+        save_data = self.tool_window_save_data("data_browser")
+        save_data["data_browser"] = {
+            "waves": bool(widget.ui.wavesCheckBox.isChecked()),
+            "variables": bool(widget.ui.variablesCheckBox.isChecked()),
+            "strings": bool(widget.ui.stringsCheckBox.isChecked()),
+            "info": bool(widget.ui.infoCheckBox.isChecked()),
         }
+        return save_data
 
     def on_project_loaded(self, data):
         session = data["session"]
         widget = self.data_browser_service.ensure_widget()
-        restore_subwindow_state(
-            self.data_browser_service.subwindow(),
-            session.get("tool_windows", {}).get("data_browser", {}),
-        )
+        self.restore_tool_window(session, "data_browser")
         widget.restore_view_state(session.get("data_browser", {}))
 
     def on_enter_no_project_state(self, data):
         del data
-        if self._action is not None:
-            self._action.setEnabled(False)
-        subwindow = self.data_browser_service.subwindow()
-        if subwindow is not None:
-            subwindow.hide()
+        self.set_bound_action_enabled("_action", False)
+        self.hide_mdi_subwindow("data_browser")
 
     def on_project_activated(self, data):
         del data
-        if self._action is not None:
-            self._action.setEnabled(True)
+        self.set_bound_action_enabled("_action", True)
 
     def on_kernel_ready(self, data):
         del data
-        self.data_browser_service.ensure_widget()
+        self.ensure_mdi_widget("data_browser")
 
     def on_kernel_crashed(self, data):
         del data

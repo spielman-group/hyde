@@ -1,28 +1,14 @@
 import importlib
 import logging
 import os
-import weakref
 
-from labscript_utils.plugins import DEFAULT_PRIORITY, MenuContext, PluginManager
-from qtutils.qt import QtCore
-
-
-_MENU_ACTIONS_BY_ID = {}
-
-
-def _menu_entry(menu, create=False):
-    menu_id = id(menu)
-    entry = _MENU_ACTIONS_BY_ID.get(menu_id)
-    if entry is not None:
-        menu_ref, actions = entry
-        if menu_ref() is menu:
-            return actions
-        _MENU_ACTIONS_BY_ID.pop(menu_id, None)
-    if not create:
-        return None
-    actions = {}
-    _MENU_ACTIONS_BY_ID[menu_id] = (weakref.ref(menu), actions)
-    return actions
+from labscript_utils.plugins import (
+    DEFAULT_PRIORITY,
+    BasePlugin,
+    MenuContext,
+    PluginManager,
+)
+from qtutils.qt import QtCore, QtGui
 
 
 class _NullConfig:
@@ -79,16 +65,91 @@ class HydePluginManager(PluginManager):
         return modules
 
 
+class HydePlugin(BasePlugin):
+    """Hyde-local plugin base with shared service and menu-action helpers."""
+
+    def __init__(self, initial_settings):
+        super().__init__(initial_settings)
+        self.services = {}
+
+    def plugin_setup_complete(self, data=None):
+        data = data or {}
+        self.services = data.get("services", {})
+        self.on_setup_complete(data)
+
+    def on_setup_complete(self, data=None):
+        del data
+
+    def service(self, key, default=None):
+        return self.services.get(key, default)
+
+    def menu_action(self, location, name, path=()):
+        lookup_menu_action = self.service("lookup_menu_action")
+        if lookup_menu_action is None:
+            return None
+        return lookup_menu_action(location, name, path=path)
+
+    def bind_menu_action(self, attr_name, location, name, path=()):
+        action = self.menu_action(location, name, path=path)
+        setattr(self, attr_name, action)
+        return action
+
+    def set_bound_action_enabled(self, attr_name, enabled):
+        action = getattr(self, attr_name, None)
+        if action is not None:
+            action.setEnabled(bool(enabled))
+
+    def mdi_context(self):
+        return self.service("mdi_context")
+
+    def ensure_mdi_widget(self, key):
+        return self.mdi_context().ensure_widget(key)
+
+    def mdi_widget(self, key):
+        return self.mdi_context().widget(key)
+
+    def mdi_subwindow(self, key):
+        return self.mdi_context().subwindow(key)
+
+    def destroy_mdi_widget(self, key):
+        return self.mdi_context().destroy(key)
+
+    def hide_mdi_subwindow(self, key):
+        subwindow = self.mdi_subwindow(key)
+        if subwindow is not None:
+            subwindow.hide()
+        return subwindow
+
+    def tool_window_save_data(self, session_key, mdi_key=None):
+        subwindow = self.mdi_subwindow(mdi_key or session_key)
+        if subwindow is None:
+            return {}
+        return {
+            "tool_windows": {
+                session_key: capture_subwindow_state(subwindow),
+            }
+        }
+
+    def restore_tool_window(self, session, session_key, mdi_key=None, ensure=False):
+        key = mdi_key or session_key
+        if ensure:
+            self.ensure_mdi_widget(key)
+        subwindow = self.mdi_subwindow(key)
+        if subwindow is None:
+            return None
+        restore_subwindow_state(
+            subwindow,
+            session.get("tool_windows", {}).get(session_key, {}),
+        )
+        return subwindow
+
+
 class HydeMenuContext(MenuContext):
     """Hyde-local menu context that retains rendered QAction objects."""
 
     def __init__(self, icon_factory=None, logger=None):
         super().__init__(icon_factory=icon_factory, logger=logger)
         self._actions = {}
-
-    def register_location(self, name, menu):
-        super().register_location(name, menu)
-        _menu_entry(menu, create=True)
 
     def lookup_action(self, location, name, path=()):
         if isinstance(path, str):
@@ -98,9 +159,8 @@ class HydeMenuContext(MenuContext):
         return self._actions.get((location, path, name))
 
     def _register_action(self, location, path, menu, name, action):
+        del menu
         self._actions[(location, path, name)] = action
-        actions = _menu_entry(menu, create=True)
-        actions[name] = action
 
     def render(self):
         self._actions = {}
@@ -153,7 +213,7 @@ class HydeMenuContext(MenuContext):
         menus = {}
         for name, menu in self.locations.items():
             menus[(name, ())] = menu
-            _menu_entry(menu, create=True).clear()
+            menu.clear()
 
         for key in sorted(grouped):
             location, path = key
@@ -164,7 +224,6 @@ class HydeMenuContext(MenuContext):
                 if submenu_key not in menus:
                     submenu = menus[(location, parent_path)].addMenu(submenu_name)
                     menus[submenu_key] = submenu
-                    _menu_entry(submenu, create=True).clear()
                 parent_path = submenu_path
             menu = menus[(location, path)]
 
@@ -270,7 +329,6 @@ class HydeMDIContext:
     def destroy(self, key):
         widget = self._widgets.pop(key, None)
         subwindow = self._subwindows.pop(key, None)
-        self._contributions.get(key)
         if widget is None:
             return None, None
         if subwindow is not None:
@@ -302,3 +360,9 @@ def restore_subwindow_state(subwindow, info):
     if geometry:
         subwindow.setGeometry(QtCore.QRect(*geometry))
     subwindow.setVisible(bool(info.get("visible", False)))
+
+
+def blank_window_icon():
+    pixmap = QtGui.QPixmap(1, 1)
+    pixmap.fill(QtCore.Qt.transparent)
+    return QtGui.QIcon(pixmap)

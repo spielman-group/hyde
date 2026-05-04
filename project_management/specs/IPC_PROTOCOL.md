@@ -212,7 +212,7 @@ This is the user's visible interactive console session.
 ## Lane 2B: Runtime Helper -> Kernel (Background Control Session)
 
 ### Transport
-- `hyde/user_interface/runtime_helper.py`
+- `hyde/user_interface/main/runtime_helper.py`
 - `jupyter_client.BlockingKernelClient`
 - shared connection file: `kernel-hyde.json`
 
@@ -234,7 +234,7 @@ inside the kernel, then emits `ENTER_NO_PROJECT_STATE`, `ACTIVATE_PROJECT`, and
 ## External Lyse-Compatible Listener
 
 ### Transport
-- `hyde/user_interface/runtime_helper.py`
+- `hyde/user_interface/main/runtime_helper.py`
 - `labscript_utils.ls_zprocess.ZMQServer`
 - port source: `LabConfig().get('ports', 'lyse')`, with fallback `42519`
 

@@ -1,4 +1,4 @@
-from labscript_utils.plugins import BasePlugin
+from hyde.user_interface.plugin_tools import HydePlugin
 
 from .dialogs import (
     HealProjectDialog,
@@ -11,15 +11,13 @@ from .dialogs import (
     SaveProjectCommand,
 )
 
-class Plugin(BasePlugin):
+class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.services = {}
         self._actions = {}
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
+    def on_setup_complete(self, data=None):
+        del data
         self._bind_actions()
         self._set_project_action_state(
             self.services["get_current_project_dir"]() is not None
@@ -83,7 +81,6 @@ class Plugin(BasePlugin):
         ]
 
     def _bind_actions(self):
-        lookup_menu_action = self.services.get("lookup_menu_action")
         self._actions = {}
         bindings = {
             "new": ("file", "New..."),
@@ -95,7 +92,7 @@ class Plugin(BasePlugin):
             "quit": ("file", "Quit"),
         }
         for action_key, (location, text) in bindings.items():
-            action = None if lookup_menu_action is None else lookup_menu_action(location, text)
+            action = self.menu_action(location, text)
             if action is not None:
                 self._actions[action_key] = action
 

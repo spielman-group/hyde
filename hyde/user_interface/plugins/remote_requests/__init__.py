@@ -3,10 +3,10 @@ import logging
 from labscript_utils import shared_drive
 from labscript_utils.labconfig import LabConfig
 from labscript_utils.ls_zprocess import ZMQServer
-from labscript_utils.plugins import BasePlugin
 from zmq.error import ZMQError
 
 from hyde.user_interface.base import RuntimeCommandState
+from hyde.user_interface.plugin_tools import HydePlugin
 
 
 def _remote_port():
@@ -42,15 +42,13 @@ class RemoteRequestServer(ZMQServer):
         )
 
 
-class Plugin(BasePlugin):
+class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.services = {}
         self.server = None
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
+    def on_setup_complete(self, data=None):
+        del data
         try:
             self.server = RemoteRequestServer(
                 self.services["queue_background_command"],

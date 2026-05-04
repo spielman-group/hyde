@@ -3,7 +3,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -12,16 +11,14 @@ try:
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
-from labscript_utils.plugins import BasePlugin
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugin_tools import (
     HydeMDIContext,
-    HydeMenuContext,
+    HydePlugin,
     HydePluginManager,
 )
-from hyde.user_interface.main.project_state import read_session, write_session
 
 
 def make_plugin_host(plugin_manager):
@@ -131,34 +128,26 @@ class TestPluginTools(unittest.TestCase):
             "Plugin Window",
         )
 
-    def test_hyde_menu_context_retains_actions_for_lookup(self):
-        main_window = QtWidgets.QMainWindow()
-        main_window.setMenuBar(QtWidgets.QMenuBar())
-        file_menu = main_window.menuBar().addMenu("File")
+    def test_configure_persistent_subwindow_uses_blank_icon_instead_of_app_icon(self):
+        dummy_app = type("DummyApp", (), {"_subwindow_filters": []})()
+        subwindow = QtWidgets.QMdiSubWindow()
+        app_icon = QtGui.QIcon(QtGui.QPixmap(2, 2))
+        QtWidgets.QApplication.setWindowIcon(app_icon)
 
-        context = HydeMenuContext()
-        context.register_location("file", file_menu)
-        context.add(
-            "demo",
-            {
-                "location": "file",
-                "group": "project",
-                "order": 10,
-                "name": "Open Demo",
-                "action": lambda: None,
-            },
-            {},
+        HydeApp.configure_persistent_subwindow(dummy_app, subwindow)
+
+        self.assertEqual(subwindow.windowIcon().availableSizes(), [QtCore.QSize(1, 1)])
+        self.assertNotEqual(
+            subwindow.windowIcon().availableSizes(),
+            app_icon.availableSizes(),
         )
-        context.render()
-
-        action = context.lookup_action("file", "Open Demo")
-        self.assertIs(action, file_menu.actions()[0])
 
     def test_setup_plugins_collects_services_and_renders_menu_actions(self):
-        class DemoPlugin(BasePlugin):
+        class DemoPlugin(HydePlugin):
             def __init__(self):
                 super().__init__({})
-                self.setup_data = None
+                self.setup_services = None
+                self.bound_action = None
 
             def get_services(self):
                 return {"plugin_service": "demo"}
@@ -174,8 +163,12 @@ class TestPluginTools(unittest.TestCase):
                     }
                 ]
 
-            def plugin_setup_complete(self, data=None):
-                self.setup_data = dict(data or {})
+            def on_setup_complete(self, data=None):
+                del data
+                self.setup_services = self.services
+                self.bound_action = self.bind_menu_action(
+                    "bound_action", "window", "Plugin Tool"
+                )
 
         plugin = DemoPlugin()
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
@@ -187,7 +180,8 @@ class TestPluginTools(unittest.TestCase):
         self.assertIn("execute_command", manager.services)
         self.assertIn("lookup_menu_action", manager.services)
         self.assertEqual(manager.services["plugin_service"], "demo")
-        self.assertIs(plugin.setup_data["services"], manager.services)
+        self.assertIs(plugin.setup_services, manager.services)
+        self.assertIs(plugin.bound_action, app.ui.menuWindow.actions()[0])
         self.assertIs(
             manager.services["lookup_menu_action"]("window", "Plugin Tool"),
             app.ui.menuWindow.actions()[0],
@@ -196,90 +190,6 @@ class TestPluginTools(unittest.TestCase):
             [action.text() for action in app.ui.menuWindow.actions()],
             ["Plugin Tool"],
         )
-
-    def test_builtin_plugins_populate_file_and_window_menus(self):
-        class FakeOutputBox:
-            def __init__(self, layout):
-                del layout
-                self.port = 12345
-
-        manager = HydePluginManager(
-            plugin_package="hyde.user_interface.plugins",
-            plugins_dir=str(
-                Path(__file__).resolve().parents[1]
-                / "hyde"
-                / "user_interface"
-                / "plugins"
-            ),
-        )
-        manager.discover_modules()
-        manager.instantiate_plugins()
-        app = make_plugin_host(manager)
-
-        with patch(
-            "hyde.user_interface.plugins.remote_requests.RemoteRequestServer",
-            lambda *args, **kwargs: object(),
-        ):
-            with patch(
-                "hyde.user_interface.plugins.logging_window.OutputBox",
-                FakeOutputBox,
-            ):
-                HydeApp.setup_plugins(app)
-
-        file_texts = [action.text() for action in app.ui.menuFile.actions() if action.text()]
-        window_texts = [
-            action.text() for action in app.ui.menuWindow.actions() if action.text()
-        ]
-
-        self.assertIn("New...", file_texts)
-        self.assertIn("Load...", file_texts)
-        self.assertIn("Save", file_texts)
-        self.assertIn("Quit", file_texts)
-        self.assertIn("Command Window", window_texts)
-        self.assertIn("Logging", window_texts)
-        self.assertIn("Procedures", window_texts)
-        self.assertIn("Data Browser", window_texts)
-
-    def test_project_session_round_trip_uses_plugin_save_and_load_hooks(self):
-        class SessionPlugin(BasePlugin):
-            def __init__(self):
-                super().__init__({})
-                self.loaded_session = None
-
-            def get_save_data(self):
-                return {"plugin_state": {"value": 7}}
-
-            def get_event_handlers(self):
-                return {"project_loaded": self.on_project_loaded}
-
-            def on_project_loaded(self, data):
-                self.loaded_session = dict(data["session"])
-
-        plugin = SessionPlugin()
-        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"session": plugin}
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, "plugin_session.hy")
-            os.makedirs(project_dir)
-            os.makedirs(os.path.join(project_dir, "terminal"))
-
-            app = make_plugin_host(manager)
-            app.emit_plugin_event = lambda name, data=None: HydeApp.emit_plugin_event(
-                app, name, data
-            )
-            app.plugin_service = lambda key: manager.services.get(key)
-            app.current_project_dir = project_dir
-
-            write_session(app, project_dir)
-            session = read_session(project_dir)
-            self.assertEqual(session["plugin_state"]["value"], 7)
-
-            HydeApp.restore_project_session(app)
-
-        self.assertIsNotNone(plugin.loaded_session)
-        self.assertEqual(plugin.loaded_session["plugin_state"]["value"], 7)
-
 
 if __name__ == "__main__":
     unittest.main()

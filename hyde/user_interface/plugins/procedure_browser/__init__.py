@@ -1,12 +1,8 @@
 import os
-from labscript_utils.plugins import BasePlugin
 from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout, QTreeView, QFileSystemModel
 from qtutils.qt.QtGui import QDesktopServices
-from hyde.user_interface.plugin_tools import (
-    capture_subwindow_state,
-    restore_subwindow_state,
-)
+from hyde.user_interface.plugin_tools import HydePlugin
 
 class ProcedureBrowser(QWidget):
     def __init__(self, procedures_dir, *args, **kwargs):
@@ -51,22 +47,16 @@ class ProcedureBrowser(QWidget):
         if os.path.isfile(file_path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
 
-class Plugin(BasePlugin):
+class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.services = {}
         self._action = None
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
-        lookup_menu_action = self.services.get("lookup_menu_action")
-        if lookup_menu_action is not None:
-            self._action = lookup_menu_action("window", "Procedures")
-        self.services["mdi_context"].ensure_widget("procedures")
-        subwindow = self.services["mdi_context"].subwindow("procedures")
-        if subwindow is not None:
-            subwindow.hide()
+    def on_setup_complete(self, data=None):
+        del data
+        self.bind_menu_action("_action", "window", "Procedures")
+        self.ensure_mdi_widget("procedures")
+        self.hide_mdi_subwindow("procedures")
 
     def get_ui_contributions(self):
         return [
@@ -106,36 +96,21 @@ class Plugin(BasePlugin):
         }
 
     def get_save_data(self):
-        subwindow = self.services["mdi_context"].subwindow("procedures")
-        if subwindow is None:
-            return {}
-        return {
-            "tool_windows": {
-                "procedures": capture_subwindow_state(subwindow),
-            }
-        }
+        return self.tool_window_save_data("procedures")
 
     def on_project_loaded(self, data):
-        info = data["session"].get("tool_windows", {}).get("procedures", {})
-        restore_subwindow_state(
-            self.services["mdi_context"].subwindow("procedures"),
-            info,
-        )
+        self.restore_tool_window(data["session"], "procedures")
 
     def on_project_activated(self, data):
-        if self._action is not None:
-            self._action.setEnabled(True)
-        widget = self.services["mdi_context"].widget("procedures")
+        self.set_bound_action_enabled("_action", True)
+        widget = self.mdi_widget("procedures")
         if widget is not None:
             widget.set_procedures_dir(data.get("procedures_dir"))
 
     def on_enter_no_project_state(self, data):
         del data
-        if self._action is not None:
-            self._action.setEnabled(False)
-        widget = self.services["mdi_context"].widget("procedures")
+        self.set_bound_action_enabled("_action", False)
+        widget = self.mdi_widget("procedures")
         if widget is not None:
             widget.set_procedures_dir(None)
-        subwindow = self.services["mdi_context"].subwindow("procedures")
-        if subwindow is not None:
-            subwindow.hide()
+        self.hide_mdi_subwindow("procedures")

@@ -19,6 +19,7 @@ from .paths import DEFAULT_PROJECT_TEMPLATE
 
 FORMAT_VERSION = 1
 EXCLUDED_NAMES = {"In", "Out", "exit", "quit"}
+TEMPLATE_IGNORE_PATTERNS = ("__pycache__", "*.pyc", ".gitkeep")
 
 
 def resolve_project_dir(path=None):
@@ -39,14 +40,18 @@ def materialize_project_template(project_dir: Path, missing_only=False, create=T
         shutil.copytree(
             template_root,
             project_dir,
-            ignore=shutil.ignore_patterns("__pycache__"),
+            ignore=shutil.ignore_patterns(*TEMPLATE_IGNORE_PATTERNS),
         )
         return []
 
     created_paths = []
     for template_path in template_root.rglob("*"):
         relative_path = template_path.relative_to(template_root)
-        if "__pycache__" in relative_path.parts or template_path.suffix == ".pyc":
+        if (
+            "__pycache__" in relative_path.parts
+            or template_path.suffix == ".pyc"
+            or template_path.name == ".gitkeep"
+        ):
             continue
         target_path = project_dir / relative_path
         if target_path.exists():

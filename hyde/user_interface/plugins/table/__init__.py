@@ -1,6 +1,6 @@
-from labscript_utils.plugins import BasePlugin
 from qtutils.qt import QtCore, QtWidgets
 from hyde.user_interface.base import RuntimeCommandState
+from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
 
 from .window import (
     TableState,
@@ -66,6 +66,7 @@ class TableWorkspaceService:
             column_widths=column_widths,
         )
         subwindow = self.plugin.services["mdi_area"].addSubWindow(table)
+        subwindow.setWindowIcon(blank_window_icon())
         # Table windows own a real close path with prompt/cleanup, so they keep
         # Qt's normal delete-on-close behavior instead of the persistent tool-
         # window wrapper that turns close into hide.
@@ -160,10 +161,9 @@ class TableFeatureService:
         return True
 
 
-class Plugin(BasePlugin):
+class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.services = {}
         self.workspace = TableWorkspaceService(self)
         self.table_feature = TableFeatureService(self)
         self.table_macros = []
@@ -171,14 +171,11 @@ class Plugin(BasePlugin):
         self._new_table_action = None
         self._macro_menu = None
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
+    def on_setup_complete(self, data=None):
+        del data
         if self._signals_connected:
             return
-        lookup_menu_action = self.services.get("lookup_menu_action")
-        if lookup_menu_action is not None:
-            self._new_table_action = lookup_menu_action("window", "New Table...")
+        self.bind_menu_action("_new_table_action", "window", "New Table...")
         self._macro_menu = self._ensure_macro_menu()
         self.services["mdi_area"].subWindowActivated.connect(
             self.workspace.on_subwindow_activated

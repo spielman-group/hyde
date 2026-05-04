@@ -1,11 +1,7 @@
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
 from qtconsole.client import QtKernelClient
-from labscript_utils.plugins import BasePlugin
 from hyde.paths import CONNECTION_FILE
-from hyde.user_interface.plugin_tools import (
-    capture_subwindow_state,
-    restore_subwindow_state,
-)
+from hyde.user_interface.plugin_tools import HydePlugin
 
 class CommandWindow(RichJupyterWidget):
     def __init__(self, connection_file, history_sink=None, initial_history=None, *args, **kwargs):
@@ -77,13 +73,13 @@ class CommandWindowService:
         self._history_entries = []
 
     def ensure_widget(self):
-        return self.plugin.services["mdi_context"].ensure_widget("command_window")
+        return self.plugin.ensure_mdi_widget("command_window")
 
     def widget(self):
-        return self.plugin.services["mdi_context"].widget("command_window")
+        return self.plugin.mdi_widget("command_window")
 
     def subwindow(self):
-        return self.plugin.services["mdi_context"].subwindow("command_window")
+        return self.plugin.mdi_subwindow("command_window")
 
     def execute_visible(self, code):
         widget = self.ensure_widget()
@@ -111,22 +107,18 @@ class CommandWindowService:
         return None if widget is None else widget.kernel_client
 
     def destroy(self):
-        self.plugin.services["mdi_context"].destroy("command_window")
+        self.plugin.destroy_mdi_widget("command_window")
 
 
-class Plugin(BasePlugin):
+class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.services = {}
         self.command_window_service = CommandWindowService(self)
         self._action = None
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
-        lookup_menu_action = self.services.get("lookup_menu_action")
-        if lookup_menu_action is not None:
-            self._action = lookup_menu_action("window", "Command Window")
+    def on_setup_complete(self, data=None):
+        del data
+        self.bind_menu_action("_action", "window", "Command Window")
 
     def get_ui_contributions(self):
         return [
@@ -177,34 +169,19 @@ class Plugin(BasePlugin):
         }
 
     def get_save_data(self):
-        subwindow = self.services["mdi_context"].subwindow("command_window")
-        if subwindow is None:
-            return {}
-        return {
-            "tool_windows": {
-                "command": capture_subwindow_state(subwindow),
-            }
-        }
+        return self.tool_window_save_data("command", "command_window")
 
     def on_project_loaded(self, data):
-        info = data["session"].get("tool_windows", {}).get("command", {})
-        restore_subwindow_state(
-            self.services["mdi_context"].subwindow("command_window"),
-            info,
-        )
+        self.restore_tool_window(data["session"], "command", "command_window")
 
     def on_enter_no_project_state(self, data):
         del data
-        if self._action is not None:
-            self._action.setEnabled(False)
-        subwindow = self.command_window_service.subwindow()
-        if subwindow is not None:
-            subwindow.hide()
+        self.set_bound_action_enabled("_action", False)
+        self.hide_mdi_subwindow("command_window")
 
     def on_project_activated(self, data):
         del data
-        if self._action is not None:
-            self._action.setEnabled(True)
+        self.set_bound_action_enabled("_action", True)
 
     def on_kernel_ready(self, data):
         del data
