@@ -51,9 +51,11 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Impl: Save kernel objects into `manifest.toml` and `data/*` using exclusion-based persistence.
 - [x] Refinement: Exclude packages, interactive namespace artifacts, and runtime helper objects from kernel-state persistence.
 - [x] Impl: Save GUI session state into `session.toml` and visible command history into `terminal/history.py`.
+- [x] Refinement: Move first-party UI discovery to `hyde.user_interface.plugins` and keep shell/support modules outside the plugin namespace.
 - [x] Impl: Wire `File -> Save`, `File -> Save As...`, and project load into the explicit save/load flow.
 - [x] Refinement: `File -> Save As...` prompts before overwriting an existing non-empty project.
 - [x] Refinement: GUI session restore warns on malformed/missing `session.toml` and does not block kernel-state restore.
+- [x] Refinement: Collect GUI session payloads centrally from plugin `get_save_data()` and restore plugin-owned session state on `project_loaded`.
 - [x] Refinement: In-place `File -> Save` overwrites the current saved state instead of preserving an older synchronized copy.
 - [x] Refinement: Switching projects resets the kernel namespace before the new project's procedures/state are loaded.
 - [x] Test: Add focused save/load integration coverage.

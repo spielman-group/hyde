@@ -141,9 +141,6 @@ class TestHydePluginManager(unittest.TestCase):
         app.on_visible_command_executed = lambda message: message
         app.request_window_macros = lambda kind="table": kind
         app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
-        app._register_plugin_window = lambda key, widget, subwindow: HydeApp._register_plugin_window(
-            app, key, widget, subwindow
-        )
         app._bind_plugin_action_aliases = lambda: HydeApp._bind_plugin_action_aliases(app)
         app._find_menu_action = lambda menu, text: HydeApp._find_menu_action(app, menu, text)
         app.ui.menuFile = menu_file
@@ -159,8 +156,8 @@ class TestHydePluginManager(unittest.TestCase):
 
     def test_real_user_interface_plugins_populate_file_and_window_menus(self):
         manager = HydePluginManager(
-            plugin_package="hyde.user_interface",
-            plugins_dir=str(Path(__file__).resolve().parents[1] / "hyde" / "user_interface"),
+            plugin_package="hyde.user_interface.plugins",
+            plugins_dir=str(Path(__file__).resolve().parents[1] / "hyde" / "user_interface" / "plugins"),
         )
         manager.discover_modules()
         manager.instantiate_plugins()
@@ -195,9 +192,6 @@ class TestHydePluginManager(unittest.TestCase):
         app.on_visible_command_executed = lambda message: message
         app.request_window_macros = lambda kind="table": kind
         app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
-        app._register_plugin_window = lambda key, widget, subwindow: HydeApp._register_plugin_window(
-            app, key, widget, subwindow
-        )
         app._bind_plugin_action_aliases = lambda: HydeApp._bind_plugin_action_aliases(app)
         app._find_menu_action = lambda menu, text: HydeApp._find_menu_action(app, menu, text)
         app.ui.menuFile = menu_file
@@ -224,14 +218,11 @@ class TestHydePluginManager(unittest.TestCase):
                 super().__init__({})
                 self.loaded_session = None
 
-            def get_event_handlers(self):
-                return {
-                    "request_project_save": self.on_request_project_save,
-                    "project_loaded": self.on_project_loaded,
-                }
+            def get_save_data(self):
+                return {"plugin_state": {"value": 7}}
 
-            def on_request_project_save(self, data):
-                data["session"]["plugin_state"] = {"value": 7}
+            def get_event_handlers(self):
+                return {"project_loaded": self.on_project_loaded}
 
             def on_project_loaded(self, data):
                 self.loaded_session = dict(data["session"])
@@ -262,9 +253,6 @@ class TestHydePluginManager(unittest.TestCase):
                     "restore_history_entries": lambda self, entries: setattr(self, "entries", list(entries)),
                 },
             )()
-            app.tables = {}
-            app.active_table_handle = None
-            app.table_counter = 0
 
             write_session(app, project_dir)
             session = read_session(project_dir)

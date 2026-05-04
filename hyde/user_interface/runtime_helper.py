@@ -134,16 +134,22 @@ class RuntimeHelper:
                 task, data = self.from_kernel.get(timeout=0.01)
             except Exception:
                 return
+            plugin_manager = getattr(self.app, "plugin_manager", None)
+            services = getattr(plugin_manager, "services", {})
             if task == "OPEN_TABLE_REQUEST":
-                self.app.open_table(
-                    data.get("names", []),
-                    data.get("target"),
-                    visible_title=data.get("title"),
-                    geometry=data.get("geometry"),
-                    column_widths=data.get("column_widths"),
-                )
+                table_workspace = services.get("table_workspace")
+                if table_workspace is not None:
+                    table_workspace.open_table(
+                        data.get("names", []),
+                        data.get("target"),
+                        visible_title=data.get("title"),
+                        geometry=data.get("geometry"),
+                        column_widths=data.get("column_widths"),
+                    )
             elif task == "TABLE_DATA_RESPONSE":
-                self.app.on_table_data(data)
+                table_workspace = services.get("table_workspace")
+                if table_workspace is not None:
+                    table_workspace.on_table_data(data)
             elif task == "ENTER_NO_PROJECT_STATE":
                 self.app.enter_no_project_state()
             elif task == "ACTIVATE_PROJECT":
@@ -155,8 +161,7 @@ class RuntimeHelper:
             elif task == "PROJECT_STATE_RESULT":
                 self.app.on_project_state_result(data)
             elif task == "WINDOW_MACROS_RESPONSE":
-                if data.get("kind") == "table":
-                    self.app.update_table_macros(data.get("macros", []))
+                self.app.emit_plugin_event("window_macros_updated", data)
 
 
 class RemoteRequestServer(ZMQServer):

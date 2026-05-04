@@ -66,10 +66,11 @@ Established the first end-to-end `.hy` package persistence flow:
 - **Kernel-State Persistence**: Saved kernel objects are written under `data/`, with `numpy.ndarray` using `.npy` and other saveable objects using pickle fallback.
 - **Exclusion-Based Save Rules**: Saveable objects are selected by exclusion, including modules, packages, routines, classes/types, and interactive artifacts such as `In` / `Out`.
 - **Manifest Tracking**: `manifest.toml` now records the saved-object registry, serializer, relative data path, and Python type name.
-- **GUI Session Persistence**: `session.toml` stores main-window state, tool-window visibility/geometry, Data Browser filter state, and open table descriptors.
+- **GUI Session Persistence**: The shell writes one `session.toml` file containing `main_window` state plus plugin-owned payloads gathered from each plugin's `get_save_data()`. Implemented plugin payloads include persistent tool-window state, Data Browser filter state, and open table descriptors.
 - **Visible History Persistence**: `terminal/history.py` stores visible command history only; muted GUI micro-mutations are excluded.
 - **File Menu Wiring**: `File -> Save` saves in place, `File -> Save As...` confirms before overwriting an existing non-empty project, writes a new `.hy` package, and switches Hyde to it, and project load restores kernel state after `procedures/__init__.py` runs.
 - **Session Restore Policy**: GUI session restore reports malformed or missing `session.toml` files and continues with kernel-state restore already complete.
+- **Plugin Boundary Completion**: First-party UI plugins are now discovered only from `hyde.user_interface.plugins`; the shell no longer injects the raw app object and table workspace ownership now lives in the table plugin rather than `HydeApp`.
 - **Save Semantics**: In-place project saves rewrite the current saved state rather than preserving an older synchronized copy.
 - **Project Switch Isolation**: Switching to a different `.hy` project resets the kernel namespace back to Hyde's clean baseline before the new project's procedures and saved state are loaded, so stale objects do not leak across projects.
 
@@ -92,11 +93,11 @@ Refined Hyde's explicit inert-state and quit handling:
 
 ## Documentation Updated
 - `project_management/PLAN.md`: Marked Phase II architectural refinements as complete.
-- `project_management/ARCHITECTURE.md`: Codified the finalized IPC and package structure models.
+- `project_management/ARCHITECTURE.md`: Codified the finalized IPC model, plugin-only discovery namespace, and shell-vs-support package structure.
 - `project_management/specs/logging_window/SPEC.md`: Added formal specifications for the new observability window.
 - `project_management/specs/data_browser/SPEC.md`: Updated to match the implemented Hyde-native browser layout and supported action set.
 - `project_management/specs/IPC_PROTOCOL.md`: Updated to document the actual `spyder_api` namespace-view comm path.
 - `project_management/specs/table/SPEC.md` and `project_management/specs/new_table_dialog/SPEC.md`: Updated to match the implemented table workflow.
-- `project_management/specs/project_save_load/SPEC.md`: Added the initial `.hy` package save/load contract and the overwrite-confirmation rule for `Save As...`.
+- `project_management/specs/project_save_load/SPEC.md`: Updated the `.hy` package save/load contract to reflect plugin-owned GUI session payloads gathered through `get_save_data()`.
 - `project_management/specs/command_window/SPEC.md`: Updated to document GUI-mode rebinding of `quit` / `exit` to `hyde.quit()`.
 - `2025_04_12_OPUS_EVALUATION.md`: Noted the transition toward `zprocess.Event` for future state notifications.

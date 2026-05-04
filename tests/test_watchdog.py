@@ -22,7 +22,8 @@ from hyde.user_interface.file_dialogs import (
     SaveCopyProjectDialog,
     SaveProjectCommand,
 )
-from hyde.user_interface.table import TableWidget
+from hyde.user_interface.table import TableWidget, prompt_to_save_table_macro
+from hyde.user_interface.plugins.table import TableWorkspaceService
 from hyde.user_interface.runtime_helper import RemoteRequestServer, RuntimeHelper
 from qtutils.qt import QtWidgets, QtCore
 
@@ -59,21 +60,33 @@ class FakeApp:
     def __init__(self):
         self.calls = []
         self.shutting_down = False
-
-    def open_table(self, names, target=None, visible_title=None, geometry=None, column_widths=None):
-        self.calls.append(
-            (
-                "open_table",
-                list(names),
-                target,
-                visible_title,
-                geometry,
-                dict(column_widths or {}),
-            )
-        )
-
-    def on_table_data(self, data):
-        self.calls.append(("table_data", data))
+        self.plugin_manager = type(
+            "PluginManager",
+            (),
+            {
+                "services": {
+                    "table_workspace": type(
+                        "TableWorkspace",
+                        (),
+                        {
+                            "open_table": lambda _self, names, target=None, visible_title=None, geometry=None, column_widths=None: self.calls.append(
+                                (
+                                    "open_table",
+                                    list(names),
+                                    target,
+                                    visible_title,
+                                    geometry,
+                                    dict(column_widths or {}),
+                                )
+                            ),
+                            "on_table_data": lambda _self, data: self.calls.append(
+                                ("table_data", data)
+                            ),
+                        },
+                    )()
+                }
+            },
+        )()
 
     def enter_no_project_state(self):
         self.calls.append(("enter_no_project_state",))
@@ -83,9 +96,6 @@ class FakeApp:
 
     def on_project_state_result(self, data):
         self.calls.append(("project_state_result", data))
-
-    def update_table_macros(self, macros):
-        self.calls.append(("update_table_macros", list(macros)))
 
     def request_gui_quit(self):
         self.calls.append(("request_gui_quit",))
@@ -552,7 +562,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
         finally:
             table.close()
 
-    def test_open_table_uses_visible_title_as_handle(self):
+    def test_table_workspace_uses_visible_title_as_handle(self):
         created = {}
 
         class FakeSubwindow:
@@ -580,14 +590,14 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 self,
                 handle,
                 names,
-                app,
+                services=None,
                 visible_title=None,
                 geometry=None,
                 column_widths=None,
             ):
                 self.handle = handle
                 self.names = list(names)
-                self.app = app
+                self.services = dict(services or {})
                 self.visible_title = visible_title
                 self.geometry = geometry
                 self.column_widths = column_widths
@@ -596,22 +606,25 @@ class TestRuntimeArchitecture(unittest.TestCase):
             def bind_subwindow(self, subwindow):
                 self.bound_subwindow = subwindow
 
-        dummy_app = type("DummyApp", (), {})()
-        dummy_app.tables = {}
-        dummy_app.table_counter = 0
-        dummy_app.ui = type("UI", (), {"mdiArea": FakeMdiArea()})()
+        plugin = type("Plugin", (), {})()
+        plugin.services = {
+            "mdi_area": FakeMdiArea(),
+            "configure_persistent_subwindow": lambda subwindow: None,
+        }
+        plugin.request_save_table_macro = lambda table_state: True
+        workspace = TableWorkspaceService(plugin)
 
-        with patch("hyde.user_interface.table.TableWidget", FakeTableWidget):
-            HydeApp.open_table.__wrapped__(dummy_app, ["b", "c"], visible_title="Table_Fun")
+        with patch("hyde.user_interface.plugins.table.TableWidget", FakeTableWidget):
+            workspace.open_table(["b", "c"], visible_title="Table_Fun")
 
         self.assertEqual(created["widget"].handle, "Table_Fun")
         self.assertEqual(created["widget"].visible_title, "Table_Fun")
-        self.assertIs(created["widget"].bound_subwindow, dummy_app.ui.mdiArea.subwindow)
-        self.assertIs(dummy_app.tables["Table_Fun"], created["widget"])
-        self.assertEqual(dummy_app.ui.mdiArea.subwindow.window_title, "Table_Fun")
-        self.assertEqual(dummy_app.table_counter, 1)
+        self.assertIs(created["widget"].bound_subwindow, plugin.services["mdi_area"].subwindow)
+        self.assertIs(workspace.tables["Table_Fun"], created["widget"])
+        self.assertEqual(plugin.services["mdi_area"].subwindow.window_title, "Table_Fun")
+        self.assertEqual(workspace.table_counter, 1)
 
-    def test_request_save_table_macro_launches_dialog_with_table_state(self):
+    def test_prompt_to_save_table_macro_launches_dialog_with_table_state(self):
         table_state = object()
         calls = {}
 
@@ -634,21 +647,24 @@ class TestRuntimeArchitecture(unittest.TestCase):
             def macro_source(self):
                 return "macro source"
 
-        dummy_app = type("DummyApp", (), {})()
-        dummy_app.ui = object()
-        dummy_app.procedures_init = "/tmp/procedures/__init__.py"
-        dummy_app.reload_procedures = lambda: calls.setdefault("reloaded", 0) or calls.__setitem__("reloaded", 1)
+        parent = object()
+        reload_procedures = lambda: calls.setdefault("reloaded", 0) or calls.__setitem__("reloaded", 1)
 
-        with patch("hyde.user_interface.main.SaveWindowDialog", FakeDialog):
-            with patch("hyde.user_interface.main.inspect_macro_conflict", return_value=None):
-                with patch("hyde.user_interface.main.write_macro_source") as write_macro_source:
-                    result = HydeApp.request_save_table_macro(dummy_app, table_state)
+        with patch("hyde.user_interface.table.SaveWindowDialog", FakeDialog):
+            with patch("hyde.user_interface.table.inspect_macro_conflict", return_value=None):
+                with patch("hyde.user_interface.table.write_macro_source") as write_macro_source:
+                    result = prompt_to_save_table_macro(
+                        table_state,
+                        parent=parent,
+                        procedures_init="/tmp/procedures/__init__.py",
+                        reload_procedures=reload_procedures,
+                    )
 
         self.assertTrue(result)
         self.assertIs(calls["table_state"], table_state)
-        self.assertIs(calls["parent"], dummy_app.ui)
+        self.assertIs(calls["parent"], parent)
         write_macro_source.assert_called_once_with(
-            dummy_app.procedures_init,
+            "/tmp/procedures/__init__.py",
             "Table_Save",
             "macro source",
         )

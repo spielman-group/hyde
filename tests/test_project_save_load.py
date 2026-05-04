@@ -27,7 +27,6 @@ from hyde.user_interface.project_state import (
     try_read_history,
     try_read_session,
     clear_tables,
-    restore_tables,
     write_history,
     write_session,
 )
@@ -166,6 +165,21 @@ class DummyTable:
         self.shutdown_calls += 1
 
 
+class PluginManagerStub:
+    def __init__(self, plugins=None, services=None):
+        self.plugins = dict(plugins or {})
+        self.services = dict(services or {})
+
+    def get_event_handlers(self, name):
+        handlers = []
+        for plugin in self.plugins.values():
+            plugin_handlers = getattr(plugin, "get_event_handlers", lambda: {})()
+            handler = plugin_handlers.get(name)
+            if handler is not None:
+                handlers.append(handler)
+        return handlers
+
+
 class TestProjectStateHelpers(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -202,23 +216,46 @@ class TestProjectStateHelpers(unittest.TestCase):
             data_browser.ui.stringsCheckBox.setChecked(True)
             data_browser.ui.infoCheckBox.setChecked(False)
 
+            class SessionPlugin:
+                def get_save_data(self):
+                    return {
+                        "tool_windows": {
+                            "command": {
+                                "visible": bool(command_subwindow.isVisible()),
+                                "geometry": [
+                                    command_subwindow.geometry().x(),
+                                    command_subwindow.geometry().y(),
+                                    command_subwindow.geometry().width(),
+                                    command_subwindow.geometry().height(),
+                                ],
+                            },
+                        },
+                        "data_browser": {
+                            "waves": bool(data_browser.ui.wavesCheckBox.isChecked()),
+                            "variables": bool(data_browser.ui.variablesCheckBox.isChecked()),
+                            "strings": bool(data_browser.ui.stringsCheckBox.isChecked()),
+                            "info": bool(data_browser.ui.infoCheckBox.isChecked()),
+                        },
+                        "active_table_handle": "Table0",
+                        "table_counter": 4,
+                        "tables": [
+                            {
+                                "handle": "Table0",
+                                "title": table_subwindow.windowTitle(),
+                                "names": ["a", "b"],
+                                "hidden": not table_subwindow.isVisible(),
+                                "geometry": [5, 42, 510, 242],
+                                "column_widths": {"a": 120, "b": 260},
+                            }
+                        ],
+                    }
+
+            table_subwindow.setWindowTitle("Table_Fun")
+            table_subwindow.setGeometry(QtCore.QRect(5, 42, 510, 242))
+
             app = type("DummyApp", (), {})()
             app.ui = main_window
-            app.command_subwindow = command_subwindow
-            app.logging_subwindow = logging_subwindow
-            app.procedures_subwindow = procedures_subwindow
-            app.data_browser_subwindow = data_browser_subwindow
-            app.data_browser = data_browser
-            app.tables = {
-                "Table0": DummyTable(
-                    "Table0",
-                    ["a", "b"],
-                    table_subwindow,
-                    column_widths={"a": 120, "b": 260},
-                )
-            }
-            app.active_table_handle = "Table0"
-            app.table_counter = 4
+            app.plugin_manager = PluginManagerStub({"session": SessionPlugin()})
 
             write_session(app, project_dir)
             session = read_session(project_dir)
@@ -242,26 +279,28 @@ class TestProjectStateHelpers(unittest.TestCase):
             table_subwindow.setWindowTitle("Table_Fun")
             table_subwindow.setGeometry(QtCore.QRect(5, 42, 510, 242))
 
+            class SavingPlugin:
+                def get_save_data(self):
+                    return {
+                        "active_table_handle": "Table0",
+                        "table_counter": 4,
+                        "tables": [
+                            {
+                                "handle": "Table0",
+                                "title": table_subwindow.windowTitle(),
+                                "names": ["a", "b"],
+                                "hidden": False,
+                                "geometry": [5, 42, 510, 242],
+                                "column_widths": {"a": 120, "b": 260},
+                            }
+                        ],
+                    }
+
             source_app = type("SourceApp", (), {})()
             source_app.ui = main_window
-            source_app.command_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            source_app.logging_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            source_app.procedures_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            source_app.data_browser_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            source_app.data_browser = DummyDataBrowser()
-            source_app.tables = {
-                "Table0": DummyTable(
-                    "Table0",
-                    ["a", "b"],
-                    table_subwindow,
-                    column_widths={"a": 120, "b": 260},
-                )
-            }
-            source_app.active_table_handle = "Table0"
-            source_app.table_counter = 4
+            source_app.plugin_manager = PluginManagerStub({"session": SavingPlugin()})
 
             write_session(source_app, project_dir)
-            session = read_session(project_dir)
 
             open_calls = []
 
@@ -269,21 +308,44 @@ class TestProjectStateHelpers(unittest.TestCase):
                 pass
 
             restored_app = RestoredApp()
-            restored_app.tables = {}
-            restored_app.active_table_handle = None
-            restored_app.table_counter = 0
+            restored_app.ui = main_window
+            restored_app.current_project_dir = project_dir
+            restored_app.command_window = type(
+                "HistorySink",
+                (),
+                {"restore_history_entries": lambda self, entries: setattr(self, "entries", list(entries))},
+            )()
 
-            def open_table(names, target=None, visible_title=None, geometry=None, column_widths=None):
-                subwindow = QtWidgets.QMdiSubWindow()
-                table = DummyTable(target, names, subwindow, column_widths=column_widths)
-                restored_app.tables[target] = table
-                open_calls.append(
-                    (list(names), target, visible_title, geometry, dict(column_widths or {}))
-                )
+            class RestoringPlugin:
+                def __init__(self):
+                    self.table_counter = 0
+                    self.active_table_handle = None
 
-            restored_app.open_table = open_table
+                def get_event_handlers(self):
+                    return {"project_loaded": self.on_project_loaded}
 
-            restore_tables(restored_app, session)
+                def on_project_loaded(self, data):
+                    session = data["session"]
+                    for table_state in session.get("tables", []):
+                        open_calls.append(
+                            (
+                                list(table_state.get("names", [])),
+                                table_state.get("handle"),
+                                table_state.get("title"),
+                                table_state.get("geometry"),
+                                dict(table_state.get("column_widths", {})),
+                            )
+                        )
+                    self.table_counter = int(session.get("table_counter", 0))
+                    self.active_table_handle = session.get("active_table_handle")
+
+            restoring_plugin = RestoringPlugin()
+            restored_app.plugin_manager = PluginManagerStub({"session": restoring_plugin})
+            restored_app.emit_plugin_event = (
+                lambda name, data=None: HydeApp.emit_plugin_event(restored_app, name, data)
+            )
+
+            HydeApp.restore_project_session(restored_app)
 
             self.assertEqual(
                 open_calls,
@@ -297,8 +359,8 @@ class TestProjectStateHelpers(unittest.TestCase):
                     )
                 ],
             )
-            self.assertEqual(restored_app.table_counter, 4)
-            self.assertEqual(restored_app.active_table_handle, "Table0")
+            self.assertEqual(restoring_plugin.table_counter, 4)
+            self.assertEqual(restoring_plugin.active_table_handle, "Table0")
 
     def test_try_read_session_returns_error_for_malformed_toml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -388,9 +450,6 @@ class TestProjectStateHelpers(unittest.TestCase):
                 {"restore_history_entries": lambda self, entries: setattr(self, "entries", list(entries))},
             )()
             app.ui = QtWidgets.QMainWindow()
-            app.tables = {}
-            app.active_table_handle = None
-            app.table_counter = 0
 
             from hyde.user_interface import main as main_module
 
@@ -452,21 +511,20 @@ class TestProjectStateHelpers(unittest.TestCase):
             parent.close()
 
     def test_clear_tables_forces_close_without_macro_prompt_path(self):
-        subwindow = type("Subwindow", (), {"close": lambda self: setattr(self, "closed", True)})()
-        subwindow.closed = False
-        table = DummyTable("Table0", ["a"], subwindow)
         app = type("DummyApp", (), {})()
-        app.tables = {"Table0": table}
-        app.active_table_handle = "Table0"
-        app.table_counter = 1
+        app.plugin_manager = PluginManagerStub(
+            services={
+                "table_workspace": type(
+                    "Workspace",
+                    (),
+                    {"clear": lambda self: setattr(self, "cleared", True)},
+                )()
+            }
+        )
 
         clear_tables(app)
 
-        self.assertEqual(table.shutdown_calls, 1)
-        self.assertTrue(subwindow.closed)
-        self.assertEqual(app.tables, {})
-        self.assertIsNone(app.active_table_handle)
-        self.assertEqual(app.table_counter, 0)
+        self.assertTrue(app.plugin_manager.services["table_workspace"].cleared)
 
     def test_save_project_returns_none(self):
         with tempfile.TemporaryDirectory() as tmpdir:

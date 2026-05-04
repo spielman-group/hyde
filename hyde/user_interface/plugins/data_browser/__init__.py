@@ -87,16 +87,13 @@ class SpyderFrontendComm(CommBase):
         print(error_wrapper)
 
 
-from hyde.user_interface.new_table_dialog import NewTableDialog
-
-
 class DataBrowser(QtWidgets.QWidget):
     namespace_view_updated = QtCore.Signal(object)
 
-    def __init__(self, connection_file, app=None, *args, **kwargs):
+    def __init__(self, connection_file, services=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.connection_file = connection_file
-        self.app = app
+        self.services = dict(services or {})
         self._external_kernel_busy = False
         self._refresh_in_flight = False
         self._closed = False
@@ -300,7 +297,11 @@ class DataBrowser(QtWidgets.QWidget):
         
         edit_action.setEnabled(can_table)
         
-        has_active_table = self.app and self.app.active_table_handle is not None
+        get_active_table_handle = self.services.get("get_active_table_handle")
+        table_feature = self.services.get("table_feature")
+        has_active_table = bool(
+            table_feature is not None and table_feature.has_active_table()
+        )
         append_action.setEnabled(can_table and has_active_table)
 
         chosen = menu.exec_(self.ui.treeView.viewport().mapToGlobal(position))
@@ -318,25 +319,21 @@ class DataBrowser(QtWidgets.QWidget):
         if not names:
             return
         
-        dialog = NewTableDialog(self._last_view, preselection=names, parent=self)
-        if dialog.exec_():
-            command = dialog.get_command()
-            if command and self.app:
-                self.app.execute_command(command, visible=True)
+        table_feature = self.services.get("table_feature")
+        if table_feature is None:
+            return
+        table_feature.show_new_table_dialog(
+            self._last_view,
+            preselection=names,
+            parent=self,
+        )
 
     def _append_to_table_selected(self):
         names = self._selected_names()
-        if not names or not self.app or not self.app.active_table_handle:
+        table_feature = self.services.get("table_feature")
+        if not names or table_feature is None:
             return
-
-        from hyde.user_interface.table import TableState
-
-        state = TableState()
-        state.set_items(names)
-        state.set_command("append")
-        state.set_target(self.app.active_table_handle)
-        command = state.python_source()
-        self.app.execute_command(command, visible=True)
+        table_feature.append_to_active_table(names)
 
     def closeEvent(self, event):
         if self._closed:
@@ -423,7 +420,7 @@ class Plugin(BasePlugin):
         del data
         return DataBrowser(
             connection_file=CONNECTION_FILE,
-            app=self.services["app"],
+            services=self.services,
             parent=parent,
         )
 
@@ -433,21 +430,24 @@ class Plugin(BasePlugin):
 
     def get_event_handlers(self):
         return {
-            "request_project_save": self.on_request_project_save,
             "project_loaded": self.on_project_loaded,
         }
 
-    def on_request_project_save(self, data):
+    def get_save_data(self):
         widget = self.services["mdi_context"].widget("data_browser")
-        session = data["session"]
-        session.setdefault("tool_windows", {})["data_browser"] = capture_subwindow_state(
-            self.services["mdi_context"].subwindow("data_browser")
-        )
-        session["data_browser"] = {
-            "waves": bool(widget.ui.wavesCheckBox.isChecked()),
-            "variables": bool(widget.ui.variablesCheckBox.isChecked()),
-            "strings": bool(widget.ui.stringsCheckBox.isChecked()),
-            "info": bool(widget.ui.infoCheckBox.isChecked()),
+        subwindow = self.services["mdi_context"].subwindow("data_browser")
+        if widget is None or subwindow is None:
+            return {}
+        return {
+            "tool_windows": {
+                "data_browser": capture_subwindow_state(subwindow),
+            },
+            "data_browser": {
+                "waves": bool(widget.ui.wavesCheckBox.isChecked()),
+                "variables": bool(widget.ui.variablesCheckBox.isChecked()),
+                "strings": bool(widget.ui.stringsCheckBox.isChecked()),
+                "info": bool(widget.ui.infoCheckBox.isChecked()),
+            },
         }
 
     def on_project_loaded(self, data):

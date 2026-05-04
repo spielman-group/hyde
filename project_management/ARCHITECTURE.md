@@ -43,12 +43,14 @@ hyde/
 │   ├── execution/             # Kernel launch and narrow IPC helpers
 │   │   ├── __init__.py
 │   │   └── kernel_launcher.py
-│   └── user_interface/       # Per-window packages
+│   └── user_interface/
 │       ├── main/
-│       │   ├── __init__.py
+│       │   ├── __init__.py    # Shell infrastructure and lifecycle fan-out
 │       │   └── main.ui
-│       ├── command_window/
-│       │   └── __init__.py    # RichJupyterWidget bridge
+│       ├── plugins/           # First-party UI plugins discovered by Hyde
+│       │   ├── command_window/
+│       │   └── ...
+│       ├── table.py           # Non-plugin support module shared by table plugin
 │       └── ...
 └── tests/
     ├── test_watchdog.py      # Architecture integration tests
@@ -98,7 +100,7 @@ To ensure "Explicit is better than Implicit," Hyde enforces a strict initializat
 2. **Authoritative Project Load**: Visible project activation uses `hyde.load_project(...)` in the kernel. That public command clears `hyde.HYDE_PROJECT_DIR`, signals the GUI into no-project state, resets the kernel namespace to Hyde's clean baseline, bootstraps `procedures/__init__.py`, restores saved objects, and then signals GUI project activation.
 3. **Project-Switch Reset**: Loading any `.hy` project, including reloading the current one, resets the kernel namespace back to Hyde's clean baseline for that session before the new project's procedures and saved objects are restored.
 4. **Kernel-State Restore**: During `hyde.load_project(...)`, persisted kernel objects are restored after `procedures/__init__.py` runs so saved objects override same-name procedure outputs.
-5. **GUI Session Restore**: After the kernel reports successful project load, the GUI reapplies `session.toml` to reopen tables and restore window layout, filters, and visible command history. If the session file is malformed or missing, the GUI warns and continues with kernel-state restore already complete.
+5. **GUI Session Restore**: After the kernel reports successful project load, the GUI restores `main_window` state and then broadcasts the loaded `session.toml` payload to plugins. Each plugin restores its own saved windows, filters, and other GUI session state from that payload. If the session file is malformed or missing, the GUI warns and continues with kernel-state restore already complete.
 6. **Procedure Reload**: Monitoring of `procedures/__init__.py` and other procedure files is a GUI-process responsibility. The GUI owns `labscript_utils.filewatcher.FileWatcher` and dispatches the canonical package initialization path through a lightweight runtime-helper thread when watched `.py` files change.
 
 ### Procedure Browser
@@ -107,7 +109,7 @@ The **Procedure Browser** (an MDI window) provides the primary UI for managing t
 - Paths inside the package are relative for portability
 - The Procedure Browser is rooted at `procedures/`, so displayed entries are relative to that directory
 - `manifest.toml` records package version and the saved-object registry
-- `session.toml` records restorable GUI session state
+- `session.toml` records restorable GUI session state, with plugin-owned payloads merged into one file by the shell
 - in-place project saves rewrite the current saved state rather than preserving an older synchronized copy
 - Scripts are plain `.py` files
 - Array data is stored in numpy format (`.npy`) when the saved object is an ndarray
@@ -146,17 +148,22 @@ Agents implementing this should look at existing solutions such as Spyder, which
 
 Agents are encouraged to explore and copy existing solutions, and use existing Python libraries rather than reinventing solutions.
 
-### Per-GUI element/window package structure
+### Plugin and Support Module Structure
 
-Each window in its own subdirectory under `user_interface/`:
+First-party Hyde plugins live under `hyde.user_interface.plugins/` and are the only
+packages discovered by the plugin manager. Shell code and non-plugin support modules
+remain outside that namespace.
 
 ```
-window_name/
-├── __init__.py   # Loads .ui, defines widget class
-└── window_name.ui     # Qt Designer file
+user_interface/
+├── main/                    # Shell infrastructure
+├── plugins/
+│   └── window_name/
+│       ├── __init__.py      # Plugin entrypoint
+│       └── window_name.ui   # Qt Designer file when needed
+├── plugin_tools.py          # Shared plugin infrastructure
+└── table.py                 # Support module used by the table plugin
 ```
-
-Main window also lives in a subdirectory.
 
 ## Widget Types
 

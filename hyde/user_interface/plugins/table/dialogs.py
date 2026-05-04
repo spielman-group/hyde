@@ -1,6 +1,7 @@
 import os
+
 from qtutils import UiLoader
-from qtutils.qt import QtWidgets, QtCore
+from qtutils.qt import QtWidgets
 
 from hyde.features.hyde_features import is_eligible_for_table
 from hyde.user_interface.table import TableState
@@ -14,10 +15,13 @@ class NewTableDialog(QtWidgets.QDialog):
         self.table_state = TableState()
 
         loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "new_table_dialog.ui")
+        ui_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "new_table_dialog",
+            "new_table_dialog.ui",
+        )
         self.ui = loader.load(ui_path, self)
 
-        # Spec: OK button -> "Do It"
         ok_button = self.ui.buttonBox.button(QtWidgets.QDialogButtonBox.Ok)
         if ok_button:
             ok_button.setText("Do It")
@@ -45,12 +49,10 @@ class NewTableDialog(QtWidgets.QDialog):
         self.table_state.set_title(title or None)
 
     def get_command(self):
-        """Generates the hyde.table(...) command via TableState."""
         self._sync_state_from_widgets()
         if not self.table_state.normalized_state()["items"]:
             return None
         return self.table_state.python_source()
 
     def get_visible_title(self):
-        """Returns the user-specified title for the window label."""
         return self.table_state.normalized_state()["settings"]["title"] or ""

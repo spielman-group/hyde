@@ -73,17 +73,11 @@ Records saved kernel objects:
 ### `session.toml`
 Records GUI/session state:
 - main-window geometry/state
-- tool-window visibility and geometry
-- Data Browser filter state
-- open table windows
-  - handle
-  - visible title
-  - tracked kernel names
-  - hidden/visible state
-  - geometry
-  - column widths keyed by tracked kernel name
-- active table handle
-- table counter
+- plugin-contributed session payloads collected from each plugin's `get_save_data()`
+
+The shell owns writing one `session.toml` file, but feature-owned GUI state is supplied
+and restored by plugins. Implemented plugin payloads currently include persistent tool
+window state, Data Browser filter state, and open table descriptors.
 
 ### `terminal/history.py`
 Stores visible command history only.
@@ -95,6 +89,7 @@ Muted GUI micro-mutations and runtime-helper-owned silent execution are excluded
 ### Save
 - `File -> Save` executes visible `hyde.save_project(mode="save")`.
 - After a successful kernel save result, the GUI rewrites `session.toml` and `terminal/history.py` in the active project.
+- The `session.toml` write collects plugin-owned GUI state through `get_save_data()` before serializing the merged session file.
 - The kernel rewrites `manifest.toml` and `data/*` in place for the current project.
 - Hyde does not preserve an older synchronized kernel-state snapshot alongside the new one.
 
@@ -117,7 +112,7 @@ Muted GUI micro-mutations and runtime-helper-owned silent execution are excluded
 - The visible command is `hyde.load_project(target)`.
 - `hyde.load_project(...)` always begins by setting `hyde.HYDE_PROJECT_DIR = None` and signaling the GUI into its no-project state.
 - The kernel then resets to Hyde's clean baseline, runs `procedures/__init__.py`, restores saved objects from `manifest.toml`, sets `HYDE_PROJECT_DIR` to the active project, and signals the GUI to activate that project.
-- After kernel objects are restored, the GUI restores `session.toml`.
+- After kernel objects are restored, the GUI restores `main_window` state and broadcasts the loaded `session.toml` payload to plugins so each plugin can restore its own GUI session state.
 - If load fails after entering no-project state, both the kernel and the GUI remain in no-project state.
 
 ## Command Generation
@@ -140,7 +135,7 @@ visible-command contract for save/load.
 1. GUI executes visible `hyde.save_project(...)`
 2. kernel writes `manifest.toml` and `data/*`
 3. kernel publishes the save result
-4. GUI writes `session.toml`
+4. GUI collects plugin `get_save_data()` payloads and writes `session.toml`
 5. GUI writes `terminal/history.py`
 
 ### Load order
@@ -151,15 +146,15 @@ visible-command contract for save/load.
 5. `hyde.load_project(...)` bootstraps `procedures/__init__.py` inside the kernel command path
 6. kernel restores saved objects into `__main__`
 7. kernel sets `HYDE_PROJECT_DIR` to the loaded project and signals GUI activation
-8. GUI restores `session.toml`
+8. GUI restores `main_window` state and emits `project_loaded` with the parsed `session.toml` payload so plugins restore their own GUI session state
 
 Saved kernel objects override same-name objects produced by `procedures/__init__.py`.
 Objects from the previously loaded project do not survive a project switch unless they are recreated by procedures or restored from the new project's saved state.
 
-Table layout restore is a GUI/session concern. Table recreation macros and
-`hyde.table(...)` may also carry saved table layout through `geometry` and
-`column_widths`, but that recreation state is not yet unified with the `session.toml`
-restore path.
+Table layout restore is currently implemented by the table plugin. Table recreation
+macros and `hyde.table(...)` may also carry saved table layout through `geometry` and
+`column_widths`, but that recreation state is intentionally separate from project
+session restore.
 
 ## Kernel Save/Load Rules
 
@@ -196,21 +191,20 @@ Kernel objects are saved by exclusion, not whitelist.
 
 ## Table Layout Persistence Boundary
 
-Table layout state is intentionally duplicated during this phase.
-
-`session.toml` stores the GUI session copy of:
+The table plugin currently persists:
 
 - table geometry
 - table visibility
 - saved data-column widths
+- active table handle
+- table counter
 
 Table recreation source generated from `TableState` may also include:
 
 - `geometry=(x, y, width, height)`
 - `column_widths={"wave_name": width, ...}`
 
-This duplication is temporary and architectural. `session.toml` remains the GUI's
-session-restore source, while recreation macros remain the explicit table-reopen
-source stored in `procedures/__init__.py`. The duplication is not an accident or
-leftover simplification debt; Hyde currently wants both save paths to be able to
-restore table layout independently.
+`session.toml` remains the plugin-restored GUI session source, while recreation macros
+remain the explicit table-reopen source stored in `procedures/__init__.py`. Hyde keeps
+both because project session restore and explicit macro recreation solve different
+workflow needs.

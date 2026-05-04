@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import logging
 import os
 from pathlib import Path
 
@@ -47,60 +48,42 @@ def _subwindow_state(subwindow):
     }
 
 
+def _merge_session_data(session, plugin_data):
+    for key, value in plugin_data.items():
+        if isinstance(value, dict) and isinstance(session.get(key), dict):
+            _merge_session_data(session[key], value)
+        else:
+            session[key] = value
+
+
+def _capture_plugin_session(app, session):
+    plugin_manager = getattr(app, "plugin_manager", None)
+    plugins = getattr(plugin_manager, "plugins", {})
+    logger = logging.getLogger("hyde")
+
+    for plugin_name, plugin in plugins.items():
+        try:
+            plugin_data = plugin.get_save_data()
+        except Exception:
+            logger.exception(
+                "Plugin save-data capture failed for '%s'.", plugin_name
+            )
+            continue
+        if not plugin_data:
+            continue
+        _merge_session_data(session, plugin_data)
+
+
 def capture_session(app):
-    if hasattr(app, "emit_plugin_event"):
-        session = {
-            "format_version": 1,
-            "main_window": {
-                "geometry": _encode_qbytearray(app.ui.saveGeometry()),
-                "state": _encode_qbytearray(app.ui.saveState()),
-            },
-        }
-        app.emit_plugin_event("request_project_save", {"session": session})
-        return session
-
-    tables = []
-    for handle, table in sorted(app.tables.items()):
-        table.capture_layout_state()
-        subwindow = table.parentWidget()
-        table_settings = table.table_state.normalized_state()["settings"]
-        tables.append(
-            {
-                "handle": handle,
-                "title": subwindow.windowTitle(),
-                "names": list(table.names),
-                "hidden": not subwindow.isVisible(),
-                "geometry": (
-                    list(table_settings["geometry"])
-                    if table_settings["geometry"] is not None
-                    else _rect_to_list(subwindow.geometry())
-                ),
-                "column_widths": dict(table_settings.get("column_widths", {})),
-            }
-        )
-
-    return {
+    session = {
         "format_version": 1,
         "main_window": {
             "geometry": _encode_qbytearray(app.ui.saveGeometry()),
             "state": _encode_qbytearray(app.ui.saveState()),
         },
-        "tool_windows": {
-            "command": _subwindow_state(app.command_subwindow),
-            "logging": _subwindow_state(app.logging_subwindow),
-            "procedures": _subwindow_state(app.procedures_subwindow),
-            "data_browser": _subwindow_state(app.data_browser_subwindow),
-        },
-        "data_browser": {
-            "waves": bool(app.data_browser.ui.wavesCheckBox.isChecked()),
-            "variables": bool(app.data_browser.ui.variablesCheckBox.isChecked()),
-            "strings": bool(app.data_browser.ui.stringsCheckBox.isChecked()),
-            "info": bool(app.data_browser.ui.infoCheckBox.isChecked()),
-        },
-        "active_table_handle": app.active_table_handle,
-        "table_counter": app.table_counter,
-        "tables": tables,
     }
+    _capture_plugin_session(app, session)
+    return session
 
 
 def write_session(app, project_dir):
@@ -169,59 +152,9 @@ def restore_main_window(app, session):
         app.ui.restoreState(_decode_qbytearray(state))
 
 
-def restore_tool_windows(app, session):
-    tool_windows = session.get("tool_windows", {})
-    mapping = {
-        "command": app.command_subwindow,
-        "logging": app.logging_subwindow,
-        "procedures": app.procedures_subwindow,
-        "data_browser": app.data_browser_subwindow,
-    }
-    for key, subwindow in mapping.items():
-        info = tool_windows.get(key, {})
-        geometry = info.get("geometry")
-        if geometry:
-            subwindow.setGeometry(_list_to_rect(geometry))
-        subwindow.setVisible(bool(info.get("visible", False)))
-
-
-def restore_data_browser_state(app, session):
-    info = session.get("data_browser", {})
-    app.data_browser.ui.wavesCheckBox.setChecked(bool(info.get("waves", True)))
-    app.data_browser.ui.variablesCheckBox.setChecked(bool(info.get("variables", True)))
-    app.data_browser.ui.stringsCheckBox.setChecked(bool(info.get("strings", True)))
-    app.data_browser.ui.infoCheckBox.setChecked(bool(info.get("info", True)))
-    app.data_browser._on_filter_changed()
-    app.data_browser._toggle_info_pane(app.data_browser.ui.infoCheckBox.isChecked())
-
-
-def restore_tables(app, session):
-    saved_counter = int(session.get("table_counter", 0))
-    for table_state in session.get("tables", []):
-        handle = table_state["handle"]
-        app.open_table(
-            table_state.get("names", []),
-            target=handle,
-            visible_title=table_state.get("title"),
-            geometry=table_state.get("geometry"),
-            column_widths=table_state.get("column_widths", {}),
-        )
-        table = app.tables.get(handle)
-        if table is None:
-            continue
-        subwindow = table.parentWidget()
-        subwindow.setVisible(not bool(table_state.get("hidden", False)))
-    app.table_counter = saved_counter
-    app.active_table_handle = session.get("active_table_handle")
-
-
 def clear_tables(app):
-    for table in list(app.tables.values()):
-        subwindow = table.parentWidget()
-        if subwindow is not None:
-            if hasattr(table, "shutdown_client"):
-                table.shutdown_client()
-            subwindow.close()
-    app.tables.clear()
-    app.active_table_handle = None
-    app.table_counter = 0
+    plugin_manager = getattr(app, "plugin_manager", None)
+    services = getattr(plugin_manager, "services", {})
+    table_workspace = services.get("table_workspace")
+    if table_workspace is not None:
+        table_workspace.clear()

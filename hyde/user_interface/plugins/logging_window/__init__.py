@@ -68,15 +68,18 @@ class Plugin(BasePlugin):
 
     def get_event_handlers(self):
         return {
-            "request_project_save": self.on_request_project_save,
             "project_loaded": self.on_project_loaded,
         }
 
-    def on_request_project_save(self, data):
-        session = data["session"]
-        session.setdefault("tool_windows", {})["logging"] = capture_subwindow_state(
-            self.services["mdi_context"].subwindow("logging")
-        )
+    def get_save_data(self):
+        subwindow = self.services["mdi_context"].subwindow("logging")
+        if subwindow is None:
+            return {}
+        return {
+            "tool_windows": {
+                "logging": capture_subwindow_state(subwindow),
+            }
+        }
 
     def on_project_loaded(self, data):
         info = data["session"].get("tool_windows", {}).get("logging", {})

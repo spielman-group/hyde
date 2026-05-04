@@ -3,7 +3,7 @@ import os
 import time
 from labscript_utils.plugins import MenuContext
 from qtutils import UiLoader, inmain_decorator
-from qtutils.qt import QtWidgets, QtCore, QtGui
+from qtutils.qt import QtWidgets, QtCore
 from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 from labscript_utils.filewatcher import FileWatcher
 from zmq.error import ZMQError
@@ -17,38 +17,18 @@ from hyde.paths import (
 from hyde.features.hyde_features import (
     format_procedures_bootstrap_code,
 )
-from hyde.user_interface.table import TableState
 from hyde.user_interface.file_dialogs import (
-    HealProjectDialog,
-    LoadProjectDialog,
     LoadProjectState,
-    NewProjectDialog,
     QuitCommand,
-    SaveAsProjectDialog,
-    SaveCopyProjectDialog,
-    SaveProjectCommand,
 )
-from hyde.user_interface.command_window import CommandWindow
-from hyde.user_interface.logging_window import LoggingWindow
-from hyde.user_interface.procedure_browser import ProcedureBrowser
-from hyde.user_interface.data_browser import DataBrowser
 from hyde.user_interface.runtime_helper import HYDE_REMOTE_PORT, RemoteRequestServer, RuntimeHelper
 from hyde.user_interface.project_state import (
     clear_tables,
     try_read_history,
     try_read_session,
-    restore_data_browser_state,
     restore_main_window,
-    restore_tables,
-    restore_tool_windows,
     write_history,
     write_session,
-)
-from hyde.user_interface.save_window_dialog import SaveWindowDialog
-from hyde.user_interface.window_macro_store import (
-    MacroStoreError,
-    inspect_macro_conflict,
-    write_macro_source,
 )
 from hyde.user_interface.plugin_tools import HydeMDIContext, HydePluginManager
 
@@ -129,23 +109,15 @@ class HydeApp:
         self.filewatcher = None
         self.remote_server = None
         self._subwindow_filters = []
-        self.tables = {}  # {handle: TableWidget}
-        self.active_table_handle = None
-        self.table_counter = 0
-        self.command_window = None
-        self.command_subwindow = None
-        self.data_browser = None
-        self.data_browser_subwindow = None
         self.shutting_down = False
         self._runtime_shutdown = False
         self._close_ready = False
         self._quit_command_sent = False
         self._quit_deadline = None
-        self.table_macros = []
         self._startup_complete = False
         self.plugin_manager = HydePluginManager(
-            plugin_package="hyde.user_interface",
-            plugins_dir=os.path.dirname(os.path.dirname(__file__)),
+            plugin_package="hyde.user_interface.plugins",
+            plugins_dir=os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins"),
             logger=logging.getLogger("hyde"),
         )
         
@@ -166,9 +138,6 @@ class HydeApp:
             self.logging_window.output_box,
         )
 
-        # Track active subwindow for "Active Table" rule
-        self.ui.mdiArea.subWindowActivated.connect(self._on_subwindow_activated)
-        self.ui.menuTableMacros.aboutToShow.connect(self.rebuild_table_macros_menu)
         self.qapplication.aboutToQuit.connect(self._mark_shutting_down)
 
         try:
@@ -178,28 +147,115 @@ class HydeApp:
             self.remote_server = None
         self.start_kernel_runtime()
 
+    def _plugin_widget(self, key):
+        mdi_context = getattr(self, "mdi_context", None)
+        if mdi_context is None:
+            return None
+        return mdi_context.widget(key)
+
+    def _plugin_subwindow(self, key):
+        mdi_context = getattr(self, "mdi_context", None)
+        if mdi_context is None:
+            return None
+        return mdi_context.subwindow(key)
+
+    @property
+    def command_window(self):
+        return self._plugin_widget("command_window")
+
+    @property
+    def command_subwindow(self):
+        return self._plugin_subwindow("command_window")
+
+    @property
+    def data_browser(self):
+        return self._plugin_widget("data_browser")
+
+    @property
+    def data_browser_subwindow(self):
+        return self._plugin_subwindow("data_browser")
+
+    @property
+    def logging_window(self):
+        return self._plugin_widget("logging")
+
+    @property
+    def logging_subwindow(self):
+        return self._plugin_subwindow("logging")
+
+    @property
+    def procedure_browser(self):
+        return self._plugin_widget("procedures")
+
+    @property
+    def procedures_subwindow(self):
+        return self._plugin_subwindow("procedures")
+
     def build_plugin_services(self):
         return {
-            "app": self,
             "ui": self.ui,
             "mdi_area": self.ui.mdiArea,
             "menu_context": getattr(self, "menu_context", None),
             "mdi_context": getattr(self, "mdi_context", None),
+            "configure_persistent_subwindow": self.configure_persistent_subwindow,
             "execute_command": self.execute_command,
             "queue_background_command": self.queue_background_command,
-            "open_table": self.open_table,
-            "request_quit": self.request_quit,
-            "choose_new_project": self.choose_new_project,
-            "choose_project": self.choose_project,
-            "choose_heal_project": self.choose_heal_project,
-            "save_project": self.save_project,
-            "save_project_as": self.save_project_as,
-            "save_project_copy": self.save_project_copy,
-            "show_new_table_dialog": self.show_new_table_dialog,
+            "get_current_project_dir": self.get_current_project_dir,
+            "get_procedures_init": self.get_procedures_init,
+            "get_command_window": self.get_command_window,
+            "get_namespace_view": self.get_namespace_view,
+            "connect_namespace_view_updated": self.connect_namespace_view_updated,
+            "disconnect_namespace_view_updated": self.disconnect_namespace_view_updated,
+            "get_shutting_down": self.get_shutting_down,
+            "set_shutting_down": self.set_shutting_down,
+            "get_quit_command_sent": self.get_quit_command_sent,
+            "set_quit_command_sent": self.set_quit_command_sent,
+            "begin_project_operation": self.begin_project_operation,
+            "project_target_needs_confirmation": self.project_target_needs_confirmation,
+            "confirm_overwrite_project": self.confirm_overwrite_project,
+            "begin_shutdown_from_close_event": self.begin_shutdown_from_close_event,
+            "reload_procedures": self.reload_procedures,
             "show_window": self.show_plugin_window,
             "on_visible_command_executed": self.on_visible_command_executed,
-            "request_window_macros": self.request_window_macros,
         }
+
+    def get_current_project_dir(self):
+        return self.current_project_dir
+
+    def get_procedures_init(self):
+        return self.procedures_init
+
+    def get_command_window(self):
+        return self.command_window
+
+    def get_namespace_view(self):
+        if self.data_browser is None:
+            return {}
+        return self.data_browser.namespace_view()
+
+    def connect_namespace_view_updated(self, callback):
+        if self.data_browser is None:
+            return False
+        self.data_browser.namespace_view_updated.connect(callback)
+        return True
+
+    def disconnect_namespace_view_updated(self, callback):
+        if self.data_browser is None:
+            return False
+        self.data_browser.namespace_view_updated.disconnect(callback)
+        return True
+
+    def get_shutting_down(self):
+        return self.shutting_down
+
+    def set_shutting_down(self, value):
+        self.shutting_down = bool(value)
+
+    def get_quit_command_sent(self):
+        return self._quit_command_sent
+
+    def set_quit_command_sent(self, value):
+        self._quit_command_sent = bool(value)
 
     def setup_plugins(self):
         self.menu_context = MenuContext(logger=logging.getLogger("hyde"))
@@ -209,7 +265,6 @@ class HydeApp:
         self.mdi_context = HydeMDIContext(
             self.ui.mdiArea,
             configure_subwindow=self.configure_persistent_subwindow,
-            created_callback=self._register_plugin_window,
         )
 
         self.plugin_manager.register_context("menus", self.menu_context)
@@ -250,19 +305,6 @@ class HydeApp:
             if action.text() == text:
                 return action
         return None
-
-    def _register_plugin_window(self, key, widget, subwindow):
-        mapping = {
-            "logging": ("logging_window", "logging_subwindow"),
-            "procedures": ("procedure_browser", "procedures_subwindow"),
-            "command_window": ("command_window", "command_subwindow"),
-            "data_browser": ("data_browser", "data_browser_subwindow"),
-        }
-        widget_attr, subwindow_attr = mapping.get(key, (None, None))
-        if widget_attr is None:
-            return
-        setattr(self, widget_attr, widget)
-        setattr(self, subwindow_attr, subwindow)
 
     def _ensure_static_plugin_windows(self):
         self.mdi_context.ensure_widget("logging")
@@ -375,136 +417,6 @@ class HydeApp:
             return
         self.queue_background_command(code, silent=True)
 
-    @inmain_decorator()
-    def open_table(self, names, target=None, visible_title=None, geometry=None, column_widths=None):
-        """
-        Open a new table or append to an existing one.
-        Called via ProcessTree relay or Data Browser.
-        
-        Args:
-            names: Variable names to display.
-            target: Optional internal handle (e.g. 'Table0').
-            visible_title: Optional UI label for the window.
-            geometry: Optional saved subwindow geometry.
-            column_widths: Optional saved widths keyed by column name.
-        """
-        from hyde.user_interface.table import TableWidget
-
-        if target is not None and target in self.tables:
-            table = self.tables[target]
-            table.append_columns(names)
-            table.parentWidget().show()
-            table.parentWidget().setFocus()
-            table.parentWidget().raise_()
-            return
-
-        # Create new table
-        if target is not None:
-            handle = target
-        else:
-            handle = visible_title or f"Table{self.table_counter}"
-            self.table_counter += 1
-        
-        table = TableWidget(
-            handle,
-            names,
-            app=self,
-            visible_title=visible_title,
-            geometry=geometry,
-            column_widths=column_widths,
-        )
-        subwindow = self.ui.mdiArea.addSubWindow(table)
-        table.bind_subwindow(subwindow)
-        self.tables[handle] = table
-        
-        # UI title vs internal handle
-        title = visible_title if visible_title else f"{handle}: {', '.join(names)}"
-        subwindow.setWindowTitle(title)
-        
-        subwindow.show()
-        
-        # When subwindow is destroyed, remove from registry
-        subwindow.destroyed.connect(lambda: self.tables.pop(handle, None))
-
-    def request_save_table_macro(self, table_state):
-        while True:
-            dialog = SaveWindowDialog(table_state=table_state, parent=self.ui)
-            if dialog.exec_() != QtWidgets.QDialog.Accepted:
-                return False
-            if dialog.choice == SaveWindowDialog.NO_SAVE:
-                return True
-            if dialog.choice != SaveWindowDialog.SAVE:
-                return False
-
-            macro_name = dialog.macro_name()
-            try:
-                macro_source = dialog.macro_source()
-            except MacroStoreError as exc:
-                QtWidgets.QMessageBox.warning(self.ui, "Invalid Macro Name", str(exc))
-                continue
-
-            conflict = inspect_macro_conflict(self.procedures_init, macro_name)
-            if conflict is not None:
-                response = QtWidgets.QMessageBox.question(
-                    self.ui,
-                    "Overwrite Recreation Macro",
-                    f"A function named {macro_name} already exists in procedures/__init__.py.\n\n"
-                    "Overwrite that function?",
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.No,
-                )
-                if response != QtWidgets.QMessageBox.Yes:
-                    continue
-
-            write_macro_source(self.procedures_init, macro_name, macro_source)
-            self.reload_procedures()
-            return True
-
-    def rebuild_table_macros_menu(self):
-        menu = self.ui.menuTableMacros
-        menu.clear()
-        if not self.table_macros:
-            placeholder = menu.addAction("No Saved Table Macros")
-            placeholder.setEnabled(False)
-            menu.setEnabled(False)
-            return
-        menu.setEnabled(True)
-        for macro in self.table_macros:
-            macro_name = macro["name"]
-            macro_args = list(macro.get("args", []))
-            invocation = f"{macro_name}({', '.join(macro_args)})"
-            action = menu.addAction(macro_name)
-            action.triggered.connect(
-                lambda checked=False, command=invocation: self.execute_command(command, visible=True)
-            )
-
-    def show_new_table_dialog(self):
-        """Opens the New Table dialog with current namespace metadata."""
-        from hyde.user_interface.new_table_dialog import NewTableDialog
-
-        metadata = (
-            self.data_browser.namespace_view()
-            if hasattr(self, 'data_browser')
-            else {}
-        )
-        
-        dialog = NewTableDialog(metadata, parent=self.ui)
-        if dialog.exec_():
-            command = dialog.get_command()
-            if command:
-                # Use visible execution for setup actions
-                self.execute_command(command, visible=True)
-
-    def _on_subwindow_activated(self, subwindow):
-        if subwindow is None:
-            return
-        widget = subwindow.widget()
-        from hyde.user_interface.table import TableWidget
-        if isinstance(widget, TableWidget):
-            self.active_table_handle = widget.handle
-        else:
-            self.active_table_handle = None
-
     def configure_persistent_subwindow(self, subwindow):
         subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, False)
         event_filter = PersistentSubwindowFilter(subwindow)
@@ -565,31 +477,7 @@ class HydeApp:
         self.ui.actionProcedures.setEnabled(has_project)
         self.ui.actionDataBrowser.setEnabled(has_project)
         self.ui.actionNew_Table.setEnabled(has_project)
-        self.ui.menuTableMacros.setEnabled(has_project and bool(self.table_macros))
-
-    def choose_new_project(self, checked=False):
-        del checked
-        NewProjectDialog(self).run()
-
-    def choose_project(self, checked=False):
-        del checked
-        LoadProjectDialog(self).run()
-
-    def choose_heal_project(self, checked=False):
-        del checked
-        HealProjectDialog(self).run()
-
-    def save_project(self, checked=False):
-        del checked
-        SaveProjectCommand(self).run()
-
-    def save_project_as(self, checked=False):
-        del checked
-        SaveAsProjectDialog(self).run()
-
-    def save_project_copy(self, checked=False):
-        del checked
-        SaveCopyProjectDialog(self).run()
+        self.ui.menuTableMacros.setEnabled(has_project)
 
     def request_quit(self, checked=False):
         del checked
@@ -602,8 +490,6 @@ class HydeApp:
         self.procedures_init = None
         self.stop_project_watcher()
         clear_tables(self)
-        self.table_macros = []
-        self.rebuild_table_macros_menu()
         self.procedure_browser.set_procedures_dir(None)
         self.ui.setWindowTitle("Hyde")
         if self.command_subwindow is not None:
@@ -649,15 +535,6 @@ class HydeApp:
             silent=True,
         )
 
-    def request_window_macros(self, kind='table'):
-        if kind != 'table':
-            return
-        state = TableState()
-        self.queue_background_command(
-            state.source_for_command("publish_table_macros"),
-            silent=True,
-        )
-                
     @inmain_decorator()
     def finalize_startup(self):
         try:
@@ -724,13 +601,6 @@ class HydeApp:
         self.start_kernel_runtime()
 
     @inmain_decorator()
-    def on_table_data(self, data):
-        request_id = data.get('request_id')
-        table_data = data.get('data', {})
-        for table in self.tables.values():
-            table.on_data_received(table_data, request_id)
-
-    @inmain_decorator()
     def on_project_state_result(self, data):
         operation = data.get('operation')
         success = bool(data.get('success', False))
@@ -768,18 +638,6 @@ class HydeApp:
         if content.get("status") != "ok":
             self._quit_command_sent = False
             self.end_project_operation()
-
-    @inmain_decorator()
-    def update_table_macros(self, macros):
-        self.table_macros = [
-            {
-                "name": macro["name"],
-                "args": list(macro.get("args", [])),
-            }
-            for macro in macros
-        ]
-        self.rebuild_table_macros_menu()
-        self._set_project_action_state(self.current_project_dir is not None)
 
     def _mark_shutting_down(self):
         self.shutting_down = True
@@ -865,7 +723,3 @@ class HydeApp:
         restore_main_window(self, session)
         if hasattr(self, "emit_plugin_event"):
             self.emit_plugin_event("project_loaded", {"session": session})
-        else:
-            restore_data_browser_state(self, session)
-            restore_tables(self, session)
-            restore_tool_windows(self, session)

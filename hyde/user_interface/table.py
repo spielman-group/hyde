@@ -1,12 +1,18 @@
+import copy
 import os
 import uuid
-import copy
-from labscript_utils.plugins import BasePlugin
+
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.features.hyde_features import TableCodec
 from hyde.user_interface.base import HydeGuiState, MutationState
+from hyde.user_interface.save_window_dialog import SaveWindowDialog
+from hyde.user_interface.window_macro_store import (
+    MacroStoreError,
+    inspect_macro_conflict,
+    write_macro_source,
+)
 
 
 class TableState(HydeGuiState):
@@ -30,25 +36,39 @@ class TableState(HydeGuiState):
 
     def set_title(self, title):
         if title:
-            self.apply_action({"type": "set", "path": ("settings", "title"), "value": title})
+            self.apply_action(
+                {"type": "set", "path": ("settings", "title"), "value": title}
+            )
         else:
             self.apply_action({"type": "clear", "path": ("settings", "title")})
 
     def set_target(self, target):
         if target:
-            self.apply_action({"type": "set", "path": ("settings", "target"), "value": target})
+            self.apply_action(
+                {"type": "set", "path": ("settings", "target"), "value": target}
+            )
         else:
             self.apply_action({"type": "clear", "path": ("settings", "target")})
 
     def set_geometry(self, geometry):
         if geometry:
-            self.apply_action({"type": "set", "path": ("settings", "geometry"), "value": list(geometry)})
+            self.apply_action(
+                {
+                    "type": "set",
+                    "path": ("settings", "geometry"),
+                    "value": list(geometry),
+                }
+            )
         else:
             self.apply_action({"type": "clear", "path": ("settings", "geometry")})
 
     def set_column_widths(self, column_widths):
         self.apply_action(
-            {"type": "set", "path": ("settings", "column_widths"), "value": dict(column_widths or {})}
+            {
+                "type": "set",
+                "path": ("settings", "column_widths"),
+                "value": dict(column_widths or {}),
+            }
         )
 
     def set_column_width(self, name, width):
@@ -56,12 +76,16 @@ class TableState(HydeGuiState):
 
     def set_request_id(self, request_id):
         if request_id:
-            self.apply_action({"type": "set", "path": ("settings", "request_id"), "value": request_id})
+            self.apply_action(
+                {"type": "set", "path": ("settings", "request_id"), "value": request_id}
+            )
         else:
             self.apply_action({"type": "clear", "path": ("settings", "request_id")})
 
     def source_for_command(self, command, **settings):
-        return self.codec.state_to_python(self._temporary_state(command=command, **settings))
+        return self.codec.state_to_python(
+            self._temporary_state(command=command, **settings)
+        )
 
     def default_macro_name(self):
         settings = self.normalized_state()["settings"]
@@ -74,6 +98,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
     Column 0: Point (index)
     Column 1+: Data waves
     """
+
     def __init__(self, names, parent=None):
         super().__init__(parent)
         self.names = names
@@ -91,7 +116,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
         return self.row_count
 
     def columnCount(self, parent=QtCore.QModelIndex()):
-        return len(self.names) + 2  # +1 for Point column, +1 inactive column
+        return len(self.names) + 2
 
     def active_column_count(self):
         return len(self.names) + 1
@@ -115,7 +140,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
     def data(self, index, role):
         if not index.isValid():
             return None
-        
+
         row = index.row()
         col = index.column()
 
@@ -129,7 +154,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
             if row < len(vals):
                 return str(vals[row])
             return ""
-        
+
         if role == QtCore.Qt.TextAlignmentRole:
             return QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
 
@@ -144,7 +169,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
     def flags(self, index):
         if not index.isValid():
             return QtCore.Qt.NoItemFlags
-        
+
         row = index.row()
         col = index.column()
         base = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
@@ -153,10 +178,18 @@ class TableViewModel(QtCore.QAbstractTableModel):
             return base
 
         if col == self.columnCount() - 1:
-            return base | QtCore.Qt.ItemIsEditable if row == 0 else QtCore.Qt.NoItemFlags
+            return (
+                base | QtCore.Qt.ItemIsEditable
+                if row == 0
+                else QtCore.Qt.NoItemFlags
+            )
 
         vals = self._column_values(col)
-        return base | QtCore.Qt.ItemIsEditable if row <= len(vals) else QtCore.Qt.NoItemFlags
+        return (
+            base | QtCore.Qt.ItemIsEditable
+            if row <= len(vals)
+            else QtCore.Qt.NoItemFlags
+        )
 
 
 class TableWidget(QtWidgets.QWidget):
@@ -164,7 +197,7 @@ class TableWidget(QtWidgets.QWidget):
         self,
         handle,
         names,
-        app,
+        services=None,
         visible_title=None,
         geometry=None,
         column_widths=None,
@@ -174,14 +207,12 @@ class TableWidget(QtWidgets.QWidget):
         super().__init__(*args, **kwargs)
         self.handle = handle
         self.names = list(names)
-        self.app = app
+        self.services = dict(services or {})
         self.table_state = TableState()
         self.table_state.set_items(self.names)
         self.table_state.set_title(visible_title or handle)
         self.table_state.set_geometry(geometry)
         self.table_state.set_column_widths(column_widths or {})
-        # Keep both states on the table widget: TableState owns recreation and
-        # layout, while MutationState stays reusable for other mutation UIs too.
         self.mutation_state = MutationState()
         self._current_request_id = None
         self._refresh_in_flight = False
@@ -194,7 +225,12 @@ class TableWidget(QtWidgets.QWidget):
         self._tracked_namespace_state = self._current_tracked_namespace_state()
 
         loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "table.ui")
+        ui_path = os.path.join(
+            os.path.dirname(__file__),
+            "plugins",
+            "table",
+            "table.ui",
+        )
         self.ui = loader.load(ui_path, self)
 
         self.model = TableViewModel(self.names)
@@ -203,18 +239,22 @@ class TableWidget(QtWidgets.QWidget):
         self.ui.tableView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.ui.tableView.viewport().installEventFilter(self)
         self.ui.valueEdit.installEventFilter(self)
-        self.ui.tableView.horizontalHeader().sectionResized.connect(self._on_section_resized)
+        self.ui.tableView.horizontalHeader().sectionResized.connect(
+            self._on_section_resized
+        )
 
-        self.ui.tableView.selectionModel().currentChanged.connect(self._on_selection_changed)
+        self.ui.tableView.selectionModel().currentChanged.connect(
+            self._on_selection_changed
+        )
         self.ui.tableView.customContextMenuRequested.connect(self._show_context_menu)
         self.ui.valueEdit.textEdited.connect(self._on_value_text_edited)
 
-        if self.app and hasattr(self.app, "data_browser"):
-            self.app.data_browser.namespace_view_updated.connect(
-                self._on_namespace_view_updated
-            )
-        
-        # Initial data fetch
+        connect_namespace_view_updated = self.services.get(
+            "connect_namespace_view_updated"
+        )
+        if connect_namespace_view_updated is not None:
+            connect_namespace_view_updated(self._on_namespace_view_updated)
+
         QtCore.QTimer.singleShot(0, self.refresh_data)
 
     def append_columns(self, names, refresh=True):
@@ -235,22 +275,22 @@ class TableWidget(QtWidgets.QWidget):
         self.capture_layout_state()
 
     def refresh_data(self):
-        """Request array data via Hyde's background runtime helper."""
         if self._closed or self._refresh_in_flight:
             return
-        
+
         self._current_request_id = str(uuid.uuid4())
         self._refresh_in_flight = True
-        if self.app:
-            code = self.table_state.source_for_command(
-                "push_table_data",
-                request_id=self._current_request_id,
-            )
-            self.app.queue_background_command(code, silent=True)
+        queue_background_command = self.services.get("queue_background_command")
+        if queue_background_command is None:
+            return
+        code = self.table_state.source_for_command(
+            "push_table_data",
+            request_id=self._current_request_id,
+        )
+        queue_background_command(code, silent=True)
 
     @inmain_decorator()
     def on_data_received(self, data, request_id):
-        """Callback from HydeApp relay for structured table-data responses."""
         if request_id != self._current_request_id:
             return
 
@@ -280,11 +320,10 @@ class TableWidget(QtWidgets.QWidget):
                 QtCore.QTimer.singleShot(0, self._fit_subwindow_to_contents)
 
     def _current_tracked_namespace_state(self):
-        if not self.app or not hasattr(self.app, "data_browser"):
+        get_namespace_view = self.services.get("get_namespace_view")
+        if get_namespace_view is None:
             return ()
-        return self._tracked_namespace_state_from_view(
-            self.app.data_browser.namespace_view()
-        )
+        return self._tracked_namespace_state_from_view(get_namespace_view())
 
     def _tracked_namespace_state_from_view(self, view):
         tracked = []
@@ -341,7 +380,10 @@ class TableWidget(QtWidgets.QWidget):
     def eventFilter(self, watched, event):
         subwindow = getattr(self, "_subwindow", None)
         ui = getattr(self, "ui", None)
-        if watched is subwindow and event.type() in (QtCore.QEvent.Move, QtCore.QEvent.Resize):
+        if watched is subwindow and event.type() in (
+            QtCore.QEvent.Move,
+            QtCore.QEvent.Resize,
+        ):
             self.capture_layout_state()
         if (
             ui is not None
@@ -357,7 +399,11 @@ class TableWidget(QtWidgets.QWidget):
                     self._schedule_value_editor_activation(index)
                 else:
                     QtCore.QTimer.singleShot(0, self._update_selection_info)
-        elif ui is not None and watched is ui.valueEdit and event.type() == QtCore.QEvent.KeyPress:
+        elif (
+            ui is not None
+            and watched is ui.valueEdit
+            and event.type() == QtCore.QEvent.KeyPress
+        ):
             if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
                 self._submit_and_move_selection(row_step=1, col_step=0)
                 return True
@@ -458,7 +504,7 @@ class TableWidget(QtWidgets.QWidget):
             self.ui.valueEdit.setReadOnly(True)
             self._selected_cell = None
             return
-        
+
         row = idx.row()
         col = idx.column()
         current_cell = (row, col)
@@ -466,7 +512,7 @@ class TableWidget(QtWidgets.QWidget):
         if not same_cell:
             self._value_edit_dirty = False
         self._selected_cell = current_cell
-        
+
         if col == 0:
             self.ui.cellInfoLabel.setText(f"Point {row}")
             self.ui.valueEdit.setText(str(row))
@@ -526,8 +572,9 @@ class TableWidget(QtWidgets.QWidget):
         for name, rows in sorted(rows_by_name.items()):
             self.mutation_state.set_delete_indices(name, rows)
             command = self.mutation_state.python_source()
-            if self.app:
-                self.app.execute_command(command, visible=False)
+            execute_command = self.services.get("execute_command")
+            if execute_command is not None:
+                execute_command(command, visible=False)
         self._value_edit_dirty = False
 
     def _editable_index_at(self, row, col):
@@ -555,7 +602,10 @@ class TableWidget(QtWidgets.QWidget):
         next_row = row + row_step
         next_col = col + col_step
 
-        while 0 <= next_row < self.model.rowCount() and 0 <= next_col < self.model.columnCount():
+        while (
+            0 <= next_row < self.model.rowCount()
+            and 0 <= next_col < self.model.columnCount()
+        ):
             next_index = self._editable_index_at(next_row, next_col)
             if next_index.isValid():
                 self.ui.tableView.setCurrentIndex(next_index)
@@ -573,7 +623,7 @@ class TableWidget(QtWidgets.QWidget):
         idx = self.ui.tableView.currentIndex()
         if not idx.isValid() or idx.column() == 0:
             return False
-        
+
         row = idx.row()
         val_text = self.ui.valueEdit.text()
 
@@ -582,9 +632,12 @@ class TableWidget(QtWidgets.QWidget):
                 if row != 0:
                     return False
                 namespace_names = set(self.names)
-                if self.app and hasattr(self.app, "data_browser"):
-                    namespace_names.update(self.app.data_browser.namespace_view().keys())
-                new_name = self.mutation_state.set_create_array(val_text, namespace_names)
+                get_namespace_view = self.services.get("get_namespace_view")
+                if get_namespace_view is not None:
+                    namespace_names.update(get_namespace_view().keys())
+                new_name = self.mutation_state.set_create_array(
+                    val_text, namespace_names
+                )
                 command = self.mutation_state.python_source()
                 pending_new_name = new_name
             else:
@@ -602,10 +655,10 @@ class TableWidget(QtWidgets.QWidget):
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self, "Invalid Value", str(exc))
             return False
-        
-        if self.app:
-            # Table edits use muted execution policy
-            self.app.execute_command(command, visible=False)
+
+        execute_command = self.services.get("execute_command")
+        if execute_command is not None:
+            execute_command(command, visible=False)
             if pending_new_name is not None:
                 self.append_columns([pending_new_name], refresh=False)
                 self._tracked_namespace_state = self._current_tracked_namespace_state()
@@ -617,7 +670,8 @@ class TableWidget(QtWidgets.QWidget):
             super().closeEvent(event)
             return
 
-        if self.app and getattr(self.app, "shutting_down", False):
+        get_shutting_down = self.services.get("get_shutting_down")
+        if get_shutting_down is not None and get_shutting_down():
             self.shutdown_client()
             super().closeEvent(event)
             return
@@ -631,9 +685,10 @@ class TableWidget(QtWidgets.QWidget):
             event.ignore()
             return
 
-        if self.app and hasattr(self.app, "request_save_table_macro"):
+        request_save_table_macro = self.services.get("request_save_table_macro")
+        if request_save_table_macro is not None:
             self.capture_layout_state()
-            if not self.app.request_save_table_macro(self.table_state):
+            if not request_save_table_macro(self.table_state):
                 event.ignore()
                 return
 
@@ -645,96 +700,45 @@ class TableWidget(QtWidgets.QWidget):
             return
         self._closed = True
         try:
-            if self.app and hasattr(self.app, "data_browser"):
-                self.app.data_browser.namespace_view_updated.disconnect(
-                    self._on_namespace_view_updated
-                )
+            disconnect_namespace_view_updated = self.services.get(
+                "disconnect_namespace_view_updated"
+            )
+            if disconnect_namespace_view_updated is not None:
+                disconnect_namespace_view_updated(self._on_namespace_view_updated)
         except Exception:
             pass
 
 
-class Plugin(BasePlugin):
-    def __init__(self, initial_settings):
-        super().__init__(initial_settings)
-        self.services = {}
+def prompt_to_save_table_macro(table_state, parent, procedures_init, reload_procedures):
+    while True:
+        dialog = SaveWindowDialog(table_state=table_state, parent=parent)
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            return False
+        if dialog.choice == SaveWindowDialog.NO_SAVE:
+            return True
+        if dialog.choice != SaveWindowDialog.SAVE:
+            return False
 
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
+        macro_name = dialog.macro_name()
+        try:
+            macro_source = dialog.macro_source()
+        except MacroStoreError as exc:
+            QtWidgets.QMessageBox.warning(parent, "Invalid Macro Name", str(exc))
+            continue
 
-    def get_menu_contributions(self):
-        return [
-            {
-                "location": "window",
-                "group": "tables",
-                "order": 20,
-                "name": "New Table...",
-                "action": self.show_new_table_dialog,
-            }
-        ]
-
-    def show_new_table_dialog(self, checked=False):
-        del checked
-        self.services["show_new_table_dialog"]()
-
-    def get_event_handlers(self):
-        return {
-            "request_project_save": self.on_request_project_save,
-            "project_loaded": self.on_project_loaded,
-            "project_activated": self.on_project_activated,
-        }
-
-    def on_request_project_save(self, data):
-        app = self.services["app"]
-        tables = []
-        for handle, table in sorted(app.tables.items()):
-            table.capture_layout_state()
-            subwindow = table.parentWidget()
-            table_settings = table.table_state.normalized_state()["settings"]
-            tables.append(
-                {
-                    "handle": handle,
-                    "title": subwindow.windowTitle(),
-                    "names": list(table.names),
-                    "hidden": not subwindow.isVisible(),
-                    "geometry": list(table_settings["geometry"])
-                    if table_settings["geometry"] is not None
-                    else [
-                        subwindow.geometry().x(),
-                        subwindow.geometry().y(),
-                        subwindow.geometry().width(),
-                        subwindow.geometry().height(),
-                    ],
-                    "column_widths": dict(table_settings.get("column_widths", {})),
-                }
+        conflict = inspect_macro_conflict(procedures_init, macro_name)
+        if conflict is not None:
+            response = QtWidgets.QMessageBox.question(
+                parent,
+                "Overwrite Recreation Macro",
+                f"A function named {macro_name} already exists in procedures/__init__.py.\n\n"
+                "Overwrite that function?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No,
             )
-
-        session = data["session"]
-        if app.active_table_handle is not None:
-            session["active_table_handle"] = app.active_table_handle
-        session["table_counter"] = app.table_counter
-        session["tables"] = tables
-
-    def on_project_loaded(self, data):
-        app = self.services["app"]
-        session = data["session"]
-        saved_counter = int(session.get("table_counter", 0))
-        for table_state in session.get("tables", []):
-            handle = table_state["handle"]
-            app.open_table(
-                table_state.get("names", []),
-                target=handle,
-                visible_title=table_state.get("title"),
-                geometry=table_state.get("geometry"),
-                column_widths=table_state.get("column_widths", {}),
-            )
-            table = app.tables.get(handle)
-            if table is None:
+            if response != QtWidgets.QMessageBox.Yes:
                 continue
-            table.parentWidget().setVisible(not bool(table_state.get("hidden", False)))
-        app.table_counter = saved_counter
-        app.active_table_handle = session.get("active_table_handle")
 
-    def on_project_activated(self, data):
-        del data
-        self.services["request_window_macros"]("table")
+        write_macro_source(procedures_init, macro_name, macro_source)
+        reload_procedures()
+        return True

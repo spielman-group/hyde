@@ -1,6 +1,5 @@
 import os
 
-from labscript_utils.plugins import BasePlugin
 from qtutils.qt import QtWidgets
 
 from hyde.features.hyde_features import SimpleHydeCommandCodec
@@ -26,7 +25,13 @@ class SimpleCommandState(HydeGuiState):
 
     def set_project_dir(self, project_dir):
         if project_dir:
-            self.apply_action({"type": "set", "path": ("settings", "project_dir"), "value": project_dir})
+            self.apply_action(
+                {
+                    "type": "set",
+                    "path": ("settings", "project_dir"),
+                    "value": project_dir,
+                }
+            )
         else:
             self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
 
@@ -34,7 +39,9 @@ class SimpleCommandState(HydeGuiState):
         return self.normalized_state()["settings"]["project_dir"]
 
     def set_overwrite(self, overwrite):
-        self.apply_action({"type": "set", "path": ("settings", "overwrite"), "value": bool(overwrite)})
+        self.apply_action(
+            {"type": "set", "path": ("settings", "overwrite"), "value": bool(overwrite)}
+        )
 
     def set_save_mode(self, mode):
         self.apply_action({"type": "set", "path": ("settings", "mode"), "value": mode})
@@ -150,7 +157,9 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
     def update_accept_button(self):
         if self._accept_button is None:
             return
-        self._accept_button.setEnabled(self._allows_project_dir(self.current_project_path()))
+        self._accept_button.setEnabled(
+            self._allows_project_dir(self.current_project_path())
+        )
 
     def accept(self):
         project_dir = self.current_project_path()
@@ -349,100 +358,6 @@ class QuitCommand:
         self.app._quit_command_sent = True
         self.app.execute_command(self.state.python_source(), visible=True)
         return True
-
-
-class Plugin(BasePlugin):
-    def __init__(self, initial_settings):
-        super().__init__(initial_settings)
-        self.services = {}
-
-    def plugin_setup_complete(self, data=None):
-        data = data or {}
-        self.services = data.get("services", {})
-
-    def get_menu_contributions(self):
-        return [
-            {
-                "location": "file",
-                "group": "project",
-                "order": 10,
-                "name": "New...",
-                "shortcut": "Ctrl+N",
-                "action": self.new_project,
-            },
-            {
-                "location": "file",
-                "group": "project",
-                "order": 20,
-                "name": "Load...",
-                "shortcut": "Ctrl+O",
-                "action": self.load_project,
-            },
-            {
-                "location": "file",
-                "group": "project",
-                "order": 30,
-                "name": "Heal Project...",
-                "action": self.heal_project,
-            },
-            {
-                "location": "file",
-                "group": "save",
-                "order": 10,
-                "name": "Save",
-                "shortcut": "Ctrl+S",
-                "action": self.save_project,
-            },
-            {
-                "location": "file",
-                "group": "save",
-                "order": 20,
-                "name": "Save As...",
-                "action": self.save_project_as,
-            },
-            {
-                "location": "file",
-                "group": "save",
-                "order": 30,
-                "name": "Save a Copy...",
-                "action": self.save_project_copy,
-            },
-            {
-                "location": "file",
-                "group": "application",
-                "order": 100,
-                "name": "Quit",
-                "action": self.quit_application,
-            },
-        ]
-
-    def new_project(self, checked=False):
-        del checked
-        self.services["choose_new_project"]()
-
-    def load_project(self, checked=False):
-        del checked
-        self.services["choose_project"]()
-
-    def heal_project(self, checked=False):
-        del checked
-        self.services["choose_heal_project"]()
-
-    def save_project(self, checked=False):
-        del checked
-        self.services["save_project"]()
-
-    def save_project_as(self, checked=False):
-        del checked
-        self.services["save_project_as"]()
-
-    def save_project_copy(self, checked=False):
-        del checked
-        self.services["save_project_copy"]()
-
-    def quit_application(self, checked=False):
-        del checked
-        self.services["request_quit"]()
 
 
 __all__ = [
