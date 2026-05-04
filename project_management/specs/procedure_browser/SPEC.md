@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 
 ### Automation
 1. When Hyde starts or a project is loaded, the execution layer changes to the project root, imports the `procedures` package, and exports its public names into the interactive kernel namespace.
-2. This ensures that the global namespace in the Command Window (IPython) is identical to the public state defined in `procedures/__init__.py`.
+2. This ensures that the global namespace in the Python Terminal (IPython) is identical to the public state defined in `procedures/__init__.py`.
 
 ## Filesystem Monitoring
 The Procedure Browser is only a view onto the `procedures/` directory. Tracking changes to

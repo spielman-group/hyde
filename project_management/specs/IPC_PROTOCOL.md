@@ -4,7 +4,7 @@
 Hyde runs as two cooperating processes plus one GUI-owned helper thread:
 
 1. **GUI Process**
-   Owns the PyQt event loop, the MDI interface, the embedded `qtconsole` command window, project-selection UI, `FileWatcher`, and the plugin-managed lyse-compatible `ZMQServer`.
+   Owns the PyQt event loop, the MDI interface, the embedded `qtconsole` Python Terminal, project-selection UI, `FileWatcher`, and the plugin-managed lyse-compatible `ZMQServer`.
 2. **Kernel Process**
    The `spyder_kernels` IPython kernel that holds the authoritative Python namespace. It is started in-process by `hyde/execution/kernel_launcher.py`, so the real kernel process is the direct `ProcessTree` child of the GUI.
 3. **Runtime Helper Thread**
@@ -21,7 +21,7 @@ Hyde uses three communication paths:
    A lyse-compatible `labscript_utils.ls_zprocess.ZMQServer` bound to the existing
    `ports.lyse` labconfig entry and owned by a first-party GUI plugin.
 
-The command window and the runtime helper both connect to the same kernel, but they use separate Jupyter client sessions for different purposes.
+The Python Terminal and the runtime helper both connect to the same kernel, but they use separate Jupyter client sessions for different purposes.
 
 External clients that already target lyse's labconfig port may also talk to Hyde
 through the plugin-owned GUI listener.
@@ -59,7 +59,7 @@ entry points used by the GUI File menu.
 The public `hyde.table(...)` helper also accepts optional recreation-layout kwargs:
 
 - `geometry=(x, y, width, height)`
-- `column_widths={"wave_name": width, ...}`
+- `column_widths={"array_name": width, ...}`
 
 ## Lane 1: Kernel -> GUI (`zprocess.ProcessTree`)
 
@@ -176,7 +176,7 @@ Payload:
     'kind': 'table',
     'macros': [
         {'name': 'Table0', 'args': ['c', 'd']},
-        {'name': 'Table1', 'args': ['wave0']},
+        {'name': 'Table1', 'args': ['array0']},
     ],
 }
 ```
@@ -189,7 +189,7 @@ GUI behavior:
 ## Lane 2A: GUI -> Kernel (Visible Command Session)
 
 ### Transport
-- `hyde/user_interface/command_window/__init__.py`
+- `hyde/user_interface/plugins/python_terminal/__init__.py`
 - `qtconsole.client.QtKernelClient`
 - shared connection file: `kernel-hyde.json`
 
@@ -197,7 +197,7 @@ GUI behavior:
 This is the user's visible interactive console session.
 
 ### Behavior
-- the command window is a minimal `RichJupyterWidget`
+- the Python Terminal is a minimal `RichJupyterWidget`
 - it creates its own `QtKernelClient`
 - user-entered Python is sent directly to the kernel over standard Jupyter `execute_request`
 - this session owns the visible rich IPython prompt/history behavior seen by the user
@@ -207,7 +207,7 @@ This is the user's visible interactive console session.
 
 ### Important boundary
 - Hyde should not inject runtime-helper-controlled background execution through this session
-- the command window is for visible user interaction, not for replaying `procedures/__init__.py`
+- the Python Terminal is for visible user interaction, not for replaying `procedures/__init__.py`
 
 ## Lane 2B: Runtime Helper -> Kernel (Background Control Session)
 

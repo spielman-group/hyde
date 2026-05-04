@@ -116,7 +116,7 @@ def collect_kernel_messages(from_child, timeout=10, stop_when=None):
     raise AssertionError(f"Timed out waiting for kernel messages. Saw: {messages!r}")
 
 
-class DummyCommandWindowService:
+class DummyPythonTerminalService:
     def __init__(self, history=None):
         self._history = list(history or [])
         self.restored_entries = None
@@ -193,9 +193,9 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app = RestoredApp()
             restored_app.ui = main_window
             restored_app.current_project_dir = project_dir
-            command_window_service = DummyCommandWindowService()
+            python_terminal_service = DummyPythonTerminalService()
             restored_app.plugin_service = lambda key: (
-                command_window_service if key == "visible_command_service" else None
+                python_terminal_service if key == "visible_terminal_service" else None
             )
 
             class RestoringPlugin:
@@ -309,7 +309,7 @@ class TestHydeStartup(unittest.TestCase):
             self.assertIsNotNone(app.kernel_process)
             self.assertIsNone(app.kernel_process.poll())
             self.assertFalse(
-                app.plugin_service("visible_command_service").subwindow().isVisible()
+                app.plugin_service("visible_terminal_service").subwindow().isVisible()
             )
             self.assertFalse(
                 app.mdi_context.subwindow("procedures").isVisible()
@@ -325,16 +325,16 @@ class TestHydeStartup(unittest.TestCase):
             self.assertFalse(lookup_menu_action(app, "file", "Save As...").isEnabled())
             self.assertFalse(lookup_menu_action(app, "file", "Save a Copy...").isEnabled())
             self.assertFalse(
-                lookup_menu_action(app, "window", "Command Window").isEnabled()
+                lookup_menu_action(app, "window", "Python Terminal").isEnabled()
             )
             self.assertFalse(lookup_menu_action(app, "window", "Procedures").isEnabled())
-            self.assertFalse(lookup_menu_action(app, "window", "Data Browser").isEnabled())
+            self.assertFalse(lookup_menu_action(app, "window", "Python Variables").isEnabled())
             self.assertFalse(lookup_menu_action(app, "window", "New Table...").isEnabled())
         finally:
             app.finalize_quit()
             wait_until(
                 lambda: (
-                    app.plugin_service("visible_command_service").widget() is None
+                    app.plugin_service("visible_terminal_service").widget() is None
                     and app.plugin_service("namespace_view_service").widget() is None
                 ),
                 timeout=10,

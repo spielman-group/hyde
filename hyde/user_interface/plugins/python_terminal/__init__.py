@@ -3,7 +3,7 @@ from qtconsole.client import QtKernelClient
 from hyde.paths import CONNECTION_FILE
 from hyde.user_interface.plugin_tools import HydePlugin
 
-class CommandWindow(RichJupyterWidget):
+class PythonTerminal(RichJupyterWidget):
     def __init__(self, connection_file, history_sink=None, initial_history=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._history_sink = history_sink
@@ -67,19 +67,19 @@ class CommandWindow(RichJupyterWidget):
             self.kernel_client = None
 
 
-class CommandWindowService:
+class PythonTerminalService:
     def __init__(self, plugin):
         self.plugin = plugin
         self._history_entries = []
 
     def ensure_widget(self):
-        return self.plugin.ensure_mdi_widget("command_window")
+        return self.plugin.ensure_mdi_widget("python_terminal")
 
     def widget(self):
-        return self.plugin.mdi_widget("command_window")
+        return self.plugin.mdi_widget("python_terminal")
 
     def subwindow(self):
-        return self.plugin.mdi_subwindow("command_window")
+        return self.plugin.mdi_subwindow("python_terminal")
 
     def execute_visible(self, code):
         widget = self.ensure_widget()
@@ -107,25 +107,25 @@ class CommandWindowService:
         return None if widget is None else widget.kernel_client
 
     def destroy(self):
-        self.plugin.destroy_mdi_widget("command_window")
+        self.plugin.destroy_mdi_widget("python_terminal")
 
 
 class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.command_window_service = CommandWindowService(self)
+        self.python_terminal_service = PythonTerminalService(self)
         self._action = None
 
     def on_setup_complete(self, data=None):
         del data
-        self.bind_menu_action("_action", "window", "Command Window")
+        self.bind_menu_action("_action", "window", "Python Terminal")
 
     def get_ui_contributions(self):
         return [
             {
                 "context": "mdi",
-                "key": "command_window",
-                "title": "Command Window",
+                "key": "python_terminal",
+                "title": "Python Terminal",
                 "factory": self.create_widget,
             }
         ]
@@ -136,20 +136,20 @@ class Plugin(HydePlugin):
                 "location": "window",
                 "group": "tool_windows",
                 "order": 10,
-                "name": "Command Window",
+                "name": "Python Terminal",
                 "action": self.show_window,
             }
         ]
 
     def get_services(self):
-        return {"visible_command_service": self.command_window_service}
+        return {"visible_terminal_service": self.python_terminal_service}
 
     def create_widget(self, parent=None, data=None):
         del data
-        widget = CommandWindow(
+        widget = PythonTerminal(
             connection_file=CONNECTION_FILE,
-            history_sink=self.command_window_service.record_history_entry,
-            initial_history=self.command_window_service.history_entries(),
+            history_sink=self.python_terminal_service.record_history_entry,
+            initial_history=self.python_terminal_service.history_entries(),
             parent=parent,
         )
         widget.executed.connect(self.services["on_visible_command_executed"])
@@ -157,7 +157,7 @@ class Plugin(HydePlugin):
 
     def show_window(self, checked=False):
         del checked
-        self.services["show_window"]("command_window")
+        self.services["show_window"]("python_terminal")
 
     def get_event_handlers(self):
         return {
@@ -169,15 +169,15 @@ class Plugin(HydePlugin):
         }
 
     def get_save_data(self):
-        return self.tool_window_save_data("command", "command_window")
+        return self.tool_window_save_data("python_terminal")
 
     def on_project_loaded(self, data):
-        self.restore_tool_window(data["session"], "command", "command_window")
+        self.restore_tool_window(data["session"], "python_terminal")
 
     def on_enter_no_project_state(self, data):
         del data
         self.set_bound_action_enabled("_action", False)
-        self.hide_mdi_subwindow("command_window")
+        self.hide_mdi_subwindow("python_terminal")
 
     def on_project_activated(self, data):
         del data
@@ -185,8 +185,8 @@ class Plugin(HydePlugin):
 
     def on_kernel_ready(self, data):
         del data
-        self.command_window_service.ensure_widget()
+        self.python_terminal_service.ensure_widget()
 
     def on_kernel_crashed(self, data):
         del data
-        self.command_window_service.destroy()
+        self.python_terminal_service.destroy()

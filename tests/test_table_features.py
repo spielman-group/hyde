@@ -33,26 +33,26 @@ class TestTableCodec(unittest.TestCase):
 class TestMutationCodec(unittest.TestCase):
     def test_mutation_state_generates_edit_append_new_array_and_delete_commands(self):
         edit_state = MutationState()
-        edit_state.set_edit_value("wave0", 1, "abc")
+        edit_state.set_edit_value("array0", 1, "abc")
         append_state = MutationState()
-        append_state.set_append_value("wave0", "2")
+        append_state.set_append_value("array0", "2")
         create_state = MutationState()
-        create_state.set_create_array("abc", ["textWave0"])
+        create_state.set_create_array("abc", ["string_array0"])
         delete_state = MutationState()
-        delete_state.set_delete_indices("wave0", [4, 1])
+        delete_state.set_delete_indices("array0", [4, 1])
 
-        self.assertEqual(edit_state.python_source(), "wave0[1] = 'abc'")
+        self.assertEqual(edit_state.python_source(), "array0[1] = 'abc'")
         self.assertEqual(
             append_state.python_source(),
-            "wave0 = np.concatenate((wave0, np.array([2], dtype=wave0.dtype)))",
+            "array0 = np.concatenate((array0, np.array([2], dtype=array0.dtype)))",
         )
         self.assertEqual(
             create_state.python_source(),
-            "textWave1 = np.array(['abc'])",
+            "string_array1 = np.array(['abc'])",
         )
         self.assertEqual(
             delete_state.python_source(),
-            "wave0 = np.delete(wave0, [1, 4])",
+            "array0 = np.delete(array0, [1, 4])",
         )
 
 class TestSaveWindowDialog(unittest.TestCase):
@@ -154,17 +154,17 @@ class TestTableWidget(unittest.TestCase):
 
             self.assertTrue(widget._submit_value_edit())
             self.assertEqual(executed, [])
-            self.assertEqual(queued, [("wave0 = np.array([5])", True)])
+            self.assertEqual(queued, [("array0 = np.array([5])", True)])
             self.assertEqual(widget.names, ["a"])
 
             namespace_service.emit(
                 {
                     "a": {"type": "ndarray"},
-                    "wave0": {"type": "ndarray"},
+                    "array0": {"type": "ndarray"},
                 }
             )
 
-            self.assertEqual(widget.names, ["a", "wave0"])
+            self.assertEqual(widget.names, ["a", "array0"])
             self.assertGreaterEqual(len(queued), 2)
         finally:
             widget.shutdown_client()

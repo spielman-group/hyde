@@ -555,7 +555,7 @@ class MutationCodec(FeatureCodec):
         except Exception:
             value = value_text
 
-        prefix = "textWave" if isinstance(value, str) else "wave"
+        prefix = "string_array" if isinstance(value, str) else "array"
         index = 0
         while f"{prefix}{index}" in existing:
             index += 1
@@ -593,8 +593,8 @@ class MutationCodec(FeatureCodec):
 
 def is_eligible_for_table(metadata):
     """
-    Determines if a variable (from Data Browser metadata) is eligible for table display.
-    Scoped to 1D numeric waves initially.
+    Determines if a variable (from Python Variables metadata) is eligible for table display.
+    Scoped to 1D numeric arrays initially.
     """
     python_type = metadata.get("python_type", "").lower()
     numpy_type = metadata.get("numpy_type", "")

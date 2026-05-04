@@ -93,9 +93,9 @@ class TableState(HydeGuiState):
 
 class TableViewModel(QtCore.QAbstractTableModel):
     """
-    Mirror of kernel data for 1D numeric waves.
+    Mirror of kernel data for 1D numeric arrays.
     Column 0: Point (index)
-    Column 1+: Data waves
+    Column 1+: Data arrays
     """
 
     def __init__(self, names, parent=None):
@@ -245,9 +245,9 @@ class TableWidget(QtWidgets.QWidget):
         self.ui.tableView.customContextMenuRequested.connect(self._show_context_menu)
         self.ui.valueEdit.textEdited.connect(self._on_value_text_edited)
 
-        data_browser_service = self.services.get("namespace_view_service")
-        if data_browser_service is not None:
-            data_browser_service.connect_namespace_view_updated(
+        python_variables_service = self.services.get("namespace_view_service")
+        if python_variables_service is not None:
+            python_variables_service.connect_namespace_view_updated(
                 self._on_namespace_view_updated
             )
 
@@ -341,11 +341,11 @@ class TableWidget(QtWidgets.QWidget):
             self.refresh_data()
 
     def _current_tracked_namespace_state(self):
-        data_browser_service = self.services.get("namespace_view_service")
-        if data_browser_service is None:
+        python_variables_service = self.services.get("namespace_view_service")
+        if python_variables_service is None:
             return ()
         return self._tracked_namespace_state_from_view(
-            data_browser_service.namespace_view()
+            python_variables_service.namespace_view()
         )
 
     def _tracked_namespace_state_from_view(self, view):
@@ -669,9 +669,11 @@ class TableWidget(QtWidgets.QWidget):
                 if row != 0:
                     return False
                 namespace_names = set(self.names)
-                data_browser_service = self.services.get("namespace_view_service")
-                if data_browser_service is not None:
-                    namespace_names.update(data_browser_service.namespace_view().keys())
+                python_variables_service = self.services.get("namespace_view_service")
+                if python_variables_service is not None:
+                    namespace_names.update(
+                        python_variables_service.namespace_view().keys()
+                    )
                 new_name = self.mutation_state.set_create_array(
                     val_text, namespace_names
                 )
@@ -735,9 +737,9 @@ class TableWidget(QtWidgets.QWidget):
             return
         self._closed = True
         try:
-            data_browser_service = self.services.get("namespace_view_service")
-            if data_browser_service is not None:
-                data_browser_service.disconnect_namespace_view_updated(
+            python_variables_service = self.services.get("namespace_view_service")
+            if python_variables_service is not None:
+                python_variables_service.disconnect_namespace_view_updated(
                     self._on_namespace_view_updated
                 )
         except Exception:

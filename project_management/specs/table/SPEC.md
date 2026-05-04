@@ -6,8 +6,8 @@
 - [x] Allow direct editing of supported data cells.
 - [x] Expose `hyde.table(...)` as the kernel-facing table creation entry point.
 - [x] Provide a New Table dialog that generates the `hyde.table(...)` creation string.
-- [x] Allow the Data Browser to create a new table from selected arrays via `Edit`.
-- [x] Allow the Data Browser to append selected arrays to an existing table via `Append to Table`.
+- [x] Allow Python Variables to create a new table from selected arrays via `Edit`.
+- [x] Allow Python Variables to append selected arrays to an existing table via `Append to Table`.
 - [x] Show a selection summary and editable value field for the current cell.
 - [x] Keep the table synchronized with the authoritative kernel namespace.
 - [x] Offer to save a parameterized table recreation macro when the table is closed.
@@ -15,7 +15,7 @@
 - [ ] Support pandas DataFrame tables and editing.
 - [ ] Support row insertion and deletion.
 - [ ] Support sorting, formatting, export, and presentation workflows.
-- [ ] Support multidimensional waves and non-numeric display modes.
+- [ ] Support multidimensional arrays and non-numeric display modes.
 
 ## Purpose
 
@@ -43,7 +43,7 @@ surfaces to reuse the same mutation path later.
 
 ## Initial Deployment Scope
 
-The initial deployment focuses on 1D wave-like objects from the active Hyde project.
+The initial deployment focuses on 1D array-like objects from the active Hyde project.
 Existing table creation from the namespace remains centered on numeric arrays, while
 in-table creation of a new column infers dtype from the entered value.
 
@@ -60,8 +60,8 @@ It includes:
 - creating a new displayed array by editing the top cell of the first inactive column
 - a current-cell summary and value field above the grid
 - live refresh when the underlying kernel data changes
-- table creation from the Data Browser `Edit` action
-- table append from the Data Browser `Append to Table` action
+- table creation from the Python Variables `Edit` action
+- table append from the Python Variables `Append to Table` action
 - save-on-close table recreation macros
 - parameterized `@hyde.table` recreation decorators
 - reopening saved tables from `Windows -> Table Macros`
@@ -73,7 +73,7 @@ It does not include:
 - a separate table-owned data model that can drift from the kernel
 - row/column formatting dialogs
 - sort/export/presentation tooling
-- multidimensional wave editing
+- multidimensional array editing
 - pandas DataFrame tables and editing
 - arbitrary command-entry dialogs
 
@@ -104,11 +104,11 @@ The initial table API is kernel-facing and deliberately small:
 - `hyde.table(...)` creates a new table from selected supported objects
 - `hyde.table(..., target=<table_name>)` appends supported objects to an existing table
 - `hyde.table(..., geometry=(x, y, width, height))` recreates a saved table window layout
-- `hyde.table(..., column_widths={"wave_name": width, ...})` recreates saved data-column widths
+- `hyde.table(..., column_widths={"array_name": width, ...})` recreates saved data-column widths
 
 The New Table dialog uses this API to generate the creation string.
 
-The Data Browser uses this API in two ways:
+Python Variables uses this API in two ways:
 
 - `Edit` opens the New Table dialog with the selected arrays
 - `Append to Table` appends the selected arrays to the currently active table
@@ -144,7 +144,7 @@ deployment. Igor-only folder/root controls are excluded rather than shown inertl
 ## Editable Operations
 
 The initial deployment supports direct editing of existing data cells in displayed
-1D wave-like objects.
+1D array-like objects.
 
 Supported edits:
 
@@ -156,7 +156,7 @@ Supported edits:
 
 For each live edit:
 
-- the target object is the selected kernel-owned wave-like object
+- the target object is the selected kernel-owned array-like object
 - the Python-level effect is an indexed assignment into that object
 - the edit is committed immediately after confirmation
 
@@ -172,8 +172,8 @@ For new-column creation:
 - the new array is equivalent to `np.array([value])`, so numpy infers the dtype from
   the typed value
 - the created array is automatically appended to the current table
-- default names follow Hyde's current auto-generated wave naming pattern such as
-  `wave0` or `textWave0`
+- default names follow Hyde's current auto-generated array naming pattern such as
+  `array0` or `string_array0`
 
 Invalid or unsupported edits:
 
@@ -194,13 +194,13 @@ string for the kernel rather than mutating scientific state in the GUI.
 
 Examples of the intended pattern:
 
-- `wave[row] = value` for a 1D wave-like object
-- `wave = np.append(wave, value)` for appending one value below an existing column
+- `array[row] = value` for a 1D array-like object
+- `array = np.append(array, value)` for appending one value below an existing column
 - `hyde.table(arr1, arr2)` for creating a new table from selected arrays
 - `hyde.table(arr1, target="Table0")` for appending to an existing table
 - `hyde.table(arr1, title="Table0", geometry=(5, 42, 510, 242), column_widths={"arr1": 262})`
   for recreating a saved table layout
-- `wave0 = np.array([value])` for creating a new array from the first inactive column
+- `array0 = np.array([value])` for creating a new array from the first inactive column
 
 All of these strings are generated by `TableState` / `TableCodec` or by
 `MutationState` / `MutationCodec`. The table does not own the authoritative value
@@ -274,7 +274,7 @@ The following Igor concepts are not part of the initial Hyde table:
 
 The long-term table direction may include:
 
-- multidimensional wave display
+- multidimensional array display
 - pandas DataFrame table display and editing
 - row insertion and deletion
 - column sorting and formatting
@@ -287,7 +287,7 @@ These capabilities are deferred until their underlying backend behavior is defin
 
 ### 03_data_tables.png
 ![Data Tables](03_data_tables.png)
-- What it shows: a Hyde data browser beside a live table window.
+- What it shows: Hyde Python Variables beside a live table window.
 - Hyde interpretation: the table is a live, editable view into kernel-owned objects.
 
 ### 13_table_with_features.png
@@ -295,4 +295,4 @@ These capabilities are deferred until their underlying backend behavior is defin
 - What it shows: a table titled `Table0:delay2,fit_delay2` with a point column, two
   data columns, a current-cell value strip, a gear menu, and scrollbars.
 - Hyde interpretation: the table supports direct cell editing and kernel-synchronized
-  display of selected wave-like objects.
+  display of selected array-like objects.

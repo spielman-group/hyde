@@ -193,8 +193,8 @@ class TestRuntimeArchitecture(unittest.TestCase):
         dummy_app._runtime_shutdown = False
         dummy_app.stop_project_watcher = lambda: process_calls.append(("stop_watcher",))
         dummy_app.plugin_service = lambda key: (
-            type("CommandWindowService", (), {"kernel_client": lambda self: kernel_client})()
-            if key == "visible_command_service"
+            type("PythonTerminalService", (), {"kernel_client": lambda self: kernel_client})()
+            if key == "visible_terminal_service"
             else None
         )
         dummy_app.runtime_helper = helper

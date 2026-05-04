@@ -200,9 +200,13 @@ class Plugin(HydePlugin):
 
     def show_new_table_dialog(self, checked=False):
         del checked
-        data_browser_service = self.services.get("namespace_view_service")
+        python_variables_service = self.services.get("namespace_view_service")
         self.table_feature.show_new_table_dialog(
-            {} if data_browser_service is None else data_browser_service.namespace_view(),
+            (
+                {}
+                if python_variables_service is None
+                else python_variables_service.namespace_view()
+            ),
             parent=self.services["ui"],
         )
 

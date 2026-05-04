@@ -3,10 +3,10 @@
 ## Feature Checklist
 - [x] Present a Hyde-native dialog for creating a new table from selected live objects.
 - [x] Generate the kernel-facing `hyde.table(...)` command string from the dialog state.
-- [x] Support table creation from selected 1D numeric arrays / wave-like objects.
+- [x] Support table creation from selected 1D numeric arrays / array-like objects.
 - [ ] Support pandas DataFrame table creation.
 - [ ] Support style macros.
-- [ ] Support multidimensional waves, text waves, and presentation workflows.
+- [ ] Support multidimensional arrays, string arrays, and presentation workflows.
 
 ## Purpose
 
@@ -23,7 +23,7 @@ and the table window, while reusable mutation state lives outside the table pack
 
 ## Initial Deployment Scope
 
-The initial deployment focuses on creating tables from 1D numeric wave-like objects.
+The initial deployment focuses on creating tables from 1D numeric array-like objects.
 It includes:
 
 - selecting one or more eligible live objects from the current Hyde namespace
@@ -37,7 +37,7 @@ It includes:
 It does not include:
 
 - pandas DataFrame creation support
-- multidimensional wave creation or editing
+- multidimensional array creation or editing
 - style macros
 - automatic reopen-on-close behavior
 - Igor-style data folders or root selection
@@ -80,7 +80,7 @@ Igor-style data folders.
 
 The only live operation in the initial deployment is table creation.
 
-- Target objects: selected 1D numeric wave-like objects from the current namespace
+- Target objects: selected 1D numeric array-like objects from the current namespace
 - Python-level effect: update `TableState` and dispatch `table_state.python_source()`
 - Timing: confirmed before dispatch
 - Invalid or unsupported selections: the dialog refuses to generate a table command
@@ -110,7 +110,7 @@ purposes only if that does not change the backend-authoritative flow.
 ## Synchronization
 
 The dialog must reflect the current live namespace when it opens.
-It should be populated from the same namespace-tracking path used by the Data Browser
+It should be populated from the same namespace-tracking path used by Python Variables
 so that table-creation choices are based on authoritative kernel state.
 
 The dialog may cache only transient metadata needed to populate the object list and
@@ -125,8 +125,8 @@ controls remain visible for layout continuity:
 - `root:` selection controls
 - style macro selection workflows
 - export/presentation workflows
-- multidimensional wave editing
-- text-wave editing
+- multidimensional array editing
+- string-array editing
 - copy-to-clipboard as a primary workflow
 - top-graph import selection
 

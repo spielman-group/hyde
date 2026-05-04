@@ -88,7 +88,7 @@ class SpyderFrontendComm(CommBase):
         print(error_wrapper)
 
 
-class DataBrowser(QtWidgets.QWidget):
+class PythonVariables(QtWidgets.QWidget):
     namespace_view_updated = QtCore.Signal(object)
 
     def __init__(self, connection_file, services=None, *args, **kwargs):
@@ -101,7 +101,7 @@ class DataBrowser(QtWidgets.QWidget):
         self._closed = False
 
         loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "data_browser.ui")
+        ui_path = os.path.join(os.path.dirname(__file__), "python_variables.ui")
         self.ui = loader.load(ui_path, self)
 
         self.model = QtGui.QStandardItemModel(0, 3)
@@ -119,7 +119,7 @@ class DataBrowser(QtWidgets.QWidget):
 
         self.kernel_client.iopub_channel.message_received.connect(self._handle_iopub_message)
 
-        self.ui.wavesCheckBox.toggled.connect(self._on_filter_changed)
+        self.ui.arraysCheckBox.toggled.connect(self._on_filter_changed)
         self.ui.variablesCheckBox.toggled.connect(self._on_filter_changed)
         self.ui.stringsCheckBox.toggled.connect(self._on_filter_changed)
         self.ui.infoCheckBox.toggled.connect(self._toggle_info_pane)
@@ -191,7 +191,7 @@ class DataBrowser(QtWidgets.QWidget):
         return dict(getattr(self, "_last_view", {}) or {})
 
     def restore_view_state(self, info):
-        self.ui.wavesCheckBox.setChecked(bool(info.get("waves", True)))
+        self.ui.arraysCheckBox.setChecked(bool(info.get("arrays", True)))
         self.ui.variablesCheckBox.setChecked(bool(info.get("variables", True)))
         self.ui.stringsCheckBox.setChecked(bool(info.get("strings", True)))
         self.ui.infoCheckBox.setChecked(bool(info.get("info", True)))
@@ -235,7 +235,7 @@ class DataBrowser(QtWidgets.QWidget):
 
     def _on_filter_changed(self):
         self.proxy_model.update_filters(
-            waves=self.ui.wavesCheckBox.isChecked(),
+            arrays=self.ui.arraysCheckBox.isChecked(),
             variables=self.ui.variablesCheckBox.isChecked(),
             strings=self.ui.stringsCheckBox.isChecked(),
         )
@@ -400,12 +400,12 @@ class DataBrowser(QtWidgets.QWidget):
 class NamespaceFilterProxyModel(QtCore.QSortFilterProxyModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._waves = True
+        self._arrays = True
         self._variables = True
         self._strings = True
 
-    def update_filters(self, waves, variables, strings):
-        self._waves = waves
+    def update_filters(self, arrays, variables, strings):
+        self._arrays = arrays
         self._variables = variables
         self._strings = strings
         self.invalidateFilter()
@@ -421,32 +421,32 @@ class NamespaceFilterProxyModel(QtCore.QSortFilterProxyModel):
         numpy_type = metadata.get("numpy_type", "")
         normalized = python_type.lower()
 
-        is_wave = normalized in {"ndarray", "dataframe"} or numpy_type == "Array"
+        is_array = normalized in {"ndarray", "dataframe"} or numpy_type == "Array"
         is_variable = normalized in {"int", "float", "complex"}
         is_string = normalized == "str"
 
         return (
-            (self._waves and is_wave)
+            (self._arrays and is_array)
             or (self._variables and is_variable)
             or (self._strings and is_string)
         )
 
 
-class DataBrowserService:
+class PythonVariablesService:
     def __init__(self, plugin):
         self.plugin = plugin
 
     def ensure_widget(self):
-        return self.plugin.ensure_mdi_widget("data_browser")
+        return self.plugin.ensure_mdi_widget("python_variables")
 
     def widget(self):
-        return self.plugin.mdi_widget("data_browser")
+        return self.plugin.mdi_widget("python_variables")
 
     def subwindow(self):
-        return self.plugin.mdi_subwindow("data_browser")
+        return self.plugin.mdi_subwindow("python_variables")
 
     def destroy(self):
-        self.plugin.destroy_mdi_widget("data_browser")
+        self.plugin.destroy_mdi_widget("python_variables")
 
     def namespace_view(self):
         widget = self.ensure_widget()
@@ -470,19 +470,19 @@ class DataBrowserService:
 class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.data_browser_service = DataBrowserService(self)
+        self.python_variables_service = PythonVariablesService(self)
         self._action = None
 
     def on_setup_complete(self, data=None):
         del data
-        self.bind_menu_action("_action", "window", "Data Browser")
+        self.bind_menu_action("_action", "window", "Python Variables")
 
     def get_ui_contributions(self):
         return [
             {
                 "context": "mdi",
-                "key": "data_browser",
-                "title": "Data Browser",
+                "key": "python_variables",
+                "title": "Python Variables",
                 "factory": self.create_widget,
             }
         ]
@@ -493,19 +493,19 @@ class Plugin(HydePlugin):
                 "location": "window",
                 "group": "tool_windows",
                 "order": 60,
-                "name": "Data Browser",
+                "name": "Python Variables",
                 "action": self.show_window,
             }
         ]
 
     def get_services(self):
         return {
-            "namespace_view_service": self.data_browser_service,
+            "namespace_view_service": self.python_variables_service,
         }
 
     def create_widget(self, parent=None, data=None):
         del data
-        return DataBrowser(
+        return PythonVariables(
             connection_file=CONNECTION_FILE,
             services=self.services,
             parent=parent,
@@ -513,7 +513,7 @@ class Plugin(HydePlugin):
 
     def show_window(self, checked=False):
         del checked
-        self.services["show_window"]("data_browser")
+        self.services["show_window"]("python_variables")
 
     def get_event_handlers(self):
         return {
@@ -525,12 +525,12 @@ class Plugin(HydePlugin):
         }
 
     def get_save_data(self):
-        widget = self.mdi_widget("data_browser")
+        widget = self.mdi_widget("python_variables")
         if widget is None:
             return {}
-        save_data = self.tool_window_save_data("data_browser")
-        save_data["data_browser"] = {
-            "waves": bool(widget.ui.wavesCheckBox.isChecked()),
+        save_data = self.tool_window_save_data("python_variables")
+        save_data["python_variables"] = {
+            "arrays": bool(widget.ui.arraysCheckBox.isChecked()),
             "variables": bool(widget.ui.variablesCheckBox.isChecked()),
             "strings": bool(widget.ui.stringsCheckBox.isChecked()),
             "info": bool(widget.ui.infoCheckBox.isChecked()),
@@ -539,14 +539,14 @@ class Plugin(HydePlugin):
 
     def on_project_loaded(self, data):
         session = data["session"]
-        widget = self.data_browser_service.ensure_widget()
-        self.restore_tool_window(session, "data_browser")
-        widget.restore_view_state(session.get("data_browser", {}))
+        widget = self.python_variables_service.ensure_widget()
+        self.restore_tool_window(session, "python_variables")
+        widget.restore_view_state(session.get("python_variables", {}))
 
     def on_enter_no_project_state(self, data):
         del data
         self.set_bound_action_enabled("_action", False)
-        self.hide_mdi_subwindow("data_browser")
+        self.hide_mdi_subwindow("python_variables")
 
     def on_project_activated(self, data):
         del data
@@ -554,8 +554,8 @@ class Plugin(HydePlugin):
 
     def on_kernel_ready(self, data):
         del data
-        self.ensure_mdi_widget("data_browser")
+        self.ensure_mdi_widget("python_variables")
 
     def on_kernel_crashed(self, data):
         del data
-        self.data_browser_service.destroy()
+        self.python_variables_service.destroy()

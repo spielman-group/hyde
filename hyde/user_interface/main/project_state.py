@@ -97,9 +97,9 @@ def write_history(app, project_dir):
     history_path.parent.mkdir(parents=True, exist_ok=True)
     plugin_manager = getattr(app, "plugin_manager", None)
     services = getattr(plugin_manager, "services", {})
-    command_window_service = services.get("visible_command_service")
+    python_terminal_service = services.get("visible_terminal_service")
     history = (
-        [] if command_window_service is None else command_window_service.history_entries()
+        [] if python_terminal_service is None else python_terminal_service.history_entries()
     )
     with history_path.open("w", encoding="utf-8") as handle:
         handle.write("# Hyde terminal history starts here.\n")

@@ -20,7 +20,7 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.plugins.data_browser import DataBrowser
+from hyde.user_interface.plugins.python_variables import PythonVariables
 
 
 def process_events(duration=0.05):
@@ -125,7 +125,7 @@ def start_kernel(process_tree, connection_file, process_name):
     return child, client
 
 
-class TestDataBrowserFinal(unittest.TestCase):
+class TestPythonVariablesFinal(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.qapp = QtWidgets.QApplication.instance()
@@ -153,7 +153,7 @@ class TestDataBrowserFinal(unittest.TestCase):
         self.kernel_process, self.client = start_kernel(
             self.process_tree,
             self.connection_file,
-            "hyde-data-browser-test",
+            "hyde-python-variables-test",
         )
         bootstrap = RuntimeCommandState()
         bootstrap.set_reload_procedures(
@@ -166,7 +166,7 @@ class TestDataBrowserFinal(unittest.TestCase):
             bootstrap.python_source(),
         )
 
-        self.browser = DataBrowser(
+        self.browser = PythonVariables(
             connection_file=self.connection_file,
             services={
                 "execute_command": (
@@ -215,7 +215,7 @@ class TestDataBrowserFinal(unittest.TestCase):
         process_events()
         self.assertEqual(sorted(current_names(self.browser)), ["arr", "df"])
 
-        self.browser.ui.wavesCheckBox.setChecked(False)
+        self.browser.ui.arraysCheckBox.setChecked(False)
         self.browser.ui.variablesCheckBox.setChecked(True)
         process_events()
         self.assertEqual(current_names(self.browser), ["val"])
@@ -249,7 +249,7 @@ class TestDataBrowserFinal(unittest.TestCase):
             QtWidgets.QMessageBox.question = original_question
 
 
-class TestDataBrowserSelectionRules(unittest.TestCase):
+class TestPythonVariablesSelectionRules(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.qapp = QtWidgets.QApplication.instance()
@@ -257,7 +257,7 @@ class TestDataBrowserSelectionRules(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
     def _make_browser(self, metadata_by_name):
-        browser = DataBrowser.__new__(DataBrowser)
+        browser = PythonVariables.__new__(PythonVariables)
         QtWidgets.QWidget.__init__(browser)
         browser.services = {}
         browser._closed = False
@@ -266,7 +266,7 @@ class TestDataBrowserSelectionRules(unittest.TestCase):
         browser.ui.treeView = QtWidgets.QTreeView(browser)
         browser.ui.infoText = QtWidgets.QTextEdit(browser)
         browser.ui.infoPane = QtWidgets.QWidget(browser)
-        browser.ui.wavesCheckBox = QtWidgets.QCheckBox(browser)
+        browser.ui.arraysCheckBox = QtWidgets.QCheckBox(browser)
         browser.ui.variablesCheckBox = QtWidgets.QCheckBox(browser)
         browser.ui.stringsCheckBox = QtWidgets.QCheckBox(browser)
         browser.ui.infoCheckBox = QtWidgets.QCheckBox(browser)
@@ -344,7 +344,7 @@ class TestDataBrowserSelectionRules(unittest.TestCase):
         )
         table_feature.append_to_active_table.assert_called_once_with(["arr", "arr2"])
 
-class TestDataBrowserRefreshTracking(unittest.TestCase):
+class TestPythonVariablesRefreshTracking(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.qapp = QtWidgets.QApplication.instance()
@@ -352,7 +352,7 @@ class TestDataBrowserRefreshTracking(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
     def _make_browser(self):
-        browser = DataBrowser.__new__(DataBrowser)
+        browser = PythonVariables.__new__(PythonVariables)
         QtWidgets.QWidget.__init__(browser)
         browser.services = {}
         browser._closed = False

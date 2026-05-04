@@ -15,7 +15,7 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Spec: Draft `specs/IPC_PROTOCOL.md` defining how the PyQt window interacts with the Jupyter kernel.
 - [x] Impl: Scaffold the core PyQt MainWindow shell (the resulting code should run without error, yielding a near-featurless MDI container.)
 - [x] Impl: Launch `spyder_kernels` directly as the managed `ProcessTree` child.
-- [x] Impl: Create and wire in the command_window widget.
+- [x] Impl: Create and wire in the `python_terminal` widget.
 - [x] Impl: Integrate unified `zlog` and managed `ProcessTree` hierarchy.
 - [x] Impl: Create the MDI Logging window for process observability.
 
@@ -32,17 +32,17 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Refinement: Move procedure-file change tracking into the GUI-owned `FileWatcher`, with canonical `procedures/__init__.py` bootstrap dispatched through the runtime helper.
 - [x] Refinement: Mask runtime-helper-owned `procedures/__init__.py` execution input at the kernel protocol level with `silent=True`.
 - [x] Refinement: Add a plugin-owned lyse-compatible remote listener on the existing `ports.lyse` labconfig entry that queues incoming agnostic paths into the runtime helper, which dispatches visible `remote(...)` in the kernel.
-- [ ] Refinement: Define the command-window display policy for output originating from runtime-helper-owned silent execution.
+- [ ] Refinement: Define the Python Terminal display policy for output originating from runtime-helper-owned silent execution.
 
 ### Feature B: Matplotlib Figure Capture
 - [ ] Spec: Draft `specs/figure_window/SPEC.md`.
 - [ ] Impl: Allow `plt.plot()` in the execution process to pop open a PyQt MDI sub-window in the GUI process via the Metadata Mirror model.
 - [ ] Test: Figure rendering and closing behavior.
 
-### Feature C: Data Browser
-- [x] Spec: Draft and refine `specs/data_browser/SPEC.md`.
+### Feature C: Python Variables
+- [x] Spec: Draft and refine `specs/python_variables/SPEC.md`.
 - [x] Impl: Capture namespace variables using Spyder comms.
-- [x] Impl: Show tracked variables in a GUI browser with Waves / Variables / Strings filters and an Info pane.
+- [x] Impl: Show tracked variables in a GUI browser with Arrays / Variables / Strings filters and an Info pane.
 - [x] Test: Verify namespace syncing on startup, after kernel execution, and after `procedures/__init__.py` reload.
 
 ### Feature E: Project Save/Load
@@ -61,8 +61,8 @@ This document is a living checklist tracking the specific steps we will follow (
 - [x] Test: Add focused save/load integration coverage.
 
 ### Feature D: Table Editor
-- [x] Spec: Refine `specs/table/SPEC.md` and define the Data Browser table-launch contract.
-- [x] Impl: Create the table editor MDI window, New Table dialog, and Data Browser table-launch/appending integration.
+- [x] Spec: Refine `specs/table/SPEC.md` and define the Python Variables table-launch contract.
+- [x] Impl: Create the table editor MDI window, New Table dialog, and Python Variables table-launch/appending integration.
 - [x] Test: Verify kernel-to-GUI table-open relay and direct-kernel handling for `hyde.table(...)`.
 - [x] Impl: Add save-on-close table recreation macros and `Windows -> Table Macros`.
 - [ ] Test: Expand coverage for GUI row rendering, muted cell-edit execution, and broader table interaction behavior.

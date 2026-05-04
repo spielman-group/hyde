@@ -19,7 +19,7 @@ Implement an absolute minimum feature set that allows for prototyping of the und
 - Focus tests on fragile areas: IPC communication, subprocess lifecycle, and execution namespace tracking.
 
 ## Phase IV: Iterative Feature Deployment
-- Identify the next most essential feature (e.g. Matplotlib basic figure capture, then Data Browser, then Table Views).
+- Identify the next most essential feature (e.g. Matplotlib basic figure capture, then Python Variables, then Table Views).
 - Deploy the feature.
 - Assess the decisions made in Phases I and II; revise the design philosophy or architecture specifications if needed.
 - Write tests for the newly added feature.

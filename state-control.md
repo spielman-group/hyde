@@ -300,7 +300,7 @@ Recommended action shape:
 ```python
 {"type": "set", "path": ["settings", "title"], "value": "My Table"}
 {"type": "clear", "path": ["settings", "title"]}
-{"type": "append_item", "item": "wave0"}
+{"type": "append_item", "item": "array0"}
 {"type": "remove_item", "index": 1}
 {"type": "move_item", "old_index": 2, "new_index": 0}
 {"type": "patch_item", "index": 0, "patch": {"label": "signal"}}

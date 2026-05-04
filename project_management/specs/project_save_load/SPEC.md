@@ -77,7 +77,7 @@ Records GUI/session state:
 
 The shell owns writing one `session.toml` file, but feature-owned GUI state is supplied
 and restored by plugins. Implemented plugin payloads currently include persistent tool
-window state, Data Browser filter state, and open table descriptors.
+window state, Python Variables filter state, and open table descriptors.
 
 ### `terminal/history.py`
 Stores visible command history only.
@@ -202,7 +202,7 @@ The table plugin currently persists:
 Table recreation source generated from `TableState` may also include:
 
 - `geometry=(x, y, width, height)`
-- `column_widths={"wave_name": width, ...}`
+- `column_widths={"array_name": width, ...}`
 
 `session.toml` remains the plugin-restored GUI session source, while recreation macros
 remain the explicit table-reopen source stored in `procedures/__init__.py`. Hyde keeps

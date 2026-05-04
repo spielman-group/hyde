@@ -1,7 +1,7 @@
-# Data Browser Specification
+# Python Variables Specification
 
 ## Feature Checklist
-- [x] Add a `Data Browser` MDI subwindow to the Hyde workspace.
+- [x] Add a `Python Variables` MDI subwindow to the Hyde workspace.
 - [x] Populate the browser from the live execution namespace using Spyder-style namespace tracking.
 - [x] Show a filterable list of named Python objects rather than Igor-style data folders.
 - [x] Show a selection-driven info pane with type and value metadata.
@@ -16,12 +16,12 @@
 
 ## Purpose
 
-The Data Browser is Hyde's visual browser for the authoritative Python execution namespace.
+Python Variables is Hyde's visual browser for the authoritative Python execution namespace.
 It allows the user to inspect named objects, view concise metadata, preview plottable data,
 and invoke common actions from a context menu. It also serves as the entry point for
 table creation and appending from selected kernel-owned arrays.
 
-The Data Browser is not a filesystem browser and does not implement Igor Pro data folders.
+Python Variables is not a filesystem browser and does not implement Igor Pro data folders.
 Its object model is Python-native:
 
 - top-level names come from the live kernel namespace
@@ -41,7 +41,7 @@ It includes:
 - currently supported actions that map cleanly onto Python and Hyde behavior
 - table launch actions for supported array selections (`Edit`, `Append to Table`)
 - `Edit` and `Append to Table` only for selection types the table widget supports in the initial deployment
-- `pandas.DataFrame` objects remain visible under `Waves` but their table actions are future work
+- `pandas.DataFrame` objects remain visible under `Arrays` but their table actions are future work
 
 The initial deployment does not include:
 
@@ -55,7 +55,7 @@ The initial deployment does not include:
 
 ## Window Layout
 
-The Data Browser lives as an MDI child window.
+Python Variables lives as an MDI child window.
 Its layout follows the broad structure suggested by the screenshot while using Hyde-native semantics:
 
 - a left-hand sidebar containing display controls and action buttons
@@ -70,7 +70,7 @@ Changing the current `.hy` project replaces the browser contents with the namesp
 
 The visible controls are classified as follows:
 
-- `Waves` - `active`
+- `Arrays` - `active`
 - `Variables` - `active`
 - `Strings` - `active`
 - `Info` - `active`
@@ -96,7 +96,7 @@ The left-hand sidebar follows the user-approved screenshot.
 
 The `Display` group contains:
 
-- `Waves`
+- `Arrays`
   Show array-like scientific data, specifically `numpy.ndarray` and `pandas.DataFrame`.
 - `Variables`
   Show numeric scalar variables.
@@ -200,7 +200,7 @@ deferred until the table widget defines DataFrame semantics.
 
 ## Table Integration
 
-The Data Browser launches the table widget through the New Table dialog and the
+Python Variables launches the table widget through the New Table dialog and the
 kernel-facing `hyde.table(...)` API.
 
 - `Edit` opens the New Table dialog with the selected array-like objects
@@ -212,7 +212,7 @@ are unavailable.
 
 ## Command Generation
 
-The Data Browser follows Hyde's string-factory rule.
+Python Variables follows Hyde's string-factory rule.
 Browser actions do not mutate scientific state directly in the GUI.
 Instead, the GUI generates explicit Python strings and dispatches them to the kernel.
 
@@ -239,7 +239,7 @@ Namespace changes caused by:
 - procedure reloads
 - external Python code run in the kernel
 
-must update the Data Browser view.
+must update the Python Variables view.
 
 The browser establishes its own namespace-view comm path and requests an initial snapshot after that path is ready, so startup and project reopen begin with a populated list rather than waiting for a future user command.
 
@@ -279,7 +279,7 @@ The following Igor concepts do not carry into Hyde as part of this specification
 - append-to-table actions once the table widget exists
 - cross-project browsing of another `.hy` project
 
-## 08_data_browser_context_menu.png
-![Data Browser Context Menu](08_data_browser_context_menu.png)
+## 08_python_variables_context_menu.png
+![Python Variables Context Menu](08_python_variables_context_menu.png)
 - What it shows: a selection-driven browser with a right-click action menu, an info area, and a preview-oriented workspace next to figure and table windows.
 - Hyde interpretation: a namespace browser for Python objects, with context actions translated into explicit Hyde/Python commands rather than Igor object operations.

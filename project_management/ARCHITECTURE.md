@@ -5,7 +5,7 @@ The core tenet of Hyde's design is the strict separation of concerns between the
 
 1. **The GUI has UX Memory, but no Scientific Memory.** The PyQt MDI application remembers window positions, table viewports, and browser states. It may hold transient, serializable UI-edit state only when that state is sufficient to regenerate Python commands and is fully derived from the authoritative execution state. The GUI does not hold canonical scientific data, arrays, matplotlib objects, or analytical state natively.
 2. **The Execution namespace is authoritative.** All named data objects, calculations, and plotting configurations live inside an independent Python execution process. The kernel should remain completely agnostic of Hyde's internal GUI representations; it simply executes standard Matplotlib code.
-3. **Metadata-over-Comms and Structured Relays.** GUI viewports that depend on execution metadata receive that metadata over the narrowest existing channel that fits the feature. The Data Browser uses Spyder's namespace-view `comm` path. The implemented Table window uses a Hyde-owned `ProcessTree` relay for table-open intents and structured table-data payloads, while still relying on standard Jupyter execution for visible commands.
+3. **Metadata-over-Comms and Structured Relays.** GUI viewports that depend on execution metadata receive that metadata over the narrowest existing channel that fits the feature. Python Variables uses Spyder's namespace-view `comm` path. The implemented Table window uses a Hyde-owned `ProcessTree` relay for table-open intents and structured table-data payloads, while still relying on standard Jupyter execution for visible commands.
 4. **2-Lane IPC Strategy.**
     - **Lane 1 (Control)**: `zprocess.ProcessTree` handles application-level orchestration (launch, heartbeats, QUIT). Analytical commands do NOT traverse this tree.
     - **Lane 2 (Execution)**: Standard Jupyter ZMQ and `comm` channels handle visible scientific execution, background execution, and namespace metadata. Hyde-specific relays should only extend this model when an existing path does not cleanly fit the feature.
@@ -48,7 +48,7 @@ hyde/
 │       │   ├── __init__.py    # Shell infrastructure and lifecycle fan-out
 │       │   └── main.ui
 │       ├── plugins/           # First-party UI plugins discovered by Hyde
-│       │   ├── command_window/
+│       │   ├── python_terminal/
 │       │   ├── table/
 │       │   └── ...
 │       ├── plugin_tools.py    # Shared plugin infrastructure
@@ -122,7 +122,7 @@ The **Procedure Browser** (an MDI window) provides the primary UI for managing t
 
 Hyde operates across two distinct processes plus one GUI-owned helper thread to ensure the GUI remains responsive and the scientific state remains authoritative and isolated:
 
-1. **Main Process (GUI):** Owns the `QMdiArea`, the `ProcessTree.instance()`, the visible command window, the `FileWatcher`, the plugin-managed lyse-compatible `ZMQServer`, and the runtime-helper queue/thread.
+1. **Main Process (GUI):** Owns the `QMdiArea`, the `ProcessTree.instance()`, the visible Python Terminal, the `FileWatcher`, the plugin-managed lyse-compatible `ZMQServer`, and the runtime-helper queue/thread.
 2. **The Kernel (spyder_kernels):** The isolated IPython engine and the authoritative Python namespace.
 
 ### Communication Lanes
@@ -133,8 +133,8 @@ Hyde operates across two distinct processes plus one GUI-owned helper thread to 
 
 The execution subprocess runs in a separate Python process using the `spyder_kernels` Jupyter kernel. This provides:
 - Full IPython functionality
-- Namespace tracking for data browser
-- Spyder namespace-view support for the Data Browser
+- Namespace tracking for Python Variables
+- Spyder namespace-view support for Python Variables
 - Mature, well-tested architecture
 
 The `hyde/execution/kernel_launcher.py` entrypoint is the managed `ProcessTree` child and starts Spyder's kernel startup code in-process. Hyde does not insert a separate controller or launcher-shim process between the GUI and the real kernel.
@@ -175,9 +175,9 @@ user_interface/
 - **Dialogs**: Modal dialogs for editing operations
 - **Drop down menus**: 
 
-### Command Window
+### Python Terminal
 
-The command window uses the `spyder_kernels` Jupyter kernel, with the frontend provided by qtconsole's RichJupyterWidget embedded in the main window.
+The Python Terminal uses the `spyder_kernels` Jupyter kernel, with the frontend provided by qtconsole's RichJupyterWidget embedded in the main window.
 
 The user should experience it as a direct "window" to the execution subprocess kernel.
 
@@ -191,7 +191,7 @@ It provides:
 Unlike Igor Pro, there is no separate command entry box at the bottom, and no line numbers other than what IPython typically generates.
 
 Using spyder_kernels provides:
-- Proper namespace tracking for the data browser
+- Proper namespace tracking for Python Variables
 - A standard Jupyter execution environment
 - Mature, well-tested architecture
 

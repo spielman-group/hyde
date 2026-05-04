@@ -313,9 +313,9 @@ class HydeApp:
         Muted commands (visible=False) execute silently to avoid console clutter.
         """
         if visible:
-            command_window_service = self.plugin_service("visible_command_service")
-            if command_window_service is not None:
-                command_window_service.execute_visible(code)
+            python_terminal_service = self.plugin_service("visible_terminal_service")
+            if python_terminal_service is not None:
+                python_terminal_service.execute_visible(code)
             return
         self.queue_background_command(code, silent=True)
 
@@ -532,9 +532,9 @@ class HydeApp:
             except Exception:
                 pass
         else:
-            command_window_service = self.plugin_service("visible_command_service")
+            python_terminal_service = self.plugin_service("visible_terminal_service")
             kernel_client = (
-                None if command_window_service is None else command_window_service.kernel_client()
+                None if python_terminal_service is None else python_terminal_service.kernel_client()
             )
             try:
                 if kernel_client is not None:
@@ -569,9 +569,9 @@ class HydeApp:
         history_entries, history_error = try_read_history(self.current_project_dir)
         if history_error:
             warnings.append(f"terminal/history.py: {history_error}")
-        command_window_service = self.plugin_service("visible_command_service")
-        if command_window_service is not None:
-            command_window_service.restore_history_entries(history_entries)
+        python_terminal_service = self.plugin_service("visible_terminal_service")
+        if python_terminal_service is not None:
+            python_terminal_service.restore_history_entries(history_entries)
         session, session_error = try_read_session(self.current_project_dir)
         if session_error:
             warnings.append(f"session.toml: {session_error}")

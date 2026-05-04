@@ -39,22 +39,22 @@ Established the foundation for a transparent, reproducible scientific environmen
 - **Lyse-Compatible Remote Listener**: A first-party GUI plugin now owns a `ZMQServer` bound to the existing `ports.lyse` labconfig entry. Its handler normalizes incoming agnostic-path payloads and queues visible `remote(...)` execution through the runtime helper.
 - **Procedure Browser Path Semantics**: The browser is rooted at `procedures/`; displayed entries are relative to that directory, not to the `.hy` project root.
 
-### 6. Phase IV-C: Data Browser Initial Implementation
+### 6. Phase IV-C: Python Variables Initial Implementation
 Established the first Hyde-native namespace browser:
-- **Spyder-Based Namespace View**: The Data Browser uses Spyder's namespace-view comm path rather than a Hyde-specific metadata tracker.
-- **MDI Data Browser**: Added a dedicated MDI Data Browser window with a left-hand display control column and a main namespace list.
-- **Filtering Semantics**: Implemented `Waves`, `Variables`, and `Strings` filters, with `Waves` covering numpy arrays and pandas DataFrames.
+- **Spyder-Based Namespace View**: Python Variables uses Spyder's namespace-view comm path rather than a Hyde-specific metadata tracker.
+- **MDI Python Variables**: Added a dedicated MDI Python Variables window with a left-hand display control column and a main namespace list.
+- **Filtering Semantics**: Implemented `Arrays`, `Variables`, and `Strings` filters, with `Arrays` covering numpy arrays and pandas DataFrames.
 - **Info Pane Toggle**: The `Info` checkbox controls the visibility of the metadata pane.
 - **Namespace Synchronization**: The browser requests an initial namespace snapshot after its own comm path is ready and refreshes after kernel execution and runtime-helper-owned procedure reload.
 - **Supported Actions**: Implemented `Copy Python Expression` and `Delete Object` against the live kernel namespace.
-- **Persistent Tool Windows**: MDI tool windows, including the Data Browser, now hide on close rather than destroying their subwindow wrappers.
+- **Persistent Tool Windows**: MDI tool windows, including Python Variables, now hide on close rather than destroying their subwindow wrappers.
 
 ### 7. Phase IV-D: Table Initial Implementation
 Established Hyde's first editable kernel-backed table workflow:
 - **Public Table API**: `hyde.table(...)` now serves as a documented public Hyde helper for opening a table from live kernel objects.
 - **MDI Table Window**: Added a table subwindow with a point column, one column per selected object, and a current-cell value strip.
 - **New Table Dialog**: Added a `Windows -> New Table...` entry and a dialog that generates visible `hyde.table(...)` commands.
-- **Data Browser Integration**: The Data Browser's `Edit` and `Append to Table` actions now route table creation/appending through the same visible command path.
+- **Python Variables Integration**: Python Variables' `Edit` and `Append to Table` actions now route table creation/appending through the same visible command path.
 - **Kernel Relay Path**: Table-open requests and structured table-data payloads travel through the direct `ProcessTree` relay between the kernel and GUI.
 - **Muted Cell Edits**: Table cell edits execute through the same command machinery as other Hyde commands, but are hidden from the visible command history to avoid console clutter.
 - **Current Scope**: The implemented table path is limited to 1D numeric arrays; DataFrame tables, sorting, and persistence remain future work.
@@ -66,7 +66,7 @@ Established the first end-to-end `.hy` package persistence flow:
 - **Kernel-State Persistence**: Saved kernel objects are written under `data/`, with `numpy.ndarray` using `.npy` and other saveable objects using pickle fallback.
 - **Exclusion-Based Save Rules**: Saveable objects are selected by exclusion, including modules, packages, routines, classes/types, and interactive artifacts such as `In` / `Out`.
 - **Manifest Tracking**: `manifest.toml` now records the saved-object registry, serializer, relative data path, and Python type name.
-- **GUI Session Persistence**: The shell writes one `session.toml` file containing `main_window` state plus plugin-owned payloads gathered from each plugin's `get_save_data()`. Implemented plugin payloads include persistent tool-window state, Data Browser filter state, and open table descriptors.
+- **GUI Session Persistence**: The shell writes one `session.toml` file containing `main_window` state plus plugin-owned payloads gathered from each plugin's `get_save_data()`. Implemented plugin payloads include persistent tool-window state, Python Variables filter state, and open table descriptors.
 - **Visible History Persistence**: `terminal/history.py` stores visible command history only; muted GUI micro-mutations are excluded.
 - **File Menu Wiring**: `File -> Save` saves in place, `File -> Save As...` confirms before overwriting an existing non-empty project, writes a new `.hy` package, and switches Hyde to it, and project load restores kernel state after `procedures/__init__.py` runs.
 - **Session Restore Policy**: GUI session restore reports malformed or missing `session.toml` files and continues with kernel-state restore already complete.
@@ -78,7 +78,7 @@ Established the first end-to-end `.hy` package persistence flow:
 Refined Hyde's explicit inert-state and quit handling:
 - **Explicit No-Project State**: Startup without a CLI project enters a true no-project state with only `New Project`, `Load Project`, `Logging`, and `Quit` active.
 - **Kernel-Authoritative Quit**: `File -> Quit` sends visible `hyde.quit()`, which signals both `ENTER_NO_PROJECT_STATE` and `QUIT_REQUESTED` from the kernel before the GUI follows the normal close path.
-- **Terminal Quit Mapping**: In GUI mode, `quit`, `quit()`, `exit`, and `exit()` in the command window map to `hyde.quit()` instead of terminating the kernel directly.
+- **Terminal Quit Mapping**: In GUI mode, `quit`, `quit()`, `exit`, and `exit()` in the Python Terminal map to `hyde.quit()` instead of terminating the kernel directly.
 - **Status-Bar Project Feedback**: Project operations report progress in the status bar rather than through a separate modal working dialog.
 - **Forced Table Teardown**: Entering no-project state force-closes table windows without prompting to save recreation macros.
 
@@ -95,9 +95,9 @@ Refined Hyde's explicit inert-state and quit handling:
 - `project_management/PLAN.md`: Marked Phase II architectural refinements as complete.
 - `project_management/ARCHITECTURE.md`: Codified the finalized IPC model, plugin-only discovery namespace, and shell-vs-support package structure.
 - `project_management/specs/logging_window/SPEC.md`: Added formal specifications for the new observability window.
-- `project_management/specs/data_browser/SPEC.md`: Updated to match the implemented Hyde-native browser layout and supported action set.
+- `project_management/specs/python_variables/SPEC.md`: Updated to match the implemented Hyde-native browser layout and supported action set.
 - `project_management/specs/IPC_PROTOCOL.md`: Updated to document the actual `spyder_api` namespace-view comm path.
 - `project_management/specs/table/SPEC.md` and `project_management/specs/new_table_dialog/SPEC.md`: Updated to match the implemented table workflow.
 - `project_management/specs/project_save_load/SPEC.md`: Updated the `.hy` package save/load contract to reflect plugin-owned GUI session payloads gathered through `get_save_data()`.
-- `project_management/specs/command_window/SPEC.md`: Updated to document GUI-mode rebinding of `quit` / `exit` to `hyde.quit()`.
+- `project_management/specs/python_terminal/SPEC.md`: Updated to document GUI-mode rebinding of `quit` / `exit` to `hyde.quit()`.
 - `2025_04_12_OPUS_EVALUATION.md`: Noted the transition toward `zprocess.Event` for future state notifications.
