@@ -4,6 +4,10 @@ import unittest
 
 import hyde
 try:
+    import matplotlib
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("matplotlib is required") from exc
+try:
     import labscript_utils.plugins  # noqa: F401
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
@@ -65,8 +69,30 @@ class TestFigureDecorator(unittest.TestCase):
         clear_table_macros()
         clear_figure_macros()
 
+    def tearDown(self):
+        pyplot = getattr(matplotlib, "pyplot", None)
+        if pyplot is not None:
+            pyplot.close("all")
+
+    def _configure_pyplot(self):
+        matplotlib.use("module://hyde.matplotlib_backend", force=True)
+        import matplotlib.pyplot as pyplot
+
+        return pyplot
+
     def test_figure_decorator_registers_parameterized_macro(self):
         @hyde.figure
+        def Graph0(x, y):
+            return x, y
+
+        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(
+            figure_macro_entries(),
+            ({"name": "Graph0", "args": ["x", "y"]},),
+        )
+
+    def test_figure_decorator_accepts_window_pos_metadata(self):
+        @hyde.figure(window_pos=(10, 20))
         def Graph0(x, y):
             return x, y
 
@@ -81,6 +107,120 @@ class TestFigureDecorator(unittest.TestCase):
             @hyde.figure
             def Graph0(*, x):
                 return x
+
+    def test_figure_decorator_rejects_unknown_metadata_keywords(self):
+        with self.assertRaises(TypeError):
+            @hyde.figure(window_position=(10, 20))
+            def Graph0(x):
+                return x
+
+    def test_decorated_builder_creates_first_class_figure_with_ir_and_command_log(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            return fig
+
+        figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        self.assertTrue(getattr(figure, "_hyde_is_first_class", False))
+        self.assertIn("layout", figure._hyde_ir)
+        self.assertTrue(figure._hyde_command_log)
+        self.assertIsNotNone(getattr(figure, "_hyde_source_artifact", None))
+        self.assertIsNotNone(getattr(figure, "_hyde_ast_artifact", None))
+
+    def test_decorated_builder_attaches_window_pos_metadata_to_figure(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(window_pos=(10, 20))
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            return fig
+
+        figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        self.assertEqual(getattr(figure, "_hyde_metadata", {}), {"window_pos": (10, 20)})
+
+    def test_decorated_builder_exposes_window_pos_metadata_before_return(self):
+        plt = self._configure_pyplot()
+        observed = {}
+
+        @hyde.figure(window_pos=(10, 20))
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            observed["metadata"] = dict(getattr(fig, "_hyde_metadata", {}))
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            fig.show()
+            return fig
+
+        Graph0([0, 1, 2], [1, 4, 9])
+
+        self.assertEqual(observed["metadata"], {"window_pos": (10, 20)})
+
+    def test_figure_decorator_can_skip_registration(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(window_pos=(10, 20), register=False)
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            fig.show()
+
+        figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        self.assertEqual(figure_macro_names(), ())
+        self.assertTrue(getattr(figure, "_hyde_is_first_class", False))
+        self.assertEqual(getattr(figure, "_hyde_metadata", {}), {"window_pos": (10, 20)})
+
+    def test_decorated_builder_can_omit_return_for_single_created_figure(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+
+        figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        self.assertEqual(figure.get_label(), "Graph0")
+        self.assertTrue(getattr(figure, "_hyde_is_first_class", False))
+        self.assertEqual(len(figure._hyde_ir["layout"]["subplots"]), 1)
+
+    def test_decorated_builder_raises_when_no_figure_is_created(self):
+        self._configure_pyplot()
+
+        @hyde.figure
+        def Graph0(x, y):
+            del x, y
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "must create exactly one figure",
+        ):
+            Graph0([0, 1, 2], [1, 4, 9])
+
+    def test_decorated_builder_raises_when_multiple_figures_are_created(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure
+        def Graph0(x, y):
+            del x, y
+            plt.figure("Graph0")
+            plt.figure("Graph1")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "must create exactly one figure",
+        ):
+            Graph0([0, 1, 2], [1, 4, 9])
 
 
 class TestWindowMacroStore(unittest.TestCase):

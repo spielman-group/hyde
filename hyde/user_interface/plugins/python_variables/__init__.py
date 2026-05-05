@@ -9,6 +9,7 @@ from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.hyde_features import is_eligible_for_table
 from hyde.paths import CONNECTION_FILE
 from hyde.user_interface.base import MutationState
+from hyde.user_interface.figure_comm import register_auxiliary_figure_comm_sink
 from hyde.user_interface.plugin_tools import HydePlugin
 
 NAMESPACE_VIEW_SETTINGS = {
@@ -96,10 +97,11 @@ class PythonVariables(QtWidgets.QWidget):
         super().__init__(*args, **kwargs)
         self.connection_file = connection_file
         self.services = dict(services or {})
-        self._external_requests_in_flight = set()
+        self._execute_requests_in_flight = set()
         self._refresh_in_flight = False
         self._refresh_pending = False
         self._closed = False
+        self._owns_kernel_client = False
 
         loader = UiLoader()
         ui_path = os.path.join(os.path.dirname(__file__), "python_variables.ui")
@@ -113,11 +115,28 @@ class PythonVariables(QtWidgets.QWidget):
         self.ui.treeView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.ui.treeView.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
-        self.kernel_client = QtKernelClient(connection_file=self.connection_file)
-        self.kernel_client.load_connection_file()
-        self.spyder_comm = SpyderFrontendComm(self.kernel_client)
-        self.kernel_client.start_channels()
+        visible_terminal_service = self.services.get("visible_terminal_service")
+        self.kernel_client = None
+        if visible_terminal_service is not None:
+            ensure_kernel_client = getattr(
+                visible_terminal_service,
+                "ensure_kernel_client",
+                None,
+            )
+            if callable(ensure_kernel_client):
+                self.kernel_client = ensure_kernel_client()
+            else:
+                widget = visible_terminal_service.ensure_widget()
+                self.kernel_client = None if widget is None else widget.kernel_client
 
+        if self.kernel_client is None:
+            self.kernel_client = QtKernelClient(connection_file=self.connection_file)
+            self.kernel_client.load_connection_file()
+            self.kernel_client.start_channels()
+            register_auxiliary_figure_comm_sink(self.kernel_client, "python_variables")
+            self._owns_kernel_client = True
+
+        self.spyder_comm = SpyderFrontendComm(self.kernel_client)
         self.kernel_client.iopub_channel.message_received.connect(self._handle_iopub_message)
 
         self.ui.arraysCheckBox.toggled.connect(self._on_filter_changed)
@@ -149,30 +168,31 @@ class PythonVariables(QtWidgets.QWidget):
 
     def _handle_iopub_message(self, msg):
         msg_type = msg["header"]["msg_type"]
-        if msg_type != "status" or not self._is_external_status_message(msg):
+        if msg_type != "status" or not self._is_execute_status_message(msg):
             return
         state = msg["content"].get("execution_state")
-        request_key = self._external_request_key(msg)
+        request_key = self._execute_request_key(msg)
         if state == "busy":
-            self._external_requests_in_flight.add(request_key)
+            self._execute_requests_in_flight.add(request_key)
         elif state == "idle":
-            had_external_activity = bool(self._external_requests_in_flight)
-            self._external_requests_in_flight.discard(request_key)
-            if had_external_activity and not self._external_requests_in_flight:
+            had_execute_activity = bool(self._execute_requests_in_flight)
+            self._execute_requests_in_flight.discard(request_key)
+            if had_execute_activity and not self._execute_requests_in_flight:
                 self.refresh_namespace()
 
-    def _external_request_key(self, msg):
+    def _execute_request_key(self, msg):
         parent_header = msg.get("parent_header", {})
         return (
             parent_header.get("session"),
             parent_header.get("msg_id"),
         )
 
-    def _is_external_status_message(self, msg):
-        parent_session = msg.get("parent_header", {}).get("session")
-        if not parent_session:
-            return False
-        return parent_session != self.kernel_client.session.session
+    def _is_execute_status_message(self, msg):
+        parent_header = msg.get("parent_header", {})
+        return (
+            parent_header.get("msg_type") == "execute_request"
+            and bool(parent_header.get("msg_id"))
+        )
 
     def _on_namespace_view(self, view):
         self._refresh_in_flight = False
@@ -211,6 +231,8 @@ class PythonVariables(QtWidgets.QWidget):
             self.spyder_comm.close()
         except Exception:
             pass
+        if not self._owns_kernel_client:
+            return
         try:
             for channel_name in ("iopub_channel", "shell_channel", "stdin_channel", "control_channel"):
                 channel = getattr(self.kernel_client, channel_name, None)

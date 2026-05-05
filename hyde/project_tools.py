@@ -240,11 +240,19 @@ def clear_live_matplotlib_managers():
         pass
 
 
+def is_matplotlib_figure_type_name(python_type):
+    return "Figure" in str(python_type or "")
+
+
+def is_matplotlib_axes_type_name(python_type):
+    return "Axes" in str(python_type or "")
+
+
 def object_restore_priority(entry):
     python_type = str((entry or {}).get("python_type", ""))
-    if python_type == "Figure":
+    if is_matplotlib_figure_type_name(python_type):
         return (0, str((entry or {}).get("name", "")))
-    if python_type == "Axes":
+    if is_matplotlib_axes_type_name(python_type):
         return (2, str((entry or {}).get("name", "")))
     return (1, str((entry or {}).get("name", "")))
 

@@ -29,6 +29,8 @@ class NewFigureDialog(QtWidgets.QDialog):
         self.ui.xComboBox.currentIndexChanged.connect(self._sync_state_from_widgets)
         self.ui.yListWidget.itemSelectionChanged.connect(self._sync_state_from_widgets)
         self.ui.titleEdit.textChanged.connect(self._sync_state_from_widgets)
+        self.ui.widthSpinBox.valueChanged.connect(self._sync_state_from_widgets)
+        self.ui.heightSpinBox.valueChanged.connect(self._sync_state_from_widgets)
         self.ui.buttonBox.accepted.connect(self.accept)
         self.ui.buttonBox.rejected.connect(self.reject)
 
@@ -60,6 +62,10 @@ class NewFigureDialog(QtWidgets.QDialog):
         self.figure_state.set_x_name(self.ui.xComboBox.currentData())
         title = self.ui.titleEdit.text().strip()
         self.figure_state.set_title(title or None)
+        self.figure_state.set_figsize(
+            self.ui.widthSpinBox.value(),
+            self.ui.heightSpinBox.value(),
+        )
 
     def get_command(self, default_title=None, open_token=None):
         self._sync_state_from_widgets()

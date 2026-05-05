@@ -28,6 +28,10 @@ def _session_path(project_dir):
     return Path(project_dir) / "session.toml"
 
 
+def _session_source_path(project_dir):
+    return Path(project_dir) / "session.py"
+
+
 def _history_path(project_dir):
     return Path(project_dir) / "terminal" / "history.py"
 
@@ -40,22 +44,50 @@ def _merge_session_data(session, plugin_data):
             session[key] = value
 
 
-def _capture_plugin_session(app, session):
+def _capture_plugin_session_toml(app, session):
     plugin_manager = getattr(app, "plugin_manager", None)
     plugins = getattr(plugin_manager, "plugins", {})
     logger = logging.getLogger("hyde")
 
     for plugin_name, plugin in plugins.items():
         try:
-            plugin_data = plugin.get_save_data()
+            get_session_toml_data = getattr(plugin, "get_session_toml_data", None)
+            if get_session_toml_data is None:
+                get_session_toml_data = getattr(plugin, "get_save_data", None)
+            plugin_data = {} if get_session_toml_data is None else get_session_toml_data()
         except Exception:
             logger.exception(
-                "Plugin save-data capture failed for '%s'.", plugin_name
+                "Plugin session TOML capture failed for '%s'.", plugin_name
             )
             continue
         if not plugin_data:
             continue
         _merge_session_data(session, plugin_data)
+
+
+def _capture_plugin_session_source(app):
+    plugin_manager = getattr(app, "plugin_manager", None)
+    plugins = getattr(plugin_manager, "plugins", {})
+    logger = logging.getLogger("hyde")
+    blocks = []
+
+    for plugin_name, plugin in plugins.items():
+        try:
+            get_session_restore_source = getattr(plugin, "get_session_restore_source", None)
+            source = (
+                ""
+                if get_session_restore_source is None
+                else get_session_restore_source()
+            )
+        except Exception:
+            logger.exception(
+                "Plugin session Python capture failed for '%s'.", plugin_name
+            )
+            continue
+        source = str(source or "").strip()
+        if source:
+            blocks.append(source)
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 
 def capture_session(app):
@@ -66,8 +98,19 @@ def capture_session(app):
             "state": _encode_qbytearray(app.ui.saveState()),
         },
     }
-    _capture_plugin_session(app, session)
+    _capture_plugin_session_toml(app, session)
     return session
+
+
+def capture_session_source(app):
+    return _capture_plugin_session_source(app)
+
+
+def write_session_source(app, project_dir):
+    path = _session_source_path(project_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(capture_session_source(app))
 
 
 def write_session(app, project_dir):
@@ -75,6 +118,7 @@ def write_session(app, project_dir):
     path.parent.mkdir(parents=True, exist_ok=True)
     session = capture_session(app)
     _write_toml(path, session)
+    write_session_source(app, project_dir)
 
 
 def read_session(project_dir):
@@ -85,11 +129,25 @@ def read_session(project_dir):
         return tomllib.load(handle)
 
 
+def read_session_source(project_dir):
+    path = _session_source_path(project_dir)
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
 def try_read_session(project_dir):
     try:
         return read_session(project_dir), None
     except (OSError, tomllib.TOMLDecodeError, ValueError) as exc:
         return {}, str(exc)
+
+
+def try_read_session_source(project_dir):
+    try:
+        return read_session_source(project_dir), None
+    except OSError as exc:
+        return "", str(exc)
 
 
 def write_history(app, project_dir):

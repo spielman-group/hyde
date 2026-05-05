@@ -16,10 +16,12 @@ from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.main.project_state import (
     try_read_history,
     try_read_session,
+    try_read_session_source,
     restore_main_window,
     write_history,
     write_session,
 )
+from hyde.user_interface.main.frontend_kernel import FrontendKernelService
 from hyde.user_interface.main.runtime_helper import RuntimeHelper
 from hyde.user_interface.plugin_tools import (
     HydeMDIContext,
@@ -102,6 +104,7 @@ class HydeApp:
         self.kernel_from_child = None
         self.kernel_process = None
         self.runtime_helper = None
+        self.frontend_kernel_service = None
         self.filewatcher = None
         self._subwindow_filters = []
         self.shutting_down = False
@@ -124,6 +127,8 @@ class HydeApp:
         self.ui.mdiArea.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.ui.menuFile.clear()
         self.ui.menuWindow.clear()
+        self.frontend_kernel_service = FrontendKernelService(CONNECTION_FILE, parent=self.ui)
+        self.frontend_kernel_service.ready.connect(self.ui._on_kernel_ready)
         self.plugin_manager.discover_modules()
         self.plugin_manager.instantiate_plugins()
         self.setup_plugins()
@@ -161,6 +166,7 @@ class HydeApp:
             "configure_persistent_subwindow": self.configure_persistent_subwindow,
             "execute_command": self.execute_command,
             "queue_background_command": self.queue_background_command,
+            "frontend_kernel_service": getattr(self, "frontend_kernel_service", None),
             "get_current_project_dir": self.get_current_project_dir,
             "get_procedures_init": self.get_procedures_init,
             "get_shutting_down": self.get_shutting_down,
@@ -257,9 +263,13 @@ class HydeApp:
             output_redirection_port=output_redirection_port,
             startup_timeout=60,
         )
+        frontend_kernel_service = getattr(self, "frontend_kernel_service", None)
+        if frontend_kernel_service is not None:
+            frontend_kernel_service.stop()
+            frontend_kernel_service.start()
         self.runtime_helper = RuntimeHelper(
             self,
-            CONNECTION_FILE,
+            frontend_kernel_service,
             self.kernel_from_child,
             self.kernel_process,
         )
@@ -450,6 +460,9 @@ class HydeApp:
             helper = self.runtime_helper
             self.runtime_helper = None
             helper.stop()
+        frontend_kernel_service = getattr(self, "frontend_kernel_service", None)
+        if frontend_kernel_service is not None:
+            frontend_kernel_service.stop()
         self.emit_plugin_event("kernel_crashed", {})
         QtWidgets.QMessageBox.warning(
             self.ui,
@@ -472,8 +485,20 @@ class HydeApp:
             if errors:
                 QtWidgets.QMessageBox.warning(self.ui, "Project Save Warnings", "\\n".join(errors))
             if success:
-                write_session(self, path)
-                write_history(self, path)
+                try:
+                    write_session(self, path)
+                except Exception as exc:
+                    errors.append(f"session persistence: {exc}")
+                try:
+                    write_history(self, path)
+                except Exception as exc:
+                    errors.append(f"history persistence: {exc}")
+                if errors:
+                    QtWidgets.QMessageBox.warning(
+                        self.ui,
+                        "Project Save Warnings",
+                        "\\n".join(errors),
+                    )
                 if mode == 'save_as':
                     self.restore_project_session()
             
@@ -526,24 +551,17 @@ class HydeApp:
         self.stop_project_watcher()
         self.emit_plugin_event("application_shutdown", {})
         helper = self.runtime_helper
-        if helper is not None and helper.kernel_client is not None:
-            try:
-                helper.kernel_client.shutdown(reply=False)
-            except Exception:
-                pass
-        else:
-            python_terminal_service = self.plugin_service("visible_terminal_service")
-            kernel_client = (
-                None if python_terminal_service is None else python_terminal_service.kernel_client()
-            )
-            try:
-                if kernel_client is not None:
-                    kernel_client.shutdown(reply=False)
-            except Exception:
-                pass
+        frontend_kernel_service = getattr(self, "frontend_kernel_service", None)
+        try:
+            if frontend_kernel_service is not None:
+                frontend_kernel_service.shutdown_kernel(reply=False)
+        except Exception:
+            pass
         if self.runtime_helper is not None:
             self.runtime_helper = None
             helper.stop()
+        if frontend_kernel_service is not None:
+            frontend_kernel_service.stop()
         self.emit_plugin_event("kernel_crashed", {})
         QtCore.QTimer.singleShot(0, self._complete_shutdown_runtime)
 
@@ -575,13 +593,19 @@ class HydeApp:
         session, session_error = try_read_session(self.current_project_dir)
         if session_error:
             warnings.append(f"session.toml: {session_error}")
+        session_source, session_source_error = try_read_session_source(
+            self.current_project_dir
+        )
+        if session_source_error:
+            warnings.append(f"session.py: {session_source_error}")
         if warnings:
             QtWidgets.QMessageBox.warning(
                 self.ui,
                 "Project Session Restore Warnings",
                 "\n".join(warnings),
             )
-        if not session:
-            return
-        restore_main_window(self, session)
+        if session:
+            restore_main_window(self, session)
         self.emit_plugin_event("project_loaded", {"session": session})
+        if session_source.strip():
+            self.queue_background_command(session_source, silent=True)

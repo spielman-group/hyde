@@ -36,6 +36,7 @@ def make_plugin_host(plugin_manager):
     app.configure_persistent_subwindow = lambda subwindow: None
     app.execute_command = lambda code, visible=True: (code, visible)
     app.queue_background_command = lambda code, silent=True: (code, silent)
+    app.frontend_kernel_service = object()
     app.show_plugin_window = lambda key: key
     app.on_visible_command_executed = lambda message: message
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
@@ -179,8 +180,10 @@ class TestPluginTools(unittest.TestCase):
         HydeApp.setup_plugins(app)
 
         self.assertIn("execute_command", manager.services)
+        self.assertIn("frontend_kernel_service", manager.services)
         self.assertIn("lookup_menu_action", manager.services)
         self.assertEqual(manager.services["plugin_service"], "demo")
+        self.assertIs(manager.services["frontend_kernel_service"], app.frontend_kernel_service)
         self.assertIs(plugin.setup_services, manager.services)
         self.assertIs(plugin.bound_action, app.ui.menuWindow.actions()[0])
         self.assertIs(

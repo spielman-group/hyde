@@ -1,20 +1,11 @@
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
-from qtconsole.client import QtKernelClient
-from hyde.paths import CONNECTION_FILE
 from hyde.user_interface.plugin_tools import HydePlugin
 
 class PythonTerminal(RichJupyterWidget):
-    def __init__(self, connection_file, history_sink=None, initial_history=None, *args, **kwargs):
+    def __init__(self, kernel_client, history_sink=None, initial_history=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._history_sink = history_sink
-
-        # Create and connect the live QtKernelClient before attaching it to
-        # the widget so visible and hidden execution both use the same session.
-        client = QtKernelClient(connection_file=connection_file)
-        client.load_connection_file()
-        client.start_channels()
-
-        self.kernel_client = client
+        self.kernel_client = kernel_client
         self.restore_history_entries(initial_history or [])
 
     def _command_source(self, source):
@@ -55,16 +46,7 @@ class PythonTerminal(RichJupyterWidget):
             self._set_history(entries or [])
 
     def shutdown(self):
-        if self.kernel_client is not None:
-            for channel_name in ("iopub_channel", "shell_channel", "stdin_channel", "control_channel"):
-                channel = getattr(self.kernel_client, channel_name, None)
-                if channel is not None and hasattr(channel, "close"):
-                    try:
-                        channel.close()
-                    except Exception:
-                        pass
-            self.kernel_client.stop_channels()
-            self.kernel_client = None
+        self.kernel_client = None
 
 
 class PythonTerminalService:
@@ -80,6 +62,10 @@ class PythonTerminalService:
 
     def subwindow(self):
         return self.plugin.mdi_subwindow("python_terminal")
+
+    def ensure_kernel_client(self):
+        frontend_kernel_service = self.plugin.services.get("frontend_kernel_service")
+        return None if frontend_kernel_service is None else frontend_kernel_service.kernel_client()
 
     def execute_visible(self, code):
         widget = self.ensure_widget()
@@ -103,8 +89,7 @@ class PythonTerminalService:
             widget.shutdown()
 
     def kernel_client(self):
-        widget = self.widget()
-        return None if widget is None else widget.kernel_client
+        return self.ensure_kernel_client()
 
     def destroy(self):
         self.plugin.destroy_mdi_widget("python_terminal")
@@ -147,7 +132,7 @@ class Plugin(HydePlugin):
     def create_widget(self, parent=None, data=None):
         del data
         widget = PythonTerminal(
-            connection_file=CONNECTION_FILE,
+            kernel_client=self.python_terminal_service.ensure_kernel_client(),
             history_sink=self.python_terminal_service.record_history_entry,
             initial_history=self.python_terminal_service.history_entries(),
             parent=parent,

@@ -1,10 +1,12 @@
 import copy
+import logging
 import uuid
 
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.features.matplotlib_features import FigureCodec
+from hyde.features.matplotlib_features import FigureCodec, FigureIRCodec
+from hyde.user_interface.figure_comm import COMM_TARGET
 from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
 from hyde.user_interface.window_naming import next_numbered_name
@@ -13,7 +15,7 @@ from .dialogs import NewFigureDialog
 from .window import FigureState, FigureWindow, prompt_to_save_figure_macro
 
 
-COMM_TARGET = "hyde_figure"
+LOGGER = logging.getLogger("hyde")
 
 
 def _figure_state_with_default_title(state, default_title):
@@ -21,21 +23,6 @@ def _figure_state_with_default_title(state, default_title):
     if default_title and not normalized["settings"].get("title"):
         normalized["settings"]["title"] = str(default_title)
     return normalized
-
-
-def _call_source_with_open_token(call_source, open_token):
-    if not call_source:
-        return call_source
-    token_line = f"fig._hyde_open_token = {open_token!r}"
-    lines = list(call_source.splitlines())
-    if token_line in lines:
-        return "\n".join(lines)
-    for index, line in enumerate(lines):
-        if line.strip() == "fig.show()":
-            lines.insert(index, token_line)
-            return "\n".join(lines)
-    lines.append(token_line)
-    return "\n".join(lines)
 
 
 class FigureWorkspaceService:
@@ -60,6 +47,7 @@ class FigureWorkspaceService:
     def open_or_update_figure(self, payload):
         figure_number = int(payload.get("figure_number"))
         snapshot = dict(payload.get("snapshot", {}) or {})
+        snapshot_metadata = dict(snapshot.get("hyde_metadata", {}) or {})
         open_token = snapshot.get("open_token")
         pending = (
             None
@@ -67,9 +55,12 @@ class FigureWorkspaceService:
             else self._pending_open_payloads.pop(str(open_token), None)
         )
         figure = self.figures.get(figure_number)
+        created_new = figure is None
         if figure is None:
             services = dict(self.plugin.services)
             services["request_save_figure_macro"] = self.plugin.request_save_figure_macro
+            if hasattr(self.plugin, "send_figure_action"):
+                services["send_figure_action"] = self.plugin.send_figure_action
             figure = FigureWindow(
                 figure_number=figure_number,
                 services=services,
@@ -80,7 +71,9 @@ class FigureWorkspaceService:
             figure.bind_subwindow(subwindow)
             self.figures[figure_number] = figure
             subwindow.destroyed.connect(
-                lambda _=None, number=figure_number: self._remove_figure(number)
+                lambda _=None, number=figure_number, workspace=self: (
+                    workspace._remove_figure(number)
+                )
             )
             subwindow.show()
         else:
@@ -89,17 +82,24 @@ class FigureWorkspaceService:
                 subwindow.show()
 
         figure.update_payload(payload)
-        pending_restore = None if pending is None else pending.get("restore")
+        pending_figure_ir = None if pending is None else pending.get("figure_ir")
         pending_live_state = None if pending is None else pending.get("live_state")
-        if pending_live_state is not None:
+        snapshot_has_figure_ir = snapshot.get("figure_ir") is not None
+        if pending_figure_ir is not None and snapshot.get("figure_ir") is None:
+            figure.snapshot_state.update(
+                default_macro_name=snapshot.get("default_macro_name"),
+                call_source=snapshot.get("call_source"),
+                save_error=snapshot.get("save_error"),
+                figure_size=snapshot.get("figure_size"),
+                tracked_names=snapshot.get("tracked_names"),
+                figure_ir=pending_figure_ir,
+                live_state=None,
+            )
+        if pending_live_state is not None and not snapshot_has_figure_ir:
             figure.set_live_state(pending_live_state)
             self.plugin.track_live_figure(figure_number, pending_live_state)
-        if pending_restore is not None:
-            figure.apply_saved_geometry(pending_restore.get("geometry"))
-            if figure.parentWidget() is not None:
-                figure.parentWidget().setVisible(
-                    not bool(pending_restore.get("hidden", False))
-                )
+        if created_new:
+            figure.apply_window_pos(snapshot_metadata.get("window_pos"))
         subwindow = figure.parentWidget()
         if subwindow is not None:
             subwindow.setFocus()
@@ -119,16 +119,19 @@ class FigureWorkspaceService:
         self.figure_title_counter = 0
         self._pending_open_payloads = {}
 
-    def register_pending_open(self, *, restore=None, live_state=None):
+    def register_pending_open(self, *, figure_ir=None, live_state=None):
         token = str(uuid.uuid4())
         self._pending_open_payloads[token] = {
-            "restore": copy.deepcopy(restore),
+            "figure_ir": copy.deepcopy(figure_ir),
             "live_state": copy.deepcopy(live_state),
         }
         return token
 
     def _remove_figure(self, figure_number):
-        self.figures.pop(int(figure_number), None)
+        figures = getattr(self, "figures", None)
+        if figures is None:
+            return
+        figures.pop(int(figure_number), None)
 
 
 class FigureFeatureService:
@@ -175,6 +178,7 @@ class Plugin(HydePlugin):
         self._new_figure_action = None
         self._macro_menu = None
         self._registered_kernel_client = None
+        self._figure_to_comm = {}
         self._comm_to_figure = {}
 
     def on_setup_complete(self, data=None):
@@ -223,16 +227,24 @@ class Plugin(HydePlugin):
             "project_loaded": self.on_project_loaded,
         }
 
-    def get_save_data(self):
-        figures = []
-        for figure in self.workspace.figures.values():
-            figure_state = figure.session_save_data()
-            if figure_state is not None:
-                figures.append(figure_state)
-        return {
-            "figure_title_counter": self.workspace.figure_title_counter,
-            "figures": figures,
-        }
+    def get_session_toml_data(self):
+        return {"figure_title_counter": self.workspace.figure_title_counter}
+
+    def get_session_restore_source(self):
+        blocks = []
+        for figure_number in sorted(self.workspace.figures):
+            figure = self.workspace.figures[figure_number]
+            try:
+                source = figure.session_restore_source()
+            except Exception:
+                LOGGER.exception(
+                    "Figure session restore-source generation failed for figure %s.",
+                    figure_number,
+                )
+                continue
+            if source:
+                blocks.append(source.strip())
+        return "\n\n".join(blocks) + ("\n" if blocks else "")
 
     def on_enter_no_project_state(self, data):
         del data
@@ -258,33 +270,9 @@ class Plugin(HydePlugin):
 
     def on_project_loaded(self, data):
         session = data["session"]
-        saved_figures = list(session.get("figures", []))
         saved_counter = int(session.get("figure_title_counter", 0))
         self.workspace.clear()
         self.workspace.figure_title_counter = saved_counter
-        for figure_state in saved_figures:
-            open_token = self.workspace.register_pending_open(
-                restore=figure_state,
-                live_state=figure_state.get("live_state"),
-            )
-            live_state = figure_state.get("live_state")
-            if live_state is not None:
-                command = FigureCodec.state_to_python(
-                    {
-                        **copy.deepcopy(live_state),
-                        "settings": {
-                            **copy.deepcopy(live_state.get("settings", {})),
-                            "command": "create",
-                            "open_token": open_token,
-                        },
-                    }
-                )
-            else:
-                call_source = figure_state.get("call_source")
-                if not call_source:
-                    continue
-                command = _call_source_with_open_token(call_source, open_token)
-            self.plugin_queue_background_command(command, silent=True)
 
     def on_kernel_ready(self, data):
         del data
@@ -358,7 +346,7 @@ class Plugin(HydePlugin):
     def _execute_macro(self, macro_name, macro_args):
         state = RuntimeCommandState()
         state.set_callable_invocation(macro_name, macro_args)
-        self.services["execute_command"](state.python_source(), visible=True)
+        self.services["execute_command"](f"{state.python_source()};", visible=True)
 
     def _ensure_macro_menu(self):
         if self._macro_menu is None:
@@ -384,19 +372,35 @@ class Plugin(HydePlugin):
     def _on_figure_comm_open(self, comm, msg):
         payload = msg["content"]["data"]
         figure_number = int(payload.get("figure_number"))
+        LOGGER.debug(
+            "Figure plugin opened comm %s for figure %s.",
+            comm.comm_id,
+            figure_number,
+        )
+        self._figure_to_comm[figure_number] = comm
         self._comm_to_figure[comm.comm_id] = figure_number
         comm.on_msg(lambda message, current_comm=comm: self._on_figure_comm_message(current_comm, message))
         comm.on_close(lambda message, current_comm=comm: self._on_figure_comm_close(current_comm, message))
         self._handle_figure_payload(payload)
 
     def _on_figure_comm_message(self, comm, msg):
-        del comm
+        LOGGER.debug(
+            "Figure plugin received comm message on %s: %s",
+            comm.comm_id,
+            msg.get("content", {}).get("data", {}).get("event"),
+        )
         self._handle_figure_payload(msg["content"]["data"])
 
     def _on_figure_comm_close(self, comm, msg):
         del msg
         figure_number = self._comm_to_figure.pop(comm.comm_id, None)
         if figure_number is not None:
+            LOGGER.debug(
+                "Figure plugin observed comm %s close for figure %s.",
+                comm.comm_id,
+                figure_number,
+            )
+            self._figure_to_comm.pop(figure_number, None)
             self._handle_figure_close(figure_number)
 
     @inmain_decorator()
@@ -412,3 +416,33 @@ class Plugin(HydePlugin):
         if figure_number is None:
             return
         self.workspace.close_figure(figure_number)
+
+    def send_figure_action(self, figure_number, action):
+        comm = self._figure_to_comm.get(int(figure_number))
+        if comm is None:
+            LOGGER.warning(
+                "Figure plugin could not send action for figure %s because no comm is registered.",
+                figure_number,
+            )
+            return False
+        try:
+            comm.send(
+                {
+                    "event": "action",
+                    "figure_number": int(figure_number),
+                    "action": dict(action or {}),
+                }
+            )
+        except Exception:
+            LOGGER.exception(
+                "Figure plugin failed to send action for figure %s: %r",
+                figure_number,
+                action,
+            )
+            return False
+        LOGGER.debug(
+            "Figure plugin sent action for figure %s: %r",
+            figure_number,
+            action,
+        )
+        return True

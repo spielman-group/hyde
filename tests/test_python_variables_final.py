@@ -3,7 +3,7 @@ import sys
 import time
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="hyde-mpl-"))
@@ -356,7 +356,7 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
         QtWidgets.QWidget.__init__(browser)
         browser.services = {}
         browser._closed = False
-        browser._external_requests_in_flight = set()
+        browser._execute_requests_in_flight = set()
         browser._refresh_in_flight = False
         browser._refresh_pending = False
         browser._last_view = {}
@@ -375,10 +375,14 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
         browser.spyder_comm = FakeSpyderComm()
         return browser, callbacks
 
-    def _status_message(self, state, session, msg_id="msg-id"):
+    def _status_message(self, state, session, msg_id="msg-id", parent_msg_type="execute_request"):
         return {
             "header": {"msg_type": "status"},
-            "parent_header": {"session": session, "msg_id": msg_id},
+            "parent_header": {
+                "session": session,
+                "msg_id": msg_id,
+                "msg_type": parent_msg_type,
+            },
             "content": {"execution_state": state},
         }
 
@@ -387,31 +391,135 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
         callback(view)
         process_events()
 
-    def test_overlapping_external_sessions_refresh_only_after_last_idle(self):
+    def test_overlapping_execute_requests_refresh_only_after_last_idle(self):
         browser, callbacks = self._make_browser()
 
         browser.refresh_namespace()
         browser._handle_iopub_message(
-            self._status_message("busy", "external-session", msg_id="a")
+            self._status_message("busy", "browser-session", msg_id="a")
         )
         browser._handle_iopub_message(
-            self._status_message("busy", "external-session", msg_id="b")
+            self._status_message("busy", "browser-session", msg_id="b")
         )
         browser._handle_iopub_message(
-            self._status_message("idle", "external-session", msg_id="a")
+            self._status_message("idle", "browser-session", msg_id="a")
         )
 
-        self.assertTrue(browser._external_requests_in_flight)
+        self.assertTrue(browser._execute_requests_in_flight)
         self.assertFalse(browser._refresh_pending)
         self.assertEqual(len(callbacks), 1)
 
         browser._handle_iopub_message(
-            self._status_message("idle", "external-session", msg_id="b")
+            self._status_message("idle", "browser-session", msg_id="b")
         )
 
-        self.assertFalse(browser._external_requests_in_flight)
+        self.assertFalse(browser._execute_requests_in_flight)
         self.assertTrue(browser._refresh_pending)
         self.assertEqual(len(callbacks), 1)
+
+    def test_comm_status_messages_do_not_trigger_refresh_tracking(self):
+        browser, callbacks = self._make_browser()
+
+        browser.refresh_namespace()
+        browser._handle_iopub_message(
+            self._status_message(
+                "busy",
+                "browser-session",
+                msg_id="comm-1",
+                parent_msg_type="comm_msg",
+            )
+        )
+        browser._handle_iopub_message(
+            self._status_message(
+                "idle",
+                "browser-session",
+                msg_id="comm-1",
+                parent_msg_type="comm_msg",
+            )
+        )
+
+        self.assertFalse(browser._execute_requests_in_flight)
+        self.assertFalse(browser._refresh_pending)
+        self.assertEqual(len(callbacks), 1)
+
+
+class TestPythonVariablesSharedClient(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication(sys.argv)
+
+    def test_reuses_visible_terminal_kernel_client(self):
+        class FakeSignal:
+            def __init__(self):
+                self._callbacks = []
+
+            def connect(self, callback):
+                self._callbacks.append(callback)
+
+            def disconnect(self, callback):
+                self._callbacks.remove(callback)
+
+        class FakeChannel:
+            def __init__(self):
+                self.message_received = FakeSignal()
+
+        class FakeKernelClient:
+            def __init__(self):
+                self.iopub_channel = FakeChannel()
+                self.session = type("Session", (), {"session": "terminal-session"})()
+
+        class FakeVisibleTerminalService:
+            def __init__(self, kernel_client):
+                self.kernel_client = kernel_client
+                self.calls = 0
+
+            def ensure_kernel_client(self):
+                self.calls += 1
+                return self.kernel_client
+
+        class FakeSpyderComm:
+            def __init__(self, kernel_client):
+                self.kernel_client = kernel_client
+
+            def open(self):
+                return None
+
+            def wait_until_ready(self, timeout=5):
+                return None
+
+            def configure_namespace_view(self, settings):
+                self.settings = settings
+
+            def request_namespace_view(self, callback):
+                callback({})
+
+            def close(self):
+                return None
+
+        shared_client = FakeKernelClient()
+        visible_terminal_service = FakeVisibleTerminalService(shared_client)
+
+        with patch(
+            "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+            FakeSpyderComm,
+        ):
+            with patch(
+                "hyde.user_interface.plugins.python_variables.register_auxiliary_figure_comm_sink",
+            ) as register_sink:
+                browser = PythonVariables(
+                    connection_file="/tmp/unused.json",
+                    services={"visible_terminal_service": visible_terminal_service},
+                )
+        try:
+            self.assertIs(browser.kernel_client, shared_client)
+            self.assertFalse(browser._owns_kernel_client)
+            self.assertEqual(visible_terminal_service.calls, 1)
+            register_sink.assert_not_called()
+        finally:
+            browser.shutdown()
+            browser.deleteLater()
 
 
 class TestPythonVariablesService(unittest.TestCase):

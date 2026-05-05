@@ -244,6 +244,73 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertEqual(restoring_plugin.table_counter, 4)
             self.assertEqual(restoring_plugin.active_table_handle, "Table0")
 
+    def test_write_session_supports_plugin_toml_and_python_routes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "session_routes.hy")
+            os.makedirs(project_dir)
+
+            main_window = QtWidgets.QMainWindow()
+
+            class SavingPlugin:
+                def get_session_toml_data(self):
+                    return {"tool_windows": {"logging": {"visible": True}}}
+
+                def get_session_restore_source(self):
+                    return "print('restore figure session')\n"
+
+            source_app = type("SourceApp", (), {})()
+            source_app.ui = main_window
+            source_app.plugin_manager = PluginManagerStub({"session": SavingPlugin()})
+
+            write_session(source_app, project_dir)
+
+            session = tomllib.loads((Path(project_dir) / "session.toml").read_text())
+            session_source = (Path(project_dir) / "session.py").read_text()
+
+            self.assertTrue(session["tool_windows"]["logging"]["visible"])
+            self.assertIn("restore figure session", session_source)
+
+    def test_restore_project_session_runs_session_python_after_project_loaded(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir) / "session_restore.hy"
+            project_dir.mkdir()
+            (project_dir / "session.toml").write_text("format_version = 1\n", encoding="utf-8")
+            (project_dir / "session.py").write_text("print('restore from session.py')\n", encoding="utf-8")
+            terminal_dir = project_dir / "terminal"
+            terminal_dir.mkdir()
+            (terminal_dir / "history.py").write_text("history = []\n", encoding="utf-8")
+
+            events = []
+
+            class RestoringPlugin:
+                def get_event_handlers(self):
+                    return {"project_loaded": self.on_project_loaded}
+
+                def on_project_loaded(self, data):
+                    del data
+                    events.append("project_loaded")
+
+            restored_app = type("RestoredApp", (), {})()
+            restored_app.ui = QtWidgets.QMainWindow()
+            restored_app.current_project_dir = str(project_dir)
+            restored_app.plugin_manager = PluginManagerStub({"session": RestoringPlugin()})
+            restored_app.plugin_service = lambda key: (
+                DummyPythonTerminalService() if key == "visible_terminal_service" else None
+            )
+            restored_app.queue_background_command = (
+                lambda code, silent=True: events.append(("session_source", code, silent)) or True
+            )
+            restored_app.emit_plugin_event = (
+                lambda name, data=None: HydeApp.emit_plugin_event(restored_app, name, data)
+            )
+
+            HydeApp.restore_project_session(restored_app)
+
+            self.assertEqual(events[0], "project_loaded")
+            self.assertEqual(events[1][0], "session_source")
+            self.assertIn("restore from session.py", events[1][1])
+            self.assertTrue(events[1][2])
+
     def test_materialize_project_template_skips_gitkeep_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir) / "heal_existing.hy"
@@ -257,6 +324,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertTrue((project_dir / "procedures" / "__init__.py").exists())
             self.assertTrue((project_dir / "manifest.toml").exists())
             self.assertTrue((project_dir / "session.toml").exists())
+            self.assertTrue((project_dir / "session.py").exists())
             self.assertTrue((project_dir / "terminal" / "history.py").exists())
             self.assertFalse((project_dir / "data" / ".gitkeep").exists())
             self.assertNotIn("data/.gitkeep", created_paths)

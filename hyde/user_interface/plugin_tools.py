@@ -83,6 +83,15 @@ class HydePlugin(BasePlugin):
     def service(self, key, default=None):
         return self.services.get(key, default)
 
+    def get_session_toml_data(self):
+        get_save_data = getattr(self, "get_save_data", None)
+        if get_save_data is None:
+            return {}
+        return get_save_data()
+
+    def get_session_restore_source(self):
+        return ""
+
     def menu_action(self, location, name, path=()):
         lookup_menu_action = self.service("lookup_menu_action")
         if lookup_menu_action is None:

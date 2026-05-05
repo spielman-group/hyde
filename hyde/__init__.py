@@ -5,6 +5,7 @@ Hyde: A modern, Pythonic data analysis and plotting environment for the labscrip
 from __future__ import annotations
 
 import inspect
+import functools
 import os
 import shutil
 import sys
@@ -292,21 +293,21 @@ def load_project(path=None):
             try:
                 sys.modules["__main__"].__dict__[name] = project_tools.deserialize_object(object_path, serializer)
                 loaded += 1
-                if entry.get("python_type") == "Axes":
+                if project_tools.is_matplotlib_axes_type_name(entry.get("python_type")):
                     restored_axis_entries.append(name)
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
         missing_axis_entries = [
             entry
             for entry in manifest.get("objects", [])
-            if entry.get("python_type") == "Axes"
+            if project_tools.is_matplotlib_axes_type_name(entry.get("python_type"))
             and entry.get("name") not in sys.modules["__main__"].__dict__
         ]
         if missing_axis_entries:
             figures = [
                 value
                 for value in sys.modules["__main__"].__dict__.values()
-                if type(value).__name__ == "Figure"
+                if project_tools.is_matplotlib_figure_type_name(type(value).__name__)
             ]
             recovered_axes = []
             for figure in figures:
@@ -451,7 +452,16 @@ def table(*args, target=None, title=None, geometry=None, column_widths=None):
         )
 
 
-def figure(*args):
+def _normalize_figure_metadata(*, window_pos=None):
+    metadata = {}
+    if window_pos is not None:
+        if not isinstance(window_pos, (list, tuple)) or len(window_pos) != 2:
+            raise TypeError("hyde.figure window_pos must be a length-2 sequence.")
+        metadata["window_pos"] = (int(window_pos[0]), int(window_pos[1]))
+    return metadata
+
+
+def figure(_func=None, *, window_pos=None, register=True):
     """
     Register a Hyde figure recreation macro.
 
@@ -460,22 +470,60 @@ def figure(*args):
     ``@hyde.figure``
 
     Decorated functions are published into `Windows -> Graph Macros` after the
-    procedures package reload path rebuilds the registry.
+    procedures package reload path rebuilds the registry unless
+    ``register=False`` is provided.
     """
-    if not args:
+    metadata = _normalize_figure_metadata(window_pos=window_pos)
+    should_register = bool(register)
+
+    if _func is None:
         def decorator(func):
-            register_figure_macro(func)
-            publish_figure_macro_registry()
-            return func
+            wrapped = _decorate_figure_builder(func, metadata=metadata)
+            if should_register:
+                register_figure_macro(wrapped)
+                publish_figure_macro_registry()
+            return wrapped
 
         return decorator
 
-    if len(args) == 1 and callable(args[0]):
-        register_figure_macro(args[0])
-        publish_figure_macro_registry()
-        return args[0]
+    if callable(_func):
+        wrapped = _decorate_figure_builder(_func, metadata=metadata)
+        if should_register:
+            register_figure_macro(wrapped)
+            publish_figure_macro_registry()
+        return wrapped
 
     raise TypeError("hyde.figure currently supports decorator registration only.")
+
+
+def _decorate_figure_builder(func, metadata=None):
+    figure_metadata = dict(metadata or {})
+
+    @functools.wraps(func)
+    def wrapper(*wrapper_args, **wrapper_kwargs):
+        from .matplotlib_backend import (
+            begin_figure_build_session,
+            end_figure_build_session,
+            finalize_figure_build_session,
+        )
+
+        session = begin_figure_build_session(
+            func,
+            wrapper_args,
+            wrapper_kwargs,
+            metadata=figure_metadata,
+        )
+        try:
+            result = func(*wrapper_args, **wrapper_kwargs)
+        finally:
+            end_figure_build_session(session)
+        return finalize_figure_build_session(session, result)
+
+    try:
+        wrapper.__signature__ = inspect.signature(func)
+    except (TypeError, ValueError):
+        pass
+    return wrapper
 
 
 def _resolve_matplotlib_figure(figure):
@@ -501,8 +549,15 @@ def track_figure(figure, state):
 
 def refresh_figure(figure):
     from .features.matplotlib_features import apply_figure_state
+    from .matplotlib_backend import apply_figure_action
 
     resolved_figure = _resolve_matplotlib_figure(figure)
+    if getattr(resolved_figure, "_hyde_is_first_class", False):
+        apply_figure_action(
+            resolved_figure,
+            {"type": "regenerate_from_ir"},
+        )
+        return resolved_figure
     state = getattr(resolved_figure, "_hyde_live_state", None)
     if state is None:
         return None

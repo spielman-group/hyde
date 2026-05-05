@@ -1,14 +1,17 @@
 import base64
 import copy
+import logging
 
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import FigureCodec
+from hyde.features.matplotlib_features import FigureCodec, FigureIRCodec
 from hyde.user_interface.base import HydeGuiState
 from hyde.user_interface.namespace_tracking import tracked_namespace_signature
 from hyde.user_interface.window_macro_dialogs import prompt_to_save_window_macro
 from hyde.user_interface.window_macro_store import MacroStoreError
+
+LOGGER = logging.getLogger("hyde")
 
 
 class FigureState(HydeGuiState):
@@ -46,6 +49,15 @@ class FigureState(HydeGuiState):
         else:
             self.apply_action({"type": "clear", "path": ("settings", "x_name")})
 
+    def set_figsize(self, width, height):
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "figsize"),
+                "value": (float(width), float(height)),
+            }
+        )
+
     def source_for_command(self, command, **settings):
         return self.codec.state_to_python(
             self._temporary_state(command=command, **settings)
@@ -64,14 +76,22 @@ class FigureSnapshotState:
         save_error=None,
         figure_size=None,
         tracked_names=None,
+        figure_ir=None,
         live_state=None,
     ):
         self._default_macro_name = default_macro_name or "Figure"
         self._call_source = call_source
         self._save_error = save_error
         self._figure_size = None if figure_size is None else tuple(figure_size)
-        self._tracked_names = tuple(tracked_names or ())
+        self._tracked_names = ()
+        self._figure_ir = None
         self._live_state = copy.deepcopy(live_state)
+        self._apply_figure_ir_snapshot(
+            default_macro_name=default_macro_name,
+            call_source=call_source,
+            tracked_names=tracked_names,
+            figure_ir=figure_ir,
+        )
 
     def update(
         self,
@@ -80,15 +100,42 @@ class FigureSnapshotState:
         save_error=None,
         figure_size=None,
         tracked_names=None,
+        figure_ir=None,
         live_state=None,
     ):
-        if default_macro_name:
-            self._default_macro_name = str(default_macro_name)
-        self._call_source = call_source
+        self._apply_figure_ir_snapshot(
+            default_macro_name=default_macro_name,
+            call_source=call_source,
+            tracked_names=tracked_names,
+            figure_ir=figure_ir,
+        )
         self._save_error = save_error
         self._figure_size = None if figure_size is None else tuple(figure_size)
-        self._tracked_names = tuple(tracked_names or ())
         self._live_state = copy.deepcopy(live_state)
+
+    def _apply_figure_ir_snapshot(
+        self,
+        default_macro_name=None,
+        call_source=None,
+        tracked_names=None,
+        figure_ir=None,
+    ):
+        self._figure_ir = copy.deepcopy(figure_ir)
+        if default_macro_name:
+            self._default_macro_name = str(default_macro_name)
+        elif self._figure_ir is not None:
+            title = FigureIRCodec.normalize_state(self._figure_ir)["settings"]["title"]
+            if title:
+                self._default_macro_name = title
+        self._call_source = call_source
+        if not self._call_source and self._figure_ir is not None:
+            self._call_source = FigureIRCodec.state_to_python(self._figure_ir)
+        if tracked_names:
+            self._tracked_names = tuple(tracked_names)
+        elif self._figure_ir is not None:
+            self._tracked_names = FigureIRCodec.tracked_names(self._figure_ir)
+        else:
+            self._tracked_names = ()
 
     def default_macro_name(self):
         return self._default_macro_name
@@ -101,6 +148,9 @@ class FigureSnapshotState:
 
     def tracked_names(self):
         return self._tracked_names
+
+    def figure_ir(self):
+        return copy.deepcopy(self._figure_ir)
 
     def live_state(self):
         return copy.deepcopy(self._live_state)
@@ -119,6 +169,8 @@ class FigureSnapshotState:
     def macro_source(self, macro_name):
         if self._save_error:
             raise MacroStoreError(self._save_error)
+        if self._figure_ir is not None:
+            return FigureIRCodec.state_to_macro_source(self._figure_ir, macro_name)
         if self._live_state is not None:
             return FigureCodec.state_to_macro_source(self._live_state, macro_name)
         if not self._call_source:
@@ -130,6 +182,28 @@ class FigureSnapshotState:
             f"{body}\n"
             "    return fig\n"
         )
+
+
+def with_window_pos_metadata(
+    macro_source,
+    window_pos,
+    decorator_name="@hyde.figure",
+    register=None,
+):
+    if (
+        not macro_source
+        or not window_pos
+        or len(window_pos) != 2
+    ):
+        return macro_source
+    lines = list(macro_source.splitlines())
+    if not lines:
+        return macro_source
+    decorator_args = [f"window_pos=({int(window_pos[0])}, {int(window_pos[1])})"]
+    if register is False:
+        decorator_args.append("register=False")
+    lines[0] = f"{decorator_name}({', '.join(decorator_args)})"
+    return "\n".join(lines)
 
 
 class FigureWindow(QtWidgets.QWidget):
@@ -146,11 +220,15 @@ class FigureWindow(QtWidgets.QWidget):
         self._closing_from_kernel = False
         self._pixmap = None
         self._initial_size_applied = False
+        self._pending_window_pos = None
         self._refresh_in_flight = False
         self._refresh_requested = False
         self._refresh_timeout_timer = QtCore.QTimer(self)
         self._refresh_timeout_timer.setSingleShot(True)
         self._refresh_timeout_timer.timeout.connect(self._on_refresh_timeout)
+        self._resize_redraw_timer = QtCore.QTimer(self)
+        self._resize_redraw_timer.setSingleShot(True)
+        self._resize_redraw_timer.timeout.connect(self._on_resize_redraw_timeout)
         self._close_timeout_timer = QtCore.QTimer(self)
         self._close_timeout_timer.setSingleShot(True)
         self._close_timeout_timer.timeout.connect(self._on_close_timeout)
@@ -193,6 +271,7 @@ class FigureWindow(QtWidgets.QWidget):
             save_error=snapshot.get("save_error"),
             figure_size=snapshot.get("figure_size"),
             tracked_names=snapshot.get("tracked_names"),
+            figure_ir=snapshot.get("figure_ir"),
             live_state=snapshot.get("live_state"),
         )
         self._tracked_namespace_state = self._current_tracked_namespace_state()
@@ -208,6 +287,7 @@ class FigureWindow(QtWidgets.QWidget):
                 if not self._initial_size_applied:
                     self._apply_initial_subwindow_size()
                     self._initial_size_applied = True
+                    self._apply_pending_window_pos()
                 if self._refresh_requested and not self._closed:
                     self._refresh_requested = False
                     self.refresh_figure()
@@ -222,24 +302,44 @@ class FigureWindow(QtWidgets.QWidget):
         geometry = self._subwindow.geometry()
         return [geometry.x(), geometry.y(), geometry.width(), geometry.height()]
 
-    def session_save_data(self):
+    def _recreation_function_source(self, macro_name, decorator_name, register=None):
+        function_source = self.snapshot_state.macro_source(macro_name)
         geometry = self.capture_geometry()
-        call_source = self.snapshot_state.call_source()
-        if geometry is None or not call_source:
-            return None
-        return {
-            "title": self.snapshot_state.default_macro_name(),
-            "hidden": not self._subwindow.isVisible(),
-            "geometry": geometry,
-            "call_source": call_source,
-            "live_state": self.snapshot_state.live_state(),
-        }
+        if geometry is None:
+            return function_source
+        return with_window_pos_metadata(
+            function_source,
+            geometry[:2],
+            decorator_name=decorator_name,
+            register=register,
+        )
 
-    def apply_saved_geometry(self, geometry):
-        if self._subwindow is None or not geometry:
+    def session_restore_source(self):
+        geometry = self.capture_geometry()
+        if geometry is None:
+            return None
+        macro_name = self.snapshot_state.default_macro_name()
+        function_source = self._recreation_function_source(
+            macro_name,
+            decorator_name="@hyde.figure",
+            register=False,
+        )
+        arguments = ", ".join(self.snapshot_state.tracked_names())
+        return f"{function_source}\n\n{macro_name}({arguments})\n"
+
+    def apply_window_pos(self, window_pos):
+        if self._subwindow is None or not window_pos or len(window_pos) != 2:
             return
-        self._subwindow.setGeometry(QtCore.QRect(*geometry))
-        self._initial_size_applied = True
+        normalized = (int(window_pos[0]), int(window_pos[1]))
+        if not self._initial_size_applied:
+            self._pending_window_pos = normalized
+        self._subwindow.move(*normalized)
+
+    def _apply_pending_window_pos(self):
+        if self._subwindow is None or self._pending_window_pos is None:
+            return
+        self._subwindow.move(*self._pending_window_pos)
+        self._pending_window_pos = None
 
     def _apply_initial_subwindow_size(self):
         if self._subwindow is None:
@@ -259,7 +359,11 @@ class FigureWindow(QtWidgets.QWidget):
                 max(160, viewport_size.width() - max(0, frame_size.width())),
                 max(120, viewport_size.height() - max(0, frame_size.height())),
             )
-            target_size.scale(available_size, QtCore.Qt.KeepAspectRatio)
+            if (
+                target_size.width() > available_size.width()
+                or target_size.height() > available_size.height()
+            ):
+                target_size.scale(available_size, QtCore.Qt.KeepAspectRatio)
         self._subwindow.resize(
             target_size.width() + max(0, frame_size.width()),
             target_size.height() + max(0, frame_size.height()),
@@ -282,6 +386,59 @@ class FigureWindow(QtWidgets.QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_scaled_pixmap()
+        if not self._closed:
+            self._resize_redraw_timer.start(150)
+
+    def contextMenuEvent(self, event):
+        if self.snapshot_state.figure_ir() is None:
+            return super().contextMenuEvent(event)
+        menu = QtWidgets.QMenu(self)
+        regenerate_action = menu.addAction("Regenerate From IR")
+        chosen = menu.exec_(event.globalPos())
+        if chosen is regenerate_action:
+            self.request_regenerate_from_ir()
+
+    def request_resize_redraw(self, width=None, height=None):
+        send_figure_action = self.services.get("send_figure_action")
+        if send_figure_action is None:
+            return False
+        if width is None or height is None:
+            target_size = self.image_label.contentsRect().size()
+            width = target_size.width()
+            height = target_size.height()
+        if int(width) <= 0 or int(height) <= 0:
+            return False
+        return bool(
+            send_figure_action(
+                self.figure_number,
+                {
+                    "type": "resize_redraw",
+                    "width": int(width),
+                    "height": int(height),
+                },
+            )
+        )
+
+    def request_regenerate_from_ir(self):
+        if self.snapshot_state.figure_ir() is None:
+            return False
+        send_figure_action = self.services.get("send_figure_action")
+        if send_figure_action is None:
+            return False
+        return bool(
+            send_figure_action(
+                self.figure_number,
+                {"type": "regenerate_from_ir"},
+            )
+        )
+
+    @inmain_decorator()
+    def _on_resize_redraw_timeout(self):
+        if self._closed:
+            return
+        if not self._initial_size_applied:
+            return
+        self.request_resize_redraw()
 
     def _queue_silent_command(self, code):
         queue_background_command = self.services.get("queue_background_command")
@@ -347,8 +504,12 @@ class FigureWindow(QtWidgets.QWidget):
         self.refresh_figure()
 
     def close_from_kernel(self):
-        if self._closed:
+        if self._closed or self._closing_from_kernel:
             return
+        LOGGER.debug(
+            "Figure window %s received kernel close confirmation.",
+            self.figure_number,
+        )
         self._close_timeout_timer.stop()
         self._kernel_close_in_progress = False
         self._closing_from_kernel = True
@@ -366,7 +527,10 @@ class FigureWindow(QtWidgets.QWidget):
         return self.snapshot_state.default_macro_name()
 
     def macro_source(self, macro_name):
-        return self.snapshot_state.macro_source(macro_name)
+        return self._recreation_function_source(
+            macro_name,
+            decorator_name="@hyde.figure",
+        )
 
     def closeEvent(self, event):
         if self._closed or self._closing_from_kernel:
@@ -381,6 +545,10 @@ class FigureWindow(QtWidgets.QWidget):
             return super().closeEvent(event)
 
         if self._kernel_close_in_progress:
+            LOGGER.debug(
+                "Figure window %s ignored duplicate close while waiting for kernel confirmation.",
+                self.figure_number,
+            )
             event.ignore()
             return
 
@@ -396,8 +564,16 @@ class FigureWindow(QtWidgets.QWidget):
             self._command_source("close", figure_number=self.figure_number)
         ):
             self._kernel_close_in_progress = False
+            LOGGER.warning(
+                "Figure window %s failed to queue kernel close command.",
+                self.figure_number,
+            )
             event.ignore()
             return
+        LOGGER.debug(
+            "Figure window %s queued kernel close command and is awaiting confirmation.",
+            self.figure_number,
+        )
         self._close_timeout_timer.start(self.CLOSE_TIMEOUT_MS)
         event.ignore()
 
@@ -405,10 +581,15 @@ class FigureWindow(QtWidgets.QWidget):
     def _on_close_timeout(self):
         if self._closed:
             return
+        LOGGER.warning(
+            "Figure window %s close confirmation timed out; window remains open.",
+            self.figure_number,
+        )
         self._kernel_close_in_progress = False
 
     def _disconnect_namespace_updates(self):
         self._refresh_timeout_timer.stop()
+        self._resize_redraw_timer.stop()
         self._close_timeout_timer.stop()
         try:
             python_variables_service = self.services.get("namespace_view_service")
