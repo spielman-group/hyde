@@ -86,10 +86,7 @@ class HydePlugin(BasePlugin):
         return self.services.get(key, default)
 
     def get_session_toml_data(self):
-        get_save_data = getattr(self, "get_save_data", None)
-        if get_save_data is None:
-            return {}
-        return get_save_data()
+        return {}
 
     def get_session_restore_source(self):
         return ""

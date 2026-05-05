@@ -153,7 +153,7 @@ class Plugin(HydePlugin):
             "project_loaded": self.on_project_loaded,
         }
 
-    def get_save_data(self):
+    def get_session_toml_data(self):
         return self.tool_window_save_data("python_terminal")
 
     def on_project_loaded(self, data):

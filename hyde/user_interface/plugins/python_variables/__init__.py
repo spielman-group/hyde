@@ -547,7 +547,7 @@ class Plugin(HydePlugin):
             "project_loaded": self.on_project_loaded,
         }
 
-    def get_save_data(self):
+    def get_session_toml_data(self):
         widget = self.mdi_widget("python_variables")
         if widget is None:
             return {}

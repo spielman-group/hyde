@@ -48,25 +48,8 @@ def _plugin_items(app):
     plugin_manager = getattr(app, "plugin_manager", None)
     return getattr(plugin_manager, "plugins", {}).items()
 
-
-def _iter_plugin_session_values(
-    app,
-    *,
-    attr_name,
-    error_message,
-):
-    logger = logging.getLogger("hyde")
-    for plugin_name, plugin in _plugin_items(app):
-        try:
-            getter = getattr(plugin, attr_name, None)
-            value = None if getter is None else getter()
-        except Exception:
-            logger.exception(error_message, plugin_name)
-            continue
-        yield value
-
-
 def capture_session(app):
+    logger = logging.getLogger("hyde")
     session = {
         "format_version": 1,
         "main_window": {
@@ -74,23 +57,31 @@ def capture_session(app):
             "state": _encode_qbytearray(app.ui.saveState()),
         },
     }
-    for plugin_data in _iter_plugin_session_values(
-        app,
-        attr_name="get_session_toml_data",
-        error_message="Plugin session TOML capture failed for '%s'.",
-    ):
+    for plugin_name, plugin in _plugin_items(app):
+        try:
+            plugin_data = plugin.get_session_toml_data()
+        except Exception:
+            logger.exception(
+                "Plugin session TOML capture failed for '%s'.",
+                plugin_name,
+            )
+            continue
         if plugin_data:
             _merge_session_data(session, plugin_data)
     return session
 
-
-def _session_source(app):
+def capture_session_source(app):
+    logger = logging.getLogger("hyde")
     blocks = []
-    for source in _iter_plugin_session_values(
-        app,
-        attr_name="get_session_restore_source",
-        error_message="Plugin session Python capture failed for '%s'.",
-    ):
+    for plugin_name, plugin in _plugin_items(app):
+        try:
+            source = plugin.get_session_restore_source()
+        except Exception:
+            logger.exception(
+                "Plugin session Python capture failed for '%s'.",
+                plugin_name,
+            )
+            continue
         source = str(source or "").strip()
         if source:
             blocks.append(source)
@@ -103,9 +94,8 @@ def write_session(app, project_dir):
     session = capture_session(app)
     _write_toml(path, session)
     session_source_path = _session_source_path(project_dir)
-    session_source_path.parent.mkdir(parents=True, exist_ok=True)
     with session_source_path.open("w", encoding="utf-8") as handle:
-        handle.write(_session_source(app))
+        handle.write(capture_session_source(app))
 
 
 def read_session(project_dir):

@@ -95,7 +95,7 @@ class Plugin(HydePlugin):
             "enter_no_project_state": self.on_enter_no_project_state,
         }
 
-    def get_save_data(self):
+    def get_session_toml_data(self):
         return self.tool_window_save_data("procedures")
 
     def on_project_loaded(self, data):

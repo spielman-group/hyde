@@ -150,16 +150,19 @@ class TestProjectStateHelpers(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
-    def test_session_write_keeps_table_counter_in_toml_and_layout_in_session_source(self):
+    def test_write_session_merges_plugin_toml_and_python_routes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, "roundtrip.hy")
+            project_dir = os.path.join(tmpdir, "session_routes.hy")
             os.makedirs(project_dir)
 
             main_window = QtWidgets.QMainWindow()
 
             class SavingPlugin:
                 def get_session_toml_data(self):
-                    return {"table_counter": 4}
+                    return {
+                        "tool_windows": {"logging": {"visible": True}},
+                        "table_counter": 4,
+                    }
 
                 def get_session_restore_source(self):
                     return (
@@ -179,37 +182,12 @@ class TestProjectStateHelpers(unittest.TestCase):
             session = tomllib.loads((Path(project_dir) / "session.toml").read_text())
             session_source = (Path(project_dir) / "session.py").read_text()
 
+            self.assertTrue(session["tool_windows"]["logging"]["visible"])
             self.assertEqual(session["table_counter"], 4)
             self.assertIn("@hyde.table(register=False)", session_source)
             self.assertIn("Table0(a, b)", session_source)
             self.assertIn("geometry=(5, 42, 510, 242)", session_source)
             self.assertIn("column_widths={'a': 120, 'b': 260}", session_source)
-
-    def test_write_session_supports_plugin_toml_and_python_routes(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = os.path.join(tmpdir, "session_routes.hy")
-            os.makedirs(project_dir)
-
-            main_window = QtWidgets.QMainWindow()
-
-            class SavingPlugin:
-                def get_session_toml_data(self):
-                    return {"tool_windows": {"logging": {"visible": True}}}
-
-                def get_session_restore_source(self):
-                    return "print('restore figure session')\n"
-
-            source_app = type("SourceApp", (), {})()
-            source_app.ui = main_window
-            source_app.plugin_manager = PluginManagerStub({"session": SavingPlugin()})
-
-            write_session(source_app, project_dir)
-
-            session = tomllib.loads((Path(project_dir) / "session.toml").read_text())
-            session_source = (Path(project_dir) / "session.py").read_text()
-
-            self.assertTrue(session["tool_windows"]["logging"]["visible"])
-            self.assertIn("restore figure session", session_source)
 
     def test_restore_project_session_runs_session_python_after_project_loaded(self):
         with tempfile.TemporaryDirectory() as tmpdir:

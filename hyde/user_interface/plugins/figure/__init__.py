@@ -262,7 +262,7 @@ class Plugin(HydePlugin):
         self.figure_macros = []
         self.rebuild_figure_macros_menu()
         state = FigureState()
-        self.plugin_queue_background_command(
+        self.services["queue_background_command"](
             state.source_for_command("publish_figure_macros"),
             silent=True,
         )
@@ -312,12 +312,9 @@ class Plugin(HydePlugin):
             reload_procedures=self.services["reload_procedures"],
         )
 
-    def plugin_queue_background_command(self, code, silent=True):
-        return self.services["queue_background_command"](code, silent=silent)
-
     def track_live_figure(self, figure_number, state):
         command_state = FigureState()
-        return self.plugin_queue_background_command(
+        return self.services["queue_background_command"](
             command_state.source_for_command(
                 "track",
                 figure_number=figure_number,

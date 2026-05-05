@@ -258,7 +258,7 @@ class Plugin(HydePlugin):
         self.table_macros = []
         self.rebuild_table_macros_menu()
         state = TableState()
-        self.plugin_queue_background_command(
+        self.services["queue_background_command"](
             state.source_for_command("publish_table_macros"),
             silent=True,
         )
@@ -310,9 +310,6 @@ class Plugin(HydePlugin):
             procedures_init=procedures_init,
             reload_procedures=self.services["reload_procedures"],
         )
-
-    def plugin_queue_background_command(self, code, silent=True):
-        return self.services["queue_background_command"](code, silent=silent)
 
     def _ensure_macro_menu(self):
         if self._macro_menu is None:
