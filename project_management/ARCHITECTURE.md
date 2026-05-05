@@ -4,8 +4,8 @@
 The core tenet of Hyde's design is the strict separation of concerns between the **Presentation Layer (GUI Process)** and the **State Layer (Execution Subprocess)**.
 
 1. **The GUI has UX Memory, but no Scientific Memory.** The PyQt MDI application remembers window positions, table viewports, and browser states. It may hold transient, serializable UI-edit state only when that state is sufficient to regenerate Python commands and is fully derived from the authoritative execution state. The GUI does not hold canonical scientific data, arrays, matplotlib objects, or analytical state natively.
-2. **The Execution namespace is authoritative.** All named data objects, calculations, and plotting configurations live inside an independent Python execution process. The kernel should remain completely agnostic of Hyde's internal GUI representations; it simply executes standard Matplotlib code.
-3. **Metadata-over-Comms and Structured Relays.** GUI viewports that depend on execution metadata receive that metadata over the narrowest existing channel that fits the feature. Python Variables uses Spyder's namespace-view `comm` path. The implemented Table window uses a Hyde-owned `ProcessTree` relay for table-open intents and structured table-data payloads, while still relying on standard Jupyter execution for visible commands.
+2. **The Execution namespace is authoritative.** All named data objects, calculations, live matplotlib figures, and Hyde-owned internal state that must remain scientifically authoritative live inside an independent Python execution process. The GUI does not own that state. Hyde may attach kernel-owned feature state to live runtime objects when that is the narrowest way to keep runtime behavior and recreation behavior aligned.
+3. **Metadata-over-Comms and Structured Relays.** GUI viewports that depend on execution metadata receive that metadata over the narrowest existing channel that fits the feature. Python Variables uses Spyder's namespace-view `comm` path. The implemented Table window uses a Hyde-owned `ProcessTree` relay for table-open intents and structured table-data payloads, while still relying on standard Jupyter execution for visible commands. Figure windows use Jupyter `comm` channels for metadata publication and semantic edit actions against kernel-owned figure state.
 4. **2-Lane IPC Strategy.**
     - **Lane 1 (Control)**: `zprocess.ProcessTree` handles application-level orchestration (launch, heartbeats, QUIT). Analytical commands do NOT traverse this tree.
     - **Lane 2 (Execution)**: Standard Jupyter ZMQ and `comm` channels handle visible scientific execution, background execution, and namespace metadata. Hyde-specific relays should only extend this model when an existing path does not cleanly fit the feature.
@@ -18,7 +18,7 @@ The core tenet of Hyde's design is the strict separation of concerns between the
 ### The IPC Boundary
 To the extent possible, IPC uses the `zprocess.ProcessTree` leveraged by other labscript applications. However, for direct frontend-to-kernel execution and output bridging, Hyde relies on standard zero-MQ Jupyter messages (`spyder_kernels` and `qtconsole`). 
 
-Because the architecture relies on the UI sending code strings and waiting for structural updates over comm channels, developers are prevented from implementing tightly-coupled frontend-backend manipulations. This forces inherently reproducible user actions.
+Because the architecture relies on the UI sending reproducible commands or semantic edit actions and waiting for structural updates over comm channels, developers are prevented from implementing tightly-coupled frontend-backend manipulations. This forces inherently reproducible user actions.
 
 ### Dynamic State Tracking (The Spyder Pattern)
 To achieve "live updates" in the UI (e.g., updating a table when an array changes in the terminal), Hyde implements a variable tracking methodology explicitly modeled after the **Spyder IDE** (https://github.com/spyder-ide/spyder). 
@@ -71,6 +71,13 @@ The `features/` layer is not the home of the public Hyde runtime API. Instead,
 `features/...` is reserved for translation between GUI representations and Python command
 strings, and for translating Python command strings or metadata back into GUI-facing
 representations.
+
+Across Hyde, "IR" means internal representation or internal state in the same sense as
+the existing state-to-Python generation path used by `features/...` today. The table
+feature is the reference example. IR is not globally synonymous with kernel-owned
+state; depending on the feature, that internal state may live in the GUI or the kernel.
+For figures specifically, the PRD chooses a figure-local IR attached to the live kernel
+`Figure` so figure runtime truth and recreation/editability truth stay aligned.
 
 When Hyde-specific helper functions are added, they should be exposed deliberately through
 the Hyde package surface rather than through ad hoc GUI-only hooks. The table feature is
@@ -139,7 +146,10 @@ The execution subprocess runs in a separate Python process using the `spyder_ker
 
 The `hyde/execution/kernel_launcher.py` entrypoint is the managed `ProcessTree` child and starts Spyder's kernel startup code in-process. Hyde does not insert a separate controller or launcher-shim process between the GUI and the real kernel.
 
-The GUI sends raw Python code to the kernel for execution - there is no special GUI-to-kernel protocol.
+Most GUI-originated execution reaches the kernel as raw Python code over standard
+Jupyter execution channels. The explicit exception is routine figure-window editing,
+which uses a private semantic Jupyter `comm` protocol against kernel-owned figure state
+rather than ad hoc Python snippets.
 
 ## Tracking of Changed Objects
 
@@ -197,9 +207,63 @@ Using spyder_kernels provides:
 
 ## Figures
 
-Figure capture and GUI figure windows are not implemented yet.
+Figure windows use the live kernel-side matplotlib `Figure` as the runtime truth.
+Hyde maintains a strict 1:1 relation between:
 
-The planned direction is a metadata-driven figure path in which the kernel remains authoritative and the GUI renders a local mirror from figure metadata delivered over Jupyter `comm` channels. Figure save/recreation behavior is still future work even though Hyde now has generic save-window dialog plumbing for saveable windows.
+- the matplotlib global registry key
+- the live kernel-side `Figure`
+- the GUI `FigureWindow`
+
+The GUI figure window is a viewport and event source only. It may own window geometry,
+focus, visibility, and transient UI state needed to emit a semantic edit request. It
+does not own canonical plot structure, arrays, scientific data, or matplotlib artist
+truth.
+
+Figure recreation and GUI editability use a figure-specific IR attached directly to the
+live figure, for example `fig._hyde_ir`. This figure IR is the figure feature's
+internal representation/internal state in the same sense that table state participates
+in the existing state-to-Python path. The figure-specific choice in this PRD is that
+this IR is kernel-owned and figure-local rather than GUI-owned.
+
+Hyde also maintains figure-local auxiliary artifacts such as:
+
+- `fig._hyde_command_log`
+- `fig._hyde_source_artifact`
+- `fig._hyde_ast_artifact`
+
+These artifacts support diagnostics, validation, and future tooling, but they are not
+authoritative once the figure exists.
+
+All Hyde-backend figures render into native MDI figure windows through the same runtime
+backend path. However, the first-class recreatable and editable figures in this design
+are those created through `@hyde.figure`.
+
+That means:
+
+- first-class `@hyde.figure` figures are guaranteed to have a canonical figure IR
+- second-class Hyde-backend figures may still render live in the GUI, but they are
+  live-render-only for now
+- second-class figures may later be converted into first-class figures, but that is a
+  separate concern from the base architecture
+
+`@hyde.figure` decorates an ordinary Python function that builds a matplotlib figure
+using standard matplotlib code. The decorated call must create exactly one first-class
+Hyde figure. It may return that figure explicitly, or Hyde may resolve it from the
+decorated build session through the instrumented backend and registry.
+
+Routine GUI figure editing uses semantic Jupyter `comm` actions, not GUI-generated
+Python snippets. The kernel receives a figure edit action, resolves the target figure
+from registry identity, mutates the authoritative figure IR on that figure, applies the
+corresponding live matplotlib mutation when practical, and redraws. Direct live
+mutation is preferred for edits such as titles, labels, limits, legend toggles, and
+trace styling. Hyde may regenerate the figure from the IR for edits that are
+semantically simple but operationally awkward to patch live.
+
+Saved figure recreation macros are generated from the authoritative figure IR only and
+lower back to standard object-oriented matplotlib Python. They follow the same bounded
+macro pattern already used for tables: source is written into `procedures/__init__.py`,
+the procedures reload path runs, the graph-macro registry is republished, and
+`Windows -> Graph Macros` is rebuilt.
 
 ## Message Protocol
 
@@ -211,7 +275,8 @@ into visible kernel execution of `remote(...)`.
 
 ## Execution Helpers
 
-The GUI generates complete Python statements using underlying libraries (matplotlib, lmfit) rather than wrapping them in custom helper functions.
+Most Hyde GUI actions generate complete Python statements using underlying libraries
+(matplotlib, lmfit) rather than wrapping them in custom helper functions.
 
 For example, when the user asks to display data, Hyde does not call a `display()` function. Instead, Hyde generates the explicit object-oriented matplotlib code that creates the figure, such as:
 ```python
@@ -220,6 +285,11 @@ gs = fig.add_gridspec(...)
 ax = fig.add_subplot(gs[0, 0])
 ax.plot(x, y)
 ```
+
+Routine figure-window editing is the deliberate exception. Once a first-class
+`@hyde.figure` figure exists, GUI edits target the kernel-owned figure IR over semantic
+Jupyter `comm` actions, and Hyde lowers that IR back to standard matplotlib Python when
+it generates saved recreation macros or performs explicit regenerate-from-IR debugging.
 
 If Hyde-specific helper functions are introduced later for capabilities not provided by the underlying scientific libraries, those helpers should be added to the Hyde package explicitly and documented at the time they are implemented.
 
@@ -231,7 +301,7 @@ New projects include a `procedures/__init__.py` that establishes the baseline en
 import hyde
 import numpy as np
 import matplotlib
-# matplotlib.use('Hyde')  # Enable when the Hyde Matplotlib backend exists.
+matplotlib.use('Hyde')
 import matplotlib.pyplot as plt
 import lmfit        # For curve fitting
 ```

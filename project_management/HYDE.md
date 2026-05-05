@@ -5,15 +5,23 @@ Hyde is a standalone labscript-suite application designed for Pythonic, Igor-Pro
 
 It provides scientists with a unified environment where figures, tables, a Python terminal, and related tools live inside a single Desktop application interface (MDI). However, unlike legacy tools, Hyde completely isolates the GUI logic from the execution logic, enforcing a clean boundary between "display" and "data state".
 
+Across Hyde, "IR" means internal representation/internal state in the same sense as the
+existing state-to-Python generation path used by `features/...`. For figures
+specifically, Hyde treats the live kernel matplotlib `Figure` as the runtime truth and a
+figure-specific kernel-owned IR as the recreation/editability truth. That figure IR
+plays the same role that internal state plays in the table feature's state-to-Python
+path, but for this feature it is attached to the live kernel figure rather than to the
+GUI.
+
 Hyde is intended to be an optional modern replacement for `lyse` while remaining fully compatible with the suite's messaging path used by `runmanager` and `blacs`.
 
 ## Core Goals (Version 1)
 - **Unified Interface:** A single PyQt MDI application window housing all figures, tables, and the command pipeline.
 - **Modular UI Composition:** Hyde's first-party UI plugins live in `hyde.user_interface.plugins`, contribute their own windows and menu actions, and consume shared execution services through defined plugin contexts. The broader `hyde.user_interface` package also contains the shell and non-plugin support modules used by those plugins.
 - **Python-Native:** A built-in IPython terminal driving all actions.
-- **GUI-Generated Replayability:** Every action in the GUI (e.g. editing a graph, fitting a curve) must generate raw Python code that is sent to the terminal. Users should be able to view and save the script that generated their UI state.
+- **Replayable Kernel Actions:** Hyde actions remain reproducible from authoritative Hyde state. Most GUI actions generate explicit Python code; figure editing uses semantic Jupyter `comm` actions against the figure feature's kernel-owned IR and can always lower back to standard matplotlib Python for saved recreation macros and debug regeneration.
 - **Session Persistence:** Application state, figures, table contents, and the terminal history must be saved as a portable `.hy` project directory package format.
-- **Live Reactivity:** Figures and tables must live-refresh when the underlying data in the Python namespace changes.
+- **Live Reactivity:** Figures and tables must live-refresh when the underlying data in the Python namespace changes, with figure windows tracking live kernel figures rather than GUI-owned plot mirrors.
 - **Suite Compatibility:** Must accept incoming messages currently designed for `lyse`.
 
 ## Non-Goals (What Hyde is NOT)

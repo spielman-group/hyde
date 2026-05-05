@@ -1,17 +1,223 @@
 # Figure Window Specification
 
-## 01_graph_construction.png
-![Figure Window](01_graph_construction.png)
-- What it shows: An active matplotlib figure living as a native MDI child window (visible beneath the new curve dialog).
-- Hyde specific behavior: The figure is rendered natively in the GUI process (via a custom matplotlib backend inside the MDI area) but serves purely as a viewport driven by the underlying IPython `spyder_kernels` instance.
-  - **Rigorous Implementation Detail**: The communication of graphical output must be achieved by developing a dedicated, custom `matplotlib` backend. You must not attempt to monkey-patch an existing backend. This provides the clean foundation necessary for future interactivity (such as user-placeable graph cursors or spawning contingent dialogs right from figure clicks).
+## Feature Checklist
+- [x] Open Hyde-backend matplotlib figures as native MDI figure windows.
+- [x] Treat the live kernel `Figure` as the runtime authority for draw, resize, close,
+  and export.
+- [x] Treat a kernel-owned IR attached to the live figure as the recreation and
+  editability authority for first-class figures.
+- [x] Keep first-class editable and recreatable figures on the `@hyde.figure` path.
+- [x] Allow all Hyde-backend figures to render live even when they are not first-class.
+- [x] Route figure-edit actions over Jupyter `comm` as semantic kernel actions.
+- [x] Support save-on-close figure macro prompts through the generic save-window
+  pattern.
+- [x] Support regenerate-from-IR as an explicit debug action.
+- [ ] Support GridSpec multi-subplot figure editing.
+- [ ] Support conversion of second-class figures into first-class editable figures.
 
-## 04_graph_close_save_script.png
-![Save Script Prompt](04_graph_close_save_script.png)
-- What it shows: the close-window prompt asking whether to save the figure recreation script.
-- Igor features: save-on-close figure scripts, naming the saved script, and save/discard choices.
+## Purpose
 
-## 05_saved_graph_menu.png
-![Saved Graph Menu](05_saved_graph_menu.png)
-- What it shows: a saved figure appearing in the window/menu hierarchy.
-- Igor features: persistent menu registry for saved figures/scripts and reopen-by-name behavior.
+The Figure window is Hyde's native MDI viewport for live matplotlib figures owned by
+the kernel.
+
+The runtime truth of an open Hyde figure is the live kernel-side matplotlib `Figure`
+registered in matplotlib's global figure registry. Hyde maintains a strict 1:1
+relationship between:
+
+- the matplotlib global registry key
+- the live kernel `Figure`
+- the GUI Figure window
+
+The GUI does not own canonical plot structure, artist state, or recreation source.
+For first-class figures, the recreation and editability truth is a kernel-owned IR
+attached directly to the live figure, for example `fig._hyde_ir`.
+
+In this figure feature, `IR` means the same kind of canonical internal state that the
+table feature uses in its state-to-Python path, but moved to the correct side of the
+architecture. The table GUI owns transient internal state long enough to generate
+Python. The figure feature instead keeps its authoritative internal state in the
+kernel on the figure itself because figure editing and recreation must remain attached
+to the live kernel figure.
+
+## Initial Deployment Scope
+
+The initial deployment provides a live Hyde figure window for every figure created on
+the Hyde matplotlib backend.
+
+It includes:
+
+- live rendering of all Hyde-backend matplotlib figures inside native MDI windows
+- resize redraw using the same live kernel `Figure`
+- close coordination between the MDI window and the kernel-side figure registry entry
+- export from the live kernel `Figure`
+- save-on-close recreation macro prompts for first-class figures
+- `Windows -> Graph Macros` integration for saved recreation macros
+- explicit regenerate-from-IR debug support
+- first-class recreation and semantic GUI editing for figures created through
+  `@hyde.figure`
+- a first-class semantic surface shaped as `FigureIR -> LayoutIR -> SubplotIR[] ->
+  TraceIR[]`, with v1 constrained to exactly one subplot
+- v1 semantic support for:
+  - one subplot
+  - zero or more line traces
+  - subplot title
+  - x label
+  - y label
+  - x limits
+  - y limits
+  - legend enabled/disabled
+  - at least the trace properties needed by the initial trace edit dialog
+
+It does not include:
+
+- GUI-owned figure state as the source of redraw or recreation
+- GUI-side source rewriting for figure edits
+- first-class editability guarantees for non-`@hyde.figure` figures
+- multi-subplot GUI editing in the initial deployment
+- arbitrary artist editing beyond the supported v1 semantic surface
+
+## Window Layout
+
+The Figure window is an MDI child containing:
+
+- the rendered matplotlib figure canvas
+- figure-window controls or menus that operate on the active figure
+- close behavior integrated with the generic saveable-window flow for first-class
+  figures
+
+The window may cache transient viewport concerns such as:
+
+- geometry
+- focus
+- visibility
+- temporary resize/stretch presentation during drag
+
+The window does not cache authoritative scientific state or canonical plot structure.
+
+## Visible Controls
+
+- Figure canvas: `active`
+  - shows the current rendered output of the live kernel `Figure`
+- Window close button: `active`
+  - closes or hides the figure through Hyde's saveable-window policy
+- `Save Figure Macro...` action: `active`
+  - available for first-class figures
+- `Regenerate From IR` debug action: `active`
+  - forces kernel-side full regeneration from the authoritative IR
+- figure-edit entry points such as trace editing: `active`
+  - active only when the selected figure and target node are first-class and supported
+
+No GUI-side editable source box, IR inspector, or raw matplotlib command editor is
+part of the initial deployment.
+
+## Editable Operations
+
+The Figure window itself is primarily a viewport. Supported live edits in the initial
+deployment are launched from figure-related dialogs and target the kernel-owned IR for
+first-class figures.
+
+Those edits target:
+
+- `FigureIR`
+- the single supported `SubplotIR`
+- supported `TraceIR` nodes within that subplot
+
+The Python-level effect of a successful edit is a kernel-side mutation of the live
+matplotlib objects associated with the edited IR node, plus a redraw of the affected
+figure.
+
+The Figure window never becomes the authority for those edits. It only identifies the
+active figure and launches the correct figure-edit surface.
+
+## Context Menu And Window Actions
+
+The active figure window exposes figure-scoped actions that operate against the figure
+identity established by the matplotlib registry key.
+
+Initial actions are:
+
+- `Save Figure Macro...`
+- `Save Graphics...`
+- `Edit Trace...` when a supported trace target exists
+- `Regenerate From IR`
+
+These actions are scoped to the active figure window only. They do not operate on
+other figures implicitly.
+
+## Command Generation
+
+The Figure window does not regenerate Python in the GUI for routine figure editing.
+
+Its command responsibilities are split in two:
+
+- figure creation and saved macro publication still lower bounded internal state into
+  explicit matplotlib Python source
+- live figure edits send semantic `comm` actions to the kernel rather than rewriting
+  source in the GUI
+
+The figure-specific meaning of `IR` should stay aligned with Hyde's existing
+state-control language:
+
+- for tables, "internal state" is the canonical state representation used by the GUI
+  state/codec pair to generate Python
+- for figures, "IR" is the same kind of canonical internal state representation, but
+  it is authoritative in the kernel on the live figure because figures must remain
+  synchronized with live matplotlib objects and future semantic editors
+
+Saved figure macros are generated from `fig._hyde_ir` only. They lower to ordinary
+object-oriented matplotlib Python source and are written into the project's bounded
+macro block in `procedures/__init__.py`.
+
+## Synchronization
+
+The figure window synchronizes against the kernel over Jupyter `comm` channels.
+
+The synchronization contract is:
+
+- the kernel owns the live matplotlib `Figure`
+- the kernel owns the authoritative `fig._hyde_ir`
+- the kernel may also retain `fig._hyde_command_log` plus preserved source and AST
+  artifacts for diagnostics
+- the GUI receives only the metadata and rendered output needed to display the figure
+  and launch valid edits
+
+Resize behavior follows this sequence:
+
+1. the GUI window resizes locally
+2. the GUI notifies the kernel of the settled target size
+3. the kernel redraws the same live `Figure`
+4. the GUI displays the updated render
+
+Edit behavior follows this sequence:
+
+1. the GUI sends a semantic `comm` action targeting the active figure and supported IR
+   node
+2. the kernel resolves the target figure from registry identity
+3. the kernel mutates `fig._hyde_ir`
+4. the kernel either applies a direct live matplotlib patch or regenerates the figure
+   from IR
+5. the kernel redraws and publishes updated render metadata
+
+Close behavior follows this sequence:
+
+1. GUI-side close targets the active registry-backed figure window
+2. first-class figures prompt through the save-window path unless hidden by the
+   supported bypass gesture
+3. kernel-side close removes the corresponding live figure and attached IR
+
+## Explicit Exclusions
+
+- GUI-owned canonical figure state
+- GUI-side parsing or rewriting of figure source for live edits
+- `ProcessTree` as the normal transport for figure edits
+- automatic first-class editability for every Hyde-backend figure
+- a general matplotlib decompiler in the initial deployment
+
+## Future Work
+
+- GridSpec-based multi-subplot figure editing on the existing `LayoutIR` /
+  `SubplotIR[]` shape
+- richer trace editing beyond the initial styling surface
+- additional axis and legend editing surfaces
+- conversion of second-class figures into first-class editable figures
+- using the same IR-driven recreation path for live figure persistence at shutdown

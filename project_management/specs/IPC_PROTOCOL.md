@@ -16,7 +16,7 @@ Hyde uses three communication paths:
 1. **Kernel -> GUI**
    `zprocess.ProcessTree` parent-child messages for Hyde-owned relays.
 2. **GUI -> Kernel**
-   Standard Jupyter ZeroMQ clients connected through the shared kernel connection file.
+   Standard Jupyter ZeroMQ clients and Jupyter `comm` channels connected through the shared kernel connection file.
 3. **External -> GUI**
    A lyse-compatible `labscript_utils.ls_zprocess.ZMQServer` bound to the existing
    `ports.lyse` labconfig entry and owned by a first-party GUI plugin.
@@ -49,12 +49,31 @@ For command-emitting GUI features, that translation lives in `HydeGuiState` /
 construction, recreation, layout-bearing background requests, and `MutationState` +
 generic `MutationCodec` for live data mutation strings.
 
+Across Hyde, "IR" means internal representation/internal state in the same sense as the
+existing state-to-Python path used by `features/...`: structured Hyde state that can
+lower back to standard Python source. It is not globally synonymous with kernel-owned
+state. The difference is feature-specific ownership. Table state currently lives in the
+GUI long enough to emit commands, while the figure PRD chooses a kernel-owned
+figure-local IR attached directly to the live matplotlib `Figure` so figure runtime
+truth and recreation/editability truth stay aligned.
+
 The table feature is the first implemented example of a public Hyde helper, with
 `hyde.table(...)` serving as the kernel-facing entry point for table creation and
 appending. The same public symbol also supports decorator use for saved parameterized
 table recreation macros. Project persistence is the second implemented example, with
 `hyde.save_project(...)` and `hyde.load_project(...)` serving as the explicit save/load
 entry points used by the GUI File menu.
+
+The figure feature adds a distinct private kernel service rather than a broad new public
+helper API. First-class figures are created through `@hyde.figure`. Those figures carry:
+
+- a live kernel `Figure` as runtime truth
+- a kernel-owned figure IR as recreation/editability truth
+- a parallel figure-local command log and optional source/AST artifacts for diagnostics
+
+Second-class Hyde-backend figures may still render live in the GUI, but they are
+live-render-only in this deployment and are not guaranteed to carry a first-class
+editable/recreatable figure IR.
 
 The public `hyde.table(...)` helper also accepts optional recreation-layout kwargs:
 
@@ -173,7 +192,7 @@ Sent when the kernel publishes a serialized window-macro registry snapshot.
 Payload:
 ```python
 {
-    'kind': 'table',
+    'kind': 'table' or 'figure',
     'macros': [
         {'name': 'Table0', 'args': ['c', 'd']},
         {'name': 'Table1', 'args': ['array0']},
@@ -183,7 +202,7 @@ Payload:
 
 GUI behavior:
 - rebuild the corresponding Windows submenu
-- selecting a table macro generates a visible call such as `Table0(c, d)`
+- selecting a macro generates a visible call such as `Table0(c, d)` or `Graph0(x, y)`
 - disable that submenu when `macros` is empty
 
 ## Lane 2A: GUI -> Kernel (Visible Command Session)
@@ -204,10 +223,14 @@ This is the user's visible interactive console session.
 - the user may access Hyde's supported feature surface in the kernel via `import hyde`
 - GUI-owned save/load actions also use this visible session by generating explicit
   `hyde.save_project(...)` and `hyde.load_project(...)` commands
+- saved window-macro menu actions also use this visible session by generating explicit
+  macro calls after the relevant registry snapshot has been published to the GUI
 
 ### Important boundary
 - Hyde should not inject runtime-helper-controlled background execution through this session
 - the Python Terminal is for visible user interaction, not for replaying `procedures/__init__.py`
+- routine figure GUI edits do not travel through this session; they use semantic Jupyter
+  `comm` actions against kernel-owned figure state
 
 ## Lane 2B: Runtime Helper -> Kernel (Background Control Session)
 
@@ -230,6 +253,62 @@ Project load itself is not owned by the runtime helper. The authoritative visibl
 `hyde.load_project(...)` command performs the project bootstrap and saved-object restore
 inside the kernel, then emits `ENTER_NO_PROJECT_STATE`, `ACTIVATE_PROJECT`, and
 `PROJECT_STATE_RESULT` messages as needed.
+
+## Lane 2C: GUI Figure Windows <-> Kernel (Semantic Figure `comm` Session)
+
+### Purpose
+This lane carries figure metadata publication and semantic figure edit actions for Hyde
+figure windows.
+
+### Authority model
+- the live kernel matplotlib `Figure` is the runtime truth
+- the authoritative recreation/editability state for a first-class figure is the
+  kernel-owned figure IR attached directly to that figure
+- the GUI figure window is a viewport and event source only
+
+### First-class and second-class figures
+- first-class figures are created through `@hyde.figure`
+- a first-class figure is guaranteed to have a kernel-owned figure IR and associated
+  figure-local artifacts
+- second-class Hyde-backend figures may still render live in the GUI, but they are
+  live-render-only in this deployment and are not guaranteed to participate in semantic
+  editing or IR-driven macro generation
+
+### Figure-local kernel artifacts
+First-class figures may carry artifacts such as:
+- `fig._hyde_ir`
+- `fig._hyde_command_log`
+- `fig._hyde_source_artifact`
+- `fig._hyde_ast_artifact`
+
+The figure IR is authoritative for recreation and editability. The command log and
+captured artifacts are auxiliary and do not outrank the IR once the figure exists.
+
+### Responsibilities
+- publish figure metadata and rendered-image updates from the kernel to the GUI
+- accept semantic figure edit actions from the GUI over Jupyter `comm`
+- resolve target figures through the matplotlib global registry identity
+- mutate the authoritative figure IR and the live figure transactionally
+- redraw the live figure after accepted edits
+- support explicit regenerate-from-IR requests as a debug path
+
+### Semantic action examples
+Routine GUI figure edits are semantic actions rather than ad hoc Python snippets. The
+action vocabulary includes operations such as:
+- set axis limits
+- set axis labels
+- set figure or subplot title
+- mutate trace styling
+- toggle legend
+- request explicit regenerate-from-IR
+
+### Important boundary
+- figure edit actions are a private Hyde protocol in this deployment, not a public
+  user-facing kernel API
+- routine figure editing does not use `ProcessTree`
+- routine figure editing does not depend on the GUI owning canonical plot state
+- saved graph macros are generated from the authoritative figure IR and exposed back to
+  the GUI through the existing window-macro registry path
 
 ## External Lyse-Compatible Listener
 

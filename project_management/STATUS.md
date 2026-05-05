@@ -74,7 +74,16 @@ Established the first end-to-end `.hy` package persistence flow:
 - **Save Semantics**: In-place project saves rewrite the current saved state rather than preserving an older synchronized copy.
 - **Project Switch Isolation**: Switching to a different `.hy` project resets the kernel namespace back to Hyde's clean baseline before the new project's procedures and saved state are loaded, so stale objects do not leak across projects.
 
-### 9. Shutdown and No-Project Behavior
+### 9. Phase IV-B Figure Architecture Direction
+The figure feature branch now has a settled architectural direction, even though the
+full figure backend and window workflow are not implemented yet:
+- **Live Figure Runtime Truth**: The live kernel matplotlib `Figure` is the runtime truth for draw, resize, export, and close behavior.
+- **Kernel-Owned Figure IR**: First-class `@hyde.figure` figures carry a kernel-owned figure IR attached directly to the live figure. Here, "IR" means the figure feature's internal representation/internal state in the same sense as the existing Hyde state-to-Python path; this branch chooses kernel ownership specifically for figures.
+- **First-Class vs Second-Class Figures**: All Hyde-backend figures may render in native MDI figure windows, but only `@hyde.figure` figures are first-class recreatable/editable figures in this deployment. Other live figures are second-class live-render-only windows for now.
+- **Semantic Figure Edit Protocol**: Routine GUI figure edits travel as semantic Jupyter `comm` actions targeting the authoritative figure IR rather than as GUI-generated matplotlib source.
+- **IR-Driven Macros**: Saved graph macros are generated from the authoritative figure IR and follow the same bounded `procedures/__init__.py` persistence pattern already used for table macros.
+
+### 10. Shutdown and No-Project Behavior
 Refined Hyde's explicit inert-state and quit handling:
 - **Explicit No-Project State**: Startup without a CLI project enters a true no-project state with only `New Project`, `Load Project`, `Logging`, and `Quit` active.
 - **Kernel-Authoritative Quit**: `File -> Quit` sends visible `hyde.quit()`, which signals both `ENTER_NO_PROJECT_STATE` and `QUIT_REQUESTED` from the kernel before the GUI follows the normal close path.
@@ -94,6 +103,9 @@ Refined Hyde's explicit inert-state and quit handling:
 ## Documentation Updated
 - `project_management/PLAN.md`: Marked Phase II architectural refinements as complete.
 - `project_management/ARCHITECTURE.md`: Codified the finalized IPC model, plugin-only discovery namespace, and shell-vs-support package structure.
+- `issues/FigureWindow_prd.md`: Revised to make the live kernel `Figure` the runtime truth and the kernel-owned figure IR the recreation/editability truth for first-class `@hyde.figure` figures.
+- `project_management/HYDE.md`: Updated the product description so figure replayability is expressed in terms of kernel-owned figure IR and semantic figure edit actions.
+- `project_management/specs/IPC_PROTOCOL.md`: Updated the high-level protocol contract so figure metadata and semantic figure edits travel over Jupyter `comm`, with first-class `@hyde.figure` figures owning kernel-side IR and second-class figures remaining live-render-only.
 - `project_management/specs/logging_window/SPEC.md`: Added formal specifications for the new observability window.
 - `project_management/specs/python_variables/SPEC.md`: Updated to match the implemented Hyde-native browser layout and supported action set.
 - `project_management/specs/IPC_PROTOCOL.md`: Updated to document the actual `spyder_api` namespace-view comm path.

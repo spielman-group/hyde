@@ -35,9 +35,13 @@ This document is a living checklist tracking the specific steps we will follow (
 - [ ] Refinement: Define the Python Terminal display policy for output originating from runtime-helper-owned silent execution.
 
 ### Feature B: Matplotlib Figure Capture
-- [ ] Spec: Draft `specs/figure_window/SPEC.md`.
-- [ ] Impl: Allow `plt.plot()` in the execution process to pop open a PyQt MDI sub-window in the GUI process via the Metadata Mirror model.
-- [ ] Test: Figure rendering and closing behavior.
+- [ ] Spec: Refine `specs/figure_window/SPEC.md` and adjacent figure docs around the first-class `@hyde.figure` model.
+- [ ] Impl: Add the Hyde matplotlib backend with transparent instrumented matplotlib subclasses and strict 1:1 mapping between registry key, live kernel `Figure`, and GUI figure window.
+- [ ] Impl: Render all Hyde-backend figures through native MDI figure windows while keeping undecorated figures second-class live-render-only in this deployment.
+- [ ] Impl: Attach kernel-owned figure IR and parallel command-log artifacts directly to first-class `@hyde.figure` figures.
+- [ ] Impl: Route figure render metadata and semantic figure edit actions over Jupyter `comm`, keeping the live kernel `Figure` as runtime truth and the figure IR as recreation/editability truth.
+- [ ] Impl: Add close-time graph-macro save flow and `Windows -> Graph Macros` refresh using the existing bounded macro pattern.
+- [ ] Test: Verify figure rendering, resize redraw, close behavior, semantic edit actions, and IR-driven macro generation.
 
 ### Feature C: Python Variables
 - [x] Spec: Draft and refine `specs/python_variables/SPEC.md`.

@@ -79,6 +79,11 @@ The shell owns writing one `session.toml` file, but feature-owned GUI state is s
 and restored by plugins. Implemented plugin payloads currently include persistent tool
 window state, Python Variables filter state, and open table descriptors.
 
+Live figure windows are not yet part of the implemented session payload set. When
+figure persistence is introduced, Hyde restores first-class figure windows from
+IR-backed recreation data or equivalent IR-derived descriptors rather than by pickling
+live matplotlib `Figure` objects or trusting GUI-owned figure mirrors.
+
 ### `terminal/history.py`
 Stores visible command history only.
 
@@ -184,7 +189,8 @@ Kernel objects are saved by exclusion, not whitelist.
 - A failed load leaves Hyde in explicit no-project state rather than partially restoring the previous project.
 
 ## Explicit Exclusions
-- figure package persistence
+- current project save does not persist live figure windows, figure IR, or matplotlib
+  `Figure` objects
 - package persistence for table contents beyond reopening saved table windows from kernel names recorded in `session.toml`
 - restoration of transient table editor state
 - hidden, non-reproducible GUI-to-kernel save/load shortcuts
@@ -208,3 +214,24 @@ Table recreation source generated from `TableState` may also include:
 remain the explicit table-reopen source stored in `procedures/__init__.py`. Hyde keeps
 both because project session restore and explicit macro recreation solve different
 workflow needs.
+
+## Future Figure Persistence Boundary
+
+Figure persistence is future work, but its architectural boundary is already defined.
+
+When Hyde persists first-class figures, it uses the same authoritative figure IR that
+powers saved figure recreation macros. In this context, figure IR means the figure
+feature's internal representation or internal state in the same sense that
+`TableState` is the table feature's internal state for the state-to-Python codec path.
+The figure PRD makes a figure-specific architectural choice that this IR is
+kernel-owned and attached to the live figure.
+
+Future figure persistence therefore follows these rules:
+
+- only first-class `@hyde.figure` figures participate
+- the live kernel `Figure` remains the runtime object during a session
+- the figure IR remains the recreation and editability truth
+- project/session restore reopens figures from IR-backed recreation source or an
+  equivalent serialized IR descriptor
+- Hyde does not pickle live matplotlib `Figure` objects as the persistence format
+- Hyde does not rely on GUI-owned semantic figure state during save or restore

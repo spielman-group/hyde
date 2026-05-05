@@ -10,7 +10,7 @@
 - [x] Support table creation from the selection via `Edit` and the New Table dialog.
 - [x] Support appending selected arrays to an existing table via `Append to Table`.
 - [x] Keep the browser synchronized with kernel namespace changes without storing scientific state in the GUI.
-- [ ] Support figure-oriented `Display` and `Append to Graph` actions once figure infrastructure exists.
+- [ ] Define a first-class figure-launch path for Python Variables that stays consistent with `@hyde.figure` figures and the figure IR model.
 - [ ] Define cross-project browsing of another `.hy` project.
   Cross-project browsing is specified here but is not part of the initial deployment.
 
@@ -20,6 +20,10 @@ Python Variables is Hyde's visual browser for the authoritative Python execution
 It allows the user to inspect named objects, view concise metadata, preview plottable data,
 and invoke common actions from a context menu. It also serves as the entry point for
 table creation and appending from selected kernel-owned arrays.
+
+Future figure-oriented actions are intentionally narrower than generic ad hoc plotting.
+When Hyde adds them, they must create or target first-class `@hyde.figure` figures
+rather than make undecorated matplotlib windows the primary workflow.
 
 Python Variables is not a filesystem browser and does not implement Igor Pro data folders.
 Its object model is Python-native:
@@ -157,6 +161,11 @@ It displays static placeholder text indicating that preview support will arrive 
 
 The preview pane remains a viewport-only area.
 Any durable or user-directed visualization action will still need to generate explicit Python commands and open the appropriate Hyde window once figure support exists.
+For first-class figures, that future command path must create or target a decorated
+figure workflow; once such a figure exists, later figure edits happen through semantic
+figure `comm` actions against the figure feature's IR rather than through Python
+Variables holding any plot state in the GUI. In this figure workflow, the PRD chooses
+that IR to live in the kernel on the live figure.
 
 ## Editable Operations
 
@@ -172,6 +181,15 @@ The following operations are visible in the screenshot but are not part of the i
 - `Display`
 - `Append to Graph`
 - `Show Where Object Is Used...`
+
+Future figure actions do not imply a generic `plt.plot(...)` shortcut for arbitrary
+selections. They must remain compatible with Hyde's first-class figure model:
+
+- the created or targeted figure is a first-class `@hyde.figure` figure
+- the figure's authoritative internal state is the figure feature's IR, which this PRD
+  places in the kernel on the live figure
+- later GUI edits on that figure use semantic `comm` actions, not Python Variables-side
+  state mutation
 
 ## Context Menu Actions
 
@@ -268,15 +286,17 @@ The following Igor concepts do not carry into Hyde as part of this specification
 - unpacked save-copy workflows
 - free-form execute-command dialogs
 - root/current-folder navigation UI
-- figure and table action support in the initial deployment
+- figure action support in the initial deployment
 - `Show Where Object Is Used...` in the initial deployment
 
 ## Future Work
 
-- display actions once Hyde figure support exists
+- display actions once Hyde defines a visible Python command path that opens or targets
+  first-class `@hyde.figure` figures from a selection
 - edit actions once the target widget semantics are defined
-- append-to-graph actions once figure support exists
-- append-to-table actions once the table widget exists
+- append-to-graph actions once Hyde defines how a selection targets an existing
+  first-class figure without bypassing the figure IR and semantic edit model
+- broader append-to-table actions once the table widget supports more object types
 - cross-project browsing of another `.hy` project
 
 ## 08_python_variables_context_menu.png
