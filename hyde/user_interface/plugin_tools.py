@@ -10,6 +10,8 @@ from labscript_utils.plugins import (
 )
 from qtutils.qt import QtCore, QtGui
 
+from hyde.user_interface.base import RuntimeCommandState
+
 
 class _NullConfig:
     def has_section(self, section):
@@ -107,6 +109,47 @@ class HydePlugin(BasePlugin):
         action = getattr(self, attr_name, None)
         if action is not None:
             action.setEnabled(bool(enabled))
+
+    def rebuild_window_macros_menu(
+        self,
+        *,
+        menu,
+        macros,
+        empty_label,
+        new_action_attr,
+        on_trigger,
+    ):
+        menu.clear()
+        get_current_project_dir = self.service("get_current_project_dir")
+        has_project = (
+            False
+            if get_current_project_dir is None
+            else get_current_project_dir() is not None
+        )
+        self.set_bound_action_enabled(new_action_attr, has_project)
+        if not has_project:
+            menu.setEnabled(False)
+            return
+        if not macros:
+            placeholder = menu.addAction(empty_label)
+            placeholder.setEnabled(False)
+            menu.setEnabled(False)
+            return
+        menu.setEnabled(True)
+        for macro in macros:
+            macro_name = macro["name"]
+            macro_args = tuple(macro.get("args", ()))
+            action = menu.addAction(macro_name)
+            action.triggered.connect(
+                lambda checked=False, name=macro_name, args=macro_args: (
+                    on_trigger(name, args)
+                )
+            )
+
+    def _execute_macro(self, macro_name, macro_args):
+        state = RuntimeCommandState()
+        state.set_callable_invocation(macro_name, macro_args)
+        self.service("execute_command")(state.python_source(), visible=True)
 
     def mdi_context(self):
         return self.service("mdi_context")

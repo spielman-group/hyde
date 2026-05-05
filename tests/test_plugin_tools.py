@@ -195,6 +195,29 @@ class TestPluginTools(unittest.TestCase):
             ["Plugin Tool"],
         )
 
+    def test_rebuild_window_macros_menu_populates_actions_with_tuple_args(self):
+        plugin = HydePlugin({})
+        plugin.services = {"get_current_project_dir": lambda: "/tmp/demo.hy"}
+        plugin._new_macro_action = QtWidgets.QAction("New Macro")
+        menu = QtWidgets.QMenu("Macros")
+        triggered = []
+
+        plugin.rebuild_window_macros_menu(
+            menu=menu,
+            macros=[{"name": "Macro0", "args": ["x", "y"]}],
+            empty_label="No Saved Macros",
+            new_action_attr="_new_macro_action",
+            on_trigger=lambda name, args: triggered.append((name, args)),
+        )
+
+        self.assertTrue(menu.isEnabled())
+        self.assertTrue(plugin._new_macro_action.isEnabled())
+        self.assertEqual([action.text() for action in menu.actions()], ["Macro0"])
+
+        menu.actions()[0].trigger()
+
+        self.assertEqual(triggered, [("Macro0", ("x", "y"))])
+
     def test_next_numbered_name_is_shared_counter_based_naming_helper(self):
         name, next_counter = next_numbered_name("Table", {"Table0", "Table1"}, 0)
         self.assertEqual(name, "Table2")

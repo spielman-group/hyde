@@ -57,6 +57,13 @@ class TestTableDecorator(unittest.TestCase):
             ({"name": "Table0", "args": ["a", "b"]},),
         )
 
+    def test_table_decorator_can_skip_registration(self):
+        @hyde.table(register=False)
+        def Table0(a, b):
+            return a, b
+
+        self.assertEqual(table_macro_names(), ())
+
     def test_table_decorator_rejects_keyword_only_parameters(self):
         with self.assertRaises(TypeError):
             @hyde.table

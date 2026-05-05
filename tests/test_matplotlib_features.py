@@ -21,6 +21,7 @@ from hyde.project_tools import (
     configure_gui_matplotlib_backend,
     is_excluded,
 )
+from hyde.user_interface.plugin_tools import HydePlugin
 from hyde.user_interface.plugins.figure import FigureFeatureService, FigureWorkspaceService, Plugin
 from hyde.user_interface.plugins.figure.dialogs import NewFigureDialog
 from hyde.user_interface.plugins.figure.window import (
@@ -210,23 +211,18 @@ class TestFigurePluginDispatch(unittest.TestCase):
         self.assertEqual(dialog.ui.heightSpinBox.prefix(), "y: ")
         self.assertEqual(state["settings"]["figsize"], (5.0, 3.0))
 
-    def test_figure_macro_dispatch_suppresses_terminal_result_display(self):
+    def test_figure_macro_dispatch_uses_shared_callable_invocation(self):
         executed = []
-        plugin = type(
-            "FakePlugin",
-            (),
-            {
-                "services": {
-                    "execute_command": (
-                        lambda code, visible=True: executed.append((code, visible))
-                    )
-                }
-            },
-        )()
+        plugin = HydePlugin({})
+        plugin.services = {
+            "execute_command": (
+                lambda code, visible=True: executed.append((code, visible))
+            )
+        }
 
         Plugin._execute_macro(plugin, "Figure0", ("x", "y"))
 
-        self.assertEqual(executed, [("Figure0(x, y);", True)])
+        self.assertEqual(executed, [("Figure0(x, y)", True)])
 
 
 class TestFigureBackendSnapshot(unittest.TestCase):
@@ -446,56 +442,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         cls.qapp = QtWidgets.QApplication.instance()
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
-
-    def test_figure_window_session_restore_source_includes_window_pos_and_call(self):
-        widget = FigureWindow(figure_number=1)
-        subwindow = QtWidgets.QMdiSubWindow()
-        subwindow.setWidget(widget)
-        widget.bind_subwindow(subwindow)
-        subwindow.setGeometry(10, 20, 300, 240)
-        widget.snapshot_state.update(
-            default_macro_name="Figure0",
-            call_source="fig = plt.figure('Figure0')\nax = fig.add_subplot(111)",
-            save_error=None,
-            figure_size=(640, 480),
-        )
-
-        source = widget.session_restore_source()
-
-        self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", source)
-        self.assertIn("def Figure0():", source)
-        self.assertIn("Figure0()", source)
-        self.assertIn("fig = plt.figure('Figure0')", source)
-
-    def test_figure_window_session_restore_source_persists_first_class_figure_ir(self):
-        widget = FigureWindow(figure_number=1)
-        subwindow = QtWidgets.QMdiSubWindow()
-        subwindow.setWidget(widget)
-        widget.bind_subwindow(subwindow)
-        subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
-        widget.update_payload(
-            {
-                "figure_number": 1,
-                "title": "Figure0",
-                "snapshot": {
-                    "default_macro_name": "Figure0",
-                    "call_source": "fig = plt.figure('Figure0')",
-                    "save_error": None,
-                    "figure_size": (640, 480),
-                    "tracked_names": ["delay", "fit_delay", "raw_delay"],
-                    "figure_ir": figure_ir,
-                    "live_state": None,
-                },
-            }
-        )
-
-        source = widget.session_restore_source()
-
-        self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", source)
-        self.assertIn("def Figure0(delay, fit_delay, raw_delay):", source)
-        self.assertIn("Figure0(delay, fit_delay, raw_delay)", source)
-        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", source)
 
     def test_figure_window_refreshes_from_same_namespace_signal_as_tables(self):
         queued = []
@@ -946,7 +892,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         workspace.clear()
         mdi_area.close()
 
-    def test_plugin_session_routes_keep_figures_out_of_toml_and_emit_restore_source(self):
+    def test_plugin_session_toml_keeps_only_figure_counter(self):
         plugin = Plugin({})
         plugin.services = {
             "queue_background_command": lambda code, silent=True: True,
@@ -967,7 +913,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 220)
         plugin.workspace.figures[1] = figure
-        plugin.workspace.figure_title_counter = 3
+        plugin.workspace.figure_counter = 3
         figure.update_payload(
             {
                 "figure_number": 1,
@@ -983,11 +929,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         )
 
         toml_data = plugin.get_session_toml_data()
-        session_source = plugin.get_session_restore_source()
 
-        self.assertEqual(toml_data, {"figure_title_counter": 3})
-        self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", session_source)
-        self.assertIn("FigureA(delay, fit_delay, raw_delay)", session_source)
+        self.assertEqual(toml_data, {"figure_counter": 3})
         figure.close()
         mdi_area.close()
 

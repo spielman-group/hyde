@@ -7,7 +7,6 @@ from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.matplotlib_features import FigureCodec, FigureIRCodec
 from hyde.user_interface.figure_comm import COMM_TARGET
-from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
 from hyde.user_interface.window_naming import next_numbered_name
 
@@ -29,7 +28,7 @@ class FigureWorkspaceService:
     def __init__(self, plugin):
         self.plugin = plugin
         self.figures = {}
-        self.figure_title_counter = 0
+        self.figure_counter = 0
         self._pending_open_payloads = {}
 
     def next_generated_title(self):
@@ -37,10 +36,10 @@ class FigureWorkspaceService:
             figure.snapshot_state.default_macro_name()
             for figure in self.figures.values()
         }
-        title, self.figure_title_counter = next_numbered_name(
+        title, self.figure_counter = next_numbered_name(
             "Figure",
             existing_titles,
-            self.figure_title_counter,
+            self.figure_counter,
         )
         return title
 
@@ -116,7 +115,7 @@ class FigureWorkspaceService:
         for figure in list(self.figures.values()):
             figure.force_close()
         self.figures.clear()
-        self.figure_title_counter = 0
+        self.figure_counter = 0
         self._pending_open_payloads = {}
 
     def register_pending_open(self, *, figure_ir=None, live_state=None):
@@ -228,7 +227,7 @@ class Plugin(HydePlugin):
         }
 
     def get_session_toml_data(self):
-        return {"figure_title_counter": self.workspace.figure_title_counter}
+        return {"figure_counter": self.workspace.figure_counter}
 
     def get_session_restore_source(self):
         blocks = []
@@ -270,9 +269,9 @@ class Plugin(HydePlugin):
 
     def on_project_loaded(self, data):
         session = data["session"]
-        saved_counter = int(session.get("figure_title_counter", 0))
+        saved_counter = int(session.get("figure_counter", 0))
         self.workspace.clear()
-        self.workspace.figure_title_counter = saved_counter
+        self.workspace.figure_counter = saved_counter
 
     def on_kernel_ready(self, data):
         del data
@@ -294,29 +293,13 @@ class Plugin(HydePlugin):
         self.rebuild_figure_macros_menu()
 
     def rebuild_figure_macros_menu(self):
-        menu = self._macro_menu
-        menu.clear()
-        has_project = self.services["get_current_project_dir"]() is not None
-        if self._new_figure_action is not None:
-            self._new_figure_action.setEnabled(has_project)
-        if not has_project:
-            menu.setEnabled(False)
-            return
-        if not self.figure_macros:
-            placeholder = menu.addAction("No Saved Graph Macros")
-            placeholder.setEnabled(False)
-            menu.setEnabled(False)
-            return
-        menu.setEnabled(True)
-        for macro in self.figure_macros:
-            macro_name = macro["name"]
-            macro_args = tuple(macro.get("args", []))
-            action = menu.addAction(macro_name)
-            action.triggered.connect(
-                lambda checked=False, name=macro_name, args=macro_args: (
-                    self._execute_macro(name, args)
-                )
-            )
+        self.rebuild_window_macros_menu(
+            menu=self._macro_menu,
+            macros=self.figure_macros,
+            empty_label="No Saved Graph Macros",
+            new_action_attr="_new_figure_action",
+            on_trigger=self._execute_macro,
+        )
 
     def request_save_figure_macro(self, saveable):
         procedures_init = self.services["get_procedures_init"]()
@@ -342,11 +325,6 @@ class Plugin(HydePlugin):
             ),
             silent=True,
         )
-
-    def _execute_macro(self, macro_name, macro_args):
-        state = RuntimeCommandState()
-        state.set_callable_invocation(macro_name, macro_args)
-        self.services["execute_command"](f"{state.python_source()};", visible=True)
 
     def _ensure_macro_menu(self):
         if self._macro_menu is None:

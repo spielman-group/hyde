@@ -302,14 +302,19 @@ class FigureWindow(QtWidgets.QWidget):
         geometry = self._subwindow.geometry()
         return [geometry.x(), geometry.y(), geometry.width(), geometry.height()]
 
-    def _recreation_function_source(self, macro_name, decorator_name, register=None):
+    def _recreation_function_source(
+        self,
+        macro_name,
+        decorator_name,
+        register=None,
+        window_pos=None,
+    ):
         function_source = self.snapshot_state.macro_source(macro_name)
-        geometry = self.capture_geometry()
-        if geometry is None:
+        if window_pos is None:
             return function_source
         return with_window_pos_metadata(
             function_source,
-            geometry[:2],
+            window_pos,
             decorator_name=decorator_name,
             register=register,
         )
@@ -323,6 +328,7 @@ class FigureWindow(QtWidgets.QWidget):
             macro_name,
             decorator_name="@hyde.figure",
             register=False,
+            window_pos=tuple(geometry[:2]),
         )
         arguments = ", ".join(self.snapshot_state.tracked_names())
         return f"{function_source}\n\n{macro_name}({arguments})\n"
@@ -527,9 +533,11 @@ class FigureWindow(QtWidgets.QWidget):
         return self.snapshot_state.default_macro_name()
 
     def macro_source(self, macro_name):
+        geometry = self.capture_geometry()
         return self._recreation_function_source(
             macro_name,
             decorator_name="@hyde.figure",
+            window_pos=None if geometry is None else tuple(geometry[:2]),
         )
 
     def closeEvent(self, event):

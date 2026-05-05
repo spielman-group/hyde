@@ -8,6 +8,7 @@ except ModuleNotFoundError as exc:
 
 from hyde.user_interface.base import MutationState
 from hyde.user_interface.plugins.table import (
+    Plugin,
     TableWorkspaceService,
 )
 from hyde.user_interface.plugins.table.window import (
@@ -367,6 +368,41 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         workspace.clear()
         self._drain_events()
+
+    def test_table_plugin_session_routes_keep_tables_out_of_toml_and_emit_restore_source(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = Plugin({})
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "queue_background_command": lambda code, silent=True: True,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "get_current_project_dir": lambda: "/tmp/demo.hy",
+        }
+
+        table = plugin.workspace.open_table(
+            ["a", "b"],
+            visible_title="Table_Fun",
+            geometry=(5, 42, 510, 242),
+            column_widths={"a": 120, "b": 260},
+        )
+        table.ui.tableView.setColumnWidth(1, 120)
+        table.ui.tableView.setColumnWidth(2, 260)
+        table.capture_layout_state()
+        plugin.workspace.active_table_handle = "Table0"
+
+        toml_data = plugin.get_session_toml_data()
+        session_source = plugin.get_session_restore_source()
+
+        self.assertEqual(toml_data, {"table_counter": 1})
+        self.assertIn("@hyde.table(register=False)", session_source)
+        self.assertIn("def Table0(a, b):", session_source)
+        self.assertIn("Table0(a, b)", session_source)
+        self.assertIn("title='Table_Fun'", session_source)
+        self.assertIn("geometry=(5, 42, 510, 242)", session_source)
+        self.assertIn("column_widths={'a': 120, 'b': 260}", session_source)
+
+        plugin.workspace.clear()
+        mdi_area.close()
 
     def test_subwindow_close_honors_table_prompt_cancel(self):
         mdi_area = QtWidgets.QMdiArea()

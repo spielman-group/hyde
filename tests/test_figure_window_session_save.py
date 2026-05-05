@@ -140,38 +140,3 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             self.assertIn("fig = plt.figure('Figure0', figsize=(5.0, 3.0))", source)
         finally:
             widget.close()
-
-    def test_session_restore_source_reuses_same_function_source_as_macro_save(self):
-        widget = FigureWindow(figure_number=1)
-        subwindow = QtWidgets.QMdiSubWindow()
-        subwindow.setWidget(widget)
-        widget.bind_subwindow(subwindow)
-        subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(
-            self._live_state_with_title_and_figsize("Figure0", (5.0, 3.0))
-        )
-        try:
-            widget.update_payload(
-                {
-                    "figure_number": 1,
-                    "title": "Figure0",
-                    "snapshot": {
-                        "figure_ir": figure_ir,
-                        "live_state": None,
-                    },
-                }
-            )
-
-            macro_lines = widget.macro_source("Figure0").splitlines()
-            session_lines = widget.session_restore_source().splitlines()
-
-            self.assertEqual(
-                session_lines[:-2],
-                [
-                    "@hyde.figure(window_pos=(10, 20), register=False)",
-                    *macro_lines[1:],
-                ],
-            )
-            self.assertEqual(session_lines[-1], "Figure0(delay, fit_delay, raw_delay)")
-        finally:
-            widget.close()

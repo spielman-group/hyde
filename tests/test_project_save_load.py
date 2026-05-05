@@ -150,34 +150,25 @@ class TestProjectStateHelpers(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
-    def test_session_round_trip_restores_table_column_widths(self):
+    def test_session_write_keeps_table_counter_in_toml_and_layout_in_session_source(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "roundtrip.hy")
             os.makedirs(project_dir)
 
             main_window = QtWidgets.QMainWindow()
-            mdi_area = QtWidgets.QMdiArea()
-            main_window.setCentralWidget(mdi_area)
-            table_subwindow = mdi_area.addSubWindow(QtWidgets.QWidget())
-            table_subwindow.setWindowTitle("Table_Fun")
-            table_subwindow.setGeometry(QtCore.QRect(5, 42, 510, 242))
 
             class SavingPlugin:
-                def get_save_data(self):
-                    return {
-                        "active_table_handle": "Table0",
-                        "table_counter": 4,
-                        "tables": [
-                            {
-                                "handle": "Table0",
-                                "title": table_subwindow.windowTitle(),
-                                "names": ["a", "b"],
-                                "hidden": False,
-                                "geometry": [5, 42, 510, 242],
-                                "column_widths": {"a": 120, "b": 260},
-                            }
-                        ],
-                    }
+                def get_session_toml_data(self):
+                    return {"table_counter": 4}
+
+                def get_session_restore_source(self):
+                    return (
+                        "@hyde.table(register=False)\n"
+                        "def Table0(a, b):\n"
+                        "    hyde.table(a, b, title='Table_Fun', geometry=(5, 42, 510, 242), "
+                        "column_widths={'a': 120, 'b': 260})\n\n"
+                        "Table0(a, b)\n"
+                    )
 
             source_app = type("SourceApp", (), {})()
             source_app.ui = main_window
@@ -185,64 +176,14 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             write_session(source_app, project_dir)
 
-            open_calls = []
+            session = tomllib.loads((Path(project_dir) / "session.toml").read_text())
+            session_source = (Path(project_dir) / "session.py").read_text()
 
-            class RestoredApp:
-                pass
-
-            restored_app = RestoredApp()
-            restored_app.ui = main_window
-            restored_app.current_project_dir = project_dir
-            python_terminal_service = DummyPythonTerminalService()
-            restored_app.plugin_service = lambda key: (
-                python_terminal_service if key == "visible_terminal_service" else None
-            )
-
-            class RestoringPlugin:
-                def __init__(self):
-                    self.table_counter = 0
-                    self.active_table_handle = None
-
-                def get_event_handlers(self):
-                    return {"project_loaded": self.on_project_loaded}
-
-                def on_project_loaded(self, data):
-                    session = data["session"]
-                    for table_state in session.get("tables", []):
-                        open_calls.append(
-                            (
-                                list(table_state.get("names", [])),
-                                table_state.get("handle"),
-                                table_state.get("title"),
-                                table_state.get("geometry"),
-                                dict(table_state.get("column_widths", {})),
-                            )
-                        )
-                    self.table_counter = int(session.get("table_counter", 0))
-                    self.active_table_handle = session.get("active_table_handle")
-
-            restoring_plugin = RestoringPlugin()
-            restored_app.plugin_manager = PluginManagerStub({"session": restoring_plugin})
-            restored_app.emit_plugin_event = (
-                lambda name, data=None: HydeApp.emit_plugin_event(restored_app, name, data)
-            )
-
-            HydeApp.restore_project_session(restored_app)
-
-            self.assertEqual(
-                open_calls,
-                [
-                    (
-                        ["a", "b"],
-                        "Table0",
-                        table_subwindow.windowTitle(),
-                        [5, 42, 510, 242],
-                        {"a": 120, "b": 260},
-                    )
-                ],
-            )
-            self.assertEqual(restoring_plugin.table_counter, 4)
-            self.assertEqual(restoring_plugin.active_table_handle, "Table0")
+            self.assertEqual(session["table_counter"], 4)
+            self.assertIn("@hyde.table(register=False)", session_source)
+            self.assertIn("Table0(a, b)", session_source)
+            self.assertIn("geometry=(5, 42, 510, 242)", session_source)
+            self.assertIn("column_widths={'a': 120, 'b': 260}", session_source)
 
     def test_write_session_supports_plugin_toml_and_python_routes(self):
         with tempfile.TemporaryDirectory() as tmpdir:

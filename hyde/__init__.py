@@ -369,7 +369,14 @@ def quit():
     raise SystemExit(0)
 
 
-def table(*args, target=None, title=None, geometry=None, column_widths=None):
+def table(
+    *args,
+    target=None,
+    title=None,
+    geometry=None,
+    column_widths=None,
+    register=True,
+):
     """
     Open or append to a Hyde table window, or register a recreation macro.
 
@@ -394,6 +401,9 @@ def table(*args, target=None, title=None, geometry=None, column_widths=None):
             recreated tables. Ignored when appending to an existing table.
         column_widths (dict[str, int], optional): Saved table column widths keyed
             by data-column name. Ignored when appending to an existing table.
+        register (bool, optional): In decorator form, publish the recreation
+            macro into `Windows -> Table Macros`. Use ``register=False`` for
+            internal non-registering decorators such as session restore.
 
     Behavior:
         - Resolves each object's top-level name in the caller's namespace by identity (`is`).
@@ -416,8 +426,9 @@ def table(*args, target=None, title=None, geometry=None, column_widths=None):
         and column_widths is None
     ):
         def decorator(func):
-            register_table_macro(func)
-            publish_table_macro_registry()
+            if register:
+                register_table_macro(func)
+                publish_table_macro_registry()
             return func
 
         return decorator
@@ -430,9 +441,13 @@ def table(*args, target=None, title=None, geometry=None, column_widths=None):
         and geometry is None
         and column_widths is None
     ):
-        register_table_macro(args[0])
-        publish_table_macro_registry()
+        if register:
+            register_table_macro(args[0])
+            publish_table_macro_registry()
         return args[0]
+
+    if not register:
+        raise TypeError("hyde.table register= is supported only in decorator form.")
 
     from .execution.helpers import resolve_names
     
@@ -451,16 +466,6 @@ def table(*args, target=None, title=None, geometry=None, column_widths=None):
             column_widths=column_widths,
         )
 
-
-def _normalize_figure_metadata(*, window_pos=None):
-    metadata = {}
-    if window_pos is not None:
-        if not isinstance(window_pos, (list, tuple)) or len(window_pos) != 2:
-            raise TypeError("hyde.figure window_pos must be a length-2 sequence.")
-        metadata["window_pos"] = (int(window_pos[0]), int(window_pos[1]))
-    return metadata
-
-
 def figure(_func=None, *, window_pos=None, register=True):
     """
     Register a Hyde figure recreation macro.
@@ -473,57 +478,52 @@ def figure(_func=None, *, window_pos=None, register=True):
     procedures package reload path rebuilds the registry unless
     ``register=False`` is provided.
     """
-    metadata = _normalize_figure_metadata(window_pos=window_pos)
-    should_register = bool(register)
+    metadata = {}
+    if window_pos is not None:
+        if not isinstance(window_pos, (list, tuple)) or len(window_pos) != 2:
+            raise TypeError("hyde.figure window_pos must be a length-2 sequence.")
+        metadata["window_pos"] = (int(window_pos[0]), int(window_pos[1]))
 
-    if _func is None:
-        def decorator(func):
-            wrapped = _decorate_figure_builder(func, metadata=metadata)
-            if should_register:
-                register_figure_macro(wrapped)
-                publish_figure_macro_registry()
-            return wrapped
+    def decorator(func):
+        figure_metadata = dict(metadata)
 
-        return decorator
+        @functools.wraps(func)
+        def wrapped(*wrapper_args, **wrapper_kwargs):
+            from .matplotlib_backend import (
+                begin_figure_build_session,
+                end_figure_build_session,
+                finalize_figure_build_session,
+            )
 
-    if callable(_func):
-        wrapped = _decorate_figure_builder(_func, metadata=metadata)
-        if should_register:
+            session = begin_figure_build_session(
+                func,
+                wrapper_args,
+                wrapper_kwargs,
+                metadata=figure_metadata,
+            )
+            try:
+                result = func(*wrapper_args, **wrapper_kwargs)
+            finally:
+                end_figure_build_session(session)
+            return finalize_figure_build_session(session, result)
+
+        try:
+            wrapped.__signature__ = inspect.signature(func)
+        except (TypeError, ValueError):
+            pass
+
+        if register:
             register_figure_macro(wrapped)
             publish_figure_macro_registry()
         return wrapped
 
+    if _func is None:
+        return decorator
+
+    if callable(_func):
+        return decorator(_func)
+
     raise TypeError("hyde.figure currently supports decorator registration only.")
-
-
-def _decorate_figure_builder(func, metadata=None):
-    figure_metadata = dict(metadata or {})
-
-    @functools.wraps(func)
-    def wrapper(*wrapper_args, **wrapper_kwargs):
-        from .matplotlib_backend import (
-            begin_figure_build_session,
-            end_figure_build_session,
-            finalize_figure_build_session,
-        )
-
-        session = begin_figure_build_session(
-            func,
-            wrapper_args,
-            wrapper_kwargs,
-            metadata=figure_metadata,
-        )
-        try:
-            result = func(*wrapper_args, **wrapper_kwargs)
-        finally:
-            end_figure_build_session(session)
-        return finalize_figure_build_session(session, result)
-
-    try:
-        wrapper.__signature__ = inspect.signature(func)
-    except (TypeError, ValueError):
-        pass
-    return wrapper
 
 
 def _resolve_matplotlib_figure(figure):

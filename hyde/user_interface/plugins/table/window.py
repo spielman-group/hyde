@@ -547,6 +547,17 @@ class TableWidget(QtWidgets.QWidget):
             widths[name] = self.ui.tableView.columnWidth(column)
         self.table_state.set_column_widths(widths)
 
+    def session_restore_source(self):
+        self.capture_layout_state()
+        function_source = self.table_state.macro_source(self.handle)
+        function_source = function_source.replace(
+            "@hyde.table",
+            "@hyde.table(register=False)",
+            1,
+        )
+        arguments = ", ".join(self.names)
+        return f"{function_source}\n\n{self.handle}({arguments})\n"
+
     def _on_value_text_edited(self, text):
         del text
         if not self.ui.valueEdit.isReadOnly():

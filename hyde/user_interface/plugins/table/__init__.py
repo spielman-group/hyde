@@ -1,5 +1,4 @@
 from qtutils.qt import QtCore, QtWidgets
-from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
 from hyde.user_interface.window_naming import next_numbered_name
 
@@ -79,7 +78,9 @@ class TableWorkspaceService:
         subwindow.setWindowTitle(title)
         subwindow.show()
         subwindow.destroyed.connect(
-            lambda _=None, table_handle=handle: self._remove_table(table_handle)
+            lambda _=None, table_handle=handle, workspace=self: (
+                workspace._remove_table(table_handle)
+            )
         )
         return table
 
@@ -119,7 +120,10 @@ class TableWorkspaceService:
         self.table_counter = 0
 
     def _remove_table(self, handle):
-        self.tables.pop(handle, None)
+        tables = getattr(self, "tables", None)
+        if tables is None:
+            return
+        tables.pop(handle, None)
         if self.active_table_handle == handle:
             self.active_table_handle = None
 
@@ -219,37 +223,24 @@ class Plugin(HydePlugin):
             "project_activated": self.on_project_activated,
         }
 
-    def get_save_data(self):
-        tables = []
-        for handle, table in self.workspace.iter_open_tables():
-            table.capture_layout_state()
-            subwindow = table.parentWidget()
-            table_settings = table.table_state.normalized_state()["settings"]
-            tables.append(
-                {
-                    "handle": handle,
-                    "title": subwindow.windowTitle(),
-                    "names": list(table.names),
-                    "hidden": not subwindow.isVisible(),
-                    "geometry": list(table_settings["geometry"])
-                    if table_settings["geometry"] is not None
-                    else [
-                        subwindow.geometry().x(),
-                        subwindow.geometry().y(),
-                        subwindow.geometry().width(),
-                        subwindow.geometry().height(),
-                    ],
-                    "column_widths": dict(table_settings.get("column_widths", {})),
-                }
-            )
+    def get_session_toml_data(self):
+        return {"table_counter": self.workspace.table_counter}
 
-        save_data = {
-            "table_counter": self.workspace.table_counter,
-            "tables": tables,
-        }
-        if self.workspace.active_table_handle is not None:
-            save_data["active_table_handle"] = self.workspace.active_table_handle
-        return save_data
+    def get_session_restore_source(self):
+        handles = [handle for handle, _ in self.workspace.iter_open_tables()]
+        active_handle = self.workspace.active_table_handle
+        if active_handle in handles:
+            handles = [handle for handle in handles if handle != active_handle] + [
+                active_handle
+            ]
+
+        blocks = []
+        for handle in handles:
+            table = self.workspace.lookup_table(handle)
+            if table is None:
+                continue
+            blocks.append(table.session_restore_source().strip())
+        return "\n\n".join(blocks) + ("\n" if blocks else "")
 
     def on_enter_no_project_state(self, data):
         del data
@@ -260,22 +251,7 @@ class Plugin(HydePlugin):
     def on_project_loaded(self, data):
         session = data["session"]
         self.workspace.clear()
-        saved_counter = int(session.get("table_counter", 0))
-        for table_state in session.get("tables", []):
-            handle = table_state["handle"]
-            self.workspace.open_table(
-                table_state.get("names", []),
-                target=handle,
-                visible_title=table_state.get("title"),
-                geometry=table_state.get("geometry"),
-                column_widths=table_state.get("column_widths", {}),
-            )
-            table = self.workspace.lookup_table(handle)
-            if table is None:
-                continue
-            table.parentWidget().setVisible(not bool(table_state.get("hidden", False)))
-        self.workspace.table_counter = saved_counter
-        self.workspace.active_table_handle = session.get("active_table_handle")
+        self.workspace.table_counter = int(session.get("table_counter", 0))
 
     def on_project_activated(self, data):
         del data
@@ -316,29 +292,13 @@ class Plugin(HydePlugin):
         self.rebuild_table_macros_menu()
 
     def rebuild_table_macros_menu(self):
-        menu = self._macro_menu
-        menu.clear()
-        has_project = self.services["get_current_project_dir"]() is not None
-        if self._new_table_action is not None:
-            self._new_table_action.setEnabled(has_project)
-        if not has_project:
-            menu.setEnabled(False)
-            return
-        if not self.table_macros:
-            placeholder = menu.addAction("No Saved Table Macros")
-            placeholder.setEnabled(False)
-            menu.setEnabled(False)
-            return
-        menu.setEnabled(True)
-        for macro in self.table_macros:
-            macro_name = macro["name"]
-            macro_args = list(macro.get("args", []))
-            action = menu.addAction(macro_name)
-            action.triggered.connect(
-                lambda checked=False, name=macro_name, args=tuple(macro_args): (
-                    self._execute_macro(name, args)
-                )
-            )
+        self.rebuild_window_macros_menu(
+            menu=self._macro_menu,
+            macros=self.table_macros,
+            empty_label="No Saved Table Macros",
+            new_action_attr="_new_table_action",
+            on_trigger=self._execute_macro,
+        )
 
     def request_save_table_macro(self, table_state):
         procedures_init = self.services["get_procedures_init"]()
@@ -353,11 +313,6 @@ class Plugin(HydePlugin):
 
     def plugin_queue_background_command(self, code, silent=True):
         return self.services["queue_background_command"](code, silent=silent)
-
-    def _execute_macro(self, macro_name, macro_args):
-        state = RuntimeCommandState()
-        state.set_callable_invocation(macro_name, macro_args)
-        self.services["execute_command"](state.python_source(), visible=True)
 
     def _ensure_macro_menu(self):
         if self._macro_menu is None:
