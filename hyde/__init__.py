@@ -16,7 +16,12 @@ import numpy as np
 
 from .paths import HYDE_DIR
 from . import project_tools
-from .recreation_registry import publish_table_macro_registry, register_table_macro
+from .recreation_registry import (
+    publish_figure_macro_registry,
+    publish_table_macro_registry,
+    register_figure_macro,
+    register_table_macro,
+)
 from .execution.ipc import (
     signal_activate_project,
     signal_enter_no_project_state,
@@ -273,7 +278,11 @@ def load_project(path=None):
             reset_namespace=True,
         )
         manifest = project_tools.read_manifest(project_dir)
-        for entry in manifest.get("objects", []):
+        restored_axis_entries = []
+        for entry in sorted(
+            manifest.get("objects", []),
+            key=project_tools.object_restore_priority,
+        ):
             name = entry["name"]
             serializer = entry["serializer"]
             object_path = project_dir / entry["path"]
@@ -283,8 +292,37 @@ def load_project(path=None):
             try:
                 sys.modules["__main__"].__dict__[name] = project_tools.deserialize_object(object_path, serializer)
                 loaded += 1
+                if entry.get("python_type") == "Axes":
+                    restored_axis_entries.append(name)
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
+        missing_axis_entries = [
+            entry
+            for entry in manifest.get("objects", [])
+            if entry.get("python_type") == "Axes"
+            and entry.get("name") not in sys.modules["__main__"].__dict__
+        ]
+        if missing_axis_entries:
+            figures = [
+                value
+                for value in sys.modules["__main__"].__dict__.values()
+                if type(value).__name__ == "Figure"
+            ]
+            recovered_axes = []
+            for figure in figures:
+                recovered_axes.extend(list(getattr(figure, "axes", ())))
+            if len(recovered_axes) >= len(missing_axis_entries):
+                for entry, axis in zip(missing_axis_entries, recovered_axes):
+                    sys.modules["__main__"].__dict__[entry["name"]] = axis
+                    restored_axis_entries.append(entry["name"])
+                    loaded += 1
+        if restored_axis_entries:
+            errors = [
+                error
+                for error in errors
+                if not any(error.startswith(f"{name}:") for name in restored_axis_entries)
+            ]
+        project_tools.clear_live_matplotlib_managers()
         HYDE_PROJECT_DIR = str(project_dir)
     except Exception as exc:
         success = False
@@ -411,3 +449,66 @@ def table(*args, target=None, title=None, geometry=None, column_widths=None):
             geometry=geometry,
             column_widths=column_widths,
         )
+
+
+def figure(*args):
+    """
+    Register a Hyde figure recreation macro.
+
+    This public Hyde API currently supports decorator registration only:
+
+    ``@hyde.figure``
+
+    Decorated functions are published into `Windows -> Graph Macros` after the
+    procedures package reload path rebuilds the registry.
+    """
+    if not args:
+        def decorator(func):
+            register_figure_macro(func)
+            publish_figure_macro_registry()
+            return func
+
+        return decorator
+
+    if len(args) == 1 and callable(args[0]):
+        register_figure_macro(args[0])
+        publish_figure_macro_registry()
+        return args[0]
+
+    raise TypeError("hyde.figure currently supports decorator registration only.")
+
+
+def _resolve_matplotlib_figure(figure):
+    if hasattr(figure, "canvas"):
+        return figure
+
+    from matplotlib._pylab_helpers import Gcf
+
+    manager = Gcf.get_fig_manager(int(figure))
+    if manager is None or getattr(manager, "canvas", None) is None:
+        raise ValueError(f"Could not resolve matplotlib figure {figure!r}.")
+    return manager.canvas.figure
+
+
+def track_figure(figure, state):
+    from .features.matplotlib_features import FigureCodec
+
+    resolved_figure = _resolve_matplotlib_figure(figure)
+    resolved_figure._hyde_live_state = FigureCodec.validate_state(state)
+    resolved_figure.canvas.draw_idle()
+    return resolved_figure
+
+
+def refresh_figure(figure):
+    from .features.matplotlib_features import apply_figure_state
+
+    resolved_figure = _resolve_matplotlib_figure(figure)
+    state = getattr(resolved_figure, "_hyde_live_state", None)
+    if state is None:
+        return None
+    apply_figure_state(
+        resolved_figure,
+        state,
+        sys.modules["__main__"].__dict__,
+    )
+    return resolved_figure

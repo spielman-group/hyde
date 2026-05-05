@@ -20,7 +20,7 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.plugins.python_variables import PythonVariables
+from hyde.user_interface.plugins.python_variables import PythonVariables, PythonVariablesService
 
 
 def process_events(duration=0.05):
@@ -412,5 +412,52 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
         self.assertFalse(browser._external_requests_in_flight)
         self.assertTrue(browser._refresh_pending)
         self.assertEqual(len(callbacks), 1)
+
+
+class TestPythonVariablesService(unittest.TestCase):
+    def test_connect_namespace_view_updated_ensures_widget_exists(self):
+        connected = []
+
+        class FakeSignal:
+            def connect(self, callback):
+                connected.append(callback)
+
+        class FakeWidget:
+            namespace_view_updated = FakeSignal()
+
+        class FakePlugin:
+            def __init__(self):
+                self.widget_instance = None
+
+            def ensure_mdi_widget(self, key):
+                del key
+                self.widget_instance = FakeWidget()
+                return self.widget_instance
+
+            def mdi_widget(self, key):
+                del key
+                return self.widget_instance
+
+        callback = object()
+        service = PythonVariablesService(FakePlugin())
+
+        self.assertTrue(service.connect_namespace_view_updated(callback))
+        self.assertEqual(connected, [callback])
+
+    def test_namespace_view_isolated_from_nested_metadata_mutation(self):
+        browser = PythonVariables.__new__(PythonVariables)
+        QtWidgets.QWidget.__init__(browser)
+        browser._last_view = {}
+        browser._update_ui = Mock()
+        browser.namespace_view_updated = type(
+            "Signal", (), {"emit": lambda self, payload: None}
+        )()
+        shared_view = {"arr": {"type": "ndarray", "view": ["[1 2 3]"]}}
+
+        browser._apply_namespace_view(shared_view)
+        snapshot = browser.namespace_view()
+        shared_view["arr"]["view"][0] = "[1 9 3]"
+
+        self.assertEqual(snapshot["arr"]["view"], ["[1 2 3]"])
 if __name__ == "__main__":
     unittest.main()

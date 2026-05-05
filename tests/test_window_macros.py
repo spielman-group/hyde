@@ -9,7 +9,10 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.recreation_registry import (
+    clear_figure_macros,
     clear_table_macros,
+    figure_macro_entries,
+    figure_macro_names,
     table_macro_entries,
     table_macro_names,
 )
@@ -37,6 +40,7 @@ def build_table_macro_source(macro_name, names, title=None, geometry=None, colum
 class TestTableDecorator(unittest.TestCase):
     def setUp(self):
         clear_table_macros()
+        clear_figure_macros()
 
     def test_table_decorator_registers_parameterized_macro(self):
         @hyde.table
@@ -54,6 +58,29 @@ class TestTableDecorator(unittest.TestCase):
             @hyde.table
             def Table0(*, a):
                 return a
+
+
+class TestFigureDecorator(unittest.TestCase):
+    def setUp(self):
+        clear_table_macros()
+        clear_figure_macros()
+
+    def test_figure_decorator_registers_parameterized_macro(self):
+        @hyde.figure
+        def Graph0(x, y):
+            return x, y
+
+        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(
+            figure_macro_entries(),
+            ({"name": "Graph0", "args": ["x", "y"]},),
+        )
+
+    def test_figure_decorator_rejects_keyword_only_parameters(self):
+        with self.assertRaises(TypeError):
+            @hyde.figure
+            def Graph0(*, x):
+                return x
 
 
 class TestWindowMacroStore(unittest.TestCase):

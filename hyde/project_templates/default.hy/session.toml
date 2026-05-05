@@ -1,1 +1,15 @@
 format_version = 1
+
+[tool_windows.python_terminal]
+visible = true
+geometry = [0, 520, 1200, 320]
+
+[tool_windows.python_variables]
+visible = true
+geometry = [780, 0, 420, 300]
+
+[python_variables]
+arrays = true
+variables = true
+strings = true
+info = true

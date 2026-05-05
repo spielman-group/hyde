@@ -20,6 +20,7 @@ from .paths import DEFAULT_PROJECT_TEMPLATE
 FORMAT_VERSION = 1
 EXCLUDED_NAMES = {"In", "Out", "exit", "quit"}
 TEMPLATE_IGNORE_PATTERNS = ("__pycache__", "*.pyc", ".gitkeep")
+HYDE_MATPLOTLIB_BACKEND = "module://hyde.matplotlib_backend"
 
 
 def resolve_project_dir(path=None):
@@ -106,8 +107,9 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
 
     import hyde
     hyde.gui_mode(True)
+    configure_gui_matplotlib_backend()
     import hyde.recreation_registry
-    hyde.recreation_registry.clear_table_macros()
+    hyde.recreation_registry.clear_window_macros()
 
     import procedures
     previous_exports = set(__main__.__dict__.get("__hyde_procedures_exports__", ()))
@@ -121,6 +123,19 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
     __main__.__dict__.update(exports)
     __main__.__hyde_procedures_exports__ = set(exports)
     hyde.recreation_registry.publish_table_macro_registry()
+    hyde.recreation_registry.publish_figure_macro_registry()
+
+
+def configure_gui_matplotlib_backend():
+    import matplotlib
+
+    if "matplotlib.pyplot" in sys.modules:
+        return
+
+    backend = str(matplotlib.get_backend() or "")
+    if backend.lower() == HYDE_MATPLOTLIB_BACKEND.lower():
+        return
+    matplotlib.use(HYDE_MATPLOTLIB_BACKEND)
 
 
 def copy_project_procedures(source_project_dir: Path, target_project_dir: Path):
@@ -182,8 +197,56 @@ def deserialize_object(path: Path, serializer):
             return np.load(handle, allow_pickle=False)
     if serializer == "pickle":
         with path.open("rb") as handle:
-            return pickle.load(handle)
+            value = pickle.load(handle)
+        return _detach_matplotlib_runtime(value)
     raise ValueError(f"Unknown Hyde serializer {serializer!r}.")
+
+
+def _detach_matplotlib_runtime(value):
+    try:
+        from matplotlib.axes import Axes
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib._pylab_helpers import Gcf
+    except Exception:
+        return value
+
+    if isinstance(value, Figure):
+        figure = value
+    elif isinstance(value, Axes):
+        figure = value.figure
+    else:
+        return value
+
+    canvas = getattr(figure, "canvas", None)
+    manager = None if canvas is None else getattr(canvas, "manager", None)
+    if manager is not None:
+        try:
+            Gcf.destroy(manager.num)
+        except Exception:
+            pass
+    FigureCanvasAgg(figure)
+    return value
+
+
+def clear_live_matplotlib_managers():
+    try:
+        from matplotlib._pylab_helpers import Gcf
+    except Exception:
+        return
+    try:
+        Gcf.figs.clear()
+    except Exception:
+        pass
+
+
+def object_restore_priority(entry):
+    python_type = str((entry or {}).get("python_type", ""))
+    if python_type == "Figure":
+        return (0, str((entry or {}).get("name", "")))
+    if python_type == "Axes":
+        return (2, str((entry or {}).get("name", "")))
+    return (1, str((entry or {}).get("name", "")))
 
 
 def write_manifest(project_dir: Path, object_entries):

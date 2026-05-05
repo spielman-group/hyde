@@ -204,7 +204,7 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
     def dispatch_python(self):
         if self.OPERATION_LABEL:
             self.services["begin_project_operation"](self.OPERATION_LABEL)
-        self.services["execute_command"](self.state.python_source(), visible=True)
+        self.services["execute_command"](self.state.python_source(), visible=False)
         return True
 
     def run(self):
@@ -332,7 +332,7 @@ class SaveProjectCommand:
         if not self.services["get_current_project_dir"]():
             return False
         self.services["begin_project_operation"]("Saving Hyde project...")
-        self.services["execute_command"](self.state.python_source(), visible=True)
+        self.services["execute_command"](self.state.python_source(), visible=False)
         return True
 
 
@@ -345,7 +345,7 @@ class QuitCommand:
         if self.services["get_shutting_down"]() or self.services["get_quit_command_sent"]():
             return False
         self.services["set_quit_command_sent"](True)
-        self.services["execute_command"](self.state.python_source(), visible=True)
+        self.services["execute_command"](self.state.python_source(), visible=False)
         return True
 
 

@@ -13,7 +13,11 @@ except ModuleNotFoundError as exc:
 
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.plugins.file_dialogs.dialogs import SaveCopyProjectDialog
+from hyde.user_interface.plugins.file_dialogs.dialogs import (
+    QuitCommand,
+    SaveCopyProjectDialog,
+    SaveProjectCommand,
+)
 
 
 class TestFileDialogPlugin(unittest.TestCase):
@@ -51,6 +55,34 @@ class TestFileDialogPlugin(unittest.TestCase):
             warning.assert_called_once()
             self.assertEqual(dispatched, [])
             self.assertEqual(operations, [])
+
+    def test_save_project_command_is_muted(self):
+        dispatched = []
+        operations = []
+        services = {
+            "get_current_project_dir": lambda: "/tmp/project.hy",
+            "begin_project_operation": operations.append,
+            "execute_command": lambda code, visible=True: dispatched.append((code, visible)),
+        }
+
+        self.assertTrue(SaveProjectCommand(services).run())
+
+        self.assertEqual(operations, ["Saving Hyde project..."])
+        self.assertEqual(dispatched, [("hyde.save_project(mode='save')", False)])
+
+    def test_quit_command_is_muted(self):
+        dispatched = []
+        flags = {"quit_sent": False}
+        services = {
+            "get_shutting_down": lambda: False,
+            "get_quit_command_sent": lambda: flags["quit_sent"],
+            "set_quit_command_sent": lambda value: flags.__setitem__("quit_sent", value),
+            "execute_command": lambda code, visible=True: dispatched.append((code, visible)),
+        }
+
+        self.assertTrue(QuitCommand(services).run())
+        self.assertTrue(flags["quit_sent"])
+        self.assertEqual(dispatched, [("hyde.quit()", False)])
 
 
 if __name__ == "__main__":

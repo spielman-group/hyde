@@ -427,6 +427,97 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             client.stop_channels()
             child.terminate()
 
+    def test_save_project_persists_live_matplotlib_figures_and_axes(self):
+        project_dir = self._project(
+            "save_figure_project.hy",
+            (
+                "import hyde\n"
+                "import matplotlib\n"
+                "matplotlib.use('module://hyde.matplotlib_backend')\n"
+                "import matplotlib.pyplot as plt\n"
+            ),
+        )
+        _, from_child, child, client = self._start_kernel("save-figure-project")
+        try:
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            self._collect_operation_messages(from_child, "load")
+
+            wait_for_code_ok(
+                client,
+                "import numpy as np\n"
+                "arr = np.arange(4)\n"
+                "fig = plt.figure('Figure0')\n"
+                "ax = fig.add_subplot(111)\n"
+                "ax.plot(arr, label='arr')\n"
+                "hyde.save_project()\n",
+            )
+            result_messages = self._collect_operation_messages(from_child, "save")
+            result = result_messages[-1][1]
+            self.assertTrue(result["success"])
+
+            manifest_path = os.path.join(project_dir, "manifest.toml")
+            with open(manifest_path, "rb") as handle:
+                manifest = tomllib.load(handle)
+            object_names = {entry["name"] for entry in manifest["objects"]}
+
+            self.assertIn("arr", object_names)
+            self.assertIn("fig", object_names)
+            self.assertIn("ax", object_names)
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "data", "fig.pkl")))
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "data", "ax.pkl")))
+        finally:
+            client.stop_channels()
+            child.terminate()
+
+    def test_load_project_restores_pickled_matplotlib_figures_and_axes(self):
+        project_dir = self._project(
+            "load_figure_project.hy",
+            (
+                "import hyde\n"
+                "import matplotlib\n"
+                "matplotlib.use('module://hyde.matplotlib_backend')\n"
+                "import matplotlib.pyplot as plt\n"
+            ),
+        )
+        _, from_child, child, client = self._start_kernel("load-figure-project-save")
+        try:
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            self._collect_operation_messages(from_child, "load")
+
+            wait_for_code_ok(
+                client,
+                "import numpy as np\n"
+                "arr = np.arange(4)\n"
+                "fig = plt.figure('Figure0')\n"
+                "ax = fig.add_subplot(111)\n"
+                "ax.plot(arr, label='arr')\n"
+                "hyde.save_project()\n",
+            )
+            self._collect_operation_messages(from_child, "save")
+        finally:
+            client.stop_channels()
+            child.terminate()
+
+        _, from_child, child, client = self._start_kernel("load-figure-project-load")
+        try:
+            wait_for_code_ok(client, f"hyde.load_project({project_dir!r})")
+            self._collect_operation_messages(from_child, "load")
+            wait_for_code_ok(
+                client,
+                "assert 'fig' in globals()\n"
+                "assert 'ax' in globals()\n"
+                "assert len(fig.axes) == 1\n"
+                "assert ax.figure is not None\n"
+                "assert fig.canvas.__class__.__name__ == 'FigureCanvasAgg'\n"
+                "from matplotlib._pylab_helpers import Gcf\n"
+                "assert len(Gcf.get_all_fig_managers()) == 0\n"
+                "assert len(fig.axes[0].lines) == 1\n"
+                "assert len(ax.lines) == 1\n",
+            )
+        finally:
+            client.stop_channels()
+            child.terminate()
+
     def test_load_project_resets_to_no_project_then_restores_objects(self):
         project_a_dir = self._project(
             "project_a.hy",

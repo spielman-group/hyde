@@ -19,6 +19,7 @@ from hyde.user_interface.plugin_tools import (
     HydePlugin,
     HydePluginManager,
 )
+from hyde.user_interface.window_naming import next_numbered_name
 
 
 def make_plugin_host(plugin_manager):
@@ -190,6 +191,15 @@ class TestPluginTools(unittest.TestCase):
             [action.text() for action in app.ui.menuWindow.actions()],
             ["Plugin Tool"],
         )
+
+    def test_next_numbered_name_is_shared_counter_based_naming_helper(self):
+        name, next_counter = next_numbered_name("Table", {"Table0", "Table1"}, 0)
+        self.assertEqual(name, "Table2")
+        self.assertEqual(next_counter, 3)
+
+        name, next_counter = next_numbered_name("Figure", {"Figure0"}, 0)
+        self.assertEqual(name, "Figure1")
+        self.assertEqual(next_counter, 2)
 
 if __name__ == "__main__":
     unittest.main()

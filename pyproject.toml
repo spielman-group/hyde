@@ -54,5 +54,8 @@ hyde = "desktop_app:entry_point"
 [project.gui-scripts]
 hyde-gui = "desktop_app:entry_point"
 
+[project.entry-points."matplotlib.backend"]
+Hyde = "hyde.matplotlib_backend"
+
 [tool.setuptools.dynamic]
 version = {attr = "hyde.__version__"}

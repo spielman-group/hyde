@@ -1,6 +1,7 @@
 from qtutils.qt import QtCore, QtWidgets
 from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
+from hyde.user_interface.window_naming import next_numbered_name
 
 from .window import (
     TableState,
@@ -26,11 +27,11 @@ class TableWorkspaceService:
         return sorted(self.tables.items())
 
     def _next_table_handle(self):
-        handle = f"Table{self.table_counter}"
-        while handle in self.tables:
-            self.table_counter += 1
-            handle = f"Table{self.table_counter}"
-        self.table_counter += 1
+        handle, self.table_counter = next_numbered_name(
+            "Table",
+            self.tables,
+            self.table_counter,
+        )
         return handle
 
     def open_table(

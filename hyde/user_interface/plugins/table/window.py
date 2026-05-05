@@ -7,10 +7,13 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_features import TableCodec
 from hyde.user_interface.base import HydeGuiState, MutationState
-from .window_macro_store import (
+from hyde.user_interface.namespace_tracking import tracked_namespace_signature
+from hyde.user_interface.window_macro_dialogs import (
+    SaveWindowDialog as GenericSaveWindowDialog,
+    prompt_to_save_window_macro,
+)
+from hyde.user_interface.window_macro_store import (
     MacroStoreError,
-    inspect_macro_conflict,
-    write_macro_source,
 )
 
 
@@ -192,6 +195,8 @@ class TableViewModel(QtCore.QAbstractTableModel):
 
 
 class TableWidget(QtWidgets.QWidget):
+    REFRESH_TIMEOUT_MS = 5000
+
     def __init__(
         self,
         handle,
@@ -216,6 +221,9 @@ class TableWidget(QtWidgets.QWidget):
         self._current_request_id = None
         self._refresh_in_flight = False
         self._refresh_requested = False
+        self._refresh_timeout_timer = QtCore.QTimer(self)
+        self._refresh_timeout_timer.setSingleShot(True)
+        self._refresh_timeout_timer.timeout.connect(self._on_refresh_timeout)
         self._selected_cell = None
         self._value_edit_dirty = False
         self._initial_size_applied = False
@@ -290,13 +298,12 @@ class TableWidget(QtWidgets.QWidget):
         )
         for command in prefix:
             if not self._queue_silent_command(command):
-                self._refresh_in_flight = False
-                self._current_request_id = None
+                self._clear_refresh_in_flight()
                 return False
         if self._queue_silent_command(refresh_command):
+            self._refresh_timeout_timer.start(self.REFRESH_TIMEOUT_MS)
             return True
-        self._refresh_in_flight = False
-        self._current_request_id = None
+        self._clear_refresh_in_flight()
         return False
 
     def refresh_data(self):
@@ -316,7 +323,7 @@ class TableWidget(QtWidgets.QWidget):
         selected_row = selected_index.row() if selected_index.isValid() else None
         selected_col = selected_index.column() if selected_index.isValid() else None
 
-        self._refresh_in_flight = False
+        self._clear_refresh_in_flight()
         self.model.update_data(data)
         self._apply_saved_column_widths()
 
@@ -340,6 +347,20 @@ class TableWidget(QtWidgets.QWidget):
             self._refresh_requested = False
             self.refresh_data()
 
+    def _clear_refresh_in_flight(self):
+        self._refresh_timeout_timer.stop()
+        self._refresh_in_flight = False
+        self._current_request_id = None
+
+    @inmain_decorator()
+    def _on_refresh_timeout(self):
+        if self._closed or not self._refresh_in_flight:
+            return
+        self._clear_refresh_in_flight()
+        if self._refresh_requested and not self._closed:
+            self._refresh_requested = False
+            self.refresh_data()
+
     def _current_tracked_namespace_state(self):
         python_variables_service = self.services.get("namespace_view_service")
         if python_variables_service is None:
@@ -349,11 +370,10 @@ class TableWidget(QtWidgets.QWidget):
         )
 
     def _tracked_namespace_state_from_view(self, view):
-        tracked = []
-        for name in list(self.names) + list(self._pending_created_columns):
-            metadata = dict(view.get(name, {}) or {})
-            tracked.append((name, tuple(sorted(metadata.items()))))
-        return tuple(tracked)
+        return tracked_namespace_signature(
+            view,
+            list(self.names) + list(self._pending_created_columns),
+        )
 
     @inmain_decorator()
     def _on_namespace_view_updated(self, view):
@@ -736,6 +756,7 @@ class TableWidget(QtWidgets.QWidget):
         if self._closed:
             return
         self._closed = True
+        self._refresh_timeout_timer.stop()
         try:
             python_variables_service = self.services.get("namespace_view_service")
             if python_variables_service is not None:
@@ -746,93 +767,19 @@ class TableWidget(QtWidgets.QWidget):
             pass
 
 
-class SaveWindowDialog(QtWidgets.QDialog):
-    SAVE = 1
-    NO_SAVE = 2
-    CANCEL = 0
-
+class SaveWindowDialog(GenericSaveWindowDialog):
     def __init__(self, table_state, parent=None):
-        super().__init__(parent)
-        self.choice = self.CANCEL
         self.table_state = table_state
-
-        loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "save_window_dialog.ui")
-        self.ui = loader.load(ui_path, self)
-
-        self.ui.nameEdit.setText(self.table_state.default_macro_name())
-        self.ui.nameEdit.selectAll()
-        self.ui.saveButton.clicked.connect(self._accept_save)
-        self.ui.noSaveButton.clicked.connect(self._accept_no_save)
-        self.ui.cancelButton.clicked.connect(self.reject)
-        self.ui.helpButton.clicked.connect(self._show_help)
-
-    def macro_name(self):
-        return self.ui.nameEdit.text().strip()
-
-    def macro_source(self):
-        return self.table_state.macro_source(self.macro_name())
-
-    def _accept_save(self):
-        self.choice = self.SAVE
-        self.accept()
-
-    def _accept_no_save(self):
-        self.choice = self.NO_SAVE
-        self.accept()
-
-    def _show_help(self):
-        QtWidgets.QMessageBox.information(
-            self,
-            "Window Recreation Macros",
-            "Save stores a parameterized recreation macro in procedures/__init__.py.\n\n"
-            "No Save closes the window without writing a macro.\n\n"
-            "Cancel leaves the window open.",
-        )
+        super().__init__(saveable=table_state, parent=parent)
 
 
 def prompt_to_save_table_macro(table_state, parent, procedures_init, reload_procedures):
-    while True:
-        dialog = SaveWindowDialog(table_state=table_state, parent=parent)
-        if dialog.exec_() != QtWidgets.QDialog.Accepted:
-            return False
-        if dialog.choice == SaveWindowDialog.NO_SAVE:
-            return True
-        if dialog.choice != SaveWindowDialog.SAVE:
-            return False
-
-        macro_name = dialog.macro_name()
-        try:
-            macro_source = dialog.macro_source()
-        except MacroStoreError as exc:
-            QtWidgets.QMessageBox.warning(parent, "Invalid Macro Name", str(exc))
-            continue
-
-        conflict = inspect_macro_conflict(procedures_init, macro_name)
-        if conflict is not None:
-            if not conflict.get("in_autogenerated_block", False):
-                QtWidgets.QMessageBox.warning(
-                    parent,
-                    "Macro Name In Use",
-                    f"{macro_name} already exists outside Hyde's autogenerated window-macro block.\n\n"
-                    "Choose a different macro name.",
-                )
-                continue
-            response = QtWidgets.QMessageBox.question(
-                parent,
-                "Overwrite Recreation Macro",
-                f"A function named {macro_name} already exists in procedures/__init__.py.\n\n"
-                "Overwrite that function?",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                QtWidgets.QMessageBox.No,
-            )
-            if response != QtWidgets.QMessageBox.Yes:
-                continue
-
-        try:
-            write_macro_source(procedures_init, macro_name, macro_source)
-        except MacroStoreError as exc:
-            QtWidgets.QMessageBox.warning(parent, "Unable To Save Macro", str(exc))
-            continue
-        reload_procedures()
-        return True
+    try:
+        return prompt_to_save_window_macro(
+            saveable=table_state,
+            parent=parent,
+            procedures_init=procedures_init,
+            reload_procedures=reload_procedures,
+        )
+    except MacroStoreError:
+        return False

@@ -1,3 +1,4 @@
+import copy
 import os
 import time
 
@@ -182,13 +183,13 @@ class PythonVariables(QtWidgets.QWidget):
 
     @inmain_decorator()
     def _apply_namespace_view(self, view):
-        self._last_view = dict(view)
+        self._last_view = copy.deepcopy(dict(view or {}))
         self._update_ui(self._last_view)
-        self.namespace_view_updated.emit(dict(self._last_view))
+        self.namespace_view_updated.emit(copy.deepcopy(self._last_view))
 
     def namespace_view(self):
         """Return the latest cached namespace metadata snapshot."""
-        return dict(getattr(self, "_last_view", {}) or {})
+        return copy.deepcopy(getattr(self, "_last_view", {}) or {})
 
     def restore_view_state(self, info):
         self.ui.arraysCheckBox.setChecked(bool(info.get("arrays", True)))
@@ -453,7 +454,7 @@ class PythonVariablesService:
         return {} if widget is None else widget.namespace_view()
 
     def connect_namespace_view_updated(self, callback):
-        widget = self.widget()
+        widget = self.ensure_widget()
         if widget is None:
             return False
         widget.namespace_view_updated.connect(callback)

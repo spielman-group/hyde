@@ -265,6 +265,63 @@ class TestTableWidget(unittest.TestCase):
             widget.shutdown_client()
             widget.close()
 
+    def test_table_refresh_detects_in_place_namespace_metadata_mutation(self):
+        queued = []
+        shared_view = ["[1 2 3]"]
+        namespace_service = FakeNamespaceViewService(
+            {"a": {"type": "ndarray", "view": shared_view}}
+        )
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "queue_background_command": lambda code, silent=True: (
+                    queued.append((code, silent)) or True
+                ),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            queued.clear()
+            shared_view[0] = "[1 99 3]"
+            namespace_service.emit({"a": {"type": "ndarray", "view": shared_view}})
+
+            self.assertEqual(len(queued), 1)
+            self.assertIn("hyde.execution.ipc.push_table_data(['a'],", queued[0][0])
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
+    def test_table_refresh_recovers_after_timed_out_request(self):
+        queued = []
+        namespace_service = FakeNamespaceViewService(
+            {"a": {"type": "ndarray", "view": "[1 2 3]"}}
+        )
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "queue_background_command": lambda code, silent=True: (
+                    queued.append((code, silent)) or True
+                ),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            widget.refresh_data()
+            self.assertTrue(widget._refresh_in_flight)
+
+            widget._on_refresh_timeout()
+            self.assertFalse(widget._refresh_in_flight)
+
+            namespace_service.emit({"a": {"type": "ndarray", "view": "[1 9 3]"}})
+
+            self.assertEqual(len(queued), 2)
+            self.assertIn("hyde.execution.ipc.push_table_data(['a'],", queued[1][0])
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
 class TestTableWorkspaceService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
