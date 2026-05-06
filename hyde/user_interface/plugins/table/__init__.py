@@ -4,7 +4,6 @@ from hyde.user_interface.plugin_tools import (
     apply_saveable_window_state,
     blank_window_icon,
 )
-from hyde.user_interface.window_macro_dialogs import prompt_to_save_window_macro
 from hyde.user_interface.window_naming import next_numbered_name
 
 from .window import (
@@ -61,7 +60,9 @@ class TableWorkspaceService:
             handle = self._next_table_handle()
 
         services = dict(self.plugin.services)
-        services["request_save_table_macro"] = self.plugin.request_save_table_macro
+        services["save_window_dialog_service"] = self.plugin.services[
+            "save_window_dialog_service"
+        ]
         table = TableWidget(
             handle,
             names,
@@ -111,16 +112,19 @@ class TableWorkspaceService:
             subwindow = table.parentWidget()
             if subwindow is None:
                 continue
-            original_callback = table.services.pop("request_save_table_macro", None)
+            save_window_dialog_service = table.services.pop(
+                "save_window_dialog_service",
+                None,
+            )
             if hasattr(table, "shutdown_client"):
                 table.shutdown_client()
             subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
             subwindow.close()
             if (
-                original_callback is not None
+                save_window_dialog_service is not None
                 and table.handle in self.tables
             ):
-                table.services["request_save_table_macro"] = original_callback
+                table.services["save_window_dialog_service"] = save_window_dialog_service
         self.tables.clear()
         self.active_table_handle = None
         self.table_counter = 0
@@ -296,17 +300,6 @@ class Plugin(HydePlugin):
             empty_label="No Saved Table Macros",
             new_action_attr="_new_table_action",
             on_trigger=self._execute_macro,
-        )
-
-    def request_save_table_macro(self, saveable):
-        procedures_init = self.services["get_procedures_init"]()
-        if not procedures_init:
-            return True
-        return prompt_to_save_window_macro(
-            saveable,
-            parent=self.services["ui"],
-            procedures_init=procedures_init,
-            reload_procedures=self.services["reload_procedures"],
         )
 
     def _ensure_macro_menu(self):

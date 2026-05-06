@@ -85,7 +85,8 @@ The Table window is a single MDI subwindow containing:
 - a compact selection/status strip above the grid
 - a main spreadsheet-like grid
 - scrollbars for navigating the displayed data
-- a close prompt that offers to save a recreation macro unless the close button is shift-clicked
+- a close prompt that offers to save a recreation macro unless the close button is
+  shift-clicked to close immediately without saving
 
 The top strip shows the current target cell and the currently selected value.
 The grid uses a point column on the left and one or more data columns to the right.

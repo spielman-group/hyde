@@ -4,7 +4,7 @@
 - [x] Present a Hyde-native save-on-close dialog for saveable windows.
 - [x] Allow the user to save a recreation macro, close without saving, or cancel the close.
 - [x] Support overwrite confirmation when a chosen macro name already exists.
-- [x] Support shift-click hide without prompting.
+- [x] Support shift-click close without prompting or saving a macro.
 - [x] Activate the same generic save-window flow for first-class figure windows.
 - [ ] Support additional non-table saveable windows beyond first-class figures.
 
@@ -47,7 +47,8 @@ It includes:
 - confirming overwrite before replacing an existing same-name function
 - closing without saving
 - canceling the close
-- hiding the window immediately when the close button is shift-clicked
+- closing the window immediately without prompting when the close button is
+  shift-clicked
 
 It does not include:
 
@@ -62,7 +63,7 @@ The dialog is a compact modal window containing:
 - the prompt `Save window recreation macro as:`
 - a single editable name field
 - `Save`, `No Save`, `Help`, and `Cancel` buttons
-- a tip about shift-click hide
+- a tip about shift-click close without saving
 
 ## Visible Controls
 
@@ -71,7 +72,7 @@ The dialog is a compact modal window containing:
 - `No Save`: `active`
 - `Help`: `active`
 - `Cancel`: `active`
-- shift-click hide tip: `active`
+- shift-click close-without-save tip: `active`
 
 ## Command Generation
 

@@ -18,7 +18,11 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 ### Runtime
 - GUI owns presentation, menus, watchers, and plugin state.
 - Kernel owns scientific state and live figures.
-- The kernel-runtime plugin owns the shared frontend client plus hidden execution.
+- The kernel-runtime plugin owns the kernel subprocess, shared frontend client, Lane 1
+  watcher, and the exported `kernel_runtime_service` plus
+  `python_execution_service`.
+- The Python Terminal plugin owns the visible console UI and exports
+  `visible_terminal_service`.
 - Runtime helper handles Lane 1 control messages and kernel-lifecycle watching.
 
 ### Tables

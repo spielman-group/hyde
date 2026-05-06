@@ -81,10 +81,7 @@ class TestSaveWindowDialog(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def test_save_window_dialog_uses_provided_saveable(self):
-        from hyde.user_interface.plugins.table.window import (
-            SaveWindowDialog,
-            TableState,
-        )
+        from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialog
 
         state = TableState()
         state.set_items(["delay2", "fit_delay2"])
@@ -103,7 +100,6 @@ class TestSaveWindowDialog(unittest.TestCase):
         self.assertIn("def Table_Save(delay2, fit_delay2):", macro)
         self.assertIn("geometry=(5, 42, 510, 242)", macro)
         self.assertIn("column_widths={'fit_delay2': 262}", macro)
-
 
 class FakeNamespaceViewService:
     def __init__(self, view=None):
@@ -140,18 +136,27 @@ class FakeExecutionService:
         return True
 
 
+class FakeSaveWindowDialogService:
+    def __init__(self, result=True):
+        self.result = result
+        self.calls = []
+
+    def prompt_to_save_window_macro(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+
 class FakeTablePlugin:
     def __init__(self, mdi_area, save_result=True):
+        self.save_window_dialog_service = FakeSaveWindowDialogService(save_result)
         self.services = {
             "mdi_area": mdi_area,
             "python_execution_service": FakeExecutionService(),
+            "ui": object(),
+            "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+            "reload_procedures": lambda: None,
+            "save_window_dialog_service": self.save_window_dialog_service,
         }
-        self.prompted_states = []
-        self.save_result = save_result
-
-    def request_save_table_macro(self, saveable):
-        self.prompted_states.append(saveable)
-        return self.save_result
 
 
 class TestTableWidget(unittest.TestCase):
@@ -360,7 +365,8 @@ class TestTableWorkspaceService(unittest.TestCase):
         subwindow.close()
         self._drain_events()
 
-        self.assertEqual(len(plugin.prompted_states), 1)
+        self.assertEqual(len(plugin.save_window_dialog_service.calls), 1)
+        self.assertIs(plugin.save_window_dialog_service.calls[0]["saveable"], table)
         self.assertTrue(table._closed)
         self.assertIsNone(workspace.lookup_table("Table0"))
         self.assertEqual(mdi_area.subWindowList(), [])
@@ -405,6 +411,19 @@ class TestTableWorkspaceService(unittest.TestCase):
         mdi_area.close()
         self._drain_events()
 
+    def test_open_table_requires_save_window_dialog_service(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = type("FakePlugin", (), {})()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "python_execution_service": FakeExecutionService(),
+            "namespace_view_service": FakeNamespaceViewService(),
+        }
+        workspace = TableWorkspaceService(plugin)
+
+        with self.assertRaises(KeyError):
+            workspace.open_table(["a"])
+
     def test_table_plugin_session_routes_keep_tables_out_of_toml_and_emit_restore_source(self):
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
@@ -414,6 +433,7 @@ class TestTableWorkspaceService(unittest.TestCase):
             "python_execution_service": FakeExecutionService(),
             "namespace_view_service": FakeNamespaceViewService(),
             "get_current_project_dir": lambda: "/tmp/demo.hy",
+            "save_window_dialog_service": FakeSaveWindowDialogService(),
         }
 
         table = plugin.workspace.open_table(
@@ -460,6 +480,7 @@ class TestTableWorkspaceService(unittest.TestCase):
             "python_execution_service": FakeExecutionService(),
             "namespace_view_service": FakeNamespaceViewService(),
             "get_current_project_dir": lambda: "/tmp/demo.hy",
+            "save_window_dialog_service": FakeSaveWindowDialogService(),
         }
 
         table = plugin.workspace.open_table(
@@ -506,7 +527,8 @@ class TestTableWorkspaceService(unittest.TestCase):
         subwindow.close()
         self._drain_events()
 
-        self.assertEqual(len(plugin.prompted_states), 1)
+        self.assertEqual(len(plugin.save_window_dialog_service.calls), 1)
+        self.assertIs(plugin.save_window_dialog_service.calls[0]["saveable"], table)
         self.assertFalse(table._closed)
         self.assertIs(workspace.lookup_table("Table0"), table)
         self.assertIn(subwindow, mdi_area.subWindowList())

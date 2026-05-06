@@ -30,6 +30,17 @@
   kernel-runtime plugin's shared frontend client, Spyder namespace view, and
   figure-window metadata/edit traffic.
 
+### Runtime ownership seams
+- The `kernel_runtime` plugin owns the kernel subprocess, shared
+  `FrontendKernelService`, Lane 1 watcher startup/shutdown, and the exported
+  `kernel_runtime_service` plus `python_execution_service`.
+- The `python_terminal` plugin owns the visible terminal UI and exports
+  `visible_terminal_service` for visible user-facing execution and history behavior.
+- The shell exports lifecycle adapters used by the runtime layer:
+  `on_kernel_ready`, `on_kernel_crashed`, `enter_no_project_state`,
+  `activate_project`, `on_project_state_result`, `request_gui_quit`, and
+  `finalize_quit`.
+
 ## Public Hyde Surface
 
 Anything exported from `hyde/__init__.py` is public kernel-facing API.
@@ -125,6 +136,8 @@ when a project is loaded.
 - Shell infrastructure lives under `hyde.user_interface.main`.
 - Shared plugin helpers live in `hyde.user_interface.plugin_tools`.
 - Only plugin packages are discovered by the plugin manager.
+- UI plugins that need Jupyter execution or metadata consume the runtime-owned shared
+  services directly rather than reaching through shell wrappers or other widgets.
 - **Strict Boundary Rule**: The core shell (`HydeApp`) must provide ZERO wrapper methods for plugin services (e.g. no `HydeApp.execute_command`). Plugins must consume registered services directly from the plugin manager. Providing shell wrappers over plugin logic is a boundary issue in disguise.
 
 ## Design Rule For New Work

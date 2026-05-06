@@ -15,7 +15,6 @@ from hyde.user_interface.plugin_tools import (
     capture_saveable_window_state,
     capture_subwindow_geometry,
 )
-from hyde.user_interface.window_macro_dialogs import prompt_to_save_window_macro
 from hyde.user_interface.window_macro_store import MacroStoreError
 
 LOGGER = logging.getLogger("hyde")
@@ -609,9 +608,21 @@ class FigureWindow(QtWidgets.QWidget):
             return
 
         if not (QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier):
-            request_save_figure_macro = self.services.get("request_save_figure_macro")
-            if request_save_figure_macro is not None:
-                if not request_save_figure_macro(self):
+            save_window_dialog_service = self.services.get("save_window_dialog_service")
+            get_procedures_init = self.services.get("get_procedures_init")
+            reload_procedures = self.services.get("reload_procedures")
+            if (
+                save_window_dialog_service is not None
+                and get_procedures_init is not None
+                and reload_procedures is not None
+            ):
+                procedures_init = get_procedures_init()
+                if procedures_init and not save_window_dialog_service.prompt_to_save_window_macro(
+                    saveable=self,
+                    parent=self.services.get("ui", self),
+                    procedures_init=procedures_init,
+                    reload_procedures=reload_procedures,
+                ):
                     event.ignore()
                     return
 
@@ -660,12 +671,3 @@ class FigureWindow(QtWidgets.QWidget):
         if self._subwindow is None or self._subwindow.isMinimized():
             return
         self._last_normal_geometry = tuple(capture_subwindow_geometry(self._subwindow))
-
-
-def prompt_to_save_figure_macro(saveable, parent, procedures_init, reload_procedures):
-    return prompt_to_save_window_macro(
-        saveable=saveable,
-        parent=parent,
-        procedures_init=procedures_init,
-        reload_procedures=reload_procedures,
-    )

@@ -36,7 +36,7 @@
      <item>
       <widget class="QLineEdit" name="nameEdit">
        <property name="placeholderText">
-        <string>Table0</string>
+        <string>Window0</string>
        </property>
       </widget>
      </item>
@@ -84,14 +84,14 @@
     </layout>
    </item>
    <item>
-    <widget class="QLabel" name="tipLabel">
-     <property name="text">
-      <string>Tip: you can hide by shift-clicking the close button.</string>
-     </property>
-     <property name="wordWrap">
-      <bool>true</bool>
-     </property>
-    </widget>
+     <widget class="QLabel" name="tipLabel">
+      <property name="text">
+      <string>Tip: shift-click the close button to close without saving a macro.</string>
+      </property>
+      <property name="wordWrap">
+       <bool>true</bool>
+      </property>
+     </widget>
    </item>
   </layout>
  </widget>

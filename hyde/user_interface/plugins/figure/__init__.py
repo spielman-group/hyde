@@ -8,7 +8,7 @@ from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
 from hyde.user_interface.window_naming import next_numbered_name
 
 from .dialogs import NewFigureDialog
-from .window import FigureState, FigureWindow, prompt_to_save_figure_macro
+from .window import FigureState, FigureWindow
 
 
 LOGGER = logging.getLogger("hyde")
@@ -46,7 +46,9 @@ class FigureWorkspaceService:
         created_new = figure is None
         if figure is None:
             services = dict(self.plugin.services)
-            services["request_save_figure_macro"] = self.plugin.request_save_figure_macro
+            services["save_window_dialog_service"] = self.plugin.services[
+                "save_window_dialog_service"
+            ]
             if hasattr(self.plugin, "send_figure_action"):
                 services["send_figure_action"] = self.plugin.send_figure_action
             figure = FigureWindow(
@@ -251,17 +253,6 @@ class Plugin(HydePlugin):
             empty_label="No Saved Graph Macros",
             new_action_attr="_new_figure_action",
             on_trigger=self._execute_macro,
-        )
-
-    def request_save_figure_macro(self, saveable):
-        procedures_init = self.services["get_procedures_init"]()
-        if not procedures_init:
-            return True
-        return prompt_to_save_figure_macro(
-            saveable,
-            parent=self.services["ui"],
-            procedures_init=procedures_init,
-            reload_procedures=self.services["reload_procedures"],
         )
 
     def _ensure_macro_menu(self):

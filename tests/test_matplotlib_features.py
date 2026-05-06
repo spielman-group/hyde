@@ -214,14 +214,13 @@ class TestFigurePluginDispatch(unittest.TestCase):
         dialog = NewFigureDialog({"arr": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "f"}})
         try:
             state = dialog.normalized_state()
+            self.assertEqual(dialog.ui.widthSpinBox.value(), 5.0)
+            self.assertEqual(dialog.ui.heightSpinBox.value(), 3.0)
+            self.assertEqual(dialog.ui.widthSpinBox.prefix(), "x: ")
+            self.assertEqual(dialog.ui.heightSpinBox.prefix(), "y: ")
+            self.assertEqual(state["settings"]["figsize"], (5.0, 3.0))
         finally:
             dialog.close()
-
-        self.assertEqual(dialog.ui.widthSpinBox.value(), 5.0)
-        self.assertEqual(dialog.ui.heightSpinBox.value(), 3.0)
-        self.assertEqual(dialog.ui.widthSpinBox.prefix(), "x: ")
-        self.assertEqual(dialog.ui.heightSpinBox.prefix(), "y: ")
-        self.assertEqual(state["settings"]["figsize"], (5.0, 3.0))
 
     def test_figure_macro_dispatch_uses_shared_callable_invocation(self):
         executed = []
@@ -494,6 +493,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
+    class _FakeSaveWindowDialogService:
+        def __init__(self, result=True):
+            self.result = result
+            self.calls = []
+
+        def prompt_to_save_window_macro(self, **kwargs):
+            self.calls.append(kwargs)
+            return self.result
+
     def test_figure_window_refreshes_from_same_namespace_signal_as_tables(self):
         sent = []
         namespace_service = FakeNamespaceViewService(
@@ -619,7 +627,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             figure_number=1,
             services={
                 "python_execution_service": FakeExecutionService(queued),
-                "request_save_figure_macro": lambda saveable: True,
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+                "reload_procedures": lambda: None,
             },
         )
         subwindow = mdi_area.addSubWindow(widget)
@@ -648,7 +658,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             figure_number=1,
             services={
                 "python_execution_service": FakeExecutionService(queued),
-                "request_save_figure_macro": lambda saveable: True,
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+                "reload_procedures": lambda: None,
             },
         )
         subwindow = mdi_area.addSubWindow(widget)
@@ -753,10 +765,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
             "python_execution_service": FakeExecutionService(),
-            "request_save_figure_macro": lambda saveable: True,
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
             "get_shutting_down": lambda: False,
         }
-        plugin.request_save_figure_macro = lambda saveable: True
         workspace = FigureWorkspaceService(plugin)
 
         figure = workspace.open_or_update_figure(
@@ -786,10 +797,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
             "python_execution_service": FakeExecutionService(),
-            "request_save_figure_macro": lambda saveable: True,
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
             "get_shutting_down": lambda: False,
         }
-        plugin.request_save_figure_macro = lambda saveable: True
         workspace = FigureWorkspaceService(plugin)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
@@ -814,6 +824,36 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         workspace.clear()
         mdi_area.close()
 
+    def test_workspace_requires_save_window_dialog_service_for_first_class_windows(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = type("FakePlugin", (), {})()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "get_shutting_down": lambda: False,
+        }
+        workspace = FigureWorkspaceService(plugin)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+
+        with self.assertRaises(KeyError):
+            workspace.open_or_update_figure(
+                {
+                    "figure_number": 1,
+                    "title": "FigureA",
+                    "snapshot": {
+                        "is_first_class": True,
+                        "default_macro_name": "FigureA",
+                        "call_source": "fig = plt.figure('FigureA')",
+                        "figure_size": (320, 240),
+                        "figure_ir": figure_ir,
+                    },
+                }
+            )
+
+        mdi_area.close()
+
     def test_workspace_applies_snapshot_window_metadata_for_new_macro_window(self):
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
@@ -822,10 +862,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
             "python_execution_service": FakeExecutionService(),
-            "request_save_figure_macro": lambda saveable: True,
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
             "get_shutting_down": lambda: False,
         }
-        plugin.request_save_figure_macro = lambda saveable: True
         workspace = FigureWorkspaceService(plugin)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
@@ -863,10 +902,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
             "python_execution_service": FakeExecutionService(),
-            "request_save_figure_macro": lambda saveable: True,
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
             "get_shutting_down": lambda: False,
         }
-        plugin.request_save_figure_macro = lambda saveable: True
         workspace = FigureWorkspaceService(plugin)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
         image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
@@ -920,10 +958,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
             "python_execution_service": FakeExecutionService(),
-            "request_save_figure_macro": lambda saveable: True,
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
             "get_shutting_down": lambda: False,
         }
-        plugin.request_save_figure_macro = lambda saveable: True
         workspace = FigureWorkspaceService(plugin)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
@@ -960,7 +997,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             {
                 "mdi_area": mdi_area,
                 "namespace_view_service": FakeNamespaceViewService(),
-                "request_save_figure_macro": lambda saveable: True,
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
                 "get_shutting_down": lambda: False,
             }
         )
@@ -1007,7 +1044,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             {
                 "mdi_area": mdi_area,
                 "namespace_view_service": FakeNamespaceViewService(),
-                "request_save_figure_macro": lambda saveable: True,
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
                 "get_shutting_down": lambda: False,
             }
         )
