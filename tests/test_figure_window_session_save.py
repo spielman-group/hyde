@@ -45,6 +45,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         )
 
         self.assertEqual(snapshot.default_macro_name(), "Figure0")
+        self.assertEqual(snapshot.handle(), "Figure0")
         self.assertEqual(snapshot.tracked_names(), ("delay", "fit_delay", "raw_delay"))
         self.assertIn("fig = plt.figure('Figure0')", snapshot.call_source())
         macro = snapshot.macro_source("Graph0")
@@ -82,8 +83,9 @@ class TestFigureWindowSessionSave(unittest.TestCase):
 
     def test_figure_window_session_restore_source_uses_figure_ir_without_live_state(self):
         widget = FigureWindow(figure_number=1)
-        subwindow = QtWidgets.QMdiSubWindow()
-        subwindow.setWidget(widget)
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
@@ -98,10 +100,17 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                     },
                 }
             )
+            subwindow.show()
+            self.qapp.processEvents()
+            subwindow.showMinimized()
+            self.qapp.processEvents()
 
             source = widget.session_restore_source()
 
-            self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", source)
+            self.assertIn(
+                "@hyde.figure(window_pos=(10, 20), window_state='minimized', register=False)",
+                source,
+            )
             self.assertIn("def Figure0(delay, fit_delay, raw_delay):", source)
             self.assertIn("Figure0(delay, fit_delay, raw_delay)", source)
             self.assertIn("fig = plt.figure('Figure0')", source)
@@ -109,8 +118,11 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 "ax.plot(delay, fit_delay, label='fit_delay')",
                 source,
             )
+            self.assertNotIn("hidden=", source)
+            self.assertNotIn("visible=", source)
         finally:
-            widget.close()
+            widget.force_close()
+            mdi_area.close()
 
     def test_figure_window_sources_preserve_figsize_from_figure_ir(self):
         widget = FigureWindow(figure_number=1)
@@ -140,3 +152,67 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             self.assertIn("fig = plt.figure('Figure0', figsize=(5.0, 3.0))", source)
         finally:
             widget.close()
+
+    def test_figure_window_title_warns_when_macro_source_is_incomplete(self):
+        widget = FigureWindow(figure_number=1)
+        subwindow = QtWidgets.QMdiSubWindow()
+        subwindow.setWidget(widget)
+        widget.bind_subwindow(subwindow)
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "title": "Figure0",
+                    "snapshot": {
+                        "default_macro_name": "Figure0",
+                        "call_source": None,
+                        "save_error": "unsupported trace source",
+                        "figure_ir": None,
+                        "live_state": None,
+                        "is_first_class": True,
+                    },
+                }
+            )
+
+            self.assertEqual(subwindow.windowTitle(), "Figure0 [Macro Incomplete]")
+        finally:
+            widget.close()
+
+    def test_figure_window_sources_include_minimized_metadata(self):
+        widget = FigureWindow(figure_number=1)
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        widget.bind_subwindow(subwindow)
+        subwindow.setGeometry(10, 20, 300, 240)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "title": "Figure0",
+                    "snapshot": {
+                        "figure_ir": figure_ir,
+                        "live_state": None,
+                    },
+                }
+            )
+            subwindow.show()
+            self.qapp.processEvents()
+            subwindow.showMinimized()
+            self.qapp.processEvents()
+
+            macro = widget.macro_source("Figure0")
+            source = widget.session_restore_source()
+
+            self.assertIn(
+                "@hyde.figure(window_pos=(10, 20), window_state='minimized')",
+                macro,
+            )
+            self.assertIn(
+                "@hyde.figure(window_pos=(10, 20), window_state='minimized', register=False)",
+                source,
+            )
+        finally:
+            widget.force_close()
+            mdi_area.close()

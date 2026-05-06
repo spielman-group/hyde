@@ -150,7 +150,7 @@ class TestProjectStateHelpers(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
-    def test_write_session_merges_plugin_toml_and_python_routes(self):
+    def test_write_session_routes_figure_restore_source_to_session_python(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "session_routes.hy")
             os.makedirs(project_dir)
@@ -161,16 +161,17 @@ class TestProjectStateHelpers(unittest.TestCase):
                 def get_session_toml_data(self):
                     return {
                         "tool_windows": {"logging": {"visible": True}},
-                        "table_counter": 4,
+                        "figure_counter": 4,
                     }
 
                 def get_session_restore_source(self):
                     return (
-                        "@hyde.table(register=False)\n"
-                        "def Table0(a, b):\n"
-                        "    hyde.table(a, b, title='Table_Fun', geometry=(5, 42, 510, 242), "
-                        "column_widths={'a': 120, 'b': 260})\n\n"
-                        "Table0(a, b)\n"
+                        "@hyde.figure(window_pos=(5, 42), register=False)\n"
+                        "def Figure0(delay, fit_delay):\n"
+                        "    fig = plt.figure('Figure0')\n"
+                        "    ax = fig.add_subplot(111)\n"
+                        "    ax.plot(delay, fit_delay)\n\n"
+                        "Figure0(delay, fit_delay)\n"
                     )
 
             source_app = type("SourceApp", (), {})()
@@ -179,22 +180,34 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             write_session(source_app, project_dir)
 
-            session = tomllib.loads((Path(project_dir) / "session.toml").read_text())
+            session_toml = (Path(project_dir) / "session.toml").read_text()
+            session = tomllib.loads(session_toml)
             session_source = (Path(project_dir) / "session.py").read_text()
 
             self.assertTrue(session["tool_windows"]["logging"]["visible"])
-            self.assertEqual(session["table_counter"], 4)
-            self.assertIn("@hyde.table(register=False)", session_source)
-            self.assertIn("Table0(a, b)", session_source)
-            self.assertIn("geometry=(5, 42, 510, 242)", session_source)
-            self.assertIn("column_widths={'a': 120, 'b': 260}", session_source)
+            self.assertEqual(session["figure_counter"], 4)
+            self.assertNotIn("@hyde.figure", session_toml)
+            self.assertIn("@hyde.figure(window_pos=(5, 42), register=False)", session_source)
+            self.assertIn("def Figure0(delay, fit_delay):", session_source)
+            self.assertIn("Figure0(delay, fit_delay)", session_source)
 
     def test_restore_project_session_runs_session_python_after_project_loaded(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir) / "session_restore.hy"
             project_dir.mkdir()
-            (project_dir / "session.toml").write_text("format_version = 1\n", encoding="utf-8")
-            (project_dir / "session.py").write_text("print('restore from session.py')\n", encoding="utf-8")
+            (project_dir / "session.toml").write_text(
+                "format_version = 1\nfigure_counter = 2\n",
+                encoding="utf-8",
+            )
+            (project_dir / "session.py").write_text(
+                "@hyde.figure(window_pos=(10, 20), register=False)\n"
+                "def Figure0(delay):\n"
+                "    fig = plt.figure('Figure0')\n"
+                "    ax = fig.add_subplot(111)\n"
+                "    ax.plot(delay)\n\n"
+                "Figure0(delay)\n",
+                encoding="utf-8",
+            )
             terminal_dir = project_dir / "terminal"
             terminal_dir.mkdir()
             (terminal_dir / "history.py").write_text("history = []\n", encoding="utf-8")
@@ -206,8 +219,7 @@ class TestProjectStateHelpers(unittest.TestCase):
                     return {"project_loaded": self.on_project_loaded}
 
                 def on_project_loaded(self, data):
-                    del data
-                    events.append("project_loaded")
+                    events.append(("project_loaded", data))
 
             restored_app = type("RestoredApp", (), {})()
             restored_app.ui = QtWidgets.QMainWindow()
@@ -225,9 +237,11 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             HydeApp.restore_project_session(restored_app)
 
-            self.assertEqual(events[0], "project_loaded")
+            self.assertEqual(events[0][0], "project_loaded")
+            self.assertEqual(events[0][1]["session"]["figure_counter"], 2)
             self.assertEqual(events[1][0], "session_source")
-            self.assertIn("restore from session.py", events[1][1])
+            self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", events[1][1])
+            self.assertIn("Figure0(delay)", events[1][1])
             self.assertTrue(events[1][2])
 
     def test_materialize_project_template_skips_gitkeep_files(self):
@@ -414,7 +428,7 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             client.stop_channels()
             child.terminate()
 
-    def test_save_project_persists_live_matplotlib_figures_and_axes(self):
+    def test_save_project_excludes_live_matplotlib_figures_and_axes(self):
         project_dir = self._project(
             "save_figure_project.hy",
             (
@@ -448,15 +462,16 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             object_names = {entry["name"] for entry in manifest["objects"]}
 
             self.assertIn("arr", object_names)
-            self.assertIn("fig", object_names)
-            self.assertIn("ax", object_names)
-            self.assertTrue(os.path.exists(os.path.join(project_dir, "data", "fig.pkl")))
-            self.assertTrue(os.path.exists(os.path.join(project_dir, "data", "ax.pkl")))
+            self.assertNotIn("fig", object_names)
+            self.assertNotIn("ax", object_names)
+            self.assertTrue(os.path.exists(os.path.join(project_dir, "data", "arr.npy")))
+            self.assertFalse(os.path.exists(os.path.join(project_dir, "data", "fig.pkl")))
+            self.assertFalse(os.path.exists(os.path.join(project_dir, "data", "ax.pkl")))
         finally:
             client.stop_channels()
             child.terminate()
 
-    def test_load_project_restores_pickled_matplotlib_figures_and_axes(self):
+    def test_load_project_does_not_restore_live_matplotlib_figures_and_axes(self):
         project_dir = self._project(
             "load_figure_project.hy",
             (
@@ -491,15 +506,12 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             self._collect_operation_messages(from_child, "load")
             wait_for_code_ok(
                 client,
-                "assert 'fig' in globals()\n"
-                "assert 'ax' in globals()\n"
-                "assert len(fig.axes) == 1\n"
-                "assert ax.figure is not None\n"
-                "assert fig.canvas.__class__.__name__ == 'FigureCanvasAgg'\n"
+                "import numpy as np\n"
+                "assert np.array_equal(arr, np.arange(4))\n"
+                "assert 'fig' not in globals()\n"
+                "assert 'ax' not in globals()\n"
                 "from matplotlib._pylab_helpers import Gcf\n"
-                "assert len(Gcf.get_all_fig_managers()) == 0\n"
-                "assert len(fig.axes[0].lines) == 1\n"
-                "assert len(ax.lines) == 1\n",
+                "assert len(Gcf.get_all_fig_managers()) == 0\n",
             )
         finally:
             client.stop_channels()

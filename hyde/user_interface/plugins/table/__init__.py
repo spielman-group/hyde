@@ -1,11 +1,15 @@
 from qtutils.qt import QtCore, QtWidgets
-from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
+from hyde.user_interface.plugin_tools import (
+    HydePlugin,
+    apply_saveable_window_state,
+    blank_window_icon,
+)
+from hyde.user_interface.window_macro_dialogs import prompt_to_save_window_macro
 from hyde.user_interface.window_naming import next_numbered_name
 
 from .window import (
     TableState,
     TableWidget,
-    prompt_to_save_table_macro,
 )
 
 
@@ -37,9 +41,10 @@ class TableWorkspaceService:
         self,
         names,
         target=None,
-        visible_title=None,
+        title=None,
         geometry=None,
         column_widths=None,
+        window_state=None,
     ):
         if target is not None and target in self.tables:
             table = self.tables[target]
@@ -61,7 +66,7 @@ class TableWorkspaceService:
             handle,
             names,
             services=services,
-            visible_title=visible_title,
+            title=title,
             geometry=geometry,
             column_widths=column_widths,
         )
@@ -74,11 +79,12 @@ class TableWorkspaceService:
         table.bind_subwindow(subwindow)
         self.tables[handle] = table
 
-        title = visible_title if visible_title else f"{handle}: {', '.join(names)}"
-        subwindow.setWindowTitle(title)
+        window_title = title if title else f"{handle}: {', '.join(names)}"
+        subwindow.setWindowTitle(window_title)
         subwindow.show()
+        apply_saveable_window_state(subwindow, window_state)
         subwindow.destroyed.connect(
-            lambda _=None, table_handle=handle, workspace=self: (
+            lambda *_, table_handle=handle, workspace=self: (
                 workspace._remove_table(table_handle)
             )
         )
@@ -227,18 +233,8 @@ class Plugin(HydePlugin):
         return {"table_counter": self.workspace.table_counter}
 
     def get_session_restore_source(self):
-        handles = [handle for handle, _ in self.workspace.iter_open_tables()]
-        active_handle = self.workspace.active_table_handle
-        if active_handle in handles:
-            handles = [handle for handle in handles if handle != active_handle] + [
-                active_handle
-            ]
-
         blocks = []
-        for handle in handles:
-            table = self.workspace.lookup_table(handle)
-            if table is None:
-                continue
+        for handle, table in self.workspace.iter_open_tables():
             blocks.append(table.session_restore_source().strip())
         return "\n\n".join(blocks) + ("\n" if blocks else "")
 
@@ -270,9 +266,10 @@ class Plugin(HydePlugin):
             self.workspace.open_table(
                 data.get("names", []),
                 data.get("target"),
-                visible_title=data.get("title"),
+                title=data.get("title"),
                 geometry=data.get("geometry"),
                 column_widths=data.get("column_widths"),
+                window_state=data.get("window_state"),
             )
             return
         if task == "TABLE_DATA_RESPONSE":
@@ -300,12 +297,12 @@ class Plugin(HydePlugin):
             on_trigger=self._execute_macro,
         )
 
-    def request_save_table_macro(self, table_state):
+    def request_save_table_macro(self, saveable):
         procedures_init = self.services["get_procedures_init"]()
         if not procedures_init:
             return True
-        return prompt_to_save_table_macro(
-            table_state,
+        return prompt_to_save_window_macro(
+            saveable,
             parent=self.services["ui"],
             procedures_init=procedures_init,
             reload_procedures=self.services["reload_procedures"],

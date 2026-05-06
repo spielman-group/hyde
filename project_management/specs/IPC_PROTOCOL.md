@@ -71,9 +71,10 @@ helper API. First-class figures are created through `@hyde.figure`. Those figure
 - a kernel-owned figure IR as recreation/editability truth
 - a parallel figure-local command log and optional source/AST artifacts for diagnostics
 
-Second-class Hyde-backend figures may still render live in the GUI, but they are
-live-render-only in this deployment and are not guaranteed to carry a first-class
-editable/recreatable figure IR.
+Non-decorated figures remain ordinary kernel-side matplotlib figures in this
+deployment. They do not open Hyde GUI figure windows and do not participate in the
+private figure-window `comm` service unless a future explicit promotion path is
+defined.
 
 The public `hyde.table(...)` helper also accepts optional recreation-layout kwargs:
 
@@ -258,7 +259,7 @@ inside the kernel, then emits `ENTER_NO_PROJECT_STATE`, `ACTIVATE_PROJECT`, and
 
 ### Purpose
 This lane carries figure metadata publication and semantic figure edit actions for Hyde
-figure windows.
+figure windows. Only first-class `@hyde.figure` figures participate in this lane.
 
 ### Authority model
 - the live kernel matplotlib `Figure` is the runtime truth
@@ -266,13 +267,13 @@ figure windows.
   kernel-owned figure IR attached directly to that figure
 - the GUI figure window is a viewport and event source only
 
-### First-class and second-class figures
+### First-class figure window boundary
 - first-class figures are created through `@hyde.figure`
 - a first-class figure is guaranteed to have a kernel-owned figure IR and associated
   figure-local artifacts
-- second-class Hyde-backend figures may still render live in the GUI, but they are
-  live-render-only in this deployment and are not guaranteed to participate in semantic
-  editing or IR-driven macro generation
+- non-decorated figures do not open Hyde GUI figure windows in this deployment
+- non-decorated figures therefore do not participate in semantic figure editing or
+  IR-driven graph-macro generation through the GUI figure-window path
 
 ### Figure-local kernel artifacts
 First-class figures may carry artifacts such as:

@@ -35,9 +35,9 @@ This document is a living checklist tracking the specific steps we will follow (
 - [ ] Refinement: Define the Python Terminal display policy for output originating from runtime-helper-owned silent execution.
 
 ### Feature B: Matplotlib Figure Capture
-- [ ] Spec: Refine `specs/figure_window/SPEC.md` and adjacent figure docs around the first-class `@hyde.figure` model.
-- [ ] Impl: Add the Hyde matplotlib backend with transparent instrumented matplotlib subclasses and strict 1:1 mapping between registry key, live kernel `Figure`, and GUI figure window.
-- [ ] Impl: Render all Hyde-backend figures through native MDI figure windows while keeping undecorated figures second-class live-render-only in this deployment.
+- [x] Spec: Refine `specs/figure_window/SPEC.md` and adjacent figure docs around the strict first-class `@hyde.figure` window model.
+- [ ] Impl: Add the Hyde matplotlib backend with transparent instrumented matplotlib subclasses and strict 1:1 mapping between registry key, live kernel `Figure`, and GUI figure window for first-class `@hyde.figure` figures.
+- [ ] Impl: Render first-class `@hyde.figure` figures through native MDI figure windows while keeping undecorated figures outside the Hyde window system in this deployment.
 - [ ] Impl: Attach kernel-owned figure IR and parallel command-log artifacts directly to first-class `@hyde.figure` figures.
 - [ ] Impl: Route figure render metadata and semantic figure edit actions over Jupyter `comm`, keeping the live kernel `Figure` as runtime truth and the figure IR as recreation/editability truth.
 - [ ] Impl: Add close-time graph-macro save flow and `Windows -> Graph Macros` refresh using the existing bounded macro pattern.

@@ -20,6 +20,7 @@ from matplotlib.projections import register_projection
 from hyde.features.matplotlib_features import (
     FigureCodec,
     FigureIRCodec,
+    apply_figure_state,
     figure_ir_append_trace,
     figure_ir_apply_title,
     figure_ir_default_state,
@@ -37,6 +38,21 @@ def _default_figure_title(figure, number):
     if label:
         return str(label)
     return f"Figure {number}"
+
+
+def _is_windowed_figure(figure):
+    return bool(
+        getattr(figure, "_hyde_is_first_class", False)
+        or getattr(figure, "_hyde_build_session", None) is not None
+    )
+
+
+def _display_in_ipython_terminal(figure):
+    try:
+        from IPython.display import display
+    except Exception:
+        return
+    display(figure)
 
 
 def _current_build_session():
@@ -241,24 +257,31 @@ def figure_call_source(figure, number):
 
 
 def figure_snapshot_payload(figure, number):
-    open_token = getattr(figure, "_hyde_open_token", None)
     figure_ir = getattr(figure, "_hyde_ir", None)
     live_state = getattr(figure, "_hyde_live_state", None)
     hyde_metadata = dict(getattr(figure, "_hyde_metadata", {}) or {})
-    if getattr(figure, "_hyde_is_first_class", False) and figure_ir is not None:
+    if _is_windowed_figure(figure) and figure_ir is not None:
+        call_source = None
+        save_error = None
+        tracked_names = []
+        try:
+            call_source = FigureIRCodec.state_to_python(figure_ir)
+            tracked_names = list(FigureIRCodec.tracked_names(figure_ir))
+        except Exception as exc:
+            save_error = str(exc)
         payload = {
             "default_macro_name": _default_figure_title(figure, number),
-            "call_source": FigureIRCodec.state_to_python(figure_ir),
-            "save_error": None,
+            "call_source": call_source,
+            "save_error": save_error,
             "figure_size": tuple(
                 int(value * figure.dpi) for value in figure.get_size_inches()
             ),
-            "tracked_names": list(FigureIRCodec.tracked_names(figure_ir)),
+            "tracked_names": tracked_names,
             "live_state": None,
             "figure_ir": figure_ir,
             "command_log": list(getattr(figure, "_hyde_command_log", [])),
-            "open_token": open_token,
             "hyde_metadata": hyde_metadata,
+            "is_first_class": True,
         }
         return payload
     if live_state is None:
@@ -274,8 +297,8 @@ def figure_snapshot_payload(figure, number):
         ),
         "tracked_names": [],
         "live_state": None,
-        "open_token": open_token,
         "hyde_metadata": hyde_metadata,
+        "is_first_class": False,
     }
     if live_state is not None:
         payload["call_source"] = FigureCodec.state_to_python(live_state)
@@ -412,6 +435,20 @@ def apply_figure_action(figure, action):
         return figure
     if action_type == "regenerate_from_ir":
         return regenerate_figure_from_ir(figure)
+    if action_type == "refresh_from_live_state":
+        live_state = getattr(figure, "_hyde_live_state", None)
+        if live_state is None:
+            live_state = _infer_live_state(figure, _main_namespace())
+            if live_state is not None:
+                figure._hyde_live_state = live_state
+        if live_state is None:
+            return figure
+        apply_figure_state(
+            figure,
+            live_state,
+            _main_namespace(),
+        )
+        return figure
 
     figure_ir = getattr(figure, "_hyde_ir", None)
     if figure_ir is None:
@@ -553,6 +590,10 @@ class FigureManagerHyde(FigureManagerBase):
         self._ready_to_push = True
 
     def show(self):
+        if not _is_windowed_figure(self.canvas.figure):
+            self.canvas.draw()
+            _display_in_ipython_terminal(self.canvas.figure)
+            return
         self._ensure_comm()
         self.canvas.draw()
 
@@ -592,6 +633,8 @@ class FigureManagerHyde(FigureManagerBase):
         return _default_figure_title(self.canvas.figure, self.num)
 
     def _ensure_comm(self):
+        if not _is_windowed_figure(self.canvas.figure):
+            return None
         if self._comm is not None:
             return self._comm
         if self._comm_open_count:

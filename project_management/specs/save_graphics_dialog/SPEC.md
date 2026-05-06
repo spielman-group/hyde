@@ -17,11 +17,11 @@ It is an export surface, not an editor and not a recreation-macro surface.
 
 The authoritative export source is always the live kernel matplotlib `Figure`
 associated with the active registry-backed figure window. The dialog does not export
-from GUI-local image caches and does not depend on the figure being first-class.
+from GUI-local image caches.
 
 That means:
 
-- first-class and second-class Hyde-backend figures may both be exported
+- the dialog operates on the active first-class figure window
 - export reads the live figure runtime truth
 - export does not mutate the authoritative figure IR
 
@@ -118,7 +118,8 @@ not change figure editability classification.
 - using GUI-local cached pixels as the authoritative export source
 - saving recreation macros through this dialog
 - mutating figure structure or trace styling as part of export
-- requiring `@hyde.figure` for ordinary graphics export
+- opening a GUI export surface for non-decorated figures that are outside Hyde's
+  figure-window system
 
 ## Future Work
 

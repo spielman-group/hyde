@@ -50,6 +50,3 @@ class NewTableDialog(QtWidgets.QDialog):
         if not self.table_state.normalized_state()["items"]:
             return None
         return self.table_state.python_source()
-
-    def get_visible_title(self):
-        return self.table_state.normalized_state()["settings"]["title"] or ""

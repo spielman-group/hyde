@@ -170,6 +170,11 @@ def is_excluded(name, value):
     builtins_quit = getattr(builtins, "quit", None)
     if value is builtins_exit or value is builtins_quit:
         return True
+    python_type = type(value).__name__
+    if is_matplotlib_figure_type_name(python_type):
+        return True
+    if is_matplotlib_axes_type_name(python_type):
+        return True
     return False
 
 

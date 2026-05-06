@@ -395,12 +395,7 @@ class HydeMDIContext:
 def capture_subwindow_state(subwindow):
     return {
         "visible": bool(subwindow.isVisible()),
-        "geometry": [
-            subwindow.geometry().x(),
-            subwindow.geometry().y(),
-            subwindow.geometry().width(),
-            subwindow.geometry().height(),
-        ],
+        "geometry": capture_subwindow_geometry(subwindow),
     }
 
 
@@ -409,6 +404,94 @@ def restore_subwindow_state(subwindow, info):
     if geometry:
         subwindow.setGeometry(QtCore.QRect(*geometry))
     subwindow.setVisible(bool(info.get("visible", False)))
+
+
+def capture_subwindow_geometry(subwindow):
+    geometry = subwindow.geometry()
+    if subwindow.isMinimized():
+        normal_geometry = subwindow.normalGeometry()
+        if normal_geometry.isValid() and not normal_geometry.isNull():
+            geometry = normal_geometry
+    return [
+        geometry.x(),
+        geometry.y(),
+        geometry.width(),
+        geometry.height(),
+    ]
+
+
+def capture_saveable_window_state(subwindow):
+    return "minimized" if subwindow.isMinimized() else None
+
+
+def apply_saveable_window_state(subwindow, window_state):
+    if subwindow is None or window_state != "minimized":
+        return
+    subwindow.showMinimized()
+
+
+def with_window_metadata(
+    macro_source,
+    *,
+    decorator_name,
+    register=None,
+    window_pos=None,
+    window_state=None,
+):
+    if not macro_source:
+        return macro_source
+    decorator_args = []
+    if window_pos and len(window_pos) == 2:
+        decorator_args.append(f"window_pos=({int(window_pos[0])}, {int(window_pos[1])})")
+    if window_state:
+        decorator_args.append(f"window_state={window_state!r}")
+    if register is False:
+        decorator_args.append("register=False")
+    if not decorator_args:
+        return macro_source
+    lines = macro_source.splitlines()
+    if not lines:
+        return macro_source
+    lines[0] = f"{decorator_name}({', '.join(decorator_args)})"
+    return "\n".join(lines)
+
+
+def build_window_function_source(
+    function_source,
+    *,
+    decorator_name,
+    register=None,
+    window_pos=None,
+    window_state=None,
+):
+    return with_window_metadata(
+        function_source,
+        decorator_name=decorator_name,
+        register=register,
+        window_pos=window_pos,
+        window_state=window_state,
+    )
+
+
+def build_window_restore_source(
+    function_source,
+    *,
+    handle,
+    arguments,
+    decorator_name,
+    register=False,
+    window_pos=None,
+    window_state=None,
+):
+    wrapped_source = build_window_function_source(
+        function_source,
+        decorator_name=decorator_name,
+        register=register,
+        window_pos=window_pos,
+        window_state=window_state,
+    )
+    invocation_arguments = ", ".join(arguments or ())
+    return f"{wrapped_source}\n\n{handle}({invocation_arguments})\n"
 
 
 def blank_window_icon():

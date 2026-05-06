@@ -1,32 +1,35 @@
 # Figure Window Specification
 
 ## Feature Checklist
-- [x] Open Hyde-backend matplotlib figures as native MDI figure windows.
+- [x] Open first-class `@hyde.figure` figures as native MDI figure windows.
 - [x] Treat the live kernel `Figure` as the runtime authority for draw, resize, close,
   and export.
 - [x] Treat a kernel-owned IR attached to the live figure as the recreation and
   editability authority for first-class figures.
 - [x] Keep first-class editable and recreatable figures on the `@hyde.figure` path.
-- [x] Allow all Hyde-backend figures to render live even when they are not first-class.
 - [x] Route figure-edit actions over Jupyter `comm` as semantic kernel actions.
 - [x] Support save-on-close figure macro prompts through the generic save-window
   pattern.
 - [x] Support regenerate-from-IR as an explicit debug action.
 - [ ] Support GridSpec multi-subplot figure editing.
-- [ ] Support conversion of second-class figures into first-class editable figures.
+- [ ] Define any future explicit promotion/import workflow for non-decorated figures.
 
 ## Purpose
 
-The Figure window is Hyde's native MDI viewport for live matplotlib figures owned by
-the kernel.
+The Figure window is Hyde's native MDI viewport for first-class `@hyde.figure`
+figures owned by the kernel.
 
-The runtime truth of an open Hyde figure is the live kernel-side matplotlib `Figure`
-registered in matplotlib's global figure registry. Hyde maintains a strict 1:1
-relationship between:
+The runtime truth of an open Hyde figure window is the live kernel-side matplotlib
+`Figure` registered in matplotlib's global figure registry. Hyde maintains a strict
+1:1 relationship between:
 
 - the matplotlib global registry key
 - the live kernel `Figure`
 - the GUI Figure window
+
+Only first-class `@hyde.figure` figures participate in that relationship in the
+initial deployment. Non-decorated figures remain ordinary kernel-side matplotlib
+figures and do not open Hyde figure windows.
 
 The GUI does not own canonical plot structure, artist state, or recreation source.
 For first-class figures, the recreation and editability truth is a kernel-owned IR
@@ -41,12 +44,12 @@ to the live kernel figure.
 
 ## Initial Deployment Scope
 
-The initial deployment provides a live Hyde figure window for every figure created on
-the Hyde matplotlib backend.
+The initial deployment provides a live Hyde figure window only for first-class
+`@hyde.figure` figures.
 
 It includes:
 
-- live rendering of all Hyde-backend matplotlib figures inside native MDI windows
+- live rendering of first-class `@hyde.figure` figures inside native MDI windows
 - resize redraw using the same live kernel `Figure`
 - close coordination between the MDI window and the kernel-side figure registry entry
 - export from the live kernel `Figure`
@@ -72,7 +75,7 @@ It does not include:
 
 - GUI-owned figure state as the source of redraw or recreation
 - GUI-side source rewriting for figure edits
-- first-class editability guarantees for non-`@hyde.figure` figures
+- Hyde MDI figure windows for non-`@hyde.figure` figures
 - multi-subplot GUI editing in the initial deployment
 - arbitrary artist editing beyond the supported v1 semantic surface
 
@@ -99,9 +102,11 @@ The window does not cache authoritative scientific state or canonical plot struc
 - Figure canvas: `active`
   - shows the current rendered output of the live kernel `Figure`
 - Window close button: `active`
-  - closes or hides the figure through Hyde's saveable-window policy
+  - closes the figure through Hyde's saveable-window policy
 - `Save Figure Macro...` action: `active`
   - available for first-class figures
+- `Save Graphics...` action: `active`
+  - available for the active first-class figure window
 - `Regenerate From IR` debug action: `active`
   - forces kernel-side full regeneration from the authoritative IR
 - figure-edit entry points such as trace editing: `active`
@@ -180,6 +185,7 @@ The synchronization contract is:
   artifacts for diagnostics
 - the GUI receives only the metadata and rendered output needed to display the figure
   and launch valid edits
+- only first-class `@hyde.figure` figures publish figure-window metadata over this lane
 
 Resize behavior follows this sequence:
 
@@ -201,8 +207,8 @@ Edit behavior follows this sequence:
 Close behavior follows this sequence:
 
 1. GUI-side close targets the active registry-backed figure window
-2. first-class figures prompt through the save-window path unless hidden by the
-   supported bypass gesture
+2. first-class figures prompt through the save-window path unless bypassed by the
+   supported close gesture
 3. kernel-side close removes the corresponding live figure and attached IR
 
 ## Explicit Exclusions
@@ -210,7 +216,7 @@ Close behavior follows this sequence:
 - GUI-owned canonical figure state
 - GUI-side parsing or rewriting of figure source for live edits
 - `ProcessTree` as the normal transport for figure edits
-- automatic first-class editability for every Hyde-backend figure
+- automatic Hyde figure-window creation for arbitrary non-decorated matplotlib figures
 - a general matplotlib decompiler in the initial deployment
 
 ## Future Work
@@ -219,5 +225,6 @@ Close behavior follows this sequence:
   `SubplotIR[]` shape
 - richer trace editing beyond the initial styling surface
 - additional axis and legend editing surfaces
-- conversion of second-class figures into first-class editable figures
+- any explicit import/promotion path that turns a non-decorated figure into a
+  first-class Hyde figure before it enters the window system
 - using the same IR-driven recreation path for live figure persistence at shutdown

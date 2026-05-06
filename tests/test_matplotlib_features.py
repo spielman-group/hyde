@@ -54,7 +54,7 @@ class FakeNamespaceViewService:
 
 
 class TestFigureCodec(unittest.TestCase):
-    def test_figure_state_generates_object_oriented_matplotlib_code(self):
+    def test_figure_state_generates_first_class_figure_builder_code(self):
         state = FigureState()
         state.set_title("DelayGraph")
         state.set_x_name("delay")
@@ -62,6 +62,7 @@ class TestFigureCodec(unittest.TestCase):
 
         source = state.python_source()
 
+        self.assertIn("@hyde.figure(register=False)", source)
         self.assertIn("def _hyde_figure(delay, fit_delay, raw_delay):", source)
         self.assertIn("_hyde_figure(delay, fit_delay, raw_delay)", source)
         self.assertIn("del _hyde_figure", source)
@@ -86,20 +87,17 @@ class TestFigureCodec(unittest.TestCase):
         self.assertIn("ax = fig.add_subplot(111)", macro)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
 
-    def test_figure_codec_generates_track_command(self):
+    def test_figure_codec_rejects_removed_track_command(self):
         state = FigureState()
         state.set_title("DelayGraph")
         state.set_items(["fit_delay"])
 
-        source = state.source_for_command(
-            "track",
-            figure_number=3,
-            tracked_state=state.normalized_state(),
-        )
-
-        self.assertTrue(source.startswith("hyde.track_figure(3, {"))
-        self.assertIn("'title': 'DelayGraph'", source)
-        self.assertIn("'items': ['fit_delay']", source)
+        with self.assertRaises(ValueError):
+            state.source_for_command(
+                "track",
+                figure_number=3,
+                tracked_state=state.normalized_state(),
+            )
 
 
 class TestFigurePluginDispatch(unittest.TestCase):
@@ -111,20 +109,12 @@ class TestFigurePluginDispatch(unittest.TestCase):
 
     def test_new_figure_dialog_dispatches_muted_command(self):
         executed = []
-        pending_states = []
 
         plugin = type("FakePlugin", (), {})()
         plugin.workspace = type(
             "FakeWorkspace",
             (),
-            {
-                "next_generated_title": lambda self: "Figure0",
-                "register_pending_open": (
-                    lambda self, live_state=None: (
-                        pending_states.append(live_state) or "open-token"
-                    )
-                ),
-            },
+            {"next_generated_title": lambda self: "Figure0"},
         )()
         plugin.services = {
             "execute_command": lambda code, visible=True: executed.append((code, visible))
@@ -139,34 +129,38 @@ class TestFigurePluginDispatch(unittest.TestCase):
             def exec_(self):
                 return True
 
-            def normalized_state(self):
-                return {"feature": "figure", "settings": {"title": None}, "items": ["arr"]}
+            def get_command(self, default_title=None):
+                del default_title
+                return (
+                    "@hyde.figure(register=False)\n"
+                    "def _hyde_figure(arr):\n"
+                    "    fig = plt.figure('Figure0')\n"
+                    "    ax = fig.add_subplot(111)\n"
+                    "    ax.set_title('Figure0')\n"
+                    "    ax.plot(arr, label='arr')\n"
+                    "    fig.show()\n\n"
+                    "_hyde_figure(arr)\n"
+                    "del _hyde_figure"
+                )
 
         with patch("hyde.user_interface.plugins.figure.NewFigureDialog", FakeDialog):
             self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
 
         self.assertEqual(len(executed), 1)
         self.assertFalse(executed[0][1])
+        self.assertIn("@hyde.figure(register=False)", executed[0][0])
+        self.assertIn("def _hyde_figure(arr):", executed[0][0])
+        self.assertIn("_hyde_figure(arr)", executed[0][0])
         self.assertIn("fig = plt.figure('Figure0')", executed[0][0])
-        self.assertIn("fig._hyde_open_token = 'open-token'", executed[0][0])
-        self.assertEqual(pending_states[0]["settings"]["title"], "Figure0")
 
     def test_new_figure_dialog_dispatches_requested_figure_size(self):
         executed = []
-        pending_states = []
 
         plugin = type("FakePlugin", (), {})()
         plugin.workspace = type(
             "FakeWorkspace",
             (),
-            {
-                "next_generated_title": lambda self: "Figure0",
-                "register_pending_open": (
-                    lambda self, live_state=None: (
-                        pending_states.append(live_state) or "open-token"
-                    )
-                ),
-            },
+            {"next_generated_title": lambda self: "Figure0"},
         )()
         plugin.services = {
             "execute_command": lambda code, visible=True: executed.append((code, visible))
@@ -181,22 +175,26 @@ class TestFigurePluginDispatch(unittest.TestCase):
             def exec_(self):
                 return True
 
-            def normalized_state(self):
-                return {
-                    "feature": "figure",
-                    "settings": {
-                        "title": None,
-                        "figsize": [5.0, 3.0],
-                    },
-                    "items": ["arr"],
-                }
+            def get_command(self, default_title=None):
+                del default_title
+                return (
+                    "@hyde.figure(register=False)\n"
+                    "def _hyde_figure(arr):\n"
+                    "    fig = plt.figure('Figure0', figsize=(5.0, 3.0))\n"
+                    "    ax = fig.add_subplot(111)\n"
+                    "    ax.set_title('Figure0')\n"
+                    "    ax.plot(arr, label='arr')\n"
+                    "    fig.show()\n\n"
+                    "_hyde_figure(arr)\n"
+                    "del _hyde_figure"
+                )
 
         with patch("hyde.user_interface.plugins.figure.NewFigureDialog", FakeDialog):
             self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
 
         self.assertEqual(len(executed), 1)
+        self.assertIn("@hyde.figure(register=False)", executed[0][0])
         self.assertIn("fig = plt.figure('Figure0', figsize=(5.0, 3.0))", executed[0][0])
-        self.assertEqual(pending_states[0]["settings"]["figsize"], (5.0, 3.0))
 
     def test_new_figure_dialog_defaults_to_reasonable_figure_size(self):
         dialog = NewFigureDialog({"arr": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "f"}})
@@ -322,7 +320,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_snapshot_payload_includes_hyde_figure_metadata(self):
         plt = self._configure_hyde_pyplot()
 
-        @hyde.figure(window_pos=(10, 20))
+        @hyde.figure(window_pos=(10, 20), window_state="minimized")
         def Graph0(x, y):
             fig = plt.figure("Graph0")
             ax = fig.add_subplot(111)
@@ -332,7 +330,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure = Graph0([0, 1, 2], [1, 4, 9])
         payload = figure_snapshot_payload(figure, 1)
 
-        self.assertEqual(payload["hyde_metadata"], {"window_pos": (10, 20)})
+        self.assertEqual(
+            payload["hyde_metadata"],
+            {"window_pos": (10, 20), "window_state": "minimized"},
+        )
 
     def test_snapshot_payload_keeps_undecorated_hyde_backend_figures_second_class(self):
         plt = self._configure_hyde_pyplot()
@@ -342,6 +343,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         payload = figure_snapshot_payload(figure, 1)
 
+        self.assertFalse(payload["is_first_class"])
         self.assertIsNone(payload.get("figure_ir"))
         self.assertIsNone(payload.get("command_log"))
         self.assertIn("ax.plot(np.array([1, 4, 9])", payload["call_source"])
@@ -395,6 +397,40 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         push_draw.assert_not_called()
         self.assertEqual(figure.get_label(), "Retitled")
 
+    def test_manager_shows_undecorated_figure_in_terminal_without_comm(self):
+        plt = self._configure_hyde_pyplot()
+        figure = plt.figure("Plain")
+        figure.add_subplot(111).plot([0, 1, 2], [1, 4, 9], label="y")
+        manager = figure.canvas.manager
+
+        with patch("hyde.matplotlib_backend.Comm") as comm_cls, patch(
+            "hyde.matplotlib_backend._display_in_ipython_terminal"
+        ) as display_terminal:
+            manager.show()
+
+        comm_cls.assert_not_called()
+        display_terminal.assert_called_once_with(figure)
+
+    def test_manager_opens_comm_for_decorated_figure_before_builder_returns(self):
+        plt = self._configure_hyde_pyplot()
+
+        with patch("hyde.matplotlib_backend.Comm") as comm_cls:
+            fake_comm = comm_cls.return_value
+            fake_comm.send.return_value = None
+            fake_comm.close.return_value = None
+
+            @hyde.figure(register=False)
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                fig.show()
+                return fig
+
+            Graph0([0, 1, 2], [1, 4, 9])
+
+        comm_cls.assert_called()
+
     def test_manager_destroy_closes_comm_even_if_close_payload_send_fails(self):
         figure = Figure()
         canvas = FigureCanvasHyde(figure)
@@ -444,7 +480,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def test_figure_window_refreshes_from_same_namespace_signal_as_tables(self):
-        queued = []
+        sent = []
         namespace_service = FakeNamespaceViewService(
             {
                 "delay": {"type": "ndarray", "view": "[0 1 2]"},
@@ -455,8 +491,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
                 ),
                 "namespace_view_service": namespace_service,
             },
@@ -472,12 +508,12 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(queued, [("hyde.refresh_figure(1)", True)])
+            self.assertEqual(sent, [(1, {"type": "refresh_from_live_state"})])
         finally:
             widget.close()
 
     def test_figure_window_detects_in_place_namespace_metadata_mutation(self):
-        queued = []
+        sent = []
         shared_view = ["[1 4 9]"]
         namespace_service = FakeNamespaceViewService(
             {
@@ -489,15 +525,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
                 ),
                 "namespace_view_service": namespace_service,
             },
         )
         try:
             widget.set_live_state(self._live_state())
-            queued.clear()
+            sent.clear()
             shared_view[0] = "[10 40 90]"
             namespace_service.emit(
                 {
@@ -507,7 +543,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(queued, [("hyde.refresh_figure(1)", True)])
+            self.assertEqual(sent, [(1, {"type": "refresh_from_live_state"})])
         finally:
             widget.close()
 
@@ -523,7 +559,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             widget.close()
 
     def test_figure_window_refresh_recovers_after_timed_out_request(self):
-        queued = []
+        sent = []
         namespace_service = FakeNamespaceViewService(
             {
                 "delay": {"type": "ndarray", "view": "[0 1 2]"},
@@ -534,8 +570,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
                 ),
                 "namespace_view_service": namespace_service,
             },
@@ -556,8 +592,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(len(queued), 2)
-            self.assertEqual(queued[1], ("hyde.refresh_figure(1)", True))
+            self.assertEqual(len(sent), 2)
+            self.assertEqual(sent[1], (1, {"type": "refresh_from_live_state"}))
         finally:
             widget.close()
 
@@ -698,8 +734,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_workspace_matches_pending_state_by_open_token_not_arrival_order(self):
-        tracked = []
+    def test_workspace_ignores_non_first_class_figure_payload(self):
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
         plugin = type("FakePlugin", (), {})()
@@ -711,53 +746,28 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         plugin.request_save_figure_macro = lambda saveable: True
-        plugin.track_live_figure = (
-            lambda figure_number, state: tracked.append(
-                (figure_number, state["settings"]["title"])
-            )
-        )
         workspace = FigureWorkspaceService(plugin)
-        token_a = workspace.register_pending_open(
-            live_state=self._live_state_with_title("FigureA"),
-        )
-        token_b = workspace.register_pending_open(
-            live_state=self._live_state_with_title("FigureB"),
-        )
 
-        workspace.open_or_update_figure(
-            {
-                "figure_number": 2,
-                "title": "FigureB",
-                "snapshot": {
-                    "open_token": token_b,
-                    "call_source": "fig = plt.figure('FigureB')",
-                    "figure_size": (320, 240),
-                },
-            }
-        )
-        workspace.open_or_update_figure(
+        figure = workspace.open_or_update_figure(
             {
                 "figure_number": 1,
                 "title": "FigureA",
                 "snapshot": {
-                    "open_token": token_a,
+                    "is_first_class": False,
                     "call_source": "fig = plt.figure('FigureA')",
                     "figure_size": (320, 240),
+                    "live_state": self._live_state_with_title("FigureA"),
                 },
             }
         )
         self.qapp.processEvents()
 
-        figure_b = workspace.figures[2]
-        figure_a = workspace.figures[1]
-        self.assertEqual(figure_b.snapshot_state.live_state()["settings"]["title"], "FigureB")
-        self.assertEqual(figure_a.snapshot_state.live_state()["settings"]["title"], "FigureA")
-        self.assertEqual(tracked, [(2, "FigureB"), (1, "FigureA")])
+        self.assertIsNone(figure)
+        self.assertEqual(workspace.figures, {})
         workspace.clear()
         mdi_area.close()
 
-    def test_workspace_prefers_pending_figure_ir_without_tracking_live_state(self):
-        tracked = []
+    def test_workspace_uses_snapshot_figure_ir_without_live_state_bridge(self):
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
         plugin = type("FakePlugin", (), {})()
@@ -769,20 +779,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         plugin.request_save_figure_macro = lambda saveable: True
-        plugin.track_live_figure = lambda figure_number, state: tracked.append((figure_number, state))
         workspace = FigureWorkspaceService(plugin)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
-        open_token = workspace.register_pending_open(
-            figure_ir=figure_ir,
-            live_state=self._live_state_with_title("LegacyMirror"),
-        )
 
         workspace.open_or_update_figure(
             {
                 "figure_number": 1,
                 "title": "FigureA",
                 "snapshot": {
-                    "open_token": open_token,
+                    "is_first_class": True,
                     "default_macro_name": "FigureA",
                     "call_source": "fig = plt.figure('FigureA')",
                     "figure_size": (320, 240),
@@ -795,11 +800,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure = workspace.figures[1]
         self.assertEqual(figure.snapshot_state.figure_ir()["settings"]["title"], "FigureA")
         self.assertIsNone(figure.snapshot_state.live_state())
-        self.assertEqual(tracked, [])
         workspace.clear()
         mdi_area.close()
 
-    def test_workspace_applies_snapshot_window_pos_metadata_for_new_macro_window(self):
+    def test_workspace_applies_snapshot_window_metadata_for_new_macro_window(self):
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
         plugin = type("FakePlugin", (), {})()
@@ -811,7 +815,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         plugin.request_save_figure_macro = lambda saveable: True
-        plugin.track_live_figure = lambda figure_number, state: None
         workspace = FigureWorkspaceService(plugin)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
@@ -820,11 +823,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 "figure_number": 1,
                 "title": "FigureA",
                 "snapshot": {
+                    "is_first_class": True,
                     "default_macro_name": "FigureA",
                     "call_source": "fig = plt.figure('FigureA')",
                     "figure_size": (320, 240),
                     "figure_ir": figure_ir,
-                    "hyde_metadata": {"window_pos": [30, 40]},
+                    "hyde_metadata": {
+                        "window_pos": [30, 40],
+                        "window_state": "minimized",
+                    },
                 },
             }
         )
@@ -832,6 +839,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         figure = workspace.figures[1]
         self.assertEqual(figure.capture_geometry()[:2], [30, 40])
+        self.assertTrue(figure.parentWidget().isMinimized())
         workspace.clear()
         mdi_area.close()
 
@@ -848,7 +856,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         plugin.request_save_figure_macro = lambda saveable: True
-        plugin.track_live_figure = lambda figure_number, state: None
         workspace = FigureWorkspaceService(plugin)
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
         image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
@@ -863,6 +870,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 "figure_number": 1,
                 "title": "FigureA",
                 "snapshot": {
+                    "is_first_class": True,
                     "default_macro_name": "FigureA",
                     "call_source": "fig = plt.figure('FigureA')",
                     "figure_size": (320, 240),
@@ -876,6 +884,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 "figure_number": 1,
                 "title": "FigureA",
                 "snapshot": {
+                    "is_first_class": True,
                     "default_macro_name": "FigureA",
                     "call_source": "fig = plt.figure('FigureA')",
                     "figure_size": (320, 240),
@@ -889,6 +898,42 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         figure = workspace.figures[1]
         self.assertEqual(figure.capture_geometry()[:2], [120, 130])
+        workspace.clear()
+        mdi_area.close()
+
+    def test_workspace_applies_snapshot_minimized_metadata_for_new_macro_window(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = type("FakePlugin", (), {})()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "queue_background_command": lambda code, silent=True: True,
+            "request_save_figure_macro": lambda saveable: True,
+            "get_shutting_down": lambda: False,
+        }
+        plugin.request_save_figure_macro = lambda saveable: True
+        workspace = FigureWorkspaceService(plugin)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+
+        workspace.open_or_update_figure(
+            {
+                "figure_number": 1,
+                "title": "FigureA",
+                "snapshot": {
+                    "is_first_class": True,
+                    "default_macro_name": "FigureA",
+                    "call_source": "fig = plt.figure('FigureA')",
+                    "figure_size": (320, 240),
+                    "figure_ir": figure_ir,
+                    "hyde_metadata": {"window_state": "minimized"},
+                },
+            }
+        )
+        self.qapp.processEvents()
+
+        figure = workspace.figures[1]
+        self.assertTrue(figure.parentWidget().isMinimized())
         workspace.clear()
         mdi_area.close()
 
@@ -911,6 +956,11 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure = FigureWindow(figure_number=1)
         subwindow = mdi_area.addSubWindow(figure)
         figure.bind_subwindow(subwindow)
+        subwindow.destroyed.connect(
+            lambda *_, number=1, workspace=plugin.workspace: (
+                workspace._remove_figure(number)
+            )
+        )
         subwindow.setGeometry(10, 20, 300, 220)
         plugin.workspace.figures[1] = figure
         plugin.workspace.figure_counter = 3
@@ -934,6 +984,45 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure.close()
         mdi_area.close()
 
+    def test_closed_figures_are_absent_from_session_restore_source(self):
+        plugin = Plugin({})
+        plugin.services = {
+            "queue_background_command": lambda code, silent=True: True,
+        }
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin.services.update(
+            {
+                "mdi_area": mdi_area,
+                "namespace_view_service": FakeNamespaceViewService(),
+                "request_save_figure_macro": lambda saveable: True,
+                "get_shutting_down": lambda: False,
+            }
+        )
+        payload = {
+            "figure_number": 1,
+            "title": "FigureA",
+            "snapshot": {
+                "is_first_class": True,
+                "default_macro_name": "FigureA",
+                "call_source": "fig = plt.figure('FigureA')",
+                "figure_size": (320, 240),
+                "figure_ir": figure_ir,
+                "live_state": None,
+            },
+        }
+        figure = plugin.workspace.open_or_update_figure(payload)
+        figure.parentWidget().setGeometry(10, 20, 300, 220)
+
+        self.assertIn("FigureA(delay, fit_delay, raw_delay)", plugin.get_session_restore_source())
+
+        plugin.workspace.close_figure(1)
+        self.qapp.processEvents()
+
+        self.assertEqual(plugin.get_session_restore_source(), "")
+        mdi_area.close()
+
 
 class TestBackendBootstrap(unittest.TestCase):
     def test_configure_gui_matplotlib_backend_forces_module_backend_only(self):
@@ -955,12 +1044,12 @@ class TestBackendBootstrap(unittest.TestCase):
 
 
 class TestMatplotlibPersistenceExclusion(unittest.TestCase):
-    def test_matplotlib_figure_and_axes_are_not_excluded_from_kernel_persistence(self):
+    def test_matplotlib_figure_and_axes_are_excluded_from_kernel_persistence(self):
         figure = Figure()
         axes = figure.add_subplot(111)
 
-        self.assertFalse(is_excluded("fig", figure))
-        self.assertFalse(is_excluded("ax", axes))
+        self.assertTrue(is_excluded("fig", figure))
+        self.assertTrue(is_excluded("ax", axes))
 
 
 class TestFigureRefreshHelpers(unittest.TestCase):

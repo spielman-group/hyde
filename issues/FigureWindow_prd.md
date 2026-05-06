@@ -41,8 +41,8 @@ matplotlib subclasses while preserving standard user-facing matplotlib syntax.
 
 The runtime and authoring model should be:
 
-- all Hyde-backend figures open as native MDI figure windows in the GUI
 - first-class Hyde figures are created through `@hyde.figure`
+- only first-class Hyde figures open as native MDI figure windows in the GUI
 - each first-class Hyde figure is backed by exactly one live kernel `Figure`
 - the live kernel `Figure` is the runtime truth
 - a kernel-owned canonical figure IR attached to that `Figure` is the
@@ -101,9 +101,9 @@ The backend may also attach:
 These are artifacts, not authoritative state.
 
 The command log is useful for debugging, diagnostics, replay tracing, validation, and
-future conversion of second-class figures. The captured source and AST are useful for
-debugging, unsupported-operation preservation, and future tooling. None of them outrank
-the IR once the figure exists.
+any future explicit import or promotion workflow for non-decorated figures. The
+captured source and AST are useful for debugging, unsupported-operation preservation,
+and future tooling. None of them outrank the IR once the figure exists.
 
 ## Figure Classes
 
@@ -129,20 +129,16 @@ dialects or Hyde-specific object-creation APIs for normal figure construction.
 
 ## First-Class And Second-Class Figures
 
-All Hyde-backend figures should render in Hyde figure windows through the same runtime
-backend path.
-
-However, first-class recreatable and editable figures in this deployment are only those
-created through `@hyde.figure`.
+First-class recreatable and editable figures in this deployment are those created
+through `@hyde.figure`.
 
 That means:
 
 - a first-class Hyde figure is guaranteed to have a canonical IR suitable for saved
   recreation macros and semantic GUI editing
-- a non-decorated Hyde-backend figure may still render live in the GUI, but it is a
-  second-class figure for now
-- second-class figures may later be converted into first-class figures, potentially
-  with some loss of information, but that conversion path is not part of this PRD
+- a non-decorated figure remains outside Hyde's GUI window system for now
+- any later conversion of a non-decorated figure into a first-class Hyde figure is a
+  separate explicit workflow and is not part of this PRD
 
 This PRD should optimize the architecture for first-class decorated figures.
 
@@ -390,8 +386,8 @@ It should:
 - request a proper redraw of the same live kernel figure at the settled size
 - coordinate kernel-side close with GUI-side close
 - prompt to save a recreation macro on close through the generic save-window pattern
-- support shift-click hide if the generic saveable-window behavior is enabled for
-  figures
+- support the agreed close-bypass gesture if the generic saveable-window behavior is
+  enabled for figures
 
 The settled redraw after resize must always come from the live figure object, not from a
 GUI-owned semantic figure reconstruction.
@@ -435,8 +431,8 @@ subplots -> traces`.
 1. As a user, I want to write standard matplotlib code inside a decorated Python
    function so that Hyde figures remain fully compatible with the normal matplotlib
    ecosystem.
-2. As a user, I want my Hyde figures to appear as native MDI child windows in the GUI
-   so that they integrate with the rest of Hyde.
+2. As a user, I want my first-class Hyde figures to appear as native MDI child windows
+   in the GUI so that they integrate with the rest of Hyde.
 3. As an architect, I want the GUI figure window to remain a viewport and event source
    so that canonical figure structure stays in the kernel.
 4. As a developer, I want the live kernel `Figure` to be the runtime truth so that
@@ -481,7 +477,7 @@ subplots -> traces`.
 
 ## Out Of Scope
 
-- making second-class non-decorated figures fully recreatable in this deployment
+- making non-decorated figures part of the Hyde window system in this deployment
 - inferring complete semantic dependency graphs for arbitrary undecorated matplotlib
   figures
 - exposing the private figure edit protocol as a public Hyde API

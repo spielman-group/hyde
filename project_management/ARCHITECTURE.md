@@ -207,12 +207,17 @@ Using spyder_kernels provides:
 
 ## Figures
 
-Figure windows use the live kernel-side matplotlib `Figure` as the runtime truth.
-Hyde maintains a strict 1:1 relation between:
+First-class `@hyde.figure` figures use the live kernel-side matplotlib `Figure` as the
+runtime truth. For those first-class figures, Hyde maintains a strict 1:1 relation
+between:
 
 - the matplotlib global registry key
 - the live kernel-side `Figure`
 - the GUI `FigureWindow`
+
+Non-decorated matplotlib figures remain ordinary kernel-side figures. They do not
+enter Hyde's GUI window system in this deployment and do not acquire a GUI
+`FigureWindow`.
 
 The GUI figure window is a viewport and event source only. It may own window geometry,
 focus, visibility, and transient UI state needed to emit a semantic edit request. It
@@ -234,16 +239,15 @@ Hyde also maintains figure-local auxiliary artifacts such as:
 These artifacts support diagnostics, validation, and future tooling, but they are not
 authoritative once the figure exists.
 
-All Hyde-backend figures render into native MDI figure windows through the same runtime
-backend path. However, the first-class recreatable and editable figures in this design
-are those created through `@hyde.figure`.
+Only first-class `@hyde.figure` figures render into native MDI figure windows in this
+deployment. The first-class recreatable and editable figures in this design are those
+created through `@hyde.figure`.
 
 That means:
 
 - first-class `@hyde.figure` figures are guaranteed to have a canonical figure IR
-- second-class Hyde-backend figures may still render live in the GUI, but they are
-  live-render-only for now
-- second-class figures may later be converted into first-class figures, but that is a
+- non-decorated figures remain outside Hyde's window system for now
+- any future promotion of a non-decorated figure into a first-class Hyde figure is a
   separate concern from the base architecture
 
 `@hyde.figure` decorates an ordinary Python function that builds a matplotlib figure

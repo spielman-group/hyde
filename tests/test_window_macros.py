@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 import hyde
+import numpy as np
 try:
     import matplotlib
 except ModuleNotFoundError as exc:
@@ -28,6 +29,7 @@ from hyde.user_interface.plugins.table.window_macro_store import (
     validate_macro_name,
     write_macro_source,
 )
+from unittest.mock import patch
 
 
 def build_table_macro_source(macro_name, names, title=None, geometry=None, column_widths=None):
@@ -64,10 +66,50 @@ class TestTableDecorator(unittest.TestCase):
 
         self.assertEqual(table_macro_names(), ())
 
+    def test_table_decorator_accepts_window_state_metadata(self):
+        with patch("hyde.signal_open_table") as signal_open_table:
+            hyde.gui_mode(True)
+            try:
+                @hyde.table(window_state="minimized", register=False)
+                def Table0(a):
+                    hyde.create_table(a)
+
+                Table0(np.array([1, 2, 3]))
+            finally:
+                hyde.gui_mode(False)
+
+        signal_open_table.assert_called_once()
+        self.assertEqual(signal_open_table.call_args.kwargs["window_state"], "minimized")
+
+    def test_table_decorator_can_restore_stable_handle(self):
+        with patch("hyde.signal_open_table") as signal_open_table:
+            hyde.gui_mode(True)
+            try:
+                @hyde.table(register=False)
+                def Table0(a):
+                    hyde.create_table(a, target="Table0", title="Table_Fun")
+
+                Table0(np.array([1, 2, 3]))
+            finally:
+                hyde.gui_mode(False)
+
+        signal_open_table.assert_called_once()
+        self.assertEqual(signal_open_table.call_args.args[1], "Table0")
+
+    def test_table_api_rejects_direct_imperative_use(self):
+        with self.assertRaises(TypeError):
+            hyde.table(np.array([1, 2, 3]))
+
     def test_table_decorator_rejects_keyword_only_parameters(self):
         with self.assertRaises(TypeError):
             @hyde.table
             def Table0(*, a):
+                return a
+
+    def test_table_decorator_rejects_unknown_window_state(self):
+        with self.assertRaises(TypeError):
+            @hyde.table(window_state="hidden")
+            def Table0(a):
                 return a
 
 
@@ -109,6 +151,17 @@ class TestFigureDecorator(unittest.TestCase):
             ({"name": "Graph0", "args": ["x", "y"]},),
         )
 
+    def test_figure_decorator_accepts_window_state_metadata(self):
+        @hyde.figure(window_state="minimized")
+        def Graph0(x, y):
+            return x, y
+
+        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(
+            figure_macro_entries(),
+            ({"name": "Graph0", "args": ["x", "y"]},),
+        )
+
     def test_figure_decorator_rejects_keyword_only_parameters(self):
         with self.assertRaises(TypeError):
             @hyde.figure
@@ -118,6 +171,12 @@ class TestFigureDecorator(unittest.TestCase):
     def test_figure_decorator_rejects_unknown_metadata_keywords(self):
         with self.assertRaises(TypeError):
             @hyde.figure(window_position=(10, 20))
+            def Graph0(x):
+                return x
+
+    def test_figure_decorator_rejects_unknown_window_state(self):
+        with self.assertRaises(TypeError):
+            @hyde.figure(window_state="hidden")
             def Graph0(x):
                 return x
 
@@ -152,6 +211,20 @@ class TestFigureDecorator(unittest.TestCase):
         figure = Graph0([0, 1, 2], [1, 4, 9])
 
         self.assertEqual(getattr(figure, "_hyde_metadata", {}), {"window_pos": (10, 20)})
+
+    def test_decorated_builder_attaches_window_state_metadata_to_figure(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(window_state="minimized")
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            return fig
+
+        figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        self.assertEqual(getattr(figure, "_hyde_metadata", {}), {"window_state": "minimized"})
 
     def test_decorated_builder_exposes_window_pos_metadata_before_return(self):
         plt = self._configure_pyplot()
@@ -200,6 +273,20 @@ class TestFigureDecorator(unittest.TestCase):
         self.assertEqual(figure.get_label(), "Graph0")
         self.assertTrue(getattr(figure, "_hyde_is_first_class", False))
         self.assertEqual(len(figure._hyde_ir["layout"]["subplots"]), 1)
+
+    def test_decorated_figure_label_is_the_stable_figure_handle(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Figure0(x):
+            fig = plt.figure("Figure0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, label="x")
+            return fig
+
+        figure = Figure0([0, 1, 2])
+
+        self.assertEqual(figure.get_label(), "Figure0")
 
     def test_decorated_builder_raises_when_no_figure_is_created(self):
         self._configure_pyplot()
@@ -252,7 +339,7 @@ class TestWindowMacroStore(unittest.TestCase):
         self.assertIn(END_MARKER, updated)
         self.assertIn("@hyde.table", updated)
         self.assertIn("def Table0(a, b):", updated)
-        self.assertIn("hyde.table(a, b, title='Table0')", updated)
+        self.assertIn("hyde.create_table(a, b, title='Table0')", updated)
 
     def test_insert_new_macro_preserves_optional_layout_kwargs(self):
         macro = build_table_macro_source(
@@ -296,7 +383,7 @@ class TestWindowMacroStore(unittest.TestCase):
             self.assertEqual(updated.count("def Table0("), 1)
             self.assertEqual(updated.count("def Table0(a, b):"), 1)
             self.assertIn("def Table1(a):", updated)
-            self.assertIn("hyde.table(a, b, title='Table0')", updated)
+            self.assertIn("hyde.create_table(a, b, title='Table0')", updated)
             conflict = inspect_macro_conflict(procedures_init, "Table0")
             self.assertIsNotNone(conflict)
             self.assertTrue(conflict["in_autogenerated_block"])

@@ -9,6 +9,7 @@ import functools
 import os
 import shutil
 import sys
+import contextvars
 import builtins
 import __main__
 from pathlib import Path
@@ -38,6 +39,32 @@ HYDE_DEBUG = True
 HYDE_PROJECT_DIR = None
 _ORIGINAL_BUILTINS_QUIT = getattr(builtins, "quit", None)
 _ORIGINAL_BUILTINS_EXIT = getattr(builtins, "exit", None)
+_TABLE_WINDOW_METADATA = contextvars.ContextVar(
+    "hyde_table_window_metadata",
+    default=None,
+)
+
+
+def _normalize_window_state(window_state, owner):
+    if window_state is None:
+        return None
+    if window_state != "minimized":
+        raise TypeError(
+            f"{owner} window_state must be 'minimized' when provided."
+        )
+    return "minimized"
+
+
+def _build_window_metadata(owner, *, window_pos=None, window_state=None):
+    metadata = {}
+    if window_pos is not None:
+        if not isinstance(window_pos, (list, tuple)) or len(window_pos) != 2:
+            raise TypeError(f"{owner} window_pos must be a length-2 sequence.")
+        metadata["window_pos"] = (int(window_pos[0]), int(window_pos[1]))
+    normalized_window_state = _normalize_window_state(window_state, owner)
+    if normalized_window_state is not None:
+        metadata["window_state"] = normalized_window_state
+    return metadata
 
 
 def gui_mode(enable=True):
@@ -369,104 +396,86 @@ def quit():
     raise SystemExit(0)
 
 
-def table(
+def create_table(
     *args,
     target=None,
     title=None,
     geometry=None,
     column_widths=None,
-    register=True,
+    window_state=None,
 ):
     """
-    Open or append to a Hyde table window, or register a recreation macro.
+    Open or append to a Hyde table window.
 
-    This public Hyde API supports two forms:
-
-    1. Direct call form:
-       ``hyde.table(a, b, target=..., title=..., geometry=..., column_widths=...)``
-       Opens a new table or appends to an existing one.
-    2. Decorator form:
-       ``@hyde.table``
-       Registers a parameterized table recreation macro.
-
-    Args:
-        *args: Live Python objects to include in the table, or one function in
-            decorator form.
-        target (str, optional): The unique handle of an existing table (e.g., 'Table0')
-            to which these objects should be appended. If None, a new table
-            window is created.
-        title (str, optional): A user-friendly visible title for a new table. 
-            If provided, this label is used in the window title bar.
-        geometry (tuple[int, int, int, int], optional): Saved MDI geometry for
-            recreated tables. Ignored when appending to an existing table.
-        column_widths (dict[str, int], optional): Saved table column widths keyed
-            by data-column name. Ignored when appending to an existing table.
-        register (bool, optional): In decorator form, publish the recreation
-            macro into `Windows -> Table Macros`. Use ``register=False`` for
-            internal non-registering decorators such as session restore.
-
-    Behavior:
-        - Resolves each object's top-level name in the caller's namespace by identity (`is`).
-        - Searches the caller's locals, then globals.
-        - Validates that each object is a supported 1D numeric array-like.
-        - Signals the Hyde executor to open or update a table via the ProcessTree.
-        - Registers decorated functions as table recreation macros whose
-          parameters name the live kernel objects needed to recreate the table.
-
-    Failure Modes:
-        - Raises TypeError if a positional argument is not a 1D numeric array-like.
-        - Raises TypeError if decorator form uses unsupported non-positional parameters.
-        - Raises ValueError if an object cannot be uniquely resolved to a top-level name.
+    This is the table creation/update primitive used by direct interactive
+    calls as well as saved table macros and session restore source.
     """
-    if (
-        not args
-        and target is None
-        and title is None
-        and geometry is None
-        and column_widths is None
-    ):
-        def decorator(func):
-            if register:
-                register_table_macro(func)
-                publish_table_macro_registry()
-            return func
-
-        return decorator
-
-    if (
-        len(args) == 1
-        and callable(args[0])
-        and target is None
-        and title is None
-        and geometry is None
-        and column_widths is None
-    ):
-        if register:
-            register_table_macro(args[0])
-            publish_table_macro_registry()
-        return args[0]
-
-    if not register:
-        raise TypeError("hyde.table register= is supported only in decorator form.")
-
     from .execution.helpers import resolve_names
-    
+
     # Capture the caller's frame for name resolution
     frame = inspect.currentframe().f_back
-    
+
     names = resolve_names(args, frame, validate_1d=True)
-    
+    metadata = dict(_TABLE_WINDOW_METADATA.get() or {})
+    if window_state is None:
+        window_state = metadata.get("window_state")
+    window_state = _normalize_window_state(window_state, "hyde.create_table")
+
     if HYDE_GUI:
-        # Signal the parent executor (Watchdog) to relay the open intent to the GUI
         signal_open_table(
             names,
             target,
             title=title,
             geometry=geometry,
             column_widths=column_widths,
+            window_state=window_state,
         )
 
-def figure(_func=None, *, window_pos=None, register=True):
+
+def table(_func=None, *, window_state=None, register=True):
+    """
+    Register a Hyde table recreation macro.
+
+    This public Hyde API currently supports decorator registration only:
+
+    ``@hyde.table``
+
+    Decorated functions are published into `Windows -> Table Macros` unless
+    ``register=False`` is provided. Internal restore paths may also pass
+    ``window_state='minimized'`` to restore saved GUI state.
+    """
+    metadata = _build_window_metadata(
+        "hyde.table",
+        window_state=window_state,
+    )
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapped(*wrapper_args, **wrapper_kwargs):
+            token = _TABLE_WINDOW_METADATA.set(dict(metadata))
+            try:
+                return func(*wrapper_args, **wrapper_kwargs)
+            finally:
+                _TABLE_WINDOW_METADATA.reset(token)
+
+        try:
+            wrapped.__signature__ = inspect.signature(func)
+        except (TypeError, ValueError):
+            pass
+        if register:
+            register_table_macro(wrapped)
+            publish_table_macro_registry()
+        return wrapped
+
+    if _func is None:
+        return decorator
+
+    if callable(_func):
+        return decorator(_func)
+
+    raise TypeError("hyde.table currently supports decorator registration only.")
+
+def figure(_func=None, *, window_pos=None, window_state=None, register=True):
     """
     Register a Hyde figure recreation macro.
 
@@ -476,13 +485,15 @@ def figure(_func=None, *, window_pos=None, register=True):
 
     Decorated functions are published into `Windows -> Graph Macros` after the
     procedures package reload path rebuilds the registry unless
-    ``register=False`` is provided.
+    ``register=False`` is provided. Internal restore paths may also pass
+    ``window_pos=...`` and ``window_state='minimized'`` to restore saved GUI
+    state.
     """
-    metadata = {}
-    if window_pos is not None:
-        if not isinstance(window_pos, (list, tuple)) or len(window_pos) != 2:
-            raise TypeError("hyde.figure window_pos must be a length-2 sequence.")
-        metadata["window_pos"] = (int(window_pos[0]), int(window_pos[1]))
+    metadata = _build_window_metadata(
+        "hyde.figure",
+        window_pos=window_pos,
+        window_state=window_state,
+    )
 
     def decorator(func):
         figure_metadata = dict(metadata)

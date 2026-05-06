@@ -1,11 +1,8 @@
-import copy
 import logging
-import uuid
 
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.features.matplotlib_features import FigureCodec, FigureIRCodec
 from hyde.user_interface.figure_comm import COMM_TARGET
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
 from hyde.user_interface.window_naming import next_numbered_name
@@ -17,19 +14,11 @@ from .window import FigureState, FigureWindow, prompt_to_save_figure_macro
 LOGGER = logging.getLogger("hyde")
 
 
-def _figure_state_with_default_title(state, default_title):
-    normalized = FigureCodec.normalize_state(copy.deepcopy(state))
-    if default_title and not normalized["settings"].get("title"):
-        normalized["settings"]["title"] = str(default_title)
-    return normalized
-
-
 class FigureWorkspaceService:
     def __init__(self, plugin):
         self.plugin = plugin
         self.figures = {}
         self.figure_counter = 0
-        self._pending_open_payloads = {}
 
     def next_generated_title(self):
         existing_titles = {
@@ -46,13 +35,13 @@ class FigureWorkspaceService:
     def open_or_update_figure(self, payload):
         figure_number = int(payload.get("figure_number"))
         snapshot = dict(payload.get("snapshot", {}) or {})
+        if not snapshot.get("is_first_class", False):
+            LOGGER.debug(
+                "Figure workspace ignored non-first-class figure payload for figure %s.",
+                figure_number,
+            )
+            return None
         snapshot_metadata = dict(snapshot.get("hyde_metadata", {}) or {})
-        open_token = snapshot.get("open_token")
-        pending = (
-            None
-            if open_token is None
-            else self._pending_open_payloads.pop(str(open_token), None)
-        )
         figure = self.figures.get(figure_number)
         created_new = figure is None
         if figure is None:
@@ -70,7 +59,7 @@ class FigureWorkspaceService:
             figure.bind_subwindow(subwindow)
             self.figures[figure_number] = figure
             subwindow.destroyed.connect(
-                lambda _=None, number=figure_number, workspace=self: (
+                lambda *_, number=figure_number, workspace=self: (
                     workspace._remove_figure(number)
                 )
             )
@@ -81,26 +70,10 @@ class FigureWorkspaceService:
                 subwindow.show()
 
         figure.update_payload(payload)
-        pending_figure_ir = None if pending is None else pending.get("figure_ir")
-        pending_live_state = None if pending is None else pending.get("live_state")
-        snapshot_has_figure_ir = snapshot.get("figure_ir") is not None
-        if pending_figure_ir is not None and snapshot.get("figure_ir") is None:
-            figure.snapshot_state.update(
-                default_macro_name=snapshot.get("default_macro_name"),
-                call_source=snapshot.get("call_source"),
-                save_error=snapshot.get("save_error"),
-                figure_size=snapshot.get("figure_size"),
-                tracked_names=snapshot.get("tracked_names"),
-                figure_ir=pending_figure_ir,
-                live_state=None,
-            )
-        if pending_live_state is not None and not snapshot_has_figure_ir:
-            figure.set_live_state(pending_live_state)
-            self.plugin.track_live_figure(figure_number, pending_live_state)
         if created_new:
-            figure.apply_window_pos(snapshot_metadata.get("window_pos"))
+            figure.apply_window_metadata(snapshot_metadata)
         subwindow = figure.parentWidget()
-        if subwindow is not None:
+        if subwindow is not None and snapshot_metadata.get("window_state") != "minimized":
             subwindow.setFocus()
             subwindow.raise_()
         return figure
@@ -109,22 +82,16 @@ class FigureWorkspaceService:
         figure = self.figures.get(int(figure_number))
         if figure is None:
             return
+        subwindow = figure.parentWidget()
         figure.close_from_kernel()
+        if subwindow is None or not subwindow.isVisible():
+            self._remove_figure(figure_number)
 
     def clear(self):
         for figure in list(self.figures.values()):
             figure.force_close()
         self.figures.clear()
         self.figure_counter = 0
-        self._pending_open_payloads = {}
-
-    def register_pending_open(self, *, figure_ir=None, live_state=None):
-        token = str(uuid.uuid4())
-        self._pending_open_payloads[token] = {
-            "figure_ir": copy.deepcopy(figure_ir),
-            "live_state": copy.deepcopy(live_state),
-        }
-        return token
 
     def _remove_figure(self, figure_number):
         figures = getattr(self, "figures", None)
@@ -146,23 +113,9 @@ class FigureFeatureService:
         if not dialog.exec_():
             return False
         generated_title = self.plugin.workspace.next_generated_title()
-        state = _figure_state_with_default_title(
-            dialog.normalized_state(),
-            generated_title,
-        )
-        if not state["items"]:
+        command = dialog.get_command(default_title=generated_title)
+        if not command:
             return False
-        open_token = self.plugin.workspace.register_pending_open(live_state=state)
-        command = FigureCodec.state_to_python(
-            {
-                **copy.deepcopy(state),
-                "settings": {
-                    **copy.deepcopy(state.get("settings", {})),
-                    "command": "create",
-                    "open_token": open_token,
-                },
-            }
-        )
         self.plugin.services["execute_command"](command, visible=False)
         return True
 
@@ -310,17 +263,6 @@ class Plugin(HydePlugin):
             parent=self.services["ui"],
             procedures_init=procedures_init,
             reload_procedures=self.services["reload_procedures"],
-        )
-
-    def track_live_figure(self, figure_number, state):
-        command_state = FigureState()
-        return self.services["queue_background_command"](
-            command_state.source_for_command(
-                "track",
-                figure_number=figure_number,
-                tracked_state=state,
-            ),
-            silent=True,
         )
 
     def _ensure_macro_menu(self):

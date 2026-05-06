@@ -339,8 +339,6 @@ class TableCodec(FeatureCodec):
             raise ValueError(f"Table command {command!r} requires at least one item.")
         if command == "append" and not settings["target"]:
             raise ValueError("Table append requires settings.target.")
-        if command == "open" and settings["target"] is not None:
-            raise ValueError("Table open does not support settings.target.")
         if command == "push_table_data" and not settings["request_id"]:
             raise ValueError("Table data push requires settings.request_id.")
 
@@ -400,7 +398,10 @@ class TableCodec(FeatureCodec):
 
         if command in {"open", "append"}:
             include_layout = command == "open"
-            return f"hyde.table({cls._table_python_arguments(normalized, include_layout=include_layout)})"
+            return (
+                "hyde.create_table("
+                f"{cls._table_python_arguments(normalized, include_layout=include_layout)})"
+            )
         if command == "push_table_data":
             return (
                 "hyde.execution.ipc.push_table_data("
@@ -411,13 +412,21 @@ class TableCodec(FeatureCodec):
         raise ValueError(f"Unsupported table command: {command!r}.")
 
     @classmethod
-    def state_to_macro_source(cls, state, macro_name, context=None):
+    def state_to_macro_source(
+        cls,
+        state,
+        macro_name,
+        context=None,
+        *,
+        preserve_target=False,
+    ):
         del context
         normalized = cls.validate_state(state)
         parameters = ", ".join(normalized["items"])
         macro_state = copy.deepcopy(normalized)
         macro_state["settings"]["command"] = "open"
-        macro_state["settings"]["target"] = None
+        if not preserve_target:
+            macro_state["settings"]["target"] = None
         if macro_state["settings"]["title"] is None:
             macro_state["settings"]["title"] = macro_name
         # Table recreation macros intentionally preserve saved GUI layout even

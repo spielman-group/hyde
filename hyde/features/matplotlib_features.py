@@ -55,9 +55,7 @@ class FigureCodec(FeatureCodec):
     _valid_commands = {
         "create",
         "publish_figure_macros",
-        "refresh",
         "close",
-        "track",
     }
 
     @classmethod
@@ -72,8 +70,6 @@ class FigureCodec(FeatureCodec):
                 "figsize": None,
                 "subplot_code": "111",
                 "figure_number": None,
-                "open_token": None,
-                "tracked_state": None,
             },
             "items": [],
             "ui": {},
@@ -112,14 +108,6 @@ class FigureCodec(FeatureCodec):
         settings["figure_number"] = (
             None if figure_number in (None, "") else int(figure_number)
         )
-        open_token = settings.get("open_token")
-        settings["open_token"] = None if open_token in (None, "") else str(open_token)
-        tracked_state = settings.get("tracked_state")
-        settings["tracked_state"] = (
-            None
-            if tracked_state in (None, "")
-            else cls.normalize_state(tracked_state)
-        )
         return normalized
 
     @classmethod
@@ -138,15 +126,8 @@ class FigureCodec(FeatureCodec):
         if settings["figsize"] is not None:
             if settings["figsize"][0] <= 0 or settings["figsize"][1] <= 0:
                 raise ValueError("Figure figsize values must be positive.")
-        if command in {"refresh", "close"} and not settings["figure_number"]:
+        if command == "close" and not settings["figure_number"]:
             raise ValueError(f"Figure command {command!r} requires a figure number.")
-        if command == "track":
-            if not settings["figure_number"]:
-                raise ValueError("Figure command 'track' requires a figure number.")
-            tracked_state = settings.get("tracked_state")
-            if tracked_state is None:
-                raise ValueError("Figure command 'track' requires tracked figure state.")
-            settings["tracked_state"] = cls.validate_state(tracked_state)
         if settings["subplot_code"] != "111":
             raise ValueError("Initial Hyde figure editing only supports subplot code '111'.")
         return normalized
@@ -183,8 +164,6 @@ class FigureCodec(FeatureCodec):
         if figsize is not None:
             figure_args.append(f"figsize={figsize!r}")
         lines = [f"fig = plt.figure({', '.join(figure_args)})"] if figure_args else ["fig = plt.figure()"]
-        if settings["open_token"]:
-            lines.append(f"fig._hyde_open_token = {settings['open_token']!r}")
         lines.append(f"ax = fig.add_subplot({settings['subplot_code']})")
         if title:
             lines.append(f"ax.set_title({title!r})")
@@ -213,7 +192,7 @@ class FigureCodec(FeatureCodec):
     def wrapped_creation_lines(cls, state, helper_name="_hyde_figure"):
         normalized = cls.validate_state(state)
         parameters = list(cls.tracked_names(normalized))
-        lines = [f"def {helper_name}({', '.join(parameters)}):"]
+        lines = [f"@hyde.figure(register=False)", f"def {helper_name}({', '.join(parameters)}):"]
         lines.extend(f"    {line}" for line in cls._creation_lines(normalized))
         lines.append(f"{helper_name}({', '.join(parameters)})")
         lines.append(f"del {helper_name}")
@@ -228,16 +207,8 @@ class FigureCodec(FeatureCodec):
             return "\n".join(cls.wrapped_creation_lines(normalized))
         if command == "publish_figure_macros":
             return "hyde.recreation_registry.publish_figure_macro_registry()"
-        if command == "refresh":
-            return f"hyde.refresh_figure({normalized['settings']['figure_number']})"
         if command == "close":
             return f"plt.close({normalized['settings']['figure_number']})"
-        if command == "track":
-            return (
-                "hyde.track_figure("
-                f"{normalized['settings']['figure_number']}, "
-                f"{normalized['settings']['tracked_state']!r})"
-            )
         raise ValueError(f"Unsupported figure command: {command!r}.")
 
     @classmethod

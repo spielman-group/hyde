@@ -26,10 +26,27 @@ class TestTableCodec(unittest.TestCase):
 
         source = state.python_source()
 
-        self.assertIn("hyde.table(delay2, fit_delay2", source)
+        self.assertIn("hyde.create_table(delay2, fit_delay2", source)
         self.assertIn("title='Table0'", source)
         self.assertIn("geometry=(5, 42, 510, 242)", source)
         self.assertIn("column_widths={'delay2': 140, 'fit_delay2': 262}", source)
+
+    def test_table_recreation_sources_clear_target_for_macros_but_preserve_it_for_session_restore(self):
+        state = TableState()
+        state.set_items(["delay2", "fit_delay2"])
+        state.set_target("Table0")
+        state.set_title("Table_Fun")
+        state.set_geometry((5, 42, 510, 242))
+        state.set_column_widths({"delay2": 140, "fit_delay2": 262})
+
+        macro = state.macro_source("Table0")
+        session_function = state.recreation_function_source(
+            "Table0",
+            preserve_target=True,
+        )
+
+        self.assertNotIn("target='Table0'", macro)
+        self.assertIn("target='Table0'", session_function)
 
 class TestMutationCodec(unittest.TestCase):
     def test_mutation_state_generates_edit_append_new_array_and_delete_commands(self):
@@ -63,7 +80,7 @@ class TestSaveWindowDialog(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
-    def test_save_window_dialog_uses_provided_table_state(self):
+    def test_save_window_dialog_uses_provided_saveable(self):
         from hyde.user_interface.plugins.table.window import (
             SaveWindowDialog,
             TableState,
@@ -75,7 +92,7 @@ class TestSaveWindowDialog(unittest.TestCase):
         state.set_geometry((5, 42, 510, 242))
         state.set_column_widths({"fit_delay2": 262})
 
-        dialog = SaveWindowDialog(table_state=state)
+        dialog = SaveWindowDialog(saveable=state)
         try:
             self.assertEqual(dialog.macro_name(), "Table_Fun")
             dialog.ui.nameEdit.setText("Table_Save")
@@ -118,8 +135,8 @@ class FakeTablePlugin:
         self.prompted_states = []
         self.save_result = save_result
 
-    def request_save_table_macro(self, table_state):
-        self.prompted_states.append(table_state)
+    def request_save_table_macro(self, saveable):
+        self.prompted_states.append(saveable)
         return self.save_result
 
 
@@ -353,13 +370,13 @@ class TestTableWorkspaceService(unittest.TestCase):
         self.assertIsNone(workspace.lookup_table("Table0"))
         self.assertEqual(mdi_area.subWindowList(), [])
 
-    def test_new_tables_keep_unique_handles_when_visible_titles_match(self):
+    def test_new_tables_keep_unique_handles_when_titles_match(self):
         mdi_area = QtWidgets.QMdiArea()
         plugin = FakeTablePlugin(mdi_area, save_result=True)
         workspace = TableWorkspaceService(plugin)
 
-        first = workspace.open_table(["a"], visible_title="Shared")
-        second = workspace.open_table(["b"], visible_title="Shared")
+        first = workspace.open_table(["a"], title="Shared")
+        second = workspace.open_table(["b"], title="Shared")
 
         self.assertEqual(first.handle, "Table0")
         self.assertEqual(second.handle, "Table1")
@@ -369,8 +386,33 @@ class TestTableWorkspaceService(unittest.TestCase):
         workspace.clear()
         self._drain_events()
 
+    def test_open_table_restores_minimized_state_from_kwarg(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = FakeTablePlugin(mdi_area, save_result=True)
+        workspace = TableWorkspaceService(plugin)
+
+        table = workspace.open_table(
+            ["a"],
+            title="Table_Fun",
+            geometry=(5, 42, 510, 242),
+            window_state="minimized",
+        )
+        self._drain_events()
+
+        self.assertEqual(
+            table.table_state.normalized_state()["settings"]["geometry"],
+            (5, 42, 510, 242),
+        )
+        self.assertTrue(table.parentWidget().isMinimized())
+
+        workspace.clear()
+        mdi_area.close()
+        self._drain_events()
+
     def test_table_plugin_session_routes_keep_tables_out_of_toml_and_emit_restore_source(self):
         mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
         plugin = Plugin({})
         plugin.services = {
             "mdi_area": mdi_area,
@@ -381,28 +423,83 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         table = plugin.workspace.open_table(
             ["a", "b"],
-            visible_title="Table_Fun",
+            title="Table_Fun",
             geometry=(5, 42, 510, 242),
             column_widths={"a": 120, "b": 260},
         )
         table.ui.tableView.setColumnWidth(1, 120)
         table.ui.tableView.setColumnWidth(2, 260)
         table.capture_layout_state()
-        plugin.workspace.active_table_handle = "Table0"
+        subwindow = table.parentWidget()
+        subwindow.show()
+        self.qapp.processEvents()
+        subwindow.showMinimized()
+        self.qapp.processEvents()
 
         toml_data = plugin.get_session_toml_data()
         session_source = plugin.get_session_restore_source()
 
         self.assertEqual(toml_data, {"table_counter": 1})
-        self.assertIn("@hyde.table(register=False)", session_source)
         self.assertIn("def Table0(a, b):", session_source)
         self.assertIn("Table0(a, b)", session_source)
         self.assertIn("title='Table_Fun'", session_source)
+        self.assertIn("target='Table0'", session_source)
         self.assertIn("geometry=(5, 42, 510, 242)", session_source)
         self.assertIn("column_widths={'a': 120, 'b': 260}", session_source)
+        self.assertIn(
+            "@hyde.table(window_state='minimized', register=False)",
+            session_source,
+        )
+        self.assertNotIn("hidden=", session_source)
+        self.assertNotIn("visible=", session_source)
 
         plugin.workspace.clear()
         mdi_area.close()
+
+    def test_table_plugin_session_restore_source_preserves_minimized_metadata(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = Plugin({})
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "queue_background_command": lambda code, silent=True: True,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "get_current_project_dir": lambda: "/tmp/demo.hy",
+        }
+
+        table = plugin.workspace.open_table(
+            ["a", "b"],
+            title="Table_Fun",
+            geometry=(5, 42, 510, 242),
+            column_widths={"a": 120, "b": 260},
+        )
+        table.parentWidget().show()
+        self.qapp.processEvents()
+        table.parentWidget().showMinimized()
+        self.qapp.processEvents()
+
+        session_source = plugin.get_session_restore_source()
+
+        self.assertIn(
+            "@hyde.table(window_state='minimized', register=False)",
+            session_source,
+        )
+
+        plugin.workspace.clear()
+        mdi_area.close()
+
+    def test_workspace_opens_minimized_table_window(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = FakeTablePlugin(mdi_area, save_result=True)
+        workspace = TableWorkspaceService(plugin)
+
+        table = workspace.open_table(["a"], window_state="minimized")
+        self.qapp.processEvents()
+
+        self.assertTrue(table.parentWidget().isMinimized())
+
+        workspace.clear()
+        self._drain_events()
 
     def test_subwindow_close_honors_table_prompt_cancel(self):
         mdi_area = QtWidgets.QMdiArea()

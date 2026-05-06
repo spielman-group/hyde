@@ -1,19 +1,25 @@
 import copy
+import logging
 import os
+import pprint
 import uuid
 
+import hyde
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_features import TableCodec
 from hyde.user_interface.base import HydeGuiState, MutationState
 from hyde.user_interface.namespace_tracking import tracked_namespace_signature
-from hyde.user_interface.window_macro_dialogs import (
-    SaveWindowDialog as GenericSaveWindowDialog,
-    prompt_to_save_window_macro,
+from hyde.user_interface.plugin_tools import (
+    build_window_function_source,
+    build_window_restore_source,
+    capture_saveable_window_state,
+    capture_subwindow_geometry,
 )
-from hyde.user_interface.window_macro_store import (
-    MacroStoreError,
+from hyde.user_interface.window_macro_dialogs import (
+    SaveWindowDialog,
+    prompt_to_save_window_macro,
 )
 
 
@@ -92,6 +98,34 @@ class TableState(HydeGuiState):
     def default_macro_name(self):
         settings = self.normalized_state()["settings"]
         return settings["title"] or settings["target"] or "Table"
+
+    def recreation_function_source(
+        self,
+        macro_name,
+        *,
+        preserve_target=False,
+        target=None,
+    ):
+        state = copy.deepcopy(self._state)
+        if target is not None:
+            state["settings"]["target"] = target
+        normalized = self.codec.validate_state(state)
+        source = self.codec.state_to_macro_source(
+            state,
+            macro_name,
+            preserve_target=preserve_target,
+        )
+        if hyde.HYDE_DEBUG:
+            logging.getLogger("hyde").debug(
+                "[Hyde state] %s\nstate:\n%s\npython:\n%s",
+                type(self).__name__,
+                pprint.pformat(normalized, sort_dicts=True),
+                source,
+            )
+        return source
+
+    def macro_source(self, macro_name):
+        return self.recreation_function_source(macro_name)
 
 
 class TableViewModel(QtCore.QAbstractTableModel):
@@ -202,7 +236,7 @@ class TableWidget(QtWidgets.QWidget):
         handle,
         names,
         services=None,
-        visible_title=None,
+        title=None,
         geometry=None,
         column_widths=None,
         *args,
@@ -214,7 +248,7 @@ class TableWidget(QtWidgets.QWidget):
         self.services = dict(services or {})
         self.table_state = TableState()
         self.table_state.set_items(self.names)
-        self.table_state.set_title(visible_title or handle)
+        self.table_state.set_title(title or handle)
         self.table_state.set_geometry(geometry)
         self.table_state.set_column_widths(column_widths or {})
         self.mutation_state = MutationState()
@@ -230,6 +264,7 @@ class TableWidget(QtWidgets.QWidget):
         self._closed = False
         self._restore_layout_requested = bool(geometry or column_widths)
         self._subwindow = None
+        self._last_normal_geometry = None
         self._pending_created_columns = []
         self._tracked_namespace_state = self._current_tracked_namespace_state()
 
@@ -276,6 +311,7 @@ class TableWidget(QtWidgets.QWidget):
         geometry = self.table_state.normalized_state()["settings"]["geometry"]
         if geometry is not None:
             subwindow.setGeometry(QtCore.QRect(*geometry))
+        self._remember_subwindow_geometry()
         self.capture_layout_state()
 
     def _queue_silent_command(self, code):
@@ -538,25 +574,52 @@ class TableWidget(QtWidgets.QWidget):
 
     def capture_layout_state(self):
         if self._subwindow is not None:
-            geometry = self._subwindow.geometry()
-            self.table_state.set_geometry(
-                [geometry.x(), geometry.y(), geometry.width(), geometry.height()]
-            )
+            if not self._subwindow.isMinimized():
+                self._remember_subwindow_geometry()
+            if self._last_normal_geometry is not None:
+                self.table_state.set_geometry(self._last_normal_geometry)
         widths = {}
         for column, name in enumerate(self.names, start=1):
             widths[name] = self.ui.tableView.columnWidth(column)
         self.table_state.set_column_widths(widths)
 
+    def _remember_subwindow_geometry(self):
+        if self._subwindow is None or self._subwindow.isMinimized():
+            return
+        self._last_normal_geometry = capture_subwindow_geometry(self._subwindow)
+
+    def window_state(self):
+        if self._subwindow is None:
+            return None
+        return capture_saveable_window_state(self._subwindow)
+
+    def default_macro_name(self):
+        return self.table_state.default_macro_name()
+
+    def window_handle(self):
+        return self.handle
+
+    def macro_source(self, macro_name):
+        self.capture_layout_state()
+        return build_window_function_source(
+            self.table_state.recreation_function_source(macro_name),
+            decorator_name="@hyde.table",
+            window_state=self.window_state(),
+        )
+
     def session_restore_source(self):
         self.capture_layout_state()
-        function_source = self.table_state.macro_source(self.handle)
-        function_source = function_source.replace(
-            "@hyde.table",
-            "@hyde.table(register=False)",
-            1,
+        return build_window_restore_source(
+            self.table_state.recreation_function_source(
+                self.window_handle(),
+                preserve_target=True,
+                target=self.window_handle(),
+            ),
+            handle=self.window_handle(),
+            arguments=self.names,
+            decorator_name="@hyde.table",
+            window_state=self.window_state(),
         )
-        arguments = ", ".join(self.names)
-        return f"{function_source}\n\n{self.handle}({arguments})\n"
 
     def _on_value_text_edited(self, text):
         del text
@@ -756,7 +819,7 @@ class TableWidget(QtWidgets.QWidget):
         request_save_table_macro = self.services.get("request_save_table_macro")
         if request_save_table_macro is not None:
             self.capture_layout_state()
-            if not request_save_table_macro(self.table_state):
+            if not request_save_table_macro(self):
                 event.ignore()
                 return
 
@@ -776,21 +839,3 @@ class TableWidget(QtWidgets.QWidget):
                 )
         except Exception:
             pass
-
-
-class SaveWindowDialog(GenericSaveWindowDialog):
-    def __init__(self, table_state, parent=None):
-        self.table_state = table_state
-        super().__init__(saveable=table_state, parent=parent)
-
-
-def prompt_to_save_table_macro(table_state, parent, procedures_init, reload_procedures):
-    try:
-        return prompt_to_save_window_macro(
-            saveable=table_state,
-            parent=parent,
-            procedures_init=procedures_init,
-            reload_procedures=reload_procedures,
-        )
-    except MacroStoreError:
-        return False
