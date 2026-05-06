@@ -71,12 +71,6 @@ class PythonTerminalService:
         widget = self.ensure_widget()
         widget.execute(code, hidden=False)
 
-    def execute_hidden(self, code, silent=True):
-        kernel_runtime_service = self.plugin.services.get("kernel_runtime_service")
-        if kernel_runtime_service is None:
-            return False
-        return bool(kernel_runtime_service.execute(code, silent=silent))
-
     def history_entries(self):
         return list(self._history_entries)
 
@@ -133,10 +127,7 @@ class Plugin(HydePlugin):
         ]
 
     def get_services(self):
-        return {
-            "visible_terminal_service": self.python_terminal_service,
-            "python_execution_service": self.python_terminal_service,
-        }
+        return {"visible_terminal_service": self.python_terminal_service}
 
     def create_widget(self, parent=None, data=None):
         del data

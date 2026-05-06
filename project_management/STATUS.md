@@ -18,7 +18,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 ### Runtime
 - GUI owns presentation, menus, watchers, and plugin state.
 - Kernel owns scientific state and live figures.
-- Runtime helper performs silent execution through the shared frontend client.
+- The kernel-runtime plugin owns the shared frontend client plus hidden execution.
+- Runtime helper handles Lane 1 control messages and kernel-lifecycle watching.
 
 ### Tables
 - `hyde.create_table(...)` is the imperative API.
@@ -43,7 +44,7 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Visible command history saves to `terminal/history.py`.
 
 ## Remaining Near-Term Gaps
-- define the final Python Terminal output policy for silent runtime-helper execution
+- define the final Python Terminal output policy for silent kernel-runtime execution
 - expand broader table interaction coverage
 - continue figure-edit surface growth from the existing first-class figure model
 

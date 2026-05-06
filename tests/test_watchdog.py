@@ -396,6 +396,78 @@ class TestRuntimeArchitecture(unittest.TestCase):
             ],
         )
 
+    def test_kernel_runtime_plugin_shutdown_waits_then_terminates_running_process(self):
+        calls = []
+        timer_delays = []
+
+        class FakeFrontendKernelService:
+            def __init__(self, connection_file, parent=None):
+                self.connection_file = connection_file
+                self.parent = parent
+                self.ready = FakeSignal()
+
+            def stop(self):
+                calls.append(("frontend_stop",))
+
+            def shutdown_kernel(self, reply=False):
+                calls.append(("shutdown_kernel", reply))
+
+        class RunningProcess:
+            def __init__(self):
+                self.terminated = False
+
+            def poll(self):
+                return 0 if self.terminated else None
+
+            def terminate(self):
+                calls.append(("terminate",))
+                self.terminated = True
+
+        plugin = KernelRuntimePlugin({})
+        plugin.services = {
+            "ui": object(),
+            "process_tree": type("UnusedProcessTree", (), {})(),
+            "emit_plugin_event": lambda name, data=None: None,
+            "on_kernel_ready": lambda: None,
+            "on_kernel_crashed": lambda: None,
+            "enter_no_project_state": lambda: None,
+            "activate_project": lambda path: None,
+            "on_project_state_result": lambda data: None,
+            "request_gui_quit": lambda: None,
+            "get_shutting_down": lambda: True,
+            "finalize_quit": lambda: calls.append(("finalize_quit",)),
+        }
+        plugin.frontend_kernel_service = FakeFrontendKernelService("/tmp/kernel.json")
+        plugin.runtime_helper = type(
+            "Helper", (), {"stop": lambda self: calls.append(("helper_stop",))}
+        )()
+        plugin.kernel_process = RunningProcess()
+
+        with patch(
+            "hyde.user_interface.plugins.kernel_runtime.time.monotonic",
+            side_effect=[100.0, 100.0, 102.5],
+        ):
+            with patch(
+                "hyde.user_interface.plugins.kernel_runtime.QtCore.QTimer.singleShot",
+                side_effect=lambda delay, fn: (
+                    timer_delays.append(delay),
+                    fn(),
+                )[-1],
+            ):
+                plugin.on_request_runtime_shutdown({})
+
+        self.assertEqual(timer_delays, [0, 50])
+        self.assertEqual(
+            calls,
+            [
+                ("helper_stop",),
+                ("shutdown_kernel", False),
+                ("frontend_stop",),
+                ("terminate",),
+                ("finalize_quit",),
+            ],
+        )
+
     def test_hyde_procedure_change_uses_hidden_execution_service(self):
         queued = []
         dummy_app = type("DummyApp", (), {})()

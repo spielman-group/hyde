@@ -14,20 +14,21 @@
 
 ### Processes
 - **GUI process**: owns the MDI shell, plugin system, file watcher, lyse-compatible
-  listener, shared frontend kernel client, and the runtime-helper thread.
+  listener, the kernel-runtime plugin, the shared frontend kernel client, and the
+  runtime-helper thread.
 - **Kernel process**: `spyder_kernels` IPython kernel. It owns the authoritative
   namespace and live scientific state.
-- **Runtime helper thread**: GUI-owned queue consumer for silent execution and kernel
-  lifecycle fan-out. It reuses the shared frontend kernel client rather than opening a
-  second frontend execution session.
+- **Runtime helper thread**: GUI-owned Lane 1 control relay plus kernel-lifecycle
+  watcher. It does not own silent execution.
 
 ### IPC lanes
 - **Lane 1: control**. `zprocess.ProcessTree` carries orchestration plus the narrow
   implemented table relays (`OPEN_TABLE_REQUEST`, `TABLE_DATA_RESPONSE`, project-state
   notifications).
 - **Lane 2: execution and metadata**. Standard Jupyter execution plus Jupyter `comm`
-  channels carry visible commands, silent background execution, Spyder namespace view,
-  and figure-window metadata/edit traffic.
+  channels carry visible commands, silent background execution through the
+  kernel-runtime plugin's shared frontend client, Spyder namespace view, and
+  figure-window metadata/edit traffic.
 
 ## Public Hyde Surface
 
@@ -91,8 +92,8 @@ when a project is loaded.
 - Embedded `RichJupyterWidget`.
 - Uses the shared frontend `QtKernelClient`.
 - User-entered commands are visible.
-- Runtime-helper-owned work executes with `silent=True` and must not consume visible
-  prompt history.
+- Kernel-runtime-owned hidden work executes with `silent=True` and must not consume
+  visible prompt history.
 
 ### Python Variables
 - Uses Spyder's namespace-view comm path.

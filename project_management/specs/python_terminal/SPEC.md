@@ -6,8 +6,8 @@
 - [x] Use standard rich IPython prompt behavior rather than a separate custom entry widget.
 - [x] Support normal user-entered execution through the visible Python Terminal session.
 - [x] Keep `procedures/__init__.py` startup/reload execution out of the GUI session.
-- [x] Mask runtime-helper-driven `procedures/__init__.py` input at the kernel protocol level with `silent=True`.
-- [ ] Show runtime-helper-session output in the Python Terminal without echoing runtime-helper input. Note: this is likely a backend requirement presented to the user via the Python Terminal.
+- [x] Mask kernel-runtime-owned `procedures/__init__.py` input at the kernel protocol level with `silent=True`.
+- [ ] Show kernel-runtime-session output in the Python Terminal without echoing kernel-runtime input. Note: this is likely a backend requirement presented to the user via the Python Terminal.
 - [ ] Verify exact startup appearance is determined from the stdout produced while `procedures/__init__.py` runs, followed by the first visible prompt `In [1]:`.
 - [ ] Document and implement the final policy for other non-user kernel output while keeping first-class figure redraw and edit traffic out of the Python Terminal.
 
@@ -16,12 +16,12 @@
 - The Python Terminal is a plain `RichJupyterWidget` wrapper in `hyde/user_interface/plugins/python_terminal/__init__.py`.
 - The GUI owns one shared frontend `QtKernelClient` in `frontend_kernel.py`, loads `kernel-hyde.json`, starts the normal Jupyter channels, and exposes that client to the Python Terminal and other frontend services.
 - User-entered commands travel directly from the GUI to the kernel over that shared frontend client session.
-- `procedures/__init__.py` execution is owned by the GUI-owned runtime helper, which reuses the shared frontend client for silent execution instead of opening a second frontend execution session.
-- Input masking for runtime-helper-driven `procedures/__init__.py` execution is implemented at the kernel protocol level with `silent=True`.
+- `procedures/__init__.py` execution is owned by the kernel-runtime plugin, which reuses the shared frontend client for silent execution instead of opening a second frontend execution session.
+- Input masking for kernel-runtime-driven `procedures/__init__.py` execution is implemented at the kernel protocol level with `silent=True`.
 - The Python Terminal is inaccessible in Hyde's explicit no-project state and becomes available only after a project is activated.
 - While `hyde.HYDE_GUI` is true, `quit` / `quit()` / `exit` / `exit()` are rebound in the kernel namespace to `hyde.quit()` so terminal-driven quit follows Hyde's orderly shutdown path.
 - First-class figure-window render, metadata, and semantic edit traffic does not route
-  through the runtime helper and does not appear in the Python Terminal as synthetic
+  through the kernel-runtime hidden execution path and does not appear in the Python Terminal as synthetic
   input. That traffic uses the dedicated figure `comm` path defined by the figure
   feature.
 
@@ -48,14 +48,14 @@
 - These commands are visible in the Python Terminal and participate in normal IPython history/prompt numbering.
 
 ### Package Startup and Reload
-- Initial loading and reload of `procedures/__init__.py` are owned by the GUI-owned runtime helper, not the Python Terminal.
-- The runtime helper reuses the shared frontend client through `FrontendKernelService`.
-- The runtime helper executes the canonical package initialization string with `silent=True`, so the kernel does not emit `execute_input` for that request and does not consume the visible prompt history.
-- File changes under `procedures/` trigger the same runtime-helper execution path as initial load.
+- Initial loading and reload of `procedures/__init__.py` are owned by the kernel-runtime plugin, not the Python Terminal.
+- The kernel-runtime plugin reuses the shared frontend client through `FrontendKernelService`.
+- The kernel-runtime plugin executes the canonical package initialization string with `silent=True`, so the kernel does not emit `execute_input` for that request and does not consume the visible prompt history.
+- File changes under `procedures/` trigger the same kernel-runtime execution path as initial load.
 
 ### Figure Traffic
 - Opening, redrawing, and editing first-class `@hyde.figure` figures is not a
-  runtime-helper workflow.
+  kernel-runtime background-execution workflow.
 - Once a first-class figure exists, routine GUI edits are private semantic `comm`
   actions against the figure feature's IR rather than visible terminal commands. For
   this feature, Hyde keeps that IR kernel-owned and attached to the live figure.

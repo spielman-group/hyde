@@ -53,10 +53,26 @@ class KernelRuntimeService:
         return True
 
 
+class PythonExecutionService:
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def execute_hidden(self, code, silent=True):
+        return self.plugin.execute_frontend(code, silent=silent)
+
+    def execute_visible(self, code):
+        visible_terminal_service = self.plugin.services.get("visible_terminal_service")
+        if visible_terminal_service is None:
+            return False
+        visible_terminal_service.execute_visible(code)
+        return True
+
+
 class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.kernel_runtime_service = KernelRuntimeService(self)
+        self.python_execution_service = PythonExecutionService(self)
         self.frontend_kernel_service = None
         self.runtime_helper = None
         self.kernel_to_child = None
@@ -69,6 +85,7 @@ class Plugin(HydePlugin):
     def get_services(self):
         return {
             "kernel_runtime_service": self.kernel_runtime_service,
+            "python_execution_service": self.python_execution_service,
         }
 
     def on_setup_complete(self, data=None):
