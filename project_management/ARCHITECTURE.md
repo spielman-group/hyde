@@ -124,6 +124,7 @@ when a project is loaded.
 - Shell infrastructure lives under `hyde.user_interface.main`.
 - Shared plugin helpers live in `hyde.user_interface.plugin_tools`.
 - Only plugin packages are discovered by the plugin manager.
+- **Strict Boundary Rule**: The core shell (`HydeApp`) must provide ZERO wrapper methods for plugin services (e.g. no `HydeApp.execute_command`). Plugins must consume registered services directly from the plugin manager. Providing shell wrappers over plugin logic is a boundary issue in disguise.
 
 ## Design Rule For New Work
 

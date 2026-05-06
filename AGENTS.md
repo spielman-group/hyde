@@ -11,6 +11,7 @@ Read this file before changing the Hyde codebase.
 ## Required Docs
 Review these before coding:
 - `project_management/ARCHITECTURE.md`
+- `project_management/IR-CONTROL.md`
 - `project_management/STYLE.md`
 - `project_management/PLAN.md`
 - `project_management/STATUS.md`
@@ -27,6 +28,9 @@ Use `project_management/specs/` only for the feature you are touching.
 
 For first-class figures, routine editing is the deliberate exception: use the existing
 semantic figure `comm` path rather than GUI-generated matplotlib source.
+
+For command-emitting GUI surfaces or GUI-side lowering/state work, follow
+`project_management/IR-CONTROL.md`.
 
 ## Working Rules
 - Use feature branches for feature work.

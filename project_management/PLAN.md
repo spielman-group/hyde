@@ -20,5 +20,4 @@
 - release packaging and announcement
 
 ## Rule For Agents
-Work from the active remaining items first. Do not reopen completed architectural work
-unless the user explicitly asks for a redesign.
+Work from the active remaining items first. Do not reopen completed architectural work unless the user explicitly asks for a redesign.

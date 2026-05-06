@@ -14,5 +14,4 @@
 
 ## Default Bias
 - Prefer the smallest clear change.
-- Avoid extra abstractions, compatibility shims, and speculative infrastructure unless
-  explicitly required.
+- Avoid extra abstractions, compatibility shims, and speculative infrastructure unless explicitly required.
