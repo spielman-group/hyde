@@ -1,10 +1,7 @@
 import copy
-import logging
 import os
-import pprint
 import uuid
 
-import hyde
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
@@ -105,20 +102,11 @@ class TableState(HydeGuiState):
         state = copy.deepcopy(self._state)
         if target is not None:
             state["settings"]["target"] = target
-        normalized = self.codec.validate_state(state)
-        source = self.codec.state_to_macro_source(
+        return self.codec.state_to_macro_source(
             state,
             macro_name,
             preserve_target=preserve_target,
         )
-        if hyde.HYDE_DEBUG:
-            logging.getLogger("hyde").debug(
-                "[Hyde state] %s\nstate:\n%s\npython:\n%s",
-                type(self).__name__,
-                pprint.pformat(normalized, sort_dicts=True),
-                source,
-            )
-        return source
 
     def macro_source(self, macro_name):
         return self.recreation_function_source(macro_name)

@@ -187,6 +187,52 @@ Project session restore uses the same lower-level recreation-source builder in
 `session.py`, wrapped as `@hyde.figure(..., register=False)` and invoked after project
 activation so first-class figures reopen through the same figure-building path.
 
+## Default-Diff Lowering
+
+First-class figures carry two distinct kernel-owned figure-edit artifacts:
+
+- `fig._hyde_ir`: the canonical semantic figure state used for editing and regeneration
+- `fig._hyde_defaults`: a snapshot of the effective matplotlib defaults that were
+  current in the kernel for this figure family when the figure was built or refreshed
+
+`fig._hyde_defaults` is not a GUI-owned guess and not a hardcoded Hyde table of
+matplotlib defaults. It is a kernel-side snapshot of the current effective defaults in
+the running matplotlib environment, including active rcParams, style sheets, and the
+current property cycler semantics that affect ordinary first-class figure lowering.
+
+This defaults snapshot exists for three reasons:
+
+1. user-facing source should look like code a human would write against the current
+   matplotlib defaults rather than a full serialization of every effective property
+2. figure-edit dialogs must seed their controls from "defaults plus current
+   non-default overrides" rather than from Hyde's own hardcoded schema defaults
+3. regeneration and saved-macro lowering need one stable comparison baseline for the
+   lifetime of the dialog or snapshot that produced them
+
+The contract is:
+
+- the kernel snapshots the current effective defaults for first-class figures
+- the GUI receives that snapshot as ordinary figure-window metadata
+- axis and trace dialogs seed their initial controls from the defaults snapshot plus
+  the current figure state
+- preview source, saveable macro source, and session restore source all lower as a diff
+  against that defaults snapshot
+- properties that match the current kernel defaults are omitted from lowered source
+  even if the user explicitly set them back to the default value
+
+Examples of intended omission behavior:
+
+- do not emit `ax.set_title(...)` when the subplot title is still the default blank
+  title
+- do not emit trace color, linewidth, or marker properties when they match the current
+  effective matplotlib defaults for that trace index
+- do not emit axis label position, tick direction, spine visibility, or other axis
+  presentation calls when they still match the current defaults snapshot
+
+This is a figure-wide rule, not an axis-dialog-specific rule. Any Hyde figure feature
+that produces user-facing matplotlib source must compare against the kernel-owned
+defaults snapshot rather than lowering a full effective state dump.
+
 ## Synchronization
 
 The figure window synchronizes against the kernel over Jupyter `comm` channels.
@@ -195,6 +241,7 @@ The synchronization contract is:
 
 - the kernel owns the live matplotlib `Figure`
 - the kernel owns the authoritative `fig._hyde_ir`
+- the kernel owns the effective-defaults snapshot `fig._hyde_defaults`
 - the kernel may also retain `fig._hyde_command_log` plus preserved source and AST
   artifacts for diagnostics
 - the GUI receives only the metadata and rendered output needed to display the figure

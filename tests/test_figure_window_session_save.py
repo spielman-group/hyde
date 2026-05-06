@@ -54,6 +54,28 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         self.assertNotIn("fig.canvas.draw_idle()", macro)
         self.assertNotIn("return fig", macro)
 
+    def test_snapshot_state_preserves_figure_defaults_metadata(self):
+        snapshot = FigureSnapshotState()
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        figure_defaults = {
+            "settings": {"title": None, "figsize": (6.4, 4.8)},
+            "trace_styles": {"subplot0": {"trace0": {"color": "#123456"}}},
+        }
+
+        snapshot.update(
+            default_macro_name=None,
+            call_source=None,
+            tracked_names=None,
+            figure_ir=figure_ir,
+            figure_defaults=figure_defaults,
+            live_state=None,
+        )
+
+        self.assertEqual(
+            snapshot.figure_defaults()["trace_styles"]["subplot0"]["trace0"]["color"],
+            "#123456",
+        )
+
     def test_figure_window_macro_source_includes_window_pos_metadata(self):
         widget = FigureWindow(figure_number=1)
         subwindow = QtWidgets.QMdiSubWindow()

@@ -21,6 +21,9 @@ from hyde.user_interface.plugins.figure_control_dialogs.trace_edit_dialog import
 )
 
 
+_DEFAULT_FIGURE_IR = object()
+
+
 def make_plugin_host(plugin_manager):
     main_window = QtWidgets.QMainWindow()
     main_window.setMenuBar(QtWidgets.QMenuBar())
@@ -103,7 +106,37 @@ def make_figure_ir():
     return FigureIRCodec.validate_state(figure_ir)
 
 
-def make_active_figure_window(mdi_area, services, figure_ir=None):
+def make_figure_defaults():
+    defaults = figure_ir_from_live_state(make_live_state())
+    subplot = defaults["layout"]["subplots"][0]
+    subplot["traces"][0]["kwargs"].update(
+        {
+            "color": "#445566",
+            "linestyle": "--",
+            "linewidth": 4.0,
+            "markersize": 9.0,
+        }
+    )
+    subplot["traces"][1]["kwargs"].update(
+        {
+            "color": "#778899",
+            "marker": "^",
+            "linestyle": ":",
+            "linewidth": 2.25,
+        }
+    )
+    return FigureIRCodec.validate_state(defaults)
+
+
+def make_active_figure_window(
+    mdi_area,
+    services,
+    figure_ir=_DEFAULT_FIGURE_IR,
+    figure_defaults=None,
+    trace_styles=None,
+):
+    services = dict(services)
+    services.setdefault("send_figure_action", lambda figure_number, action: True)
     figure = FigureWindow(figure_number=7, services=services)
     subwindow = mdi_area.addSubWindow(figure)
     figure.bind_subwindow(subwindow)
@@ -114,8 +147,14 @@ def make_active_figure_window(mdi_area, services, figure_ir=None):
             "title": "Figure0",
             "snapshot": {
                 "is_first_class": True,
-                "figure_ir": figure_ir or make_figure_ir(),
+                "figure_ir": (
+                    make_figure_ir()
+                    if figure_ir is _DEFAULT_FIGURE_IR
+                    else figure_ir
+                ),
+                "figure_defaults": figure_defaults,
                 "live_state": None,
+                "trace_styles": trace_styles,
             },
         }
     )
@@ -142,7 +181,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
 
         self.assertEqual(
             [action.text() for action in app.ui.menuFigure.actions()],
-            ["Modify Data Appearance..."],
+            ["Modify Data Appearance...", "Modify Axis..."],
         )
 
     def test_modify_data_appearance_action_uses_active_figure_window(self):
@@ -174,6 +213,28 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         }
 
         self.assertFalse(plugin.show_trace_appearance_dialog())
+
+    def test_modify_data_appearance_action_requires_semantic_dispatch_for_active_figure(
+        self,
+    ):
+        mdi_area = QtWidgets.QMdiArea()
+        make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": None,
+            },
+        )
+        plugin = FigureControlPlugin({})
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "ui": QtWidgets.QMainWindow(),
+        }
+
+        with patch.object(TraceAppearanceDialog, "exec_") as exec_:
+            self.assertFalse(plugin.show_trace_appearance_dialog())
+
+        self.assertEqual(exec_.call_count, 0)
 
 
 class TestTraceAppearanceDialog(unittest.TestCase):
@@ -209,6 +270,38 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             dialog.close()
 
         self.assertEqual(sent, [])
+
+    def test_dialog_seeds_from_figure_defaults_before_current_trace_state(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure_ir = figure_ir_from_live_state(make_live_state())
+        subplot = figure_ir["layout"]["subplots"][0]
+        subplot["traces"][0]["kwargs"].update(
+            {
+                "marker": "s",
+                "linestyle": "None",
+            }
+        )
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: True,
+            },
+            figure_ir=FigureIRCodec.validate_state(figure_ir),
+            figure_defaults=make_figure_defaults(),
+            trace_styles=None,
+        )
+
+        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        try:
+            self.assertEqual(dialog.line_color_edit.text(), "#445566")
+            self.assertEqual(dialog.line_width_spin.value(), 4.0)
+            self.assertEqual(dialog.marker_size_spin.value(), 9.0)
+            self.assertEqual(dialog.line_style_combo.currentData(), "None")
+            self.assertEqual(dialog.marker_combo.currentData(), "s")
+            self.assertEqual(dialog.mode_combo.currentData(), "markers")
+        finally:
+            dialog.close()
 
     def test_dialog_sends_live_trace_style_updates(self):
         sent = []
@@ -365,6 +458,41 @@ class TestTraceAppearanceDialog(unittest.TestCase):
                             "color": "#ff7f0e",
                         },
                         "replace": True,
+                    },
+                ),
+            ],
+        )
+
+    def test_apply_keeps_live_updates_without_reverting_opening_snapshot(self):
+        sent = []
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
+                ),
+            },
+        )
+
+        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        try:
+            dialog.line_width_spin.setValue(4.0)
+            dialog.accept()
+        finally:
+            dialog.close()
+
+        self.assertEqual(
+            sent,
+            [
+                (
+                    7,
+                    {
+                        "type": "set_trace_style",
+                        "subplot_id": "subplot0",
+                        "trace_id": "trace0",
+                        "style": {"linewidth": 4.0},
                     },
                 ),
             ],

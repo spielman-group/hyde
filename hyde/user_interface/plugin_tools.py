@@ -201,6 +201,8 @@ class HydeMenuContext(MenuContext):
     def __init__(self, icon_factory=None, logger=None):
         super().__init__(icon_factory=icon_factory, logger=logger)
         self._actions = {}
+        self._grouped_contributions = {}
+        self._group_orders = {}
 
     def lookup_action(self, location, name, path=()):
         if isinstance(path, str):
@@ -209,9 +211,89 @@ class HydeMenuContext(MenuContext):
             path = tuple(path)
         return self._actions.get((location, path, name))
 
-    def _register_action(self, location, path, menu, name, action):
-        del menu
+    def _register_action(self, location, path, name, action):
         self._actions[(location, path, name)] = action
+
+    def _normalized_path(self, path):
+        if isinstance(path, str):
+            return (path,)
+        return tuple(path)
+
+    def _sorted_contributions(self, location, path):
+        key = (location, self._normalized_path(path))
+        contributions = self._grouped_contributions.get(key, [])
+        group_orders = self._group_orders.get(key, {})
+        return sorted(
+            contributions,
+            key=lambda item: (
+                group_orders[item[1].get("group", None)],
+                item[1].get("order", DEFAULT_PRIORITY),
+                item[0],
+                item[1]["name"],
+            ),
+        )
+
+    def _render_menu_tree(self, location, root_menu, register_actions):
+        menus = {(location, ()): root_menu}
+        paths = {
+            path
+            for current_location, path in self._grouped_contributions
+            if current_location == location
+        }
+        for path in sorted(paths):
+            parent_path = ()
+            for submenu_name in path:
+                submenu_path = parent_path + (submenu_name,)
+                submenu_key = (location, submenu_path)
+                if submenu_key not in menus:
+                    submenu = menus[(location, parent_path)].addMenu(submenu_name)
+                    menus[submenu_key] = submenu
+                parent_path = submenu_path
+
+        for path in sorted(paths):
+            menu = menus[(location, path)]
+            previous_group = None
+            for index, (plugin_name, contribution) in enumerate(
+                self._sorted_contributions(location, path)
+            ):
+                group = contribution.get("group", None)
+                if index and group != previous_group:
+                    menu.addSeparator()
+                previous_group = group
+
+                name = contribution["name"]
+                icon = contribution.get("icon", None)
+                if icon is not None and self.icon_factory is not None:
+                    action = menu.addAction(self.icon_factory(icon), name)
+                else:
+                    action = menu.addAction(name)
+
+                callback = contribution.get("action", None)
+                if callback is not None:
+                    action.triggered.connect(callback)
+
+                shortcut = contribution.get("shortcut", None)
+                if shortcut is not None and hasattr(action, "setShortcut"):
+                    action.setShortcut(shortcut)
+
+                checkable = contribution.get("checkable", False)
+                if hasattr(action, "setCheckable"):
+                    action.setCheckable(checkable)
+
+                enabled = contribution.get("enabled", True)
+                if hasattr(action, "setEnabled"):
+                    action.setEnabled(enabled)
+
+                if register_actions:
+                    self._register_action(location, path, name, action)
+
+    def build_popup_menu(self, location, parent=None):
+        if location not in self.locations:
+            return None
+        base_menu = self.locations[location]
+        popup_menu = base_menu.__class__(base_menu.title(), parent or base_menu.parent())
+        self._render_menu_tree(location, popup_menu, register_actions=False)
+        return popup_menu
 
     def render(self):
         self._actions = {}
@@ -246,11 +328,7 @@ class HydeMenuContext(MenuContext):
                 )
                 continue
 
-            path = contribution.get("path", ())
-            if isinstance(path, str):
-                path = (path,)
-            else:
-                path = tuple(path)
+            path = self._normalized_path(contribution.get("path", ()))
 
             key = (location, path)
             group = contribution.get("group", None)
@@ -261,64 +339,12 @@ class HydeMenuContext(MenuContext):
 
             grouped.setdefault(key, []).append((plugin_name, contribution))
 
-        menus = {}
+        self._grouped_contributions = grouped
+        self._group_orders = group_orders
+
         for name, menu in self.locations.items():
-            menus[(name, ())] = menu
             menu.clear()
-
-        for key in sorted(grouped):
-            location, path = key
-            parent_path = ()
-            for submenu_name in path:
-                submenu_path = parent_path + (submenu_name,)
-                submenu_key = (location, submenu_path)
-                if submenu_key not in menus:
-                    submenu = menus[(location, parent_path)].addMenu(submenu_name)
-                    menus[submenu_key] = submenu
-                parent_path = submenu_path
-            menu = menus[(location, path)]
-
-            contributions = sorted(
-                grouped[key],
-                key=lambda item: (
-                    group_orders[key][item[1].get("group", None)],
-                    item[1].get("order", DEFAULT_PRIORITY),
-                    item[0],
-                    item[1]["name"],
-                ),
-            )
-
-            previous_group = None
-            for index, (plugin_name, contribution) in enumerate(contributions):
-                group = contribution.get("group", None)
-                if index and group != previous_group:
-                    menu.addSeparator()
-                previous_group = group
-
-                name = contribution["name"]
-                icon = contribution.get("icon", None)
-                if icon is not None and self.icon_factory is not None:
-                    action = menu.addAction(self.icon_factory(icon), name)
-                else:
-                    action = menu.addAction(name)
-
-                callback = contribution.get("action", None)
-                if callback is not None:
-                    action.triggered.connect(callback)
-
-                shortcut = contribution.get("shortcut", None)
-                if shortcut is not None and hasattr(action, "setShortcut"):
-                    action.setShortcut(shortcut)
-
-                checkable = contribution.get("checkable", False)
-                if hasattr(action, "setCheckable"):
-                    action.setCheckable(checkable)
-
-                enabled = contribution.get("enabled", True)
-                if hasattr(action, "setEnabled"):
-                    action.setEnabled(enabled)
-
-                self._register_action(location, path, menu, name, action)
+            self._render_menu_tree(name, menu, register_actions=True)
 
 
 class HydeMDIContext:

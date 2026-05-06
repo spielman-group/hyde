@@ -11,6 +11,8 @@ import threading
 
 import numpy as np
 from ipykernel.comm import Comm
+from matplotlib import rcParams
+from matplotlib import ticker as mticker
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import FigureManagerBase, _Backend
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -145,6 +147,7 @@ def finalize_figure_build_session(session, result):
             figure._hyde_ir,
             figure.get_label() or None,
         )
+    figure._hyde_defaults = _figure_defaults_snapshot(figure._hyde_ir)
     figure._hyde_is_first_class = True
     figure._hyde_source_artifact = session.source_artifact
     figure._hyde_ast_artifact = session.ast_artifact
@@ -178,30 +181,31 @@ def _is_default_xdata(x_values):
     return np.array_equal(array, expected)
 
 
-def _line_kwargs(line):
+def _line_kwargs(line, default_style=None):
     style = _line_style_snapshot(line)
+    default_style = dict(default_style or {})
     kwargs = {}
-    if style["color"] is not None:
+    if style["color"] is not None and style["color"] != default_style.get("color"):
         kwargs["color"] = style["color"]
-    if style["visible"] is False:
+    if style["visible"] is False and style["visible"] != default_style.get("visible"):
         kwargs["visible"] = False
-    if style["linestyle"] not in (None, "-", "solid"):
+    if style["linestyle"] != default_style.get("linestyle") and style["linestyle"] not in (None, "-", "solid"):
         kwargs["linestyle"] = style["linestyle"]
-    if style["marker"] not in (None, "", "None", "none"):
+    if style["marker"] != default_style.get("marker") and style["marker"] not in (None, "", "None", "none"):
         kwargs["marker"] = style["marker"]
-    if style["linewidth"] not in (None, 1.5):
+    if style["linewidth"] != default_style.get("linewidth") and style["linewidth"] is not None:
         kwargs["linewidth"] = style["linewidth"]
-    if style["alpha"] not in (None, 1.0):
+    if style["alpha"] != default_style.get("alpha") and style["alpha"] is not None:
         kwargs["alpha"] = style["alpha"]
-    if style["drawstyle"] not in (None, "default"):
+    if style["drawstyle"] != default_style.get("drawstyle") and style["drawstyle"] not in (None, "default"):
         kwargs["drawstyle"] = style["drawstyle"]
-    if style["markersize"] not in (None, 6.0):
+    if style["markersize"] != default_style.get("markersize") and style["markersize"] is not None:
         kwargs["markersize"] = style["markersize"]
-    if style["markerfacecolor"] not in (None, "auto", style["color"]):
+    if style["markerfacecolor"] != default_style.get("markerfacecolor") and style["markerfacecolor"] not in (None, "auto", style["color"]):
         kwargs["markerfacecolor"] = style["markerfacecolor"]
-    if style["markeredgecolor"] not in (None, "auto", style["color"]):
+    if style["markeredgecolor"] != default_style.get("markeredgecolor") and style["markeredgecolor"] not in (None, "auto", style["color"]):
         kwargs["markeredgecolor"] = style["markeredgecolor"]
-    if style["markeredgewidth"] not in (None, 1.0):
+    if style["markeredgewidth"] != default_style.get("markeredgewidth") and style["markeredgewidth"] is not None:
         kwargs["markeredgewidth"] = style["markeredgewidth"]
     label = style.get("label")
     if label:
@@ -250,10 +254,194 @@ def _line_style_snapshot(line):
     }
 
 
-def _format_plot_call(line):
+def _default_tick_color(axis_name):
+    label_color = rcParams.get(f"{axis_name}tick.labelcolor", "inherit")
+    if label_color in (None, "inherit"):
+        label_color = rcParams.get(
+            f"{axis_name}tick.color",
+            rcParams.get("axes.edgecolor"),
+        )
+    return _normalize_line_color(label_color)
+
+
+def _default_label_color():
+    label_color = rcParams.get("axes.labelcolor", rcParams.get("axes.edgecolor"))
+    if label_color in (None, "inherit", "auto"):
+        label_color = rcParams.get("axes.edgecolor")
+    return _normalize_line_color(label_color)
+
+
+def _default_axis_state(axis_name):
+    tick_direction = str(
+        rcParams.get(f"{axis_name}tick.direction", "out")
+    )
+    direction = {
+        "in": "inside",
+        "out": "outside",
+        "inout": "both",
+    }.get(tick_direction, "outside")
+    grid_visible = bool(rcParams.get("axes.grid", False))
+    grid_which = str(rcParams.get("axes.grid.which", "major"))
+    return {
+        "id": axis_name,
+        "scale_mode": "linear",
+        "log_tick_mode": "plain",
+        "range": {
+            "limits": None,
+            "limit_mode": {"min": "auto", "max": "auto"},
+            "autoscale": "data",
+            "reverse": False,
+        },
+        "label": {
+            "text": None,
+            "visible": True,
+            "side": "bottom" if axis_name == "x" else "left",
+            "position_mode": "auto",
+            "position": None,
+            "offset": float(rcParams.get("axes.labelpad", 4.0)),
+            "rotation": 0.0,
+            "line_spacing": 1.2,
+            "color": _default_label_color(),
+        },
+        "ticks": {
+            "major": {
+                "mode": "auto",
+                "count": None,
+                "step": None,
+                "positions": None,
+                "labels": None,
+            },
+            "minor": {"visible": False},
+            "direction": direction,
+            "formatter": {
+                "style": "plain",
+                "low_trip": None,
+                "high_trip": None,
+                "exponent_prescale": None,
+                "use_thousands_separator": False,
+                "zero_as_zero": True,
+                "trim_trailing_zeros": False,
+                "trim_leading_zero": False,
+                "prefer_exponent": False,
+            },
+            "suppressed_values": [],
+            "display_range": None,
+            "max_log_cycles_minor": None,
+            "max_log_cycles_minor_labels": None,
+        },
+        "grid": {
+            "visible": grid_visible,
+            "which": grid_which,
+            "linestyle": str(rcParams.get("grid.linestyle", "-")),
+            "linewidth": float(rcParams.get("grid.linewidth", 0.8)),
+            "color": _normalize_line_color(rcParams.get("grid.color")),
+        },
+        "zero_line": {
+            "visible": False,
+            "linestyle": "-",
+            "linewidth": None,
+            "color": None,
+        },
+    }
+
+
+def _default_axis_side_state(side):
+    axis_name = "x" if side in {"bottom", "top"} else "y"
+    primary = (axis_name == "x" and side == "bottom") or (
+        axis_name == "y" and side == "left"
+    )
+    return {
+        "side": side,
+        "axis": axis_name,
+        "spine_visible": bool(rcParams.get(f"axes.spines.{side}", primary)),
+        "ticks_visible": bool(
+            rcParams.get(f"{axis_name}tick.{side}", primary)
+        ),
+        "tick_labels_visible": bool(
+            rcParams.get(f"{axis_name}tick.label{side}", primary)
+        ),
+        "spine_color": _normalize_line_color(rcParams.get("axes.edgecolor")),
+        "spine_width": float(rcParams.get("axes.linewidth", 0.8)),
+        "tick_label_color": _default_tick_color(axis_name),
+        "tick_label_rotation": 0.0,
+        "tick_label_offset": 0.0,
+        "offset": 0.0,
+        "draw_between": (0.0, 1.0),
+        "draw_on_top": False,
+    }
+
+
+def _default_subplot_state(subplot_id="subplot0", subplot_code="111"):
+    return {
+        "id": str(subplot_id),
+        "subplot_code": str(subplot_code),
+        "title": None,
+        "xlabel": None,
+        "ylabel": None,
+        "x_limits": None,
+        "y_limits": None,
+        "legend": False,
+        "traces": [],
+        "axes": {
+            "x": _default_axis_state("x"),
+            "y": _default_axis_state("y"),
+        },
+        "axis_sides": {
+            side: _default_axis_side_state(side)
+            for side in ("bottom", "top", "left", "right")
+        },
+        "opaque_nodes": [],
+    }
+
+
+def _default_trace_style(index):
+    temp_figure = Figure(figsize=tuple(float(value) for value in rcParams["figure.figsize"]))
+    temp_axis = temp_figure.add_subplot(111)
+    lines = []
+    for _ in range(index + 1):
+        lines = temp_axis.plot([0.0, 1.0], [0.0, 1.0])
+    style = _line_style_snapshot(lines[-1])
+    style["label"] = None
+    return style
+
+
+def _figure_defaults_snapshot(figure_ir):
+    normalized = FigureIRCodec.validate_state(figure_ir)
+    default_ir = FigureIRCodec.default_state()
+    default_ir["settings"]["figsize"] = tuple(
+        float(value) for value in rcParams["figure.figsize"]
+    )
+    default_ir["layout"]["subplots"] = []
+    trace_style_defaults = {}
+    for subplot in normalized["layout"]["subplots"]:
+        default_subplot = _default_subplot_state(
+            subplot_id=subplot["id"],
+            subplot_code=subplot["subplot_code"],
+        )
+        default_ir["layout"]["subplots"].append(default_subplot)
+        subplot_trace_defaults = {}
+        for index, trace in enumerate(subplot["traces"]):
+            default_style = _default_trace_style(index)
+            subplot_trace_defaults[trace["id"]] = default_style
+            default_subplot["traces"].append(
+                {
+                    "id": trace["id"],
+                    "kind": trace["kind"],
+                    "x_source": trace["x_source"],
+                    "y_source": trace["y_source"],
+                    "kwargs": dict(default_style),
+                }
+            )
+        trace_style_defaults[subplot["id"]] = subplot_trace_defaults
+    default_ir = FigureIRCodec.validate_state(default_ir)
+    default_ir["trace_styles"] = trace_style_defaults
+    return default_ir
+
+
+def _format_plot_call(line, default_style=None):
     x_values = line.get_xdata()
     y_values = line.get_ydata()
-    kwargs = _line_kwargs(line)
+    kwargs = _line_kwargs(line, default_style=default_style)
     keyword = ", ".join(f"{name}={value!r}" for name, value in kwargs.items())
     if _is_default_xdata(x_values):
         arguments = [_array_expression(y_values)]
@@ -298,8 +486,8 @@ def figure_call_source(figure, number):
         source_lines.append(f"ax.set_xlabel({xlabel!r})")
     if ylabel:
         source_lines.append(f"ax.set_ylabel({ylabel!r})")
-    for line in lines:
-        source_lines.append(_format_plot_call(line))
+    for index, line in enumerate(lines):
+        source_lines.append(_format_plot_call(line, default_style=_default_trace_style(index)))
     if legend is not None:
         source_lines.append("ax.legend()")
     if grid_on:
@@ -314,12 +502,20 @@ def figure_snapshot_payload(figure, number):
     live_state = getattr(figure, "_hyde_live_state", None)
     hyde_metadata = dict(getattr(figure, "_hyde_metadata", {}) or {})
     if _is_windowed_figure(figure) and figure_ir is not None:
+        normalized_figure_ir = FigureIRCodec.validate_state(figure_ir)
+        figure_defaults = getattr(figure, "_hyde_defaults", None)
+        if figure_defaults is None:
+            figure_defaults = _figure_defaults_snapshot(normalized_figure_ir)
+            figure._hyde_defaults = figure_defaults
         call_source = None
         save_error = None
         tracked_names = []
         try:
-            call_source = FigureIRCodec.state_to_python(figure_ir)
-            tracked_names = list(FigureIRCodec.tracked_names(figure_ir))
+            call_source = FigureIRCodec.state_to_python(
+                normalized_figure_ir,
+                context={"figure_defaults": figure_defaults},
+            )
+            tracked_names = list(FigureIRCodec.tracked_names(normalized_figure_ir))
         except Exception as exc:
             save_error = str(exc)
         payload = {
@@ -331,8 +527,13 @@ def figure_snapshot_payload(figure, number):
             ),
             "tracked_names": tracked_names,
             "live_state": None,
-            "figure_ir": figure_ir,
-            "trace_styles": _figure_trace_styles(figure, figure_ir),
+            "figure_ir": normalized_figure_ir,
+            "figure_defaults": figure_defaults,
+            "resolved_axis_limits": _resolved_axis_limits_snapshot(
+                figure,
+                normalized_figure_ir,
+            ),
+            "trace_styles": _figure_trace_styles(figure, normalized_figure_ir),
             "command_log": list(getattr(figure, "_hyde_command_log", [])),
             "hyde_metadata": hyde_metadata,
             "is_first_class": True,
@@ -433,6 +634,18 @@ def _figure_trace_styles(figure, figure_ir):
     return styles
 
 
+def _resolved_axis_limits_snapshot(figure, figure_ir):
+    limits = {}
+    normalized = FigureIRCodec.validate_state(figure_ir)
+    for subplot in normalized["layout"]["subplots"]:
+        axis = _resolve_live_axis(figure, subplot["id"])
+        limits[subplot["id"]] = {
+            "x": tuple(float(value) for value in axis.get_xlim()),
+            "y": tuple(float(value) for value in axis.get_ylim()),
+        }
+    return limits
+
+
 def _apply_line_style(line, kwargs):
     if "visible" in kwargs:
         line.set_visible(bool(kwargs["visible"]))
@@ -462,6 +675,198 @@ def _apply_line_style(line, kwargs):
         line.set_label(kwargs["label"])
 
 
+def _semantic_axis(axis_name):
+    return "xaxis" if axis_name == "x" else "yaxis"
+
+
+def _primary_side(axis_name):
+    return "bottom" if axis_name == "x" else "left"
+
+
+def _mirror_side(axis_name):
+    return "top" if axis_name == "x" else "right"
+
+
+def _tick_direction(direction):
+    return {
+        "inside": "in",
+        "outside": "out",
+        "both": "inout",
+    }[direction]
+
+
+def _set_axis_scale(axis, axis_name, axis_state):
+    if axis_state["scale_mode"] == "linear":
+        getattr(axis, f"set_{axis_name}scale")("linear")
+    elif axis_state["scale_mode"] == "log":
+        getattr(axis, f"set_{axis_name}scale")("log")
+    else:
+        getattr(axis, f"set_{axis_name}scale")("log", base=2)
+
+
+def _set_axis_label(axis, axis_name, axis_state):
+    label = axis_state["label"]
+    axis_axis = getattr(axis, _semantic_axis(axis_name))
+    axis_axis.set_label_position(label["side"])
+    getattr(axis, f"set_{axis_name}label")(label["text"])
+    axis_axis.label.set_visible(bool(label["visible"]))
+    if label["color"] is not None:
+        axis_axis.label.set_color(label["color"])
+    if label["rotation"] is not None:
+        axis_axis.label.set_rotation(label["rotation"])
+    axis_axis.label.set_linespacing(label["line_spacing"])
+    if label["position_mode"] == "manual" and label["position"] is not None:
+        current_x, current_y = axis_axis.label.get_position()
+        if axis_name == "x":
+            axis_axis.set_label_coords(label["position"], current_y)
+        else:
+            axis_axis.set_label_coords(current_x, label["position"])
+    axis_axis.labelpad = label["offset"]
+
+
+def _set_axis_range(axis, axis_name, axis_state):
+    range_state = axis_state["range"]
+    limits = range_state["limits"]
+    limit_mode = range_state["limit_mode"]
+    setter = getattr(axis, f"set_{axis_name}lim")
+    manual_kwargs = {}
+    if limits is not None and limit_mode["min"] == "manual":
+        manual_kwargs["left" if axis_name == "x" else "bottom"] = limits[0]
+    if limits is not None and limit_mode["max"] == "manual":
+        manual_kwargs["right" if axis_name == "x" else "top"] = limits[1]
+    if (
+        limits is not None
+        and limit_mode["min"] == "manual"
+        and limit_mode["max"] == "manual"
+    ):
+        setter(*limits)
+    else:
+        axis.autoscale(enable=True, axis=axis_name)
+        if manual_kwargs:
+            setter(**manual_kwargs)
+    if axis_state["range"]["reverse"]:
+        getattr(axis, f"invert_{axis_name}axis")()
+
+
+def _set_axis_side_state(axis, axis_name, subplot):
+    primary = subplot["axis_sides"][_primary_side(axis_name)]
+    mirror = subplot["axis_sides"][_mirror_side(axis_name)]
+    axis.tick_params(
+        axis=axis_name,
+        which="both",
+        **{
+            _primary_side(axis_name): primary["ticks_visible"],
+            f"label{_primary_side(axis_name)}": primary["tick_labels_visible"],
+            _mirror_side(axis_name): mirror["ticks_visible"],
+            f"label{_mirror_side(axis_name)}": mirror["tick_labels_visible"],
+            "direction": _tick_direction(subplot["axes"][axis_name]["ticks"]["direction"]),
+        },
+    )
+    limits = getattr(axis, f"get_{axis_name}lim")()
+    for side_name in (_primary_side(axis_name), _mirror_side(axis_name)):
+        side_state = subplot["axis_sides"][side_name]
+        spine = axis.spines[side_name]
+        spine.set_visible(side_state["spine_visible"])
+        if side_state["spine_color"] is not None:
+            spine.set_color(side_state["spine_color"])
+        if side_state["spine_width"] is not None:
+            spine.set_linewidth(side_state["spine_width"])
+        if side_state["offset"]:
+            spine.set_position(("outward", side_state["offset"]))
+        if side_state["draw_between"] != (0.0, 1.0):
+            low = limits[0] + (limits[1] - limits[0]) * side_state["draw_between"][0]
+            high = limits[0] + (limits[1] - limits[0]) * side_state["draw_between"][1]
+            spine.set_bounds(low, high)
+
+
+def _set_axis_ticks(axis, axis_name, axis_state):
+    axis_axis = getattr(axis, _semantic_axis(axis_name))
+    major = axis_state["ticks"]["major"]
+    if major["positions"] is not None:
+        axis_axis.set_major_locator(mticker.FixedLocator(major["positions"]))
+        if major["labels"] is not None:
+            axis_axis.set_major_formatter(mticker.FixedFormatter(major["labels"]))
+    elif major["mode"] == "manual" and major["step"] is not None:
+        axis_axis.set_major_locator(mticker.MultipleLocator(major["step"]))
+    elif major["count"] is not None:
+        axis_axis.set_major_locator(mticker.MaxNLocator(nbins=major["count"]))
+    if axis_state["ticks"]["minor"]["visible"]:
+        if axis_state["scale_mode"] in {"log", "log2"}:
+            base = 2 if axis_state["scale_mode"] == "log2" else 10
+            axis_axis.set_minor_locator(mticker.LogLocator(base=base, subs="auto"))
+        else:
+            axis_axis.set_minor_locator(mticker.AutoMinorLocator())
+    else:
+        axis_axis.set_minor_locator(mticker.NullLocator())
+
+
+def _set_axis_tick_label_style(axis, axis_name, subplot):
+    axis_axis = getattr(axis, _semantic_axis(axis_name))
+    primary_side = _primary_side(axis_name)
+    mirror_side = _mirror_side(axis_name)
+    for side_name, label_attr in (
+        (primary_side, "label1"),
+        (mirror_side, "label2"),
+    ):
+        side_state = subplot["axis_sides"][side_name]
+        rotation = side_state["tick_label_rotation"]
+        color = side_state["tick_label_color"]
+        if color is None and not rotation:
+            continue
+        for tick in axis_axis.get_major_ticks() + axis_axis.get_minor_ticks():
+            label = getattr(tick, label_attr)
+            if color is not None:
+                label.set_color(color)
+            if rotation:
+                label.set_rotation(rotation)
+
+
+def _set_axis_grid(axis, axis_name, axis_state):
+    grid = axis_state["grid"]
+    if not grid["visible"]:
+        axis.grid(False, axis=axis_name, which="both")
+        return
+    kwargs = {
+        "axis": axis_name,
+        "which": grid["which"],
+        "linestyle": grid["linestyle"],
+    }
+    if grid["linewidth"] is not None:
+        kwargs["linewidth"] = grid["linewidth"]
+    if grid["color"] is not None:
+        kwargs["color"] = grid["color"]
+    axis.grid(True, **kwargs)
+
+
+def _add_zero_line(axis, axis_name, axis_state):
+    zero_line = axis_state["zero_line"]
+    if not zero_line["visible"]:
+        return
+    kwargs = {"linestyle": zero_line["linestyle"]}
+    if zero_line["linewidth"] is not None:
+        kwargs["linewidth"] = zero_line["linewidth"]
+    if zero_line["color"] is not None:
+        kwargs["color"] = zero_line["color"]
+    line = axis.axvline(0, **kwargs) if axis_name == "x" else axis.axhline(0, **kwargs)
+    line._hyde_semantic_role = f"{axis_name}_zero_line"
+
+
+def _apply_subplot_axis_state(axis, subplot):
+    axis.set_axisbelow(
+        not any(side_state["draw_on_top"] for side_state in subplot["axis_sides"].values())
+    )
+    for axis_name in ("x", "y"):
+        axis_state = subplot["axes"][axis_name]
+        _set_axis_scale(axis, axis_name, axis_state)
+        _set_axis_label(axis, axis_name, axis_state)
+        _set_axis_range(axis, axis_name, axis_state)
+        _set_axis_side_state(axis, axis_name, subplot)
+        _set_axis_ticks(axis, axis_name, axis_state)
+        _set_axis_tick_label_style(axis, axis_name, subplot)
+        _set_axis_grid(axis, axis_name, axis_state)
+        _add_zero_line(axis, axis_name, axis_state)
+
+
 def regenerate_figure_from_ir(figure):
     figure_ir = getattr(figure, "_hyde_ir", None)
     if figure_ir is None:
@@ -472,10 +877,12 @@ def regenerate_figure_from_ir(figure):
     preserved_size = figure.get_size_inches()
     manager = getattr(figure.canvas, "manager", None)
     was_ready_to_push = None
+    was_building = getattr(figure, "_hyde_building", False)
     if manager is not None and hasattr(manager, "_ready_to_push"):
         was_ready_to_push = manager._ready_to_push
         manager._ready_to_push = False
     try:
+        figure._hyde_building = False
         figure.clear()
         figsize = normalized["settings"].get("figsize")
         if figsize is None:
@@ -497,10 +904,6 @@ def regenerate_figure_from_ir(figure):
         axis._hyde_subplot_id = subplot["id"]
         if subplot["title"]:
             axis.set_title(subplot["title"])
-        if subplot["xlabel"]:
-            axis.set_xlabel(subplot["xlabel"])
-        if subplot["ylabel"]:
-            axis.set_ylabel(subplot["ylabel"])
         for trace in subplot["traces"]:
             x_values = _resolve_ir_operand_value(trace["x_source"], namespace, figure)
             y_values = _resolve_ir_operand_value(trace["y_source"], namespace, figure)
@@ -510,11 +913,9 @@ def regenerate_figure_from_ir(figure):
             line._hyde_trace_id = trace["id"]
         if subplot["legend"]:
             axis.legend()
-        if subplot["x_limits"] is not None:
-            axis.set_xlim(*subplot["x_limits"])
-        if subplot["y_limits"] is not None:
-            axis.set_ylim(*subplot["y_limits"])
+        _apply_subplot_axis_state(axis, subplot)
     finally:
+        figure._hyde_building = was_building
         if was_ready_to_push is not None:
             manager._ready_to_push = was_ready_to_push
     figure.canvas.draw_idle()
@@ -568,8 +969,12 @@ def apply_figure_action(figure, action):
         label = action.get("label")
         if action.get("axis") == "x":
             axis.set_xlabel(label)
+            if label not in (None, ""):
+                axis.xaxis.label.set_visible(True)
         else:
             axis.set_ylabel(label)
+            if label not in (None, ""):
+                axis.yaxis.label.set_visible(True)
         figure.canvas.draw_idle()
         return figure
     if action_type in {"set_subplot_title", "set_figure_title"}:
@@ -600,6 +1005,8 @@ def apply_figure_action(figure, action):
             axis.legend()
         figure.canvas.draw_idle()
         return figure
+    if action_type in {"set_axis_state", "set_axis_side_state"}:
+        return regenerate_figure_from_ir(figure)
     raise ValueError(f"Unsupported figure action: {action_type!r}.")
 
 
@@ -888,6 +1295,7 @@ class FigureHyde(Figure):
         super().__init__(*args, **kwargs)
         self._hyde_is_first_class = False
         self._hyde_ir = figure_ir_default_state()
+        self._hyde_defaults = _figure_defaults_snapshot(self._hyde_ir)
         if kwargs.get("figsize") is not None:
             self._hyde_ir["settings"]["figsize"] = tuple(
                 float(value) for value in self.get_size_inches()
@@ -921,20 +1329,7 @@ class FigureHyde(Figure):
             if not subplots:
                 subplot_id = "subplot0"
                 subplot_code = "111" if len(args) == 1 else "111"
-                subplots.append(
-                    {
-                        "id": subplot_id,
-                        "subplot_code": subplot_code,
-                        "title": None,
-                        "xlabel": None,
-                        "ylabel": None,
-                        "x_limits": None,
-                        "y_limits": None,
-                        "legend": False,
-                        "traces": [],
-                        "opaque_nodes": [],
-                    }
-                )
+                subplots.append(_default_subplot_state(subplot_id, subplot_code))
                 axis._hyde_subplot_id = subplot_id
                 self._record_command("add_subplot", f"ax = fig.add_subplot({subplot_code})")
         return axis

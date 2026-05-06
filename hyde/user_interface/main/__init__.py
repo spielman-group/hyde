@@ -214,7 +214,10 @@ class HydeApp:
 
     def popup_menu(self, location, global_pos):
         menu_context = getattr(self, "menu_context", None)
-        menu = None if menu_context is None else menu_context.locations.get(location)
+        menu = None if menu_context is None else menu_context.build_popup_menu(
+            location,
+            parent=self.ui,
+        )
         if menu is None:
             return None
         return menu.exec_(global_pos)

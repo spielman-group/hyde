@@ -16,6 +16,7 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugin_tools import (
     HydeMDIContext,
+    HydeMenuContext,
     HydePlugin,
     HydePluginManager,
 )
@@ -252,7 +253,39 @@ class TestPluginTools(unittest.TestCase):
         manager.services["hide_menu"]("figure")
         self.assertFalse(app.ui.menuFigure.menuAction().isVisible())
 
-    def test_setup_plugins_renders_contextual_menu_contributions_and_reuses_menu_for_popup(self):
+    def test_menu_context_builds_fresh_popup_menu_from_registry(self):
+        triggered = []
+        main_window = QtWidgets.QMainWindow()
+        persistent_menu = RecordingMenu("Figure", main_window)
+        context = HydeMenuContext()
+        context.register_location("figure", persistent_menu)
+        context.contributions = [
+            (
+                "demo",
+                {
+                    "location": "figure",
+                    "group": "demo",
+                    "order": 10,
+                    "name": "Figure Action",
+                    "action": lambda: triggered.append("figure"),
+                },
+            )
+        ]
+
+        context.render()
+        popup_menu = context.build_popup_menu("figure", parent=main_window)
+
+        self.assertIsNotNone(popup_menu)
+        self.assertIsNot(popup_menu, persistent_menu)
+        self.assertEqual(
+            [action.text() for action in popup_menu.actions()],
+            ["Figure Action"],
+        )
+
+        popup_menu.actions()[0].trigger()
+        self.assertEqual(triggered, ["figure"])
+
+    def test_setup_plugins_renders_contextual_menu_contributions_and_uses_fresh_popup_menu(self):
         triggered = []
 
         class DemoPlugin(HydePlugin):
@@ -295,7 +328,7 @@ class TestPluginTools(unittest.TestCase):
 
         popup_pos = QtCore.QPoint(12, 34)
         manager.services["popup_menu"]("figure", popup_pos)
-        self.assertEqual(app.ui.menuFigure.popup_calls, [popup_pos])
+        self.assertEqual(app.ui.menuFigure.popup_calls, [])
 
     def test_figure_window_shows_empty_shared_contextual_menu(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
@@ -335,7 +368,7 @@ class TestPluginTools(unittest.TestCase):
 
         widget.contextMenuEvent(event)
 
-        self.assertEqual(app.ui.menuFigure.popup_calls, [popup_pos])
+        self.assertEqual(app.ui.menuFigure.popup_calls, [])
         self.assertIs(mdi_area.activeSubWindow(), subwindow)
 
     def test_table_widget_shows_shared_contextual_menu(self):
@@ -371,7 +404,7 @@ class TestPluginTools(unittest.TestCase):
 
         widget._show_context_menu(popup_pos)
 
-        self.assertEqual(app.ui.menuTable.popup_calls, [expected_global])
+        self.assertEqual(app.ui.menuTable.popup_calls, [])
         self.assertIs(mdi_area.activeSubWindow(), subwindow)
 
     def test_table_plugin_registers_delete_action_with_shared_table_menu(self):

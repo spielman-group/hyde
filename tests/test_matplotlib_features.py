@@ -14,7 +14,13 @@ import hyde
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.matplotlib_backend import FigureCanvasHyde, FigureManagerHyde, figure_snapshot_payload
+from hyde.matplotlib_backend import (
+    FigureCanvasHyde,
+    FigureManagerHyde,
+    _figure_defaults_snapshot,
+    apply_figure_action,
+    figure_snapshot_payload,
+)
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.project_tools import (
     HYDE_MATPLOTLIB_BACKEND,
@@ -308,6 +314,245 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIn("markeredgecolor='black'", source)
         self.assertIn("markeredgewidth=2.0", source)
 
+    def test_figure_ir_axis_edit_surface_lowers_axis_state_to_python(self):
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+
+        with_bottom_hidden = FigureIRCodec.update_state(
+            figure_ir,
+            {
+                "type": "set_axis_side_state",
+                "subplot_id": "subplot0",
+                "side": "bottom",
+                "state": {
+                    "spine_visible": False,
+                    "ticks_visible": False,
+                    "tick_labels_visible": False,
+                },
+            },
+        )
+        with_x_axis = FigureIRCodec.update_state(
+            with_bottom_hidden,
+            {
+                "type": "set_axis_state",
+                "subplot_id": "subplot0",
+                "axis": "x",
+                "state": {
+                    "scale_mode": "log2",
+                    "range": {
+                        "limits": (1.0, 8.0),
+                        "limit_mode": {"min": "manual", "max": "manual"},
+                        "autoscale": "data",
+                    },
+                    "label": {
+                        "text": "Delay",
+                        "visible": True,
+                        "side": "top",
+                        "position_mode": "manual",
+                        "position": 0.35,
+                        "offset": 14.0,
+                        "line_spacing": 1.6,
+                        "color": "#aa5500",
+                    },
+                    "ticks": {
+                        "major": {
+                            "mode": "manual",
+                            "positions": [1.0, 2.0, 4.0, 8.0],
+                            "labels": ["1", "2", "4", "8"],
+                        },
+                        "minor": {"visible": True},
+                        "direction": "both",
+                    },
+                    "grid": {
+                        "visible": True,
+                        "linestyle": ":",
+                        "linewidth": 1.25,
+                        "color": "#123456",
+                    },
+                },
+            },
+        )
+        with_right_side = FigureIRCodec.update_state(
+            with_x_axis,
+            {
+                "type": "set_axis_side_state",
+                "subplot_id": "subplot0",
+                "side": "right",
+                "state": {
+                    "spine_visible": True,
+                    "ticks_visible": True,
+                    "tick_labels_visible": True,
+                    "tick_label_color": "#00aa00",
+                    "tick_label_rotation": 35.0,
+                },
+            },
+        )
+        updated = FigureIRCodec.update_state(
+            with_right_side,
+            {
+                "type": "set_axis_state",
+                "subplot_id": "subplot0",
+                "axis": "y",
+                "state": {
+                    "label": {
+                        "text": "Signal",
+                        "visible": False,
+                        "side": "right",
+                    },
+                    "range": {
+                        "limits": (-2.0, 12.0),
+                        "limit_mode": {"min": "manual", "max": "manual"},
+                        "autoscale": "data",
+                    },
+                    "zero_line": {
+                        "visible": True,
+                        "linestyle": "--",
+                        "linewidth": 2.0,
+                        "color": "#654321",
+                    },
+                },
+            },
+        )
+
+        subplot = updated["layout"]["subplots"][0]
+        self.assertEqual(subplot["axes"]["x"]["label"]["side"], "top")
+        self.assertEqual(subplot["axes"]["y"]["label"]["side"], "right")
+        self.assertFalse(subplot["axes"]["y"]["label"]["visible"])
+        self.assertFalse(subplot["axis_sides"]["bottom"]["spine_visible"])
+        self.assertFalse(subplot["axis_sides"]["top"]["ticks_visible"])
+        self.assertEqual(subplot["axis_sides"]["right"]["tick_label_color"], "#00aa00")
+
+        source = FigureIRCodec.state_to_python(updated)
+        self.assertIn("import matplotlib.ticker as mticker", source)
+        self.assertIn("ax.set_xscale('log', base=2)", source)
+        self.assertIn("ax.set_xlim(1.0, 8.0)", source)
+        self.assertIn("ax.xaxis.set_label_position('top')", source)
+        self.assertIn("ax.set_xlabel('Delay')", source)
+        self.assertIn("ax.xaxis.label.set_color('#aa5500')", source)
+        self.assertIn("ax.xaxis.label.set_linespacing(1.6)", source)
+        self.assertIn("ax.xaxis.set_label_coords(0.35, _hyde_x_label_coords[1])", source)
+        self.assertIn("ax.xaxis.labelpad = 14.0", source)
+        self.assertIn("ax.tick_params(axis='x', which='both', top=False, labeltop=False, bottom=False, labelbottom=False, direction='inout')", source)
+        self.assertIn("ax.xaxis.set_major_locator(mticker.FixedLocator([1.0, 2.0, 4.0, 8.0]))", source)
+        self.assertIn("ax.xaxis.set_major_formatter(mticker.FixedFormatter(['1', '2', '4', '8']))", source)
+        self.assertIn("ax.grid(True, axis='x', which='major', linestyle=':', linewidth=1.25, color='#123456')", source)
+        self.assertIn("ax.yaxis.set_label_position('right')", source)
+        self.assertIn("ax.set_ylabel('Signal')", source)
+        self.assertIn("ax.yaxis.label.set_visible(False)", source)
+        self.assertIn("ax.set_ylim(-2.0, 12.0)", source)
+        self.assertIn("for _hyde_tick in ax.yaxis.get_major_ticks() + ax.yaxis.get_minor_ticks():", source)
+        self.assertIn("_hyde_tick.label2.set_color('#00aa00')", source)
+        self.assertIn("_hyde_tick.label2.set_rotation(35.0)", source)
+        self.assertIn("ax.axhline(0, linestyle='--', linewidth=2.0, color='#654321')", source)
+
+    def test_figure_ir_lowers_partial_axis_ranges_and_resolved_side_state_to_python(self):
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+
+        with_bottom_extent = FigureIRCodec.update_state(
+            figure_ir,
+            {
+                "type": "set_axis_side_state",
+                "subplot_id": "subplot0",
+                "side": "bottom",
+                "state": {
+                    "draw_between": (0.1, 0.9),
+                },
+            },
+        )
+        with_top_layer = FigureIRCodec.update_state(
+            with_bottom_extent,
+            {
+                "type": "set_axis_side_state",
+                "subplot_id": "subplot0",
+                "side": "top",
+                "state": {
+                    "draw_on_top": True,
+                },
+            },
+        )
+        updated = FigureIRCodec.update_state(
+            with_top_layer,
+            {
+                "type": "set_axis_state",
+                "subplot_id": "subplot0",
+                "axis": "x",
+                "state": {
+                    "range": {
+                        "limits": (0.0, 8.0),
+                        "limit_mode": {"min": "manual", "max": "auto"},
+                        "autoscale": "data",
+                    },
+                },
+            },
+        )
+        updated = FigureIRCodec.update_state(
+            updated,
+            {
+                "type": "set_axis_state",
+                "subplot_id": "subplot0",
+                "axis": "y",
+                "state": {
+                    "range": {
+                        "limits": (-4.0, 3.0),
+                        "limit_mode": {"min": "auto", "max": "manual"},
+                        "autoscale": "data",
+                    },
+                },
+            },
+        )
+
+        source = FigureIRCodec.state_to_python(updated)
+
+        self.assertIn("ax.autoscale(enable=True, axis='x')", source)
+        self.assertIn("ax.set_xlim(left=0.0)", source)
+        self.assertIn("ax.autoscale(enable=True, axis='y')", source)
+        self.assertIn("ax.set_ylim(top=3.0)", source)
+        self.assertIn("ax.set_axisbelow(False)", source)
+        self.assertIn("_hyde_bottom_bounds = ax.get_xlim()", source)
+        self.assertIn("ax.spines['bottom'].set_bounds(", source)
+
+    def test_default_diff_lowering_omits_blank_label_visibility_until_explicitly_hidden(self):
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        defaults = _figure_defaults_snapshot(figure_ir)
+
+        source = FigureIRCodec.state_to_python(
+            figure_ir,
+            context={"figure_defaults": defaults},
+        )
+
+        self.assertNotIn("label.set_visible(False)", source)
+
+        hidden = FigureIRCodec.update_state(
+            figure_ir,
+            {
+                "type": "set_axis_state",
+                "subplot_id": "subplot0",
+                "axis": "x",
+                "state": {"label": {"visible": False}},
+            },
+        )
+        hidden_source = FigureIRCodec.state_to_python(
+            hidden,
+            context={"figure_defaults": defaults},
+        )
+
+        self.assertIn("ax.xaxis.label.set_visible(False)", hidden_source)
+
+    def test_set_axis_label_action_does_not_hide_blank_label_artist(self):
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+
+        cleared = FigureIRCodec.update_state(
+            figure_ir,
+            {
+                "type": "set_axis_label",
+                "subplot_id": "subplot0",
+                "axis": "x",
+                "label": "",
+            },
+        )
+
+        self.assertIsNone(cleared["layout"]["subplots"][0]["axes"]["x"]["label"]["text"])
+        self.assertTrue(cleared["layout"]["subplots"][0]["axes"]["x"]["label"]["visible"])
+
     def test_snapshot_payload_serializes_simple_single_axes_line_figure(self):
         figure = Figure()
         axes = figure.add_subplot(111)
@@ -354,6 +599,14 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIsNone(payload["live_state"])
         self.assertEqual(payload["figure_ir"]["settings"]["title"], "Graph0")
         self.assertEqual(
+            payload["resolved_axis_limits"]["subplot0"]["x"],
+            tuple(float(value) for value in figure.axes[0].get_xlim()),
+        )
+        self.assertEqual(
+            payload["resolved_axis_limits"]["subplot0"]["y"],
+            tuple(float(value) for value in figure.axes[0].get_ylim()),
+        )
+        self.assertEqual(
             payload["trace_styles"]["subplot0"]["trace0"]["label"],
             "y",
         )
@@ -366,6 +619,39 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             [entry["op"] for entry in payload["command_log"]],
             ["add_subplot", "plot"],
         )
+        subplot = payload["figure_ir"]["layout"]["subplots"][0]
+        self.assertEqual(subplot["axes"]["x"]["label"]["side"], "bottom")
+        self.assertEqual(subplot["axes"]["x"]["range"]["limit_mode"], {"min": "auto", "max": "auto"})
+        self.assertEqual(
+            sorted(subplot["axis_sides"]),
+            ["bottom", "left", "right", "top"],
+        )
+
+    def test_snapshot_payload_keeps_build_time_defaults_when_rcparams_change_later(self):
+        plt = self._configure_hyde_pyplot()
+
+        with matplotlib.rc_context({"lines.linewidth": 3.25}):
+            @hyde.figure
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        with matplotlib.rc_context({"lines.linewidth": 7.5}):
+            payload = figure_snapshot_payload(figure, 1)
+
+        self.assertEqual(
+            payload["figure_defaults"]["trace_styles"]["subplot0"]["trace0"]["linewidth"],
+            3.25,
+        )
+        self.assertEqual(
+            figure._hyde_defaults["trace_styles"]["subplot0"]["trace0"]["linewidth"],
+            3.25,
+        )
+        self.assertNotIn("linewidth=3.25", payload["call_source"])
 
     def test_snapshot_payload_preserves_figsize_for_first_class_decorated_figure(self):
         plt = self._configure_hyde_pyplot()
@@ -383,6 +669,70 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         self.assertEqual(payload["figure_ir"]["settings"]["figsize"], (5.0, 3.0))
         self.assertIn("fig = plt.figure('Graph0', figsize=(5.0, 3.0))", payload["call_source"])
+
+    def test_snapshot_payload_includes_kernel_defaults_and_omits_matching_default_output(self):
+        plt = self._configure_hyde_pyplot()
+
+        with matplotlib.rc_context(
+            {
+                "axes.labelpad": 9.0,
+                "lines.linestyle": "--",
+                "lines.linewidth": 3.25,
+                "xtick.direction": "in",
+                "ytick.direction": "in",
+            }
+        ):
+            @hyde.figure
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            figure = Graph0([0, 1, 2], [1, 4, 9])
+            apply_figure_action(
+                figure,
+                {
+                    "type": "set_trace_style",
+                    "subplot_id": "subplot0",
+                    "trace_id": "trace0",
+                    "style": {
+                        "linestyle": "--",
+                        "linewidth": 3.25,
+                    },
+                },
+            )
+            apply_figure_action(
+                figure,
+                {
+                    "type": "set_axis_state",
+                    "subplot_id": "subplot0",
+                    "axis": "x",
+                    "state": {
+                        "label": {
+                            "offset": 9.0,
+                        },
+                        "ticks": {
+                            "direction": "inside",
+                        },
+                    },
+                },
+            )
+
+            payload = figure_snapshot_payload(figure, 1)
+
+        defaults = payload["figure_defaults"]
+        subplot_defaults = defaults["layout"]["subplots"][0]
+        self.assertEqual(subplot_defaults["traces"][0]["kwargs"]["linestyle"], "--")
+        self.assertEqual(subplot_defaults["traces"][0]["kwargs"]["linewidth"], 3.25)
+        self.assertEqual(subplot_defaults["axes"]["x"]["label"]["offset"], 9.0)
+        self.assertEqual(subplot_defaults["axes"]["x"]["ticks"]["direction"], "inside")
+        self.assertEqual(defaults, figure._hyde_defaults)
+        self.assertNotIn("linestyle='--'", payload["call_source"])
+        self.assertNotIn("linewidth=3.25", payload["call_source"])
+        self.assertNotIn("ax.tick_params(", payload["call_source"])
+        self.assertNotIn("labelpad = 9.0", payload["call_source"])
+        self.assertNotIn("ax.set_xlabel(None)", payload["call_source"])
 
     def test_snapshot_payload_includes_hyde_figure_metadata(self):
         plt = self._configure_hyde_pyplot()

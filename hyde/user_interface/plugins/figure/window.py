@@ -83,22 +83,31 @@ class FigureSnapshotState:
         figure_size=None,
         tracked_names=None,
         figure_ir=None,
+        figure_defaults=None,
+        resolved_axis_limits=None,
         live_state=None,
         trace_styles=None,
     ):
         self._default_macro_name = default_macro_name or "Figure"
-        self._call_source = call_source
-        self._save_error = save_error
-        self._figure_size = None if figure_size is None else tuple(figure_size)
         self._tracked_names = ()
         self._figure_ir = None
-        self._live_state = copy.deepcopy(live_state)
-        self._trace_styles = copy.deepcopy(trace_styles) or {}
-        self._apply_figure_ir_snapshot(
+        self._figure_defaults = None
+        self._call_source = None
+        self._save_error = None
+        self._figure_size = None
+        self._live_state = None
+        self._trace_styles = {}
+        self.update(
             default_macro_name=default_macro_name,
             call_source=call_source,
+            save_error=save_error,
+            figure_size=figure_size,
             tracked_names=tracked_names,
             figure_ir=figure_ir,
+            figure_defaults=figure_defaults,
+            resolved_axis_limits=resolved_axis_limits,
+            live_state=live_state,
+            trace_styles=trace_styles,
         )
 
     def update(
@@ -109,28 +118,14 @@ class FigureSnapshotState:
         figure_size=None,
         tracked_names=None,
         figure_ir=None,
+        figure_defaults=None,
+        resolved_axis_limits=None,
         live_state=None,
         trace_styles=None,
     ):
-        self._apply_figure_ir_snapshot(
-            default_macro_name=default_macro_name,
-            call_source=call_source,
-            tracked_names=tracked_names,
-            figure_ir=figure_ir,
-        )
-        self._save_error = save_error
-        self._figure_size = None if figure_size is None else tuple(figure_size)
-        self._live_state = copy.deepcopy(live_state)
-        self._trace_styles = copy.deepcopy(trace_styles) or {}
-
-    def _apply_figure_ir_snapshot(
-        self,
-        default_macro_name=None,
-        call_source=None,
-        tracked_names=None,
-        figure_ir=None,
-    ):
         self._figure_ir = copy.deepcopy(figure_ir)
+        self._figure_defaults = copy.deepcopy(figure_defaults)
+        self._resolved_axis_limits = copy.deepcopy(resolved_axis_limits) or {}
         if default_macro_name:
             self._default_macro_name = str(default_macro_name)
         elif self._figure_ir is not None:
@@ -139,13 +134,20 @@ class FigureSnapshotState:
                 self._default_macro_name = title
         self._call_source = call_source
         if not self._call_source and self._figure_ir is not None:
-            self._call_source = FigureIRCodec.state_to_python(self._figure_ir)
+            self._call_source = FigureIRCodec.state_to_python(
+                self._figure_ir,
+                context={"figure_defaults": self._figure_defaults},
+            )
         if tracked_names:
             self._tracked_names = tuple(tracked_names)
         elif self._figure_ir is not None:
             self._tracked_names = FigureIRCodec.tracked_names(self._figure_ir)
         else:
             self._tracked_names = ()
+        self._save_error = save_error
+        self._figure_size = None if figure_size is None else tuple(figure_size)
+        self._live_state = copy.deepcopy(live_state)
+        self._trace_styles = copy.deepcopy(trace_styles) or {}
 
     def default_macro_name(self):
         return self._default_macro_name
@@ -164,6 +166,12 @@ class FigureSnapshotState:
 
     def figure_ir(self):
         return copy.deepcopy(self._figure_ir)
+
+    def figure_defaults(self):
+        return copy.deepcopy(self._figure_defaults)
+
+    def resolved_axis_limits(self):
+        return copy.deepcopy(self._resolved_axis_limits)
 
     def has_save_warning(self):
         return bool(self._save_error)
@@ -189,7 +197,11 @@ class FigureSnapshotState:
         if self._save_error:
             raise MacroStoreError(self._save_error)
         if self._figure_ir is not None:
-            return FigureIRCodec.state_to_macro_source(self._figure_ir, macro_name)
+            return FigureIRCodec.state_to_macro_source(
+                self._figure_ir,
+                macro_name,
+                context={"figure_defaults": self._figure_defaults},
+            )
         if self._live_state is not None:
             return FigureCodec.state_to_macro_source(self._live_state, macro_name)
         if not self._call_source:
@@ -268,6 +280,8 @@ class FigureWindow(QtWidgets.QWidget):
             figure_size=snapshot.get("figure_size"),
             tracked_names=snapshot.get("tracked_names"),
             figure_ir=snapshot.get("figure_ir"),
+            figure_defaults=snapshot.get("figure_defaults"),
+            resolved_axis_limits=snapshot.get("resolved_axis_limits"),
             live_state=snapshot.get("live_state"),
             trace_styles=snapshot.get("trace_styles"),
         )
@@ -441,70 +455,35 @@ class FigureWindow(QtWidgets.QWidget):
         popup_menu("figure", event.globalPos())
 
     def request_resize_redraw(self, width=None, height=None):
-        send_figure_action = self.services.get("send_figure_action")
-        if send_figure_action is None:
-            return False
         if width is None or height is None:
             target_size = self.image_label.contentsRect().size()
             width = target_size.width()
             height = target_size.height()
         if int(width) <= 0 or int(height) <= 0:
             return False
-        return bool(
-            send_figure_action(
-                self.figure_number,
-                {
-                    "type": "resize_redraw",
-                    "width": int(width),
-                    "height": int(height),
-                },
-            )
+        return self.request_figure_action(
+            {
+                "type": "resize_redraw",
+                "width": int(width),
+                "height": int(height),
+            }
         )
+
+    def request_figure_action(self, action):
+        send_figure_action = self.services.get("send_figure_action")
+        if send_figure_action is None:
+            return False
+        return bool(send_figure_action(self.figure_number, dict(action or {})))
 
     def request_regenerate_from_ir(self):
         if self.snapshot_state.figure_ir() is None:
             return False
-        send_figure_action = self.services.get("send_figure_action")
-        if send_figure_action is None:
-            return False
-        return bool(
-            send_figure_action(
-                self.figure_number,
-                {"type": "regenerate_from_ir"},
-            )
-        )
+        return self.request_figure_action({"type": "regenerate_from_ir"})
 
     def request_refresh_from_live_state(self):
         if self.snapshot_state.live_state() is None:
             return False
-        send_figure_action = self.services.get("send_figure_action")
-        if send_figure_action is None:
-            return False
-        return bool(
-            send_figure_action(
-                self.figure_number,
-                {"type": "refresh_from_live_state"},
-            )
-        )
-
-    def request_trace_style_update(self, subplot_id, trace_id, style, replace=False):
-        send_figure_action = self.services.get("send_figure_action")
-        if send_figure_action is None:
-            return False
-        action = {
-            "type": "set_trace_style",
-            "subplot_id": subplot_id,
-            "trace_id": trace_id,
-            "style": dict(style or {}),
-        }
-        if replace:
-            action["replace"] = True
-        return bool(
-            send_figure_action(
-                self.figure_number,
-                action,
-            )
-        )
+        return self.request_figure_action({"type": "refresh_from_live_state"})
 
     @inmain_decorator()
     def _on_resize_redraw_timeout(self):

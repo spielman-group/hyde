@@ -2,7 +2,6 @@ from matplotlib import colors as mcolors
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtWidgets
 
-
 SUPPORTED_STYLE_DEFAULTS = {
     "visible": True,
     "linestyle": "-",
@@ -98,6 +97,29 @@ def _trace_display_name(trace):
     return str(trace.get("id", "trace"))
 
 
+def _apply_style_values(style, values):
+    if not isinstance(values, dict):
+        return
+    for key in style:
+        if key not in values:
+            continue
+        value = values[key]
+        if key == "color":
+            style[key] = _normalize_color(value, style[key])
+        elif key in {"markerfacecolor", "markeredgecolor"}:
+            style[key] = _normalize_color(value, style[key])
+        elif key == "linestyle":
+            style[key] = _normalize_linestyle(value)
+        elif key == "marker":
+            style[key] = _normalize_marker(value)
+        elif key == "visible":
+            style[key] = bool(value)
+        elif key in {"linewidth", "alpha", "markersize", "markeredgewidth"}:
+            style[key] = float(value)
+        else:
+            style[key] = value
+
+
 class TraceAppearanceDialog(QtWidgets.QDialog):
     def __init__(self, figure_window, parent=None):
         super().__init__(parent)
@@ -106,6 +128,7 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         self.figure_window = figure_window
         self._loading_controls = False
         self._trace_records = []
+        self._trace_records_by_id = {}
         self._original_styles = {}
         self._current_styles = {}
         self._touched_trace_ids = set()
@@ -210,6 +233,23 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
     def _load_traces(self):
         figure_ir = self.figure_window.snapshot_state.figure_ir() or {}
         trace_styles = self.figure_window.snapshot_state.trace_styles()
+        figure_defaults = self.figure_window.snapshot_state.figure_defaults() or {}
+        default_traces_by_subplot = {}
+        for subplot in figure_defaults.get("layout", {}).get("subplots", []):
+            subplot_id = str(subplot.get("id"))
+            default_traces_by_subplot[subplot_id] = {
+                str(trace.get("id")): dict(trace or {})
+                for trace in subplot.get("traces", [])
+            }
+        for subplot_id, trace_defaults in dict(
+            figure_defaults.get("trace_styles", {}) or {}
+        ).items():
+            subplot_defaults = default_traces_by_subplot.setdefault(str(subplot_id), {})
+            for trace_id, style in dict(trace_defaults or {}).items():
+                subplot_defaults.setdefault(
+                    str(trace_id),
+                    {"kwargs": dict(style or {})},
+                )
         subplots = figure_ir.get("layout", {}).get("subplots", [])
         if not subplots:
             return
@@ -221,6 +261,9 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
             style = self._style_from_trace(
                 trace,
                 index,
+                default_trace=default_traces_by_subplot.get(subplot["id"], {}).get(
+                    trace_id
+                ),
                 live_style=trace_styles.get(subplot["id"], {}).get(trace_id),
             )
             record = {
@@ -229,53 +272,20 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
                 "label": _trace_display_name(trace),
             }
             self._trace_records.append(record)
+            self._trace_records_by_id[trace_id] = dict(record)
             self._original_styles[trace_id] = dict(style)
             self._current_styles[trace_id] = dict(style)
             self.trace_list.addItem(record["label"])
         if self.trace_list.count():
             self.trace_list.setCurrentRow(0)
 
-    def _style_from_trace(self, trace, index, live_style=None):
+    def _style_from_trace(self, trace, index, default_trace=None, live_style=None):
         style = dict(SUPPORTED_STYLE_DEFAULTS)
         style["color"] = _default_trace_color(index)
-        kwargs = dict(trace.get("kwargs", {}) or {})
-        for key in style:
-            if key not in kwargs:
-                continue
-            value = kwargs[key]
-            if key == "color":
-                style[key] = _normalize_color(value, style[key])
-            elif key in {"markerfacecolor", "markeredgecolor"}:
-                style[key] = _normalize_color(value, "auto")
-            elif key == "linestyle":
-                style[key] = _normalize_linestyle(value)
-            elif key == "marker":
-                style[key] = _normalize_marker(value)
-            elif key == "visible":
-                style[key] = bool(value)
-            elif key in {"linewidth", "alpha", "markersize", "markeredgewidth"}:
-                style[key] = float(value)
-            else:
-                style[key] = value
-        if isinstance(live_style, dict):
-            for key in style:
-                if key not in live_style:
-                    continue
-                value = live_style[key]
-                if key == "color":
-                    style[key] = _normalize_color(value, style[key])
-                elif key in {"markerfacecolor", "markeredgecolor"}:
-                    style[key] = _normalize_color(value, style[key])
-                elif key == "linestyle":
-                    style[key] = _normalize_linestyle(value)
-                elif key == "marker":
-                    style[key] = _normalize_marker(value)
-                elif key == "visible":
-                    style[key] = bool(value)
-                elif key in {"linewidth", "alpha", "markersize", "markeredgewidth"}:
-                    style[key] = float(value)
-                else:
-                    style[key] = value
+        if isinstance(default_trace, dict):
+            _apply_style_values(style, default_trace.get("kwargs", {}))
+        _apply_style_values(style, trace.get("kwargs", {}))
+        _apply_style_values(style, live_style)
         return style
 
     def has_supported_traces(self):
@@ -327,27 +337,31 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
             return "markers"
         return "lines"
 
+    def _record_for_trace(self, trace_id):
+        record = self._trace_records_by_id.get(str(trace_id))
+        return None if record is None else dict(record)
+
     def _send_style_update(self, trace_id, patch, replace=False, reload_controls=False):
+        trace_id = str(trace_id)
         if not patch:
             return False
-        record = next(
-            (item for item in self._trace_records if item["trace_id"] == trace_id),
-            None,
-        )
+        record = self._record_for_trace(trace_id)
         if record is None:
             return False
-        style = dict(patch)
-        sent = bool(
-            self.figure_window.request_trace_style_update(
-                record["subplot_id"],
-                trace_id,
-                style,
-                replace=replace,
-            )
-        )
-        if not sent:
+        action = {
+            "type": "set_trace_style",
+            "subplot_id": record["subplot_id"],
+            "trace_id": record["trace_id"],
+            "style": dict(patch),
+        }
+        if replace:
+            action["replace"] = True
+        if not self.figure_window.request_figure_action(action):
             return False
-        self._current_styles[trace_id].update(style)
+        if replace:
+            self._current_styles[trace_id] = dict(patch)
+        else:
+            self._current_styles[trace_id].update(patch)
         if self._current_styles[trace_id] == self._original_styles[trace_id]:
             self._touched_trace_ids.discard(trace_id)
         else:
@@ -401,7 +415,9 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
             fallback=self._current_styles[trace_id]["color"],
         )
         if color is None:
-            self.line_color_edit.setText(self._current_styles[trace_id]["color"])
+            self.line_color_edit.setText(
+                self._current_styles[trace_id]["color"]
+            )
             return
         self._send_style_update(trace_id, {"color": color})
 
@@ -514,7 +530,7 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         for trace_id in sorted(self._touched_trace_ids):
             self._send_style_update(
                 trace_id,
-                dict(self._original_styles[trace_id]),
+                self._original_styles[trace_id],
                 replace=True,
             )
         self._touched_trace_ids.clear()
