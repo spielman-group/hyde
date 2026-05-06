@@ -128,6 +128,15 @@ class DummyPythonTerminalService:
         self.restored_entries = list(entries)
 
 
+class DummyExecutionService:
+    def __init__(self, events):
+        self.events = events
+
+    def execute_hidden(self, code, silent=True):
+        self.events.append(("session_source", code, silent))
+        return True
+
+
 class PluginManagerStub:
     def __init__(self, plugins=None, services=None):
         self.plugins = dict(plugins or {})
@@ -226,10 +235,11 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app.current_project_dir = str(project_dir)
             restored_app.plugin_manager = PluginManagerStub({"session": RestoringPlugin()})
             restored_app.plugin_service = lambda key: (
-                DummyPythonTerminalService() if key == "visible_terminal_service" else None
-            )
-            restored_app.queue_background_command = (
-                lambda code, silent=True: events.append(("session_source", code, silent)) or True
+                DummyPythonTerminalService()
+                if key == "visible_terminal_service"
+                else DummyExecutionService(events)
+                if key == "python_execution_service"
+                else None
             )
             restored_app.emit_plugin_event = (
                 lambda name, data=None: HydeApp.emit_plugin_event(restored_app, name, data)
@@ -307,14 +317,15 @@ class TestHydeStartup(unittest.TestCase):
         try:
             wait_until(lambda: app._startup_complete, timeout=60, message="Hyde did not finish startup.")
             self.assertIsNone(app.current_project_dir)
-            self.assertIsNotNone(app.kernel_process)
-            self.assertIsNone(app.kernel_process.poll())
+            self.assertTrue(app.plugin_service("kernel_runtime_service").is_ready())
+            self.assertIsNotNone(app.plugin_service("kernel_runtime_service").kernel_client())
             self.assertFalse(
                 app.plugin_service("visible_terminal_service").subwindow().isVisible()
             )
             self.assertFalse(
                 app.mdi_context.subwindow("procedures").isVisible()
             )
+            app.plugin_service("namespace_view_service").ensure_widget()
             self.assertFalse(
                 app.plugin_service("namespace_view_service").subwindow().isVisible()
             )
@@ -332,12 +343,9 @@ class TestHydeStartup(unittest.TestCase):
             self.assertFalse(lookup_menu_action(app, "window", "Python Variables").isEnabled())
             self.assertFalse(lookup_menu_action(app, "window", "New Table...").isEnabled())
         finally:
-            app.finalize_quit()
+            app.begin_shutdown_from_close_event()
             wait_until(
-                lambda: (
-                    app.plugin_service("visible_terminal_service").widget() is None
-                    and app.plugin_service("namespace_view_service").widget() is None
-                ),
+                lambda: app._close_ready,
                 timeout=10,
                 message="Hyde did not finish asynchronous shutdown.",
             )

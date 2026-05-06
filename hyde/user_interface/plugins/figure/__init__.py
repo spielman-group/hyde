@@ -116,7 +116,7 @@ class FigureFeatureService:
         command = dialog.get_command(default_title=generated_title)
         if not command:
             return False
-        self.plugin.services["execute_command"](command, visible=False)
+        self.plugin.services["python_execution_service"].execute_hidden(command)
         return True
 
 
@@ -215,9 +215,8 @@ class Plugin(HydePlugin):
         self.figure_macros = []
         self.rebuild_figure_macros_menu()
         state = FigureState()
-        self.services["queue_background_command"](
-            state.source_for_command("publish_figure_macros"),
-            silent=True,
+        self.services["python_execution_service"].execute_hidden(
+            state.source_for_command("publish_figure_macros")
         )
 
     def on_project_loaded(self, data):
@@ -273,17 +272,19 @@ class Plugin(HydePlugin):
         return self._macro_menu
 
     def _register_comm_target(self):
-        terminal_service = self.services.get("visible_terminal_service")
-        if terminal_service is None:
+        kernel_runtime_service = self.services.get("kernel_runtime_service")
+        if kernel_runtime_service is None:
             return
-        widget = terminal_service.ensure_widget()
-        kernel_client = None if widget is None else widget.kernel_client
-        comm_manager = None if kernel_client is None else getattr(kernel_client, "comm_manager", None)
-        if comm_manager is None:
+        kernel_client = kernel_runtime_service.kernel_client()
+        if kernel_client is None:
             return
         if kernel_client is self._registered_kernel_client:
             return
-        comm_manager.register_target(COMM_TARGET, self._on_figure_comm_open)
+        if not kernel_runtime_service.register_comm_target(
+            COMM_TARGET,
+            self._on_figure_comm_open,
+        ):
+            return
         self._registered_kernel_client = kernel_client
 
     def _on_figure_comm_open(self, comm, msg):

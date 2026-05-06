@@ -12,13 +12,40 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.figure_comm import COMM_TARGET, register_auxiliary_figure_comm_sink
 from hyde.user_interface.base import RuntimeCommandState
+from hyde.user_interface.figure_comm import (
+    COMM_TARGET,
+    register_auxiliary_figure_comm_sink,
+)
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.main.frontend_kernel import FrontendKernelService
 from hyde.user_interface.main.runtime_helper import RuntimeHelper
+from hyde.user_interface.plugins.kernel_runtime import Plugin as KernelRuntimePlugin
 from hyde.user_interface.plugins.remote_requests import RemoteRequestServer
 from qtutils.qt import QtWidgets
+
+
+class FakeSignal:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def disconnect(self, callback):
+        self._callbacks.remove(callback)
+
+    def emit(self, message=None):
+        for callback in list(self._callbacks):
+            if message is None:
+                callback()
+            else:
+                callback(message)
+
+
+class FakeShellChannel:
+    def __init__(self):
+        self.message_received = FakeSignal()
 
 
 class FakeKernelClient:
@@ -30,53 +57,6 @@ class FakeKernelClient:
 
     def shutdown(self, reply=False, timeout=None):
         self.calls.append(("shutdown", reply if timeout is None else (reply, timeout)))
-
-
-class FakeApp:
-    def __init__(self):
-        self.calls = []
-        self.shutting_down = False
-
-    def enter_no_project_state(self):
-        self.calls.append(("enter_no_project_state",))
-
-    def activate_project(self, path):
-        self.calls.append(("activate_project", path))
-
-    def on_project_state_result(self, data):
-        self.calls.append(("project_state_result", data))
-
-    def request_gui_quit(self):
-        self.calls.append(("request_gui_quit",))
-
-    def on_kernel_crashed(self):
-        self.calls.append(("kernel_crashed",))
-
-    def on_kernel_ready(self):
-        self.calls.append(("kernel_ready",))
-
-    def emit_plugin_event(self, name, data=None):
-        self.calls.append(("plugin_event", name, data))
-
-
-class FakeStatusBar:
-    def __init__(self):
-        self.messages = []
-        self.cleared = 0
-
-    def showMessage(self, message, timeout=0):
-        self.messages.append((message, timeout))
-
-    def clearMessage(self):
-        self.cleared += 1
-
-
-class FakeJoinThread:
-    def join(self, timeout=None):
-        self.timeout = timeout
-
-    def is_alive(self):
-        return False
 
 
 class FakeCommManager:
@@ -120,28 +100,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIsNotNone(comm._on_close)
 
     def test_frontend_kernel_service_marks_ready_from_kernel_info_reply(self):
-        class FakeSignal:
-            def __init__(self):
-                self._callbacks = []
-
-            def connect(self, callback):
-                self._callbacks.append(callback)
-
-            def disconnect(self, callback):
-                self._callbacks.remove(callback)
-
-            def emit(self, message=None):
-                for callback in list(self._callbacks):
-                    if message is None:
-                        callback()
-                    else:
-                        callback(message)
-
-        class FakeShellChannel:
-            def __init__(self):
-                self.message_received = FakeSignal()
-
-        class FakeKernelClient:
+        class FakeQtKernelClient:
             def __init__(self, connection_file):
                 self.connection_file = connection_file
                 self.shell_channel = FakeShellChannel()
@@ -169,7 +128,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
             ready_events = []
             with patch(
                 "hyde.user_interface.main.frontend_kernel.QtKernelClient",
-                FakeKernelClient,
+                FakeQtKernelClient,
             ):
                 service = FrontendKernelService(connection_file)
                 service.ready.connect(lambda: ready_events.append("ready"))
@@ -189,51 +148,132 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 self.assertTrue(service.is_ready())
                 self.assertEqual(ready_events, ["ready"])
 
-    def test_runtime_helper_executes_queued_command_through_shared_frontend_service(self):
-        executed = []
-        frontend_kernel_service = type(
-            "FrontendKernelService",
-            (),
-            {
-                "is_ready": lambda self: True,
-                "execute": lambda self, code, silent=True: executed.append((code, silent)) or True,
-            },
-        )()
+    def test_runtime_helper_routes_lane_one_messages_and_kernel_messages(self):
+        calls = []
+        from_kernel = queue.Queue()
+        helper = None
+
+        def stop_after_kernel_message(name, data=None):
+            calls.append((name, data))
+            helper.stop()
+
+        shell_services = {
+            "enter_no_project_state": lambda: calls.append(("no_project",)),
+            "activate_project": lambda path: calls.append(("activate_project", path)),
+            "on_project_state_result": lambda data: calls.append(
+                ("project_state_result", data)
+            ),
+            "request_gui_quit": lambda: calls.append(("request_gui_quit",)),
+            "emit_plugin_event": stop_after_kernel_message,
+        }
+        from_kernel.put(("ENTER_NO_PROJECT_STATE", None))
+        from_kernel.put(("ACTIVATE_PROJECT", {"path": "/tmp/demo.hy"}))
+        from_kernel.put(("PROJECT_STATE_RESULT", {"operation": "load"}))
+        from_kernel.put(("TABLE_DATA_RESPONSE", {"request_id": "r1"}))
         helper = RuntimeHelper(
-            app=type("FakeApp", (), {"ui": object()})(),
-            frontend_kernel_service=frontend_kernel_service,
-            from_kernel=queue.Queue(),
+            shell_services=shell_services,
+            from_kernel=from_kernel,
             kernel_process=type("FakeProcess", (), {"poll": lambda self: None})(),
+            on_kernel_crashed=lambda: calls.append(("kernel_crashed",)),
         )
-        helper.enqueue_execute("print('hello')", silent=True)
-        helper._drain_commands()
 
-        self.assertEqual(executed, [("print('hello')", True)])
+        helper.start()
+        helper.thread.join(timeout=1.0)
 
-    def test_hyde_start_kernel_runtime_launches_kernel_child_directly(self):
+        self.assertFalse(helper.thread.is_alive())
+        self.assertEqual(
+            calls,
+            [
+                ("no_project",),
+                ("activate_project", "/tmp/demo.hy"),
+                ("project_state_result", {"operation": "load"}),
+                (
+                    "kernel_message",
+                    {
+                        "task": "TABLE_DATA_RESPONSE",
+                        "data": {"request_id": "r1"},
+                    },
+                ),
+            ],
+        )
+
+    def test_runtime_helper_quit_requested_routes_to_shell_quit(self):
+        calls = []
+        from_kernel = queue.Queue()
+        from_kernel.put(("QUIT_REQUESTED", None))
+        helper = RuntimeHelper(
+            shell_services={
+                "enter_no_project_state": lambda: None,
+                "activate_project": lambda path: None,
+                "on_project_state_result": lambda data: None,
+                "request_gui_quit": lambda: calls.append(("request_gui_quit",)),
+                "emit_plugin_event": lambda name, data=None: None,
+            },
+            from_kernel=from_kernel,
+            kernel_process=type("FakeProcess", (), {"poll": lambda self: None})(),
+            on_kernel_crashed=lambda: calls.append(("kernel_crashed",)),
+        )
+
+        helper.start()
+        helper.thread.join(timeout=1.0)
+
+        self.assertEqual(calls, [("request_gui_quit",)])
+
+    def test_runtime_helper_reports_kernel_process_death(self):
+        calls = []
+        helper = RuntimeHelper(
+            shell_services={
+                "enter_no_project_state": lambda: None,
+                "activate_project": lambda path: None,
+                "on_project_state_result": lambda data: None,
+                "request_gui_quit": lambda: None,
+                "emit_plugin_event": lambda name, data=None: None,
+            },
+            from_kernel=queue.Queue(),
+            kernel_process=type("DeadProcess", (), {"poll": lambda self: 1})(),
+            on_kernel_crashed=lambda: calls.append(("kernel_crashed",)),
+        )
+
+        helper.start()
+        helper.thread.join(timeout=1.0)
+
+        self.assertEqual(calls, [("kernel_crashed",)])
+
+    def test_kernel_runtime_plugin_starts_shared_frontend_client_and_worker(self):
         class FakeProcessTree:
             def __init__(self):
                 self.calls = []
 
-            def subprocess(self, path, args=None, output_redirection_port=None, startup_timeout=None):
-                self.calls.append((path, list(args or []), output_redirection_port, startup_timeout))
+            def subprocess(
+                self,
+                path,
+                args=None,
+                output_redirection_port=None,
+                startup_timeout=None,
+            ):
+                self.calls.append(
+                    (path, list(args or []), output_redirection_port, startup_timeout)
+                )
                 process = type("FakeProcess", (), {"poll": lambda self: None})()
                 return "to-kernel", "from-kernel", process
 
         class FakeRuntimeHelper:
-            def __init__(self, app, frontend_kernel_service, from_kernel, kernel_process):
-                self.app = app
-                self.frontend_kernel_service = frontend_kernel_service
+            def __init__(self, shell_services, from_kernel, kernel_process, on_kernel_crashed):
+                self.shell_services = shell_services
                 self.from_kernel = from_kernel
                 self.kernel_process = kernel_process
+                self.on_kernel_crashed = on_kernel_crashed
                 self.started = False
 
             def start(self):
                 self.started = True
 
         class FakeFrontendKernelService:
-            def __init__(self):
+            def __init__(self, connection_file, parent=None):
+                self.connection_file = connection_file
+                self.parent = parent
                 self.calls = []
+                self.ready = FakeSignal()
 
             def stop(self):
                 self.calls.append("stop")
@@ -241,45 +281,141 @@ class TestRuntimeArchitecture(unittest.TestCase):
             def start(self):
                 self.calls.append("start")
 
-        dummy_app = type("DummyApp", (), {})()
-        dummy_app.process_tree = FakeProcessTree()
-        dummy_app.plugin_service = lambda key: (
-            type("LoggingService", (), {"port": lambda self: 12345})()
-            if key == "runtime_output_service"
-            else None
-        )
-        dummy_app.runtime_helper = None
-        dummy_app.kernel_to_child = None
-        dummy_app.kernel_from_child = None
-        dummy_app.kernel_process = None
-        dummy_app.frontend_kernel_service = FakeFrontendKernelService()
+            def kernel_client(self):
+                return None
+
+        services = {
+            "ui": object(),
+            "process_tree": FakeProcessTree(),
+            "runtime_output_service": type(
+                "LoggingService", (), {"port": lambda self: 12345}
+            )(),
+            "emit_plugin_event": lambda name, data=None: None,
+            "on_kernel_ready": lambda: None,
+            "on_kernel_crashed": lambda: None,
+            "enter_no_project_state": lambda: None,
+            "activate_project": lambda path: None,
+            "on_project_state_result": lambda data: None,
+            "request_gui_quit": lambda: None,
+            "get_shutting_down": lambda: False,
+            "finalize_quit": lambda: None,
+        }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             connection_file = os.path.join(tmpdir, "kernel-hyde.json")
-            with patch("hyde.user_interface.main.CONNECTION_FILE", connection_file):
-                with patch("hyde.user_interface.main.RuntimeHelper", FakeRuntimeHelper):
-                    HydeApp.start_kernel_runtime(dummy_app)
+            with patch(
+                "hyde.user_interface.plugins.kernel_runtime.CONNECTION_FILE",
+                connection_file,
+            ):
+                with patch(
+                    "hyde.user_interface.plugins.kernel_runtime.FrontendKernelService",
+                    FakeFrontendKernelService,
+                ):
+                    with patch(
+                        "hyde.user_interface.plugins.kernel_runtime.RuntimeHelper",
+                        FakeRuntimeHelper,
+                    ):
+                        plugin = KernelRuntimePlugin({})
+                        plugin.plugin_setup_complete({"services": services})
 
-        self.assertEqual(len(dummy_app.process_tree.calls), 1)
-        path, args, port, startup_timeout = dummy_app.process_tree.calls[0]
+        runtime_service = plugin.kernel_runtime_service
+        self.assertIsInstance(plugin.runtime_helper, FakeRuntimeHelper)
+        self.assertIs(plugin.runtime_helper.shell_services, services)
+        self.assertTrue(plugin.runtime_helper.started)
+        self.assertIsInstance(plugin.frontend_kernel_service, FakeFrontendKernelService)
+        self.assertEqual(plugin.frontend_kernel_service.calls, ["stop", "start"])
+        self.assertEqual(len(services["process_tree"].calls), 1)
+        path, args, port, startup_timeout = services["process_tree"].calls[0]
         self.assertEqual(path, KERNEL_LAUNCHER)
         self.assertEqual(args, ["-f", connection_file])
         self.assertEqual(port, 12345)
         self.assertEqual(startup_timeout, 60)
-        self.assertEqual(dummy_app.kernel_to_child, "to-kernel")
-        self.assertEqual(dummy_app.kernel_from_child, "from-kernel")
-        self.assertIsInstance(dummy_app.runtime_helper, FakeRuntimeHelper)
-        self.assertIs(dummy_app.runtime_helper.frontend_kernel_service, dummy_app.frontend_kernel_service)
-        self.assertTrue(dummy_app.runtime_helper.started)
-        self.assertEqual(dummy_app.frontend_kernel_service.calls, ["stop", "start"])
+        self.assertIsNone(runtime_service.kernel_client())
 
-    def test_procedure_change_enqueues_silent_reload_on_runtime_queue(self):
+    def test_kernel_runtime_plugin_shutdown_finalizes_when_process_is_stopped(self):
+        calls = []
+
+        class FakeFrontendKernelService:
+            def __init__(self, connection_file, parent=None):
+                self.connection_file = connection_file
+                self.parent = parent
+                self.ready = FakeSignal()
+
+            def stop(self):
+                calls.append(("frontend_stop",))
+
+            def start(self):
+                calls.append(("frontend_start",))
+
+            def shutdown_kernel(self, reply=False):
+                calls.append(("shutdown_kernel", reply))
+
+            def is_ready(self):
+                return True
+
+            def execute(self, code, silent=True):
+                calls.append(("execute", code, silent))
+                return True
+
+            def kernel_client(self):
+                return FakeKernelClient()
+
+        plugin = KernelRuntimePlugin({})
+        plugin.services = {
+            "ui": object(),
+            "process_tree": type("UnusedProcessTree", (), {})(),
+            "emit_plugin_event": lambda name, data=None: None,
+            "on_kernel_ready": lambda: None,
+            "on_kernel_crashed": lambda: None,
+            "enter_no_project_state": lambda: None,
+            "activate_project": lambda path: None,
+            "on_project_state_result": lambda data: None,
+            "request_gui_quit": lambda: None,
+            "get_shutting_down": lambda: True,
+            "finalize_quit": lambda: calls.append(("finalize_quit",)),
+        }
+        plugin.frontend_kernel_service = FakeFrontendKernelService("/tmp/kernel.json")
+        plugin.runtime_helper = type(
+            "Helper", (), {"stop": lambda self: calls.append(("helper_stop",))}
+        )()
+        plugin.kernel_process = type("StoppedProcess", (), {"poll": lambda self: 0})()
+
+        with patch(
+            "hyde.user_interface.plugins.kernel_runtime.QtCore.QTimer.singleShot",
+            side_effect=lambda delay, fn: fn(),
+        ):
+            plugin.on_request_runtime_shutdown({})
+
+        self.assertEqual(
+            calls,
+            [
+                ("helper_stop",),
+                ("shutdown_kernel", False),
+                ("frontend_stop",),
+                ("finalize_quit",),
+            ],
+        )
+
+    def test_hyde_procedure_change_uses_hidden_execution_service(self):
         queued = []
         dummy_app = type("DummyApp", (), {})()
         dummy_app.current_project_dir = "/tmp/project.hy"
-        dummy_app.queue_background_command = lambda code, silent=True: queued.append((code, silent))
+        dummy_app.plugin_service = lambda key: (
+            type(
+                "ExecutionService",
+                (),
+                {"execute_hidden": lambda self, code, silent=True: queued.append((code, silent))},
+            )()
+            if key == "python_execution_service"
+            else None
+        )
 
-        HydeApp.on_procedure_change(dummy_app, "procedures/example.py", {}, event="modified")
+        HydeApp.on_procedure_change(
+            dummy_app,
+            "procedures/example.py",
+            {},
+            event="modified",
+        )
 
         self.assertEqual(len(queued), 1)
         code, silent = queued[0]
@@ -289,22 +425,12 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIn(os.path.dirname(HYDE_DIR), code)
         self.assertIn("reset_namespace=False", code)
 
-    def test_queue_background_command_uses_runtime_helper_queue(self):
-        queued = []
-        runtime_helper = type(
-            "RuntimeHelper",
-            (),
-            {"enqueue_execute": lambda self, code, silent=True: queued.append((code, silent))},
-        )()
-        dummy_app = type("DummyApp", (), {"runtime_helper": runtime_helper})()
-
-        self.assertTrue(HydeApp.queue_background_command(dummy_app, "x = 1", silent=False))
-        self.assertEqual(queued, [("x = 1", False)])
-
-    def test_remote_request_server_queues_visible_remote_execution(self):
+    def test_remote_request_server_uses_hidden_execution_with_non_silent_flag(self):
         queued = []
         server = RemoteRequestServer.__new__(RemoteRequestServer)
-        server.enqueue_command = lambda code, silent=True: queued.append((code, silent)) or True
+        server.execute_hidden = (
+            lambda code, silent=True: queued.append((code, silent)) or True
+        )
 
         self.assertEqual(server.handler("hello"), "hello")
         self.assertEqual(server.handler("/path/to/file.h5"), "added successfully")
@@ -312,96 +438,49 @@ class TestRuntimeArchitecture(unittest.TestCase):
         state.set_remote_request("/path/to/file.h5")
         self.assertEqual(queued, [(state.python_source(), False)])
 
-    def test_on_kernel_crashed_stops_helper_before_restart(self):
+    def test_on_kernel_crashed_resets_shell_state_without_runtime_restart(self):
         calls = []
-        helper = type("Helper", (), {"stop": lambda self: calls.append(("helper_stop",))})()
-        frontend_kernel_service = type(
-            "FrontendKernelService",
-            (),
-            {"stop": lambda self: calls.append(("frontend_stop",))},
-        )()
         dummy_app = type("DummyApp", (), {})()
         dummy_app.shutting_down = False
         dummy_app._quit_command_sent = True
-        dummy_app.runtime_helper = helper
-        dummy_app.frontend_kernel_service = frontend_kernel_service
         dummy_app.ui = object()
         dummy_app.enter_no_project_state = lambda: calls.append(("no_project",))
         dummy_app.end_project_operation = lambda: calls.append(("end",))
         dummy_app.emit_plugin_event = lambda name, data=None: calls.append((name, data))
-        dummy_app.start_kernel_runtime = lambda: calls.append(("restart_runtime",))
 
         with patch("hyde.user_interface.main.QtWidgets.QMessageBox.warning") as warning:
             HydeApp.on_kernel_crashed(dummy_app)
 
         self.assertFalse(dummy_app._quit_command_sent)
-        self.assertIsNone(dummy_app.runtime_helper)
         self.assertEqual(
             calls,
             [
                 ("no_project",),
                 ("end",),
-                ("helper_stop",),
-                ("frontend_stop",),
                 ("kernel_crashed", {}),
-                ("restart_runtime",),
             ],
         )
         warning.assert_called_once()
 
-    def test_shutdown_runtime_requests_kernel_shutdown_and_schedules_completion(self):
-        process_calls = []
-        frontend_kernel_service = type(
-            "FrontendKernelService",
-            (),
-            {
-                "shutdown_kernel": lambda self, reply=False: process_calls.append(
-                    ("shutdown_kernel", reply)
-                ),
-                "stop": lambda self: process_calls.append(("frontend_stop",)),
-            },
-        )()
-        helper = type("Helper", (), {"stop": lambda self: process_calls.append(("helper_stop",))})()
-
+    def test_begin_shutdown_from_close_event_emits_shutdown_events_once(self):
+        calls = []
         dummy_app = type("DummyApp", (), {})()
         dummy_app._runtime_shutdown = False
-        dummy_app.stop_project_watcher = lambda: process_calls.append(("stop_watcher",))
-        dummy_app.runtime_helper = helper
-        dummy_app.frontend_kernel_service = frontend_kernel_service
-        dummy_app.emit_plugin_event = lambda name, data=None: process_calls.append((name, data))
-        dummy_app._complete_shutdown_runtime = lambda: process_calls.append(("complete_shutdown",))
+        dummy_app.stop_project_watcher = lambda: calls.append(("stop_watcher",))
+        dummy_app.emit_plugin_event = lambda name, data=None: calls.append((name, data))
 
-        with patch("hyde.user_interface.main.time.monotonic", return_value=10.0):
-            with patch("hyde.user_interface.main.QtCore.QTimer.singleShot", side_effect=lambda delay, fn: process_calls.append(("singleShot", delay, fn))):
-                HydeApp.shutdown_runtime(dummy_app)
+        HydeApp.begin_shutdown_from_close_event(dummy_app)
+        HydeApp.begin_shutdown_from_close_event(dummy_app)
 
-        self.assertEqual(dummy_app._quit_deadline, 12.0)
-        self.assertEqual(process_calls[0], ("stop_watcher",))
-        self.assertEqual(process_calls[1], ("application_shutdown", {}))
-        self.assertEqual(process_calls[2], ("shutdown_kernel", False))
-        self.assertEqual(process_calls[3], ("helper_stop",))
-        self.assertEqual(process_calls[4], ("frontend_stop",))
-        self.assertEqual(process_calls[5], ("kernel_crashed", {}))
-        self.assertEqual(process_calls[6][0:2], ("singleShot", 0))
-        self.assertIsNone(dummy_app.runtime_helper)
-
-    def test_complete_shutdown_runtime_closes_when_kernel_already_stopped(self):
-        process_calls = []
-
-        class DummyProcess:
-            def poll(self):
-                return 0
-
-        dummy_app = type("DummyApp", (), {})()
-        dummy_app.runtime_helper = None
-        dummy_app.kernel_process = DummyProcess()
-        dummy_app._quit_deadline = 0.0
-        dummy_app.ui = type("UI", (), {"close": lambda self: process_calls.append(("close",))})()
-
-        HydeApp._complete_shutdown_runtime(dummy_app)
-
-        self.assertEqual(process_calls, [("close",)])
-
+        self.assertTrue(dummy_app._runtime_shutdown)
+        self.assertEqual(
+            calls,
+            [
+                ("stop_watcher",),
+                ("application_shutdown", {}),
+                ("request_runtime_shutdown", {}),
+            ],
+        )
 
 
 if __name__ == "__main__":

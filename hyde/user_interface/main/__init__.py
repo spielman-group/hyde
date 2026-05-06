@@ -1,15 +1,12 @@
 import logging
 import os
-import time
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore
 from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 from labscript_utils.filewatcher import FileWatcher
 
 from hyde.paths import (
-    CONNECTION_FILE,
     HYDE_DIR,
-    KERNEL_LAUNCHER,
     get_project_paths,
 )
 from hyde.user_interface.base import RuntimeCommandState
@@ -21,16 +18,12 @@ from hyde.user_interface.main.project_state import (
     write_history,
     write_session,
 )
-from hyde.user_interface.main.frontend_kernel import FrontendKernelService
-from hyde.user_interface.main.runtime_helper import RuntimeHelper
 from hyde.user_interface.plugin_tools import (
     HydeMDIContext,
     HydeMenuContext,
     HydePluginManager,
     blank_window_icon,
 )
-
-qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
 
 class PersistentSubwindowFilter(QtCore.QObject):
     """Turn MDI close requests into hide requests so tool windows persist."""
@@ -78,10 +71,6 @@ class HydeMainWindow(QtWidgets.QMainWindow):
         super().__init__(*args, **kwargs)
         self.app = app
 
-    @qt_slot()
-    def _on_kernel_ready(self):
-        self.app.finalize_startup()
-
     def closeEvent(self, event):
         if self.app._close_ready:
             return super().closeEvent(event)
@@ -100,18 +89,12 @@ class HydeApp:
         self.current_project_dir = None
         self.procedures_dir = None
         self.procedures_init = None
-        self.kernel_to_child = None
-        self.kernel_from_child = None
-        self.kernel_process = None
-        self.runtime_helper = None
-        self.frontend_kernel_service = None
         self.filewatcher = None
         self._subwindow_filters = []
         self.shutting_down = False
         self._runtime_shutdown = False
         self._close_ready = False
         self._quit_command_sent = False
-        self._quit_deadline = None
         self._startup_complete = False
         self.plugin_manager = HydePluginManager(
             plugin_package="hyde.user_interface.plugins",
@@ -127,8 +110,6 @@ class HydeApp:
         self.ui.mdiArea.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.ui.menuFile.clear()
         self.ui.menuWindow.clear()
-        self.frontend_kernel_service = FrontendKernelService(CONNECTION_FILE, parent=self.ui)
-        self.frontend_kernel_service.ready.connect(self.ui._on_kernel_ready)
         self.plugin_manager.discover_modules()
         self.plugin_manager.instantiate_plugins()
         self.setup_plugins()
@@ -147,7 +128,6 @@ class HydeApp:
                 )
 
         self.qapplication.aboutToQuit.connect(self._mark_shutting_down)
-        self.start_kernel_runtime()
 
     def plugin_services(self):
         plugin_manager = getattr(self, "plugin_manager", None)
@@ -164,9 +144,8 @@ class HydeApp:
             "lookup_menu_action": self.lookup_menu_action,
             "mdi_context": getattr(self, "mdi_context", None),
             "configure_persistent_subwindow": self.configure_persistent_subwindow,
-            "execute_command": self.execute_command,
-            "queue_background_command": self.queue_background_command,
-            "frontend_kernel_service": getattr(self, "frontend_kernel_service", None),
+            "emit_plugin_event": self.emit_plugin_event,
+            "process_tree": self.process_tree,
             "get_current_project_dir": self.get_current_project_dir,
             "get_procedures_init": self.get_procedures_init,
             "get_shutting_down": self.get_shutting_down,
@@ -176,10 +155,16 @@ class HydeApp:
             "begin_project_operation": self.begin_project_operation,
             "project_target_needs_confirmation": self.project_target_needs_confirmation,
             "confirm_overwrite_project": self.confirm_overwrite_project,
-            "begin_shutdown_from_close_event": self.begin_shutdown_from_close_event,
+            "finalize_quit": self.finalize_quit,
             "reload_procedures": self.reload_procedures,
             "show_window": self.show_plugin_window,
             "on_visible_command_executed": self.on_visible_command_executed,
+            "on_kernel_ready": self.on_kernel_ready,
+            "on_kernel_crashed": self.on_kernel_crashed,
+            "enter_no_project_state": self.enter_no_project_state,
+            "activate_project": self.activate_project,
+            "on_project_state_result": self.on_project_state_result,
+            "request_gui_quit": self.request_gui_quit,
         }
 
     def get_current_project_dir(self):
@@ -244,37 +229,6 @@ class HydeApp:
                 )
         return payload
 
-    def start_kernel_runtime(self):
-        if os.path.exists(CONNECTION_FILE):
-            os.remove(CONNECTION_FILE)
-        output_redirection_port = None
-        logging_service = self.plugin_service("runtime_output_service")
-        if logging_service is not None:
-            try:
-                output_redirection_port = logging_service.port()
-            except Exception as exc:
-                print(
-                    "[Hyde] Could not connect runtime output redirection; "
-                    f"continuing without it: {exc}"
-                )
-        self.kernel_to_child, self.kernel_from_child, self.kernel_process = self.process_tree.subprocess(
-            KERNEL_LAUNCHER,
-            args=["-f", CONNECTION_FILE],
-            output_redirection_port=output_redirection_port,
-            startup_timeout=60,
-        )
-        frontend_kernel_service = getattr(self, "frontend_kernel_service", None)
-        if frontend_kernel_service is not None:
-            frontend_kernel_service.stop()
-            frontend_kernel_service.start()
-        self.runtime_helper = RuntimeHelper(
-            self,
-            frontend_kernel_service,
-            self.kernel_from_child,
-            self.kernel_process,
-        )
-        self.runtime_helper.start()
-
     def stop_project_watcher(self):
         if self.filewatcher is not None:
             self.filewatcher.stop()
@@ -293,12 +247,6 @@ class HydeApp:
             interval=0.5,
         )
 
-    def queue_background_command(self, code, silent=True):
-        if self.runtime_helper is None:
-            return False
-        self.runtime_helper.enqueue_execute(code, silent=silent)
-        return True
-
     def on_procedure_change(self, name, info, event=None):
         del info
         if event == "original":
@@ -313,21 +261,9 @@ class HydeApp:
             os.path.dirname(HYDE_DIR),
             reset_namespace=False,
         )
-        self.queue_background_command(state.python_source(), silent=True)
-
-    def execute_command(self, code, visible=True):
-        """
-        Execute a command in the kernel with a choice of visibility policy.
-        
-        Visible commands appear in the console history and history pane.
-        Muted commands (visible=False) execute silently to avoid console clutter.
-        """
-        if visible:
-            python_terminal_service = self.plugin_service("visible_terminal_service")
-            if python_terminal_service is not None:
-                python_terminal_service.execute_visible(code)
-            return
-        self.queue_background_command(code, silent=True)
+        python_execution_service = self.plugin_service("python_execution_service")
+        if python_execution_service is not None:
+            python_execution_service.execute_hidden(state.python_source())
 
     def configure_persistent_subwindow(self, subwindow):
         subwindow.setWindowIcon(blank_window_icon())
@@ -417,7 +353,9 @@ class HydeApp:
             os.path.dirname(HYDE_DIR),
             reset_namespace=False,
         )
-        self.queue_background_command(state.python_source(), silent=True)
+        python_execution_service = self.plugin_service("python_execution_service")
+        if python_execution_service is not None:
+            python_execution_service.execute_hidden(state.python_source())
 
     @inmain_decorator()
     def finalize_startup(self):
@@ -456,20 +394,12 @@ class HydeApp:
         self._quit_command_sent = False
         self.enter_no_project_state()
         self.end_project_operation()
-        if self.runtime_helper is not None:
-            helper = self.runtime_helper
-            self.runtime_helper = None
-            helper.stop()
-        frontend_kernel_service = getattr(self, "frontend_kernel_service", None)
-        if frontend_kernel_service is not None:
-            frontend_kernel_service.stop()
         self.emit_plugin_event("kernel_crashed", {})
         QtWidgets.QMessageBox.warning(
             self.ui,
             "Kernel Crashed",
             "The IPython execution kernel died unexpectedly. Hyde is reconnecting to a fresh kernel.",
         )
-        self.start_kernel_runtime()
 
     @inmain_decorator()
     def on_project_state_result(self, data):
@@ -536,50 +466,16 @@ class HydeApp:
         if self._close_ready:
             return
         self.shutting_down = True
+        self._close_ready = True
         self.ui.close()
 
     def begin_shutdown_from_close_event(self):
         if self._runtime_shutdown:
             return
-        self.shutdown_runtime()
-
-    def shutdown_runtime(self):
-        if self._runtime_shutdown:
-            return
         self._runtime_shutdown = True
-        self._quit_deadline = time.monotonic() + 2.0
         self.stop_project_watcher()
         self.emit_plugin_event("application_shutdown", {})
-        helper = self.runtime_helper
-        frontend_kernel_service = getattr(self, "frontend_kernel_service", None)
-        try:
-            if frontend_kernel_service is not None:
-                frontend_kernel_service.shutdown_kernel(reply=False)
-        except Exception:
-            pass
-        if self.runtime_helper is not None:
-            self.runtime_helper = None
-            helper.stop()
-        if frontend_kernel_service is not None:
-            frontend_kernel_service.stop()
-        self.emit_plugin_event("kernel_crashed", {})
-        QtCore.QTimer.singleShot(0, self._complete_shutdown_runtime)
-
-    def _complete_shutdown_runtime(self):
-        if self.runtime_helper is not None:
-            return
-        kernel_running = self.kernel_process is not None and self.kernel_process.poll() is None
-        quit_deadline = self._quit_deadline
-        if kernel_running and quit_deadline is not None and time.monotonic() < quit_deadline:
-            QtCore.QTimer.singleShot(50, self._complete_shutdown_runtime)
-            return
-        if kernel_running:
-            self.kernel_process.terminate()
-            if self.kernel_process.poll() is None:
-                QtCore.QTimer.singleShot(50, self._complete_shutdown_runtime)
-                return
-        self._close_ready = True
-        self.ui.close()
+        self.emit_plugin_event("request_runtime_shutdown", {})
 
 
     def restore_project_session(self):
@@ -608,4 +504,6 @@ class HydeApp:
             restore_main_window(self, session)
         self.emit_plugin_event("project_loaded", {"session": session})
         if session_source.strip():
-            self.queue_background_command(session_source, silent=True)
+            python_execution_service = self.plugin_service("python_execution_service")
+            if python_execution_service is not None:
+                python_execution_service.execute_hidden(session_source)

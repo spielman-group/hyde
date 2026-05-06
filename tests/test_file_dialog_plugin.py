@@ -37,9 +37,11 @@ class TestFileDialogPlugin(unittest.TestCase):
                 "ui": QtWidgets.QWidget(),
                 "get_current_project_dir": lambda: project_dir,
                 "begin_project_operation": operations.append,
-                "execute_command": lambda code, visible=True: dispatched.append(
-                    (code, visible)
-                ),
+                "python_execution_service": type(
+                    "ExecutionService",
+                    (),
+                    {"execute_hidden": lambda self, code, silent=True: dispatched.append((code, silent))},
+                )(),
                 "project_target_needs_confirmation": lambda path: False,
                 "confirm_overwrite_project": lambda path: True,
             }
@@ -62,13 +64,17 @@ class TestFileDialogPlugin(unittest.TestCase):
         services = {
             "get_current_project_dir": lambda: "/tmp/project.hy",
             "begin_project_operation": operations.append,
-            "execute_command": lambda code, visible=True: dispatched.append((code, visible)),
+            "python_execution_service": type(
+                "ExecutionService",
+                (),
+                {"execute_hidden": lambda self, code, silent=True: dispatched.append((code, silent))},
+            )(),
         }
 
         self.assertTrue(SaveProjectCommand(services).run())
 
         self.assertEqual(operations, ["Saving Hyde project..."])
-        self.assertEqual(dispatched, [("hyde.save_project(mode='save')", False)])
+        self.assertEqual(dispatched, [("hyde.save_project(mode='save')", True)])
 
     def test_quit_command_is_muted(self):
         dispatched = []
@@ -77,12 +83,16 @@ class TestFileDialogPlugin(unittest.TestCase):
             "get_shutting_down": lambda: False,
             "get_quit_command_sent": lambda: flags["quit_sent"],
             "set_quit_command_sent": lambda value: flags.__setitem__("quit_sent", value),
-            "execute_command": lambda code, visible=True: dispatched.append((code, visible)),
+            "python_execution_service": type(
+                "ExecutionService",
+                (),
+                {"execute_hidden": lambda self, code, silent=True: dispatched.append((code, silent))},
+            )(),
         }
 
         self.assertTrue(QuitCommand(services).run())
         self.assertTrue(flags["quit_sent"])
-        self.assertEqual(dispatched, [("hyde.quit()", False)])
+        self.assertEqual(dispatched, [("hyde.quit()", True)])
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ except ModuleNotFoundError as exc:
 
 from jupyter_client import BlockingKernelClient
 from labscript_utils.ls_zprocess import ProcessTree
+from qtconsole.client import QtKernelClient
 from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
@@ -155,6 +156,9 @@ class TestPythonVariablesFinal(unittest.TestCase):
             self.connection_file,
             "hyde-python-variables-test",
         )
+        self.shared_client = QtKernelClient(connection_file=self.connection_file)
+        self.shared_client.load_connection_file()
+        self.shared_client.start_channels()
         bootstrap = RuntimeCommandState()
         bootstrap.set_reload_procedures(
             self.project_dir,
@@ -169,12 +173,19 @@ class TestPythonVariablesFinal(unittest.TestCase):
         self.browser = PythonVariables(
             connection_file=self.connection_file,
             services={
-                "execute_command": (
-                    lambda code, visible=True: self.client.execute(
+                "python_execution_service": type(
+                    "ExecutionService",
+                    (),
+                    {"execute_hidden": lambda _self, code, silent=True: self.client.execute(
                         code,
-                        silent=not visible,
-                    )
-                )
+                        silent=silent,
+                    )},
+                )(),
+                "kernel_runtime_service": type(
+                    "KernelRuntimeService",
+                    (),
+                    {"kernel_client": lambda _self: self.shared_client},
+                )(),
             },
         )
         self.browser.show()
@@ -193,6 +204,8 @@ class TestPythonVariablesFinal(unittest.TestCase):
             self.browser.deleteLater()
         if hasattr(self, "client") and self.client is not None:
             self.client.stop_channels()
+        if hasattr(self, "shared_client") and self.shared_client is not None:
+            self.shared_client.stop_channels()
         if hasattr(self, "kernel_process") and self.kernel_process is not None and self.kernel_process.poll() is None:
             self.kernel_process.terminate()
             self.kernel_process.wait(timeout=10)
@@ -450,7 +463,7 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
-    def test_reuses_visible_terminal_kernel_client(self):
+    def test_reuses_kernel_runtime_shared_client(self):
         class FakeSignal:
             def __init__(self):
                 self._callbacks = []
@@ -469,15 +482,6 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
             def __init__(self):
                 self.iopub_channel = FakeChannel()
                 self.session = type("Session", (), {"session": "terminal-session"})()
-
-        class FakeVisibleTerminalService:
-            def __init__(self, kernel_client):
-                self.kernel_client = kernel_client
-                self.calls = 0
-
-            def ensure_kernel_client(self):
-                self.calls += 1
-                return self.kernel_client
 
         class FakeSpyderComm:
             def __init__(self, kernel_client):
@@ -499,24 +503,22 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
                 return None
 
         shared_client = FakeKernelClient()
-        visible_terminal_service = FakeVisibleTerminalService(shared_client)
+        kernel_runtime_service = type(
+            "KernelRuntimeService",
+            (),
+            {"kernel_client": lambda self: shared_client},
+        )()
 
         with patch(
             "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
             FakeSpyderComm,
         ):
-            with patch(
-                "hyde.user_interface.plugins.python_variables.register_auxiliary_figure_comm_sink",
-            ) as register_sink:
-                browser = PythonVariables(
-                    connection_file="/tmp/unused.json",
-                    services={"visible_terminal_service": visible_terminal_service},
-                )
+            browser = PythonVariables(
+                connection_file="/tmp/unused.json",
+                services={"kernel_runtime_service": kernel_runtime_service},
+            )
         try:
             self.assertIs(browser.kernel_client, shared_client)
-            self.assertFalse(browser._owns_kernel_client)
-            self.assertEqual(visible_terminal_service.calls, 1)
-            register_sink.assert_not_called()
         finally:
             browser.shutdown()
             browser.deleteLater()

@@ -53,6 +53,20 @@ class FakeNamespaceViewService:
             callback(dict(self._view))
 
 
+class FakeExecutionService:
+    def __init__(self, hidden_calls=None, visible_calls=None):
+        self.hidden_calls = hidden_calls if hidden_calls is not None else []
+        self.visible_calls = visible_calls if visible_calls is not None else []
+
+    def execute_hidden(self, code, silent=True):
+        self.hidden_calls.append((code, silent))
+        return True
+
+    def execute_visible(self, code):
+        self.visible_calls.append(code)
+        return True
+
+
 class TestFigureCodec(unittest.TestCase):
     def test_figure_state_generates_first_class_figure_builder_code(self):
         state = FigureState()
@@ -117,7 +131,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
             {"next_generated_title": lambda self: "Figure0"},
         )()
         plugin.services = {
-            "execute_command": lambda code, visible=True: executed.append((code, visible))
+            "python_execution_service": FakeExecutionService(executed),
         }
 
         service = FigureFeatureService(plugin)
@@ -147,7 +161,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
             self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
 
         self.assertEqual(len(executed), 1)
-        self.assertFalse(executed[0][1])
+        self.assertTrue(executed[0][1])
         self.assertIn("@hyde.figure(register=False)", executed[0][0])
         self.assertIn("def _hyde_figure(arr):", executed[0][0])
         self.assertIn("_hyde_figure(arr)", executed[0][0])
@@ -163,7 +177,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
             {"next_generated_title": lambda self: "Figure0"},
         )()
         plugin.services = {
-            "execute_command": lambda code, visible=True: executed.append((code, visible))
+            "python_execution_service": FakeExecutionService(executed),
         }
 
         service = FigureFeatureService(plugin)
@@ -213,14 +227,15 @@ class TestFigurePluginDispatch(unittest.TestCase):
         executed = []
         plugin = HydePlugin({})
         plugin.services = {
-            "execute_command": (
-                lambda code, visible=True: executed.append((code, visible))
+            "python_execution_service": FakeExecutionService(
+                hidden_calls=[],
+                visible_calls=executed,
             )
         }
 
         Plugin._execute_macro(plugin, "Figure0", ("x", "y"))
 
-        self.assertEqual(executed, [("Figure0(x, y)", True)])
+        self.assertEqual(executed, ["Figure0(x, y)"])
 
 
 class TestFigureBackendSnapshot(unittest.TestCase):
@@ -603,9 +618,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
-                ),
+                "python_execution_service": FakeExecutionService(queued),
                 "request_save_figure_macro": lambda saveable: True,
             },
         )
@@ -634,9 +647,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
-                ),
+                "python_execution_service": FakeExecutionService(queued),
                 "request_save_figure_macro": lambda saveable: True,
             },
         )
@@ -741,7 +752,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
             "request_save_figure_macro": lambda saveable: True,
             "get_shutting_down": lambda: False,
         }
@@ -774,7 +785,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
             "request_save_figure_macro": lambda saveable: True,
             "get_shutting_down": lambda: False,
         }
@@ -810,7 +821,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
             "request_save_figure_macro": lambda saveable: True,
             "get_shutting_down": lambda: False,
         }
@@ -851,7 +862,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
             "request_save_figure_macro": lambda saveable: True,
             "get_shutting_down": lambda: False,
         }
@@ -908,7 +919,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
             "request_save_figure_macro": lambda saveable: True,
             "get_shutting_down": lambda: False,
         }
@@ -940,7 +951,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_plugin_session_toml_keeps_only_figure_counter(self):
         plugin = Plugin({})
         plugin.services = {
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
         }
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
         mdi_area = QtWidgets.QMdiArea()
@@ -987,7 +998,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_closed_figures_are_absent_from_session_restore_source(self):
         plugin = Plugin({})
         plugin.services = {
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
         }
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
         mdi_area = QtWidgets.QMdiArea()

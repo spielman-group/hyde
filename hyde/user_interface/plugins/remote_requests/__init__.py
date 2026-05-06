@@ -19,8 +19,8 @@ def _remote_port():
 class RemoteRequestServer(ZMQServer):
     """Lyse-compatible request server owned by the remote-requests plugin."""
 
-    def __init__(self, enqueue_command, port):
-        self.enqueue_command = enqueue_command
+    def __init__(self, execute_hidden, port):
+        self.execute_hidden = execute_hidden
         super().__init__(port=port, bind_address="tcp://*")
 
     def handler(self, request_data):
@@ -33,7 +33,7 @@ class RemoteRequestServer(ZMQServer):
         if isinstance(request_data, str):
             state = RuntimeCommandState()
             state.set_remote_request(request_data)
-            if not self.enqueue_command(state.python_source(), silent=False):
+            if not self.execute_hidden(state.python_source(), silent=False):
                 return "error: kernel unavailable"
             return "added successfully"
         return (
@@ -51,7 +51,7 @@ class Plugin(HydePlugin):
         del data
         try:
             self.server = RemoteRequestServer(
-                self.services["queue_background_command"],
+                self.services["python_execution_service"].execute_hidden,
                 _remote_port(),
             )
         except ZMQError as exc:

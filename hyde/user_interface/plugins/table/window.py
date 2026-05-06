@@ -315,10 +315,10 @@ class TableWidget(QtWidgets.QWidget):
         self.capture_layout_state()
 
     def _queue_silent_command(self, code):
-        queue_background_command = self.services.get("queue_background_command")
-        if queue_background_command is None:
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
             return False
-        return bool(queue_background_command(code, silent=True))
+        return bool(python_execution_service.execute_hidden(code))
 
     def _queue_refresh(self, prefix_commands=None):
         if self._closed:

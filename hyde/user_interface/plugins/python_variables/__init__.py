@@ -4,12 +4,9 @@ import time
 
 from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
-from qtconsole.client import QtKernelClient
 from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.hyde_features import is_eligible_for_table
-from hyde.paths import CONNECTION_FILE
 from hyde.user_interface.base import MutationState
-from hyde.user_interface.figure_comm import register_auxiliary_figure_comm_sink
 from hyde.user_interface.plugin_tools import HydePlugin
 
 NAMESPACE_VIEW_SETTINGS = {
@@ -94,14 +91,13 @@ class PythonVariables(QtWidgets.QWidget):
     namespace_view_updated = QtCore.Signal(object)
 
     def __init__(self, connection_file, services=None, *args, **kwargs):
+        del connection_file
         super().__init__(*args, **kwargs)
-        self.connection_file = connection_file
         self.services = dict(services or {})
         self._execute_requests_in_flight = set()
         self._refresh_in_flight = False
         self._refresh_pending = False
         self._closed = False
-        self._owns_kernel_client = False
 
         loader = UiLoader()
         ui_path = os.path.join(os.path.dirname(__file__), "python_variables.ui")
@@ -115,26 +111,15 @@ class PythonVariables(QtWidgets.QWidget):
         self.ui.treeView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.ui.treeView.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
-        visible_terminal_service = self.services.get("visible_terminal_service")
+        kernel_runtime_service = self.services.get("kernel_runtime_service")
         self.kernel_client = None
-        if visible_terminal_service is not None:
-            ensure_kernel_client = getattr(
-                visible_terminal_service,
-                "ensure_kernel_client",
-                None,
-            )
-            if callable(ensure_kernel_client):
-                self.kernel_client = ensure_kernel_client()
-            else:
-                widget = visible_terminal_service.ensure_widget()
-                self.kernel_client = None if widget is None else widget.kernel_client
-
+        if kernel_runtime_service is not None:
+            self.kernel_client = kernel_runtime_service.kernel_client()
         if self.kernel_client is None:
-            self.kernel_client = QtKernelClient(connection_file=self.connection_file)
-            self.kernel_client.load_connection_file()
-            self.kernel_client.start_channels()
-            register_auxiliary_figure_comm_sink(self.kernel_client, "python_variables")
-            self._owns_kernel_client = True
+            raise RuntimeError(
+                "PythonVariables requires a shared kernel client from "
+                "kernel_runtime_service."
+            )
 
         self.spyder_comm = SpyderFrontendComm(self.kernel_client)
         self.kernel_client.iopub_channel.message_received.connect(self._handle_iopub_message)
@@ -229,19 +214,6 @@ class PythonVariables(QtWidgets.QWidget):
             pass
         try:
             self.spyder_comm.close()
-        except Exception:
-            pass
-        if not self._owns_kernel_client:
-            return
-        try:
-            for channel_name in ("iopub_channel", "shell_channel", "stdin_channel", "control_channel"):
-                channel = getattr(self.kernel_client, channel_name, None)
-                if channel is not None and hasattr(channel, "close"):
-                    try:
-                        channel.close()
-                    except Exception:
-                        pass
-            self.kernel_client.stop_channels()
         except Exception:
             pass
 
@@ -343,12 +315,12 @@ class PythonVariables(QtWidgets.QWidget):
         )
         if confirm != QtWidgets.QMessageBox.Yes:
             return
-        execute_command = self.services.get("execute_command")
+        python_execution_service = self.services.get("python_execution_service")
         for name in names:
             state = MutationState()
             state.set_delete_name(name)
-            if execute_command is not None:
-                execute_command(state.python_source(), visible=False)
+            if python_execution_service is not None:
+                python_execution_service.execute_hidden(state.python_source())
 
     def _show_context_menu(self, position):
         menu = QtWidgets.QMenu(self)
@@ -529,7 +501,7 @@ class Plugin(HydePlugin):
     def create_widget(self, parent=None, data=None):
         del data
         return PythonVariables(
-            connection_file=CONNECTION_FILE,
+            connection_file=None,
             services=self.services,
             parent=parent,
         )

@@ -126,11 +126,25 @@ class FakeNamespaceViewService:
             callback(dict(self._view))
 
 
+class FakeExecutionService:
+    def __init__(self, hidden_calls=None, visible_calls=None):
+        self.hidden_calls = hidden_calls if hidden_calls is not None else []
+        self.visible_calls = visible_calls if visible_calls is not None else []
+
+    def execute_hidden(self, code, silent=True):
+        self.hidden_calls.append((code, silent))
+        return True
+
+    def execute_visible(self, code):
+        self.visible_calls.append(code)
+        return True
+
+
 class FakeTablePlugin:
     def __init__(self, mdi_area, save_result=True):
         self.services = {
             "mdi_area": mdi_area,
-            "queue_background_command": lambda code, silent=True: None,
+            "python_execution_service": FakeExecutionService(),
         }
         self.prompted_states = []
         self.save_result = save_result
@@ -155,12 +169,7 @@ class TestTableWidget(unittest.TestCase):
             "Table0",
             ["a"],
             services={
-                "execute_command": lambda code, visible=False: executed.append(
-                    (code, visible)
-                ),
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
-                ),
+                "python_execution_service": FakeExecutionService(queued, executed),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -196,12 +205,7 @@ class TestTableWidget(unittest.TestCase):
             "Table0",
             ["a"],
             services={
-                "execute_command": lambda code, visible=False: executed.append(
-                    (code, visible)
-                ),
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
-                ),
+                "python_execution_service": FakeExecutionService(queued, executed),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -252,12 +256,7 @@ class TestTableWidget(unittest.TestCase):
             "Table0",
             ["a"],
             services={
-                "execute_command": lambda code, visible=False: executed.append(
-                    (code, visible)
-                ),
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
-                ),
+                "python_execution_service": FakeExecutionService(queued, executed),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -293,9 +292,7 @@ class TestTableWidget(unittest.TestCase):
             "Table0",
             ["a"],
             services={
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
-                ),
+                "python_execution_service": FakeExecutionService(queued),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -319,9 +316,7 @@ class TestTableWidget(unittest.TestCase):
             "Table0",
             ["a"],
             services={
-                "queue_background_command": lambda code, silent=True: (
-                    queued.append((code, silent)) or True
-                ),
+                "python_execution_service": FakeExecutionService(queued),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -416,7 +411,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         plugin = Plugin({})
         plugin.services = {
             "mdi_area": mdi_area,
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
             "namespace_view_service": FakeNamespaceViewService(),
             "get_current_project_dir": lambda: "/tmp/demo.hy",
         }
@@ -462,7 +457,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         plugin = Plugin({})
         plugin.services = {
             "mdi_area": mdi_area,
-            "queue_background_command": lambda code, silent=True: True,
+            "python_execution_service": FakeExecutionService(),
             "namespace_view_service": FakeNamespaceViewService(),
             "get_current_project_dir": lambda: "/tmp/demo.hy",
         }

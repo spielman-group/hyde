@@ -34,9 +34,8 @@ def make_plugin_host(plugin_manager):
     app.ui = main_window
     app.plugin_manager = plugin_manager
     app.configure_persistent_subwindow = lambda subwindow: None
-    app.execute_command = lambda code, visible=True: (code, visible)
-    app.queue_background_command = lambda code, silent=True: (code, silent)
-    app.frontend_kernel_service = object()
+    app.emit_plugin_event = lambda name, data=None: (name, data)
+    app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.on_visible_command_executed = lambda message: message
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
@@ -54,7 +53,14 @@ def make_plugin_host(plugin_manager):
     app.project_target_needs_confirmation = lambda path: False
     app.confirm_overwrite_project = lambda path: False
     app.begin_shutdown_from_close_event = lambda: None
+    app.finalize_quit = lambda: None
     app.reload_procedures = lambda: None
+    app.on_kernel_ready = lambda: None
+    app.on_kernel_crashed = lambda: None
+    app.enter_no_project_state = lambda: None
+    app.activate_project = lambda project_dir: project_dir
+    app.on_project_state_result = lambda data: data
+    app.request_gui_quit = lambda: None
     return app
 
 
@@ -179,11 +185,15 @@ class TestPluginTools(unittest.TestCase):
 
         HydeApp.setup_plugins(app)
 
-        self.assertIn("execute_command", manager.services)
-        self.assertIn("frontend_kernel_service", manager.services)
+        self.assertNotIn("execute_command", manager.services)
+        self.assertNotIn("queue_background_command", manager.services)
+        self.assertNotIn("frontend_kernel_service", manager.services)
+        self.assertIn("emit_plugin_event", manager.services)
+        self.assertIn("process_tree", manager.services)
+        self.assertIn("on_kernel_ready", manager.services)
         self.assertIn("lookup_menu_action", manager.services)
         self.assertEqual(manager.services["plugin_service"], "demo")
-        self.assertIs(manager.services["frontend_kernel_service"], app.frontend_kernel_service)
+        self.assertIs(manager.services["process_tree"], app.process_tree)
         self.assertIs(plugin.setup_services, manager.services)
         self.assertIs(plugin.bound_action, app.ui.menuWindow.actions()[0])
         self.assertIs(

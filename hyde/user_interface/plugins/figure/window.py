@@ -489,10 +489,10 @@ class FigureWindow(QtWidgets.QWidget):
         self.request_resize_redraw()
 
     def _queue_silent_command(self, code):
-        queue_background_command = self.services.get("queue_background_command")
-        if queue_background_command is None:
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
             return False
-        return bool(queue_background_command(code, silent=True))
+        return bool(python_execution_service.execute_hidden(code))
 
     def _command_source(self, command, **settings):
         return self.command_state.source_for_command(command, **settings)

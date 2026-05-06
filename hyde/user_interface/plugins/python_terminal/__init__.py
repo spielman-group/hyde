@@ -64,12 +64,18 @@ class PythonTerminalService:
         return self.plugin.mdi_subwindow("python_terminal")
 
     def ensure_kernel_client(self):
-        frontend_kernel_service = self.plugin.services.get("frontend_kernel_service")
-        return None if frontend_kernel_service is None else frontend_kernel_service.kernel_client()
+        kernel_runtime_service = self.plugin.services.get("kernel_runtime_service")
+        return None if kernel_runtime_service is None else kernel_runtime_service.kernel_client()
 
     def execute_visible(self, code):
         widget = self.ensure_widget()
         widget.execute(code, hidden=False)
+
+    def execute_hidden(self, code, silent=True):
+        kernel_runtime_service = self.plugin.services.get("kernel_runtime_service")
+        if kernel_runtime_service is None:
+            return False
+        return bool(kernel_runtime_service.execute(code, silent=silent))
 
     def history_entries(self):
         return list(self._history_entries)
@@ -127,7 +133,10 @@ class Plugin(HydePlugin):
         ]
 
     def get_services(self):
-        return {"visible_terminal_service": self.python_terminal_service}
+        return {
+            "visible_terminal_service": self.python_terminal_service,
+            "python_execution_service": self.python_terminal_service,
+        }
 
     def create_widget(self, parent=None, data=None):
         del data

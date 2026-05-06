@@ -146,7 +146,9 @@ class HydePlugin(BasePlugin):
     def _execute_macro(self, macro_name, macro_args):
         state = RuntimeCommandState()
         state.set_callable_invocation(macro_name, macro_args)
-        self.service("execute_command")(state.python_source(), visible=True)
+        self.service("python_execution_service").execute_visible(
+            state.python_source()
+        )
 
     def mdi_context(self):
         return self.service("mdi_context")

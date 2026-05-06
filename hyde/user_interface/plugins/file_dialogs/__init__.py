@@ -110,7 +110,9 @@ class Plugin(HydePlugin):
         state = LoadProjectState()
         state.set_project_dir(project_dir)
         self.services["begin_project_operation"]("Loading Hyde project...")
-        self.services["execute_command"](state.python_source(), visible=False)
+        self.services["python_execution_service"].execute_hidden(
+            state.python_source()
+        )
 
     def new_project(self, checked=False):
         del checked

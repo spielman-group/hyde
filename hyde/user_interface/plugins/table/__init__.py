@@ -156,7 +156,7 @@ class TableFeatureService:
         if not command:
             return False
 
-        self.plugin.services["execute_command"](command, visible=True)
+        self.plugin.services["python_execution_service"].execute_visible(command)
         return True
 
     def append_to_active_table(self, names):
@@ -168,7 +168,9 @@ class TableFeatureService:
         state.set_items(names)
         state.set_command("append")
         state.set_target(active_table_handle)
-        self.plugin.services["execute_command"](state.python_source(), visible=True)
+        self.plugin.services["python_execution_service"].execute_visible(
+            state.python_source()
+        )
         return True
 
 
@@ -254,9 +256,8 @@ class Plugin(HydePlugin):
         self.table_macros = []
         self.rebuild_table_macros_menu()
         state = TableState()
-        self.services["queue_background_command"](
-            state.source_for_command("publish_table_macros"),
-            silent=True,
+        self.services["python_execution_service"].execute_hidden(
+            state.source_for_command("publish_table_macros")
         )
 
     def on_kernel_message(self, payload):
