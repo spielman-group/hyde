@@ -1,6 +1,7 @@
 import os
 import queue
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -496,6 +497,54 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIn("/tmp/project.hy", code)
         self.assertIn(os.path.dirname(HYDE_DIR), code)
         self.assertIn("reset_namespace=False", code)
+
+    def test_hyde_procedure_change_is_safe_from_background_thread(self):
+        queued = []
+        errors = []
+        finished = threading.Event()
+        dummy_app = type("DummyApp", (), {})()
+        dummy_app.current_project_dir = "/tmp/project.hy"
+        dummy_app.plugin_service = lambda key: (
+            type(
+                "ExecutionService",
+                (),
+                {
+                    "execute_hidden": lambda self, code, silent=True: queued.append(
+                        (code, silent)
+                    )
+                },
+            )()
+            if key == "python_execution_service"
+            else None
+        )
+
+        def worker():
+            try:
+                HydeApp.on_procedure_change(
+                    dummy_app,
+                    "procedures/example.py",
+                    {},
+                    event="modified",
+                )
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        app = QtWidgets.QApplication.instance()
+        self.assertIsNotNone(app)
+        for _ in range(100):
+            if finished.wait(0.01):
+                break
+            app.processEvents()
+        thread.join(timeout=1.0)
+
+        self.assertEqual(errors, [])
+        self.assertTrue(finished.is_set())
+        self.assertEqual(len(queued), 1)
+        self.assertTrue(queued[0][1])
 
     def test_remote_request_server_uses_hidden_execution_with_non_silent_flag(self):
         queued = []

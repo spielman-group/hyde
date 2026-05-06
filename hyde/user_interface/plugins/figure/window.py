@@ -84,6 +84,7 @@ class FigureSnapshotState:
         tracked_names=None,
         figure_ir=None,
         live_state=None,
+        trace_styles=None,
     ):
         self._default_macro_name = default_macro_name or "Figure"
         self._call_source = call_source
@@ -92,6 +93,7 @@ class FigureSnapshotState:
         self._tracked_names = ()
         self._figure_ir = None
         self._live_state = copy.deepcopy(live_state)
+        self._trace_styles = copy.deepcopy(trace_styles) or {}
         self._apply_figure_ir_snapshot(
             default_macro_name=default_macro_name,
             call_source=call_source,
@@ -108,6 +110,7 @@ class FigureSnapshotState:
         tracked_names=None,
         figure_ir=None,
         live_state=None,
+        trace_styles=None,
     ):
         self._apply_figure_ir_snapshot(
             default_macro_name=default_macro_name,
@@ -118,6 +121,7 @@ class FigureSnapshotState:
         self._save_error = save_error
         self._figure_size = None if figure_size is None else tuple(figure_size)
         self._live_state = copy.deepcopy(live_state)
+        self._trace_styles = copy.deepcopy(trace_styles) or {}
 
     def _apply_figure_ir_snapshot(
         self,
@@ -166,6 +170,9 @@ class FigureSnapshotState:
 
     def live_state(self):
         return copy.deepcopy(self._live_state)
+
+    def trace_styles(self):
+        return copy.deepcopy(self._trace_styles)
 
     def set_live_state(self, state):
         self._live_state = copy.deepcopy(state)
@@ -262,6 +269,7 @@ class FigureWindow(QtWidgets.QWidget):
             tracked_names=snapshot.get("tracked_names"),
             figure_ir=snapshot.get("figure_ir"),
             live_state=snapshot.get("live_state"),
+            trace_styles=snapshot.get("trace_styles"),
         )
         if title and self._subwindow is not None:
             self._subwindow.setWindowTitle(self._window_title(str(title)))
@@ -476,6 +484,25 @@ class FigureWindow(QtWidgets.QWidget):
             send_figure_action(
                 self.figure_number,
                 {"type": "refresh_from_live_state"},
+            )
+        )
+
+    def request_trace_style_update(self, subplot_id, trace_id, style, replace=False):
+        send_figure_action = self.services.get("send_figure_action")
+        if send_figure_action is None:
+            return False
+        action = {
+            "type": "set_trace_style",
+            "subplot_id": subplot_id,
+            "trace_id": trace_id,
+            "style": dict(style or {}),
+        }
+        if replace:
+            action["replace"] = True
+        return bool(
+            send_figure_action(
+                self.figure_number,
+                action,
             )
         )
 

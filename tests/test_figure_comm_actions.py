@@ -68,6 +68,65 @@ class TestFigureCommActions(unittest.TestCase):
         self.assertEqual(subplot["x_limits"], (-1, 5))
         self.assertEqual(tuple(figure.axes[0].get_xlim()), (-1.0, 5.0))
 
+    def test_apply_figure_action_updates_ir_and_live_trace_style_for_broader_line2d_kwargs(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            return fig
+
+        figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        apply_figure_action(
+            figure,
+            {
+                "type": "set_trace_style",
+                "subplot_id": "subplot0",
+                "trace_id": "trace0",
+                "style": {
+                    "visible": False,
+                    "alpha": 0.25,
+                    "drawstyle": "steps-mid",
+                    "color": "green",
+                    "linestyle": "None",
+                    "linewidth": 3.5,
+                    "marker": "s",
+                    "markersize": 7.0,
+                    "markerfacecolor": "red",
+                    "markeredgecolor": "black",
+                    "markeredgewidth": 2.0,
+                },
+            },
+        )
+
+        trace_kwargs = figure._hyde_ir["layout"]["subplots"][0]["traces"][0]["kwargs"]
+        self.assertFalse(trace_kwargs["visible"])
+        self.assertEqual(trace_kwargs["alpha"], 0.25)
+        self.assertEqual(trace_kwargs["drawstyle"], "steps-mid")
+        self.assertEqual(trace_kwargs["linestyle"], "None")
+        self.assertEqual(trace_kwargs["linewidth"], 3.5)
+        self.assertEqual(trace_kwargs["marker"], "s")
+        self.assertEqual(trace_kwargs["markersize"], 7.0)
+        self.assertEqual(trace_kwargs["markerfacecolor"], "red")
+        self.assertEqual(trace_kwargs["markeredgecolor"], "black")
+        self.assertEqual(trace_kwargs["markeredgewidth"], 2.0)
+
+        line = figure.axes[0].lines[0]
+        self.assertFalse(line.get_visible())
+        self.assertEqual(line.get_alpha(), 0.25)
+        self.assertEqual(line.get_drawstyle(), "steps-mid")
+        self.assertEqual(line.get_color(), "green")
+        self.assertEqual(line.get_linestyle(), "None")
+        self.assertEqual(line.get_linewidth(), 3.5)
+        self.assertEqual(line.get_marker(), "s")
+        self.assertEqual(line.get_markersize(), 7.0)
+        self.assertEqual(line.get_markerfacecolor(), "red")
+        self.assertEqual(line.get_markeredgecolor(), "black")
+        self.assertEqual(line.get_markeredgewidth(), 2.0)
+
     def test_apply_figure_action_regenerates_live_figure_from_ir(self):
         plt = self._configure_pyplot()
 

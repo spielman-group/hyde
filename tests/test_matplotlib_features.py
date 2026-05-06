@@ -15,7 +15,7 @@ import hyde
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.matplotlib_backend import FigureCanvasHyde, FigureManagerHyde, figure_snapshot_payload
-from hyde.features.matplotlib_features import figure_ir_from_live_state
+from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.project_tools import (
     HYDE_MATPLOTLIB_BACKEND,
     configure_gui_matplotlib_backend,
@@ -263,6 +263,51 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         state.set_items(["fit_delay", "raw_delay"])
         return state.normalized_state()
 
+    def test_figure_ir_trace_style_edit_preserves_broader_line2d_kwargs(self):
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+
+        updated = FigureIRCodec.update_state(
+            figure_ir,
+            {
+                "type": "set_trace_style",
+                "subplot_id": "subplot0",
+                "trace_id": "trace0",
+                "style": {
+                    "visible": False,
+                    "alpha": 0.25,
+                    "linestyle": "None",
+                    "linewidth": 3.5,
+                    "drawstyle": "steps-mid",
+                    "markersize": 7.0,
+                    "markerfacecolor": "red",
+                    "markeredgecolor": "black",
+                    "markeredgewidth": 2.0,
+                },
+            },
+        )
+
+        trace_kwargs = updated["layout"]["subplots"][0]["traces"][0]["kwargs"]
+        self.assertFalse(trace_kwargs["visible"])
+        self.assertEqual(trace_kwargs["alpha"], 0.25)
+        self.assertEqual(trace_kwargs["linestyle"], "None")
+        self.assertEqual(trace_kwargs["linewidth"], 3.5)
+        self.assertEqual(trace_kwargs["drawstyle"], "steps-mid")
+        self.assertEqual(trace_kwargs["markersize"], 7.0)
+        self.assertEqual(trace_kwargs["markerfacecolor"], "red")
+        self.assertEqual(trace_kwargs["markeredgecolor"], "black")
+        self.assertEqual(trace_kwargs["markeredgewidth"], 2.0)
+
+        source = FigureIRCodec.state_to_python(updated)
+        self.assertIn("visible=False", source)
+        self.assertIn("alpha=0.25", source)
+        self.assertIn("linestyle='None'", source)
+        self.assertIn("linewidth=3.5", source)
+        self.assertIn("drawstyle='steps-mid'", source)
+        self.assertIn("markersize=7.0", source)
+        self.assertIn("markerfacecolor='red'", source)
+        self.assertIn("markeredgecolor='black'", source)
+        self.assertIn("markeredgewidth=2.0", source)
+
     def test_snapshot_payload_serializes_simple_single_axes_line_figure(self):
         figure = Figure()
         axes = figure.add_subplot(111)
@@ -308,6 +353,14 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(payload["tracked_names"], ["x", "y"])
         self.assertIsNone(payload["live_state"])
         self.assertEqual(payload["figure_ir"]["settings"]["title"], "Graph0")
+        self.assertEqual(
+            payload["trace_styles"]["subplot0"]["trace0"]["label"],
+            "y",
+        )
+        self.assertEqual(
+            payload["trace_styles"]["subplot0"]["trace0"]["linestyle"],
+            "-",
+        )
         self.assertIn("ax.plot(x, y, label='y')", payload["call_source"])
         self.assertEqual(
             [entry["op"] for entry in payload["command_log"]],

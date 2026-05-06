@@ -14,6 +14,7 @@ from ipykernel.comm import Comm
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import FigureManagerBase, _Backend
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 
@@ -178,23 +179,75 @@ def _is_default_xdata(x_values):
 
 
 def _line_kwargs(line):
+    style = _line_style_snapshot(line)
     kwargs = {}
-    color = line.get_color()
-    if color is not None:
-        kwargs["color"] = color
-    linestyle = line.get_linestyle()
-    if linestyle not in (None, "-", "solid"):
-        kwargs["linestyle"] = linestyle
-    marker = line.get_marker()
-    if marker not in (None, "", "None", "none"):
-        kwargs["marker"] = marker
-    linewidth = line.get_linewidth()
-    if linewidth not in (None, 1.5):
-        kwargs["linewidth"] = linewidth
-    label = _line_label(line)
+    if style["color"] is not None:
+        kwargs["color"] = style["color"]
+    if style["visible"] is False:
+        kwargs["visible"] = False
+    if style["linestyle"] not in (None, "-", "solid"):
+        kwargs["linestyle"] = style["linestyle"]
+    if style["marker"] not in (None, "", "None", "none"):
+        kwargs["marker"] = style["marker"]
+    if style["linewidth"] not in (None, 1.5):
+        kwargs["linewidth"] = style["linewidth"]
+    if style["alpha"] not in (None, 1.0):
+        kwargs["alpha"] = style["alpha"]
+    if style["drawstyle"] not in (None, "default"):
+        kwargs["drawstyle"] = style["drawstyle"]
+    if style["markersize"] not in (None, 6.0):
+        kwargs["markersize"] = style["markersize"]
+    if style["markerfacecolor"] not in (None, "auto", style["color"]):
+        kwargs["markerfacecolor"] = style["markerfacecolor"]
+    if style["markeredgecolor"] not in (None, "auto", style["color"]):
+        kwargs["markeredgecolor"] = style["markeredgecolor"]
+    if style["markeredgewidth"] not in (None, 1.0):
+        kwargs["markeredgewidth"] = style["markeredgewidth"]
+    label = style.get("label")
     if label:
         kwargs["label"] = label
     return kwargs
+
+
+def _normalize_line_color(value, fallback=None):
+    if value in (None, ""):
+        return fallback
+    if isinstance(value, str) and value.lower() == "auto":
+        return "auto"
+    try:
+        return to_hex(value)
+    except Exception:
+        return str(value)
+
+
+def _line_style_snapshot(line):
+    color = _normalize_line_color(line.get_color())
+    marker = line.get_marker()
+    if marker in (None, "", "none"):
+        marker = "None"
+    linestyle = line.get_linestyle()
+    if linestyle in (None, ""):
+        linestyle = "None"
+    return {
+        "visible": bool(line.get_visible()),
+        "color": color,
+        "linestyle": linestyle,
+        "linewidth": float(line.get_linewidth()),
+        "label": _line_label(line),
+        "alpha": 1.0 if line.get_alpha() is None else float(line.get_alpha()),
+        "drawstyle": str(line.get_drawstyle()),
+        "marker": str(marker),
+        "markersize": float(line.get_markersize()),
+        "markerfacecolor": _normalize_line_color(
+            line.get_markerfacecolor(),
+            fallback=color,
+        ),
+        "markeredgecolor": _normalize_line_color(
+            line.get_markeredgecolor(),
+            fallback=color,
+        ),
+        "markeredgewidth": float(line.get_markeredgewidth()),
+    }
 
 
 def _format_plot_call(line):
@@ -279,6 +332,7 @@ def figure_snapshot_payload(figure, number):
             "tracked_names": tracked_names,
             "live_state": None,
             "figure_ir": figure_ir,
+            "trace_styles": _figure_trace_styles(figure, figure_ir),
             "command_log": list(getattr(figure, "_hyde_command_log", [])),
             "hyde_metadata": hyde_metadata,
             "is_first_class": True,
@@ -359,13 +413,49 @@ def _resolve_live_line(axis, trace_id=None):
     raise ValueError(f"Unknown live trace id: {trace_id!r}.")
 
 
+def _figure_trace_styles(figure, figure_ir):
+    styles = {}
+    normalized = FigureIRCodec.validate_state(figure_ir)
+    for subplot in normalized["layout"]["subplots"]:
+        axis = _resolve_live_axis(figure, subplot["id"])
+        live_lines = {
+            getattr(line, "_hyde_trace_id", None): line
+            for line in axis.lines
+            if getattr(line, "_hyde_trace_id", None) is not None
+        }
+        subplot_styles = {}
+        for trace in subplot["traces"]:
+            line = live_lines.get(trace["id"])
+            if line is None:
+                continue
+            subplot_styles[trace["id"]] = _line_style_snapshot(line)
+        styles[subplot["id"]] = subplot_styles
+    return styles
+
+
 def _apply_line_style(line, kwargs):
+    if "visible" in kwargs:
+        line.set_visible(bool(kwargs["visible"]))
+    if "alpha" in kwargs:
+        line.set_alpha(kwargs["alpha"])
     if "color" in kwargs:
         line.set_color(kwargs["color"])
+    if "drawstyle" in kwargs:
+        line.set_drawstyle(kwargs["drawstyle"])
     if "marker" in kwargs:
-        line.set_marker(kwargs["marker"])
+        marker = kwargs["marker"]
+        line.set_marker("None" if marker in (None, "", "none") else marker)
+    if "markersize" in kwargs:
+        line.set_markersize(kwargs["markersize"])
+    if "markerfacecolor" in kwargs:
+        line.set_markerfacecolor(kwargs["markerfacecolor"])
+    if "markeredgecolor" in kwargs:
+        line.set_markeredgecolor(kwargs["markeredgecolor"])
+    if "markeredgewidth" in kwargs:
+        line.set_markeredgewidth(kwargs["markeredgewidth"])
     if "linestyle" in kwargs:
-        line.set_linestyle(kwargs["linestyle"])
+        linestyle = kwargs["linestyle"]
+        line.set_linestyle("None" if linestyle in (None, "", "none") else linestyle)
     if "linewidth" in kwargs:
         line.set_linewidth(kwargs["linewidth"])
     if "label" in kwargs:
@@ -380,44 +470,53 @@ def regenerate_figure_from_ir(figure):
     normalized = FigureIRCodec.validate_state(figure_ir)
     namespace = _main_namespace()
     preserved_size = figure.get_size_inches()
-    figure.clear()
-    figsize = normalized["settings"].get("figsize")
-    if figsize is None:
-        figure.set_size_inches(preserved_size, forward=False)
-    else:
-        figure.set_size_inches(*figsize, forward=False)
+    manager = getattr(figure.canvas, "manager", None)
+    was_ready_to_push = None
+    if manager is not None and hasattr(manager, "_ready_to_push"):
+        was_ready_to_push = manager._ready_to_push
+        manager._ready_to_push = False
+    try:
+        figure.clear()
+        figsize = normalized["settings"].get("figsize")
+        if figsize is None:
+            figure.set_size_inches(preserved_size, forward=False)
+        else:
+            figure.set_size_inches(*figsize, forward=False)
 
-    title = normalized["settings"].get("title")
-    if title:
-        figure.set_label(title)
+        title = normalized["settings"].get("title")
+        if title:
+            figure.set_label(title)
 
-    subplots = normalized["layout"]["subplots"]
-    if not subplots:
-        figure.canvas.draw_idle()
-        return figure
+        subplots = normalized["layout"]["subplots"]
+        if not subplots:
+            figure.canvas.draw_idle()
+            return figure
 
-    subplot = subplots[0]
-    axis = figure.add_subplot(int(subplot["subplot_code"]))
-    axis._hyde_subplot_id = subplot["id"]
-    if subplot["title"]:
-        axis.set_title(subplot["title"])
-    if subplot["xlabel"]:
-        axis.set_xlabel(subplot["xlabel"])
-    if subplot["ylabel"]:
-        axis.set_ylabel(subplot["ylabel"])
-    for trace in subplot["traces"]:
-        x_values = _resolve_ir_operand_value(trace["x_source"], namespace, figure)
-        y_values = _resolve_ir_operand_value(trace["y_source"], namespace, figure)
-        args = [y_values] if x_values is None else [x_values, y_values]
-        kwargs = dict(trace["kwargs"] or {})
-        line = axis.plot(*args, **kwargs)[0]
-        line._hyde_trace_id = trace["id"]
-    if subplot["legend"]:
-        axis.legend()
-    if subplot["x_limits"] is not None:
-        axis.set_xlim(*subplot["x_limits"])
-    if subplot["y_limits"] is not None:
-        axis.set_ylim(*subplot["y_limits"])
+        subplot = subplots[0]
+        axis = figure.add_subplot(int(subplot["subplot_code"]))
+        axis._hyde_subplot_id = subplot["id"]
+        if subplot["title"]:
+            axis.set_title(subplot["title"])
+        if subplot["xlabel"]:
+            axis.set_xlabel(subplot["xlabel"])
+        if subplot["ylabel"]:
+            axis.set_ylabel(subplot["ylabel"])
+        for trace in subplot["traces"]:
+            x_values = _resolve_ir_operand_value(trace["x_source"], namespace, figure)
+            y_values = _resolve_ir_operand_value(trace["y_source"], namespace, figure)
+            args = [y_values] if x_values is None else [x_values, y_values]
+            kwargs = dict(trace["kwargs"] or {})
+            line = axis.plot(*args, **kwargs)[0]
+            line._hyde_trace_id = trace["id"]
+        if subplot["legend"]:
+            axis.legend()
+        if subplot["x_limits"] is not None:
+            axis.set_xlim(*subplot["x_limits"])
+        if subplot["y_limits"] is not None:
+            axis.set_ylim(*subplot["y_limits"])
+    finally:
+        if was_ready_to_push is not None:
+            manager._ready_to_push = was_ready_to_push
     figure.canvas.draw_idle()
     return figure
 
@@ -491,6 +590,9 @@ def apply_figure_action(figure, action):
         figure.canvas.draw_idle()
         return figure
     if action_type == "set_trace_style":
+        if action.get("replace"):
+            regenerate_figure_from_ir(figure)
+            return figure
         axis = _resolve_live_axis(figure, action.get("subplot_id"))
         line = _resolve_live_line(axis, action.get("trace_id"))
         _apply_line_style(line, dict(action.get("style", {}) or {}))
@@ -735,9 +837,26 @@ class AxesHyde(Axes):
                 y_source = operand_from_runtime_value(args[1], named_values)
             if y_source is not None:
                 trace_kwargs = {}
-                label = kwargs.get("label")
-                if label not in (None, "", "_nolegend_"):
-                    trace_kwargs["label"] = label
+                for name in (
+                    "alpha",
+                    "color",
+                    "drawstyle",
+                    "label",
+                    "linestyle",
+                    "linewidth",
+                    "marker",
+                    "markeredgecolor",
+                    "markeredgewidth",
+                    "markerfacecolor",
+                    "markersize",
+                    "visible",
+                ):
+                    if name not in kwargs:
+                        continue
+                    value = kwargs[name]
+                    if name == "label" and value in (None, "", "_nolegend_"):
+                        continue
+                    trace_kwargs[name] = value
                 figure._hyde_ir = figure_ir_append_trace(
                     figure._hyde_ir,
                     {

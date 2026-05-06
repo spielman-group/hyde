@@ -279,6 +279,7 @@ class HydeApp:
             interval=0.5,
         )
 
+    @inmain_decorator()
     def on_procedure_change(self, name, info, event=None):
         del info
         if event == "original":

@@ -465,7 +465,35 @@ class FigureIRCodec(FeatureCodec):
         elif action_type == "set_trace_style":
             trace = cls._resolve_trace(subplot, action.get("trace_id"))
             style = dict(action.get("style", {}) or {})
-            for key in ("color", "marker", "linestyle", "linewidth", "label"):
+            if action.get("replace"):
+                for key in (
+                    "alpha",
+                    "color",
+                    "drawstyle",
+                    "linestyle",
+                    "linewidth",
+                    "marker",
+                    "markeredgecolor",
+                    "markeredgewidth",
+                    "markerfacecolor",
+                    "markersize",
+                    "visible",
+                ):
+                    trace["kwargs"].pop(key, None)
+            for key in (
+                "alpha",
+                "color",
+                "drawstyle",
+                "label",
+                "linestyle",
+                "linewidth",
+                "marker",
+                "markeredgecolor",
+                "markeredgewidth",
+                "markerfacecolor",
+                "markersize",
+                "visible",
+            ):
                 if key in style:
                     trace["kwargs"][key] = style[key]
         else:
