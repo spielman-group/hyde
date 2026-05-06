@@ -141,6 +141,7 @@ class Plugin(HydePlugin):
             return
         self.bind_menu_action("_new_figure_action", "window", "New Figure...")
         self._macro_menu = self._ensure_macro_menu()
+        self.services["mdi_area"].subWindowActivated.connect(self.on_subwindow_activated)
         self._macro_menu.aboutToShow.connect(self.rebuild_figure_macros_menu)
         self.rebuild_figure_macros_menu()
         self._signals_connected = True
@@ -156,7 +157,7 @@ class Plugin(HydePlugin):
                 "order": 30,
                 "name": "New Figure...",
                 "action": self.show_new_figure_dialog,
-            }
+            },
         ]
 
     def show_new_figure_dialog(self, checked=False):
@@ -170,6 +171,16 @@ class Plugin(HydePlugin):
             ),
             parent=self.services["ui"],
         )
+
+    def on_subwindow_activated(self, subwindow):
+        show_menu = self.services.get("show_menu")
+        hide_menu = self.services.get("hide_menu")
+        widget = None if subwindow is None else subwindow.widget()
+        if isinstance(widget, FigureWindow):
+            if show_menu is not None:
+                show_menu("figure")
+        elif hide_menu is not None:
+            hide_menu("figure")
 
     def get_event_handlers(self):
         return {

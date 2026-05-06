@@ -197,6 +197,9 @@ class Plugin(HydePlugin):
         self.services["mdi_area"].subWindowActivated.connect(
             self.workspace.on_subwindow_activated
         )
+        self.services["mdi_area"].subWindowActivated.connect(
+            self.on_subwindow_activated
+        )
         self._macro_menu.aboutToShow.connect(self.rebuild_table_macros_menu)
         self.rebuild_table_macros_menu()
         self._signals_connected = True
@@ -212,7 +215,14 @@ class Plugin(HydePlugin):
                 "order": 20,
                 "name": "New Table...",
                 "action": self.show_new_table_dialog,
-            }
+            },
+            {
+                "location": "table",
+                "group": "table",
+                "order": 10,
+                "name": "Delete Selected Data",
+                "action": self.delete_selected_data,
+            },
         ]
 
     def show_new_table_dialog(self, checked=False):
@@ -226,6 +236,27 @@ class Plugin(HydePlugin):
             ),
             parent=self.services["ui"],
         )
+
+    def delete_selected_data(self, checked=False):
+        del checked
+        mdi_area = self.services.get("mdi_area")
+        if mdi_area is None:
+            return False
+        subwindow = mdi_area.activeSubWindow()
+        widget = None if subwindow is None else subwindow.widget()
+        if not isinstance(widget, TableWidget):
+            return False
+        return widget.request_delete_selected_data()
+
+    def on_subwindow_activated(self, subwindow):
+        show_menu = self.services.get("show_menu")
+        hide_menu = self.services.get("hide_menu")
+        widget = None if subwindow is None else subwindow.widget()
+        if isinstance(widget, TableWidget):
+            if show_menu is not None:
+                show_menu("table")
+        elif hide_menu is not None:
+            hide_menu("table")
 
     def get_event_handlers(self):
         return {

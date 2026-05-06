@@ -424,13 +424,13 @@ class FigureWindow(QtWidgets.QWidget):
         return super().eventFilter(watched, event)
 
     def contextMenuEvent(self, event):
-        if self.snapshot_state.figure_ir() is None:
+        mdi_area = self.services.get("mdi_area")
+        if mdi_area is not None and self._subwindow is not None:
+            mdi_area.setActiveSubWindow(self._subwindow)
+        popup_menu = self.services.get("popup_menu")
+        if popup_menu is None:
             return super().contextMenuEvent(event)
-        menu = QtWidgets.QMenu(self)
-        regenerate_action = menu.addAction("Regenerate From IR")
-        chosen = menu.exec_(event.globalPos())
-        if chosen is regenerate_action:
-            self.request_regenerate_from_ir()
+        popup_menu("figure", event.globalPos())
 
     def request_resize_redraw(self, width=None, height=None):
         send_figure_action = self.services.get("send_figure_action")

@@ -449,15 +449,13 @@ class TableWidget(QtWidgets.QWidget):
                     QtCore.QItemSelectionModel.ClearAndSelect,
                 )
 
-        rows_by_name = self._selected_data_rows_by_name()
-
-        menu = QtWidgets.QMenu(self)
-        delete_action = menu.addAction("Delete Selected Data")
-        delete_action.setEnabled(bool(rows_by_name))
-
-        chosen = menu.exec_(self.ui.tableView.viewport().mapToGlobal(position))
-        if chosen == delete_action:
-            self._delete_selected_data(rows_by_name)
+        mdi_area = self.services.get("mdi_area")
+        if mdi_area is not None and self._subwindow is not None:
+            mdi_area.setActiveSubWindow(self._subwindow)
+        popup_menu = self.services.get("popup_menu")
+        if popup_menu is None:
+            return
+        popup_menu("table", self.ui.tableView.viewport().mapToGlobal(position))
 
     def _schedule_value_editor_activation(self, index):
         if not (self.model.flags(index) & QtCore.Qt.ItemIsEditable):
@@ -703,6 +701,13 @@ class TableWidget(QtWidgets.QWidget):
         if commands and not self._queue_refresh(commands):
             return
         self._value_edit_dirty = False
+
+    def request_delete_selected_data(self):
+        rows_by_name = self._selected_data_rows_by_name()
+        if not rows_by_name:
+            return False
+        self._delete_selected_data(rows_by_name)
+        return True
 
     def _editable_index_at(self, row, col):
         if row < 0 or col < 0:

@@ -110,6 +110,8 @@ class HydeApp:
         self.ui.mdiArea.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.ui.menuFile.clear()
         self.ui.menuWindow.clear()
+        self.ui.menuFigure.clear()
+        self.ui.menuTable.clear()
         self.plugin_manager.discover_modules()
         self.plugin_manager.instantiate_plugins()
         self.setup_plugins()
@@ -142,6 +144,9 @@ class HydeApp:
             "mdi_area": self.ui.mdiArea,
             "menu_context": getattr(self, "menu_context", None),
             "lookup_menu_action": self.lookup_menu_action,
+            "show_menu": self.show_menu,
+            "hide_menu": self.hide_menu,
+            "popup_menu": self.popup_menu,
             "mdi_context": getattr(self, "mdi_context", None),
             "configure_persistent_subwindow": self.configure_persistent_subwindow,
             "emit_plugin_event": self.emit_plugin_event,
@@ -191,10 +196,35 @@ class HydeApp:
             return None
         return menu_context.lookup_action(location, name, path=path)
 
+    def show_menu(self, location):
+        menu_context = getattr(self, "menu_context", None)
+        menu = None if menu_context is None else menu_context.locations.get(location)
+        if menu is None:
+            return None
+        menu.menuAction().setVisible(True)
+        return menu
+
+    def hide_menu(self, location):
+        menu_context = getattr(self, "menu_context", None)
+        menu = None if menu_context is None else menu_context.locations.get(location)
+        if menu is None:
+            return None
+        menu.menuAction().setVisible(False)
+        return menu
+
+    def popup_menu(self, location, global_pos):
+        menu_context = getattr(self, "menu_context", None)
+        menu = None if menu_context is None else menu_context.locations.get(location)
+        if menu is None:
+            return None
+        return menu.exec_(global_pos)
+
     def setup_plugins(self):
         self.menu_context = HydeMenuContext(logger=logging.getLogger("hyde"))
         self.menu_context.register_location("file", self.ui.menuFile)
         self.menu_context.register_location("window", self.ui.menuWindow)
+        self.menu_context.register_location("figure", self.ui.menuFigure)
+        self.menu_context.register_location("table", self.ui.menuTable)
 
         self.mdi_context = HydeMDIContext(
             self.ui.mdiArea,
@@ -211,6 +241,8 @@ class HydeApp:
         }
         self.plugin_manager.setup_contexts(plugin_data)
         self.menu_context.render()
+        self.hide_menu("figure")
+        self.hide_menu("table")
         self.plugin_manager.setup_complete(plugin_data)
 
     def show_plugin_window(self, key):

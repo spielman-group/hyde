@@ -39,8 +39,20 @@
      <string>Windows</string>
     </property>
    </widget>
+   <widget class="QMenu" name="menuFigure">
+    <property name="title">
+     <string>Figure</string>
+    </property>
+   </widget>
+   <widget class="QMenu" name="menuTable">
+    <property name="title">
+     <string>Table</string>
+    </property>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuWindow"/>
+   <addaction name="menuFigure"/>
+   <addaction name="menuTable"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
  </widget>

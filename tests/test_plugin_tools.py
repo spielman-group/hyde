@@ -19,14 +19,32 @@ from hyde.user_interface.plugin_tools import (
     HydePlugin,
     HydePluginManager,
 )
+from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
+from hyde.user_interface.plugins.figure.window import FigureWindow
+from hyde.user_interface.plugins.table import Plugin as TablePlugin
+from hyde.user_interface.plugins.table.window import TableWidget
 from hyde.user_interface.window_naming import next_numbered_name
+
+
+class RecordingMenu(QtWidgets.QMenu):
+    def __init__(self, title, parent=None):
+        super().__init__(title, parent)
+        self.popup_calls = []
+
+    def exec_(self, pos, *args, **kwargs):
+        self.popup_calls.append(QtCore.QPoint(pos))
+        return None
 
 
 def make_plugin_host(plugin_manager):
     main_window = QtWidgets.QMainWindow()
     main_window.setMenuBar(QtWidgets.QMenuBar())
     main_window.menuFile = main_window.menuBar().addMenu("File")
-    main_window.menuWindow = main_window.menuBar().addMenu("Window")
+    main_window.menuWindow = main_window.menuBar().addMenu("Windows")
+    main_window.menuFigure = RecordingMenu("Figure", main_window.menuBar())
+    main_window.menuTable = RecordingMenu("Table", main_window.menuBar())
+    main_window.menuBar().addMenu(main_window.menuFigure)
+    main_window.menuBar().addMenu(main_window.menuTable)
     main_window.mdiArea = QtWidgets.QMdiArea()
     main_window.setCentralWidget(main_window.mdiArea)
 
@@ -42,6 +60,11 @@ def make_plugin_host(plugin_manager):
     app.lookup_menu_action = lambda location, name, path=(): (
         None if getattr(app, "menu_context", None) is None
         else app.menu_context.lookup_action(location, name, path=path)
+    )
+    app.show_menu = lambda location: HydeApp.show_menu(app, location)
+    app.hide_menu = lambda location: HydeApp.hide_menu(app, location)
+    app.popup_menu = lambda location, global_pos: HydeApp.popup_menu(
+        app, location, global_pos
     )
     app.get_current_project_dir = lambda: None
     app.get_procedures_init = lambda: None
@@ -204,6 +227,171 @@ class TestPluginTools(unittest.TestCase):
             [action.text() for action in app.ui.menuWindow.actions()],
             ["Plugin Tool"],
         )
+
+    def test_setup_plugins_registers_contextual_menu_locations_and_visibility_services(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {}
+        app = make_plugin_host(manager)
+
+        HydeApp.setup_plugins(app)
+
+        self.assertIn("figure", app.menu_context.locations)
+        self.assertIn("table", app.menu_context.locations)
+        self.assertIn("show_menu", manager.services)
+        self.assertIn("hide_menu", manager.services)
+        self.assertFalse(app.ui.menuFigure.menuAction().isVisible())
+        self.assertFalse(app.ui.menuTable.menuAction().isVisible())
+        self.assertEqual(
+            [action.text() for action in app.ui.menuBar().actions()],
+            ["File", "Windows", "Figure", "Table"],
+        )
+
+        manager.services["show_menu"]("figure")
+        self.assertTrue(app.ui.menuFigure.menuAction().isVisible())
+
+        manager.services["hide_menu"]("figure")
+        self.assertFalse(app.ui.menuFigure.menuAction().isVisible())
+
+    def test_setup_plugins_renders_contextual_menu_contributions_and_reuses_menu_for_popup(self):
+        triggered = []
+
+        class DemoPlugin(HydePlugin):
+            def get_menu_contributions(self):
+                return [
+                    {
+                        "location": "figure",
+                        "group": "demo",
+                        "order": 10,
+                        "name": "Figure Action",
+                        "action": lambda: triggered.append("figure"),
+                    },
+                    {
+                        "location": "table",
+                        "group": "demo",
+                        "order": 20,
+                        "name": "Table Action",
+                        "action": lambda: triggered.append("table"),
+                    },
+                ]
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"demo": DemoPlugin({})}
+        app = make_plugin_host(manager)
+
+        HydeApp.setup_plugins(app)
+
+        self.assertEqual(
+            [action.text() for action in app.ui.menuFigure.actions()],
+            ["Figure Action"],
+        )
+        self.assertEqual(
+            [action.text() for action in app.ui.menuTable.actions()],
+            ["Table Action"],
+        )
+
+        manager.services["lookup_menu_action"]("figure", "Figure Action").trigger()
+        manager.services["lookup_menu_action"]("table", "Table Action").trigger()
+        self.assertEqual(triggered, ["figure", "table"])
+
+        popup_pos = QtCore.QPoint(12, 34)
+        manager.services["popup_menu"]("figure", popup_pos)
+        self.assertEqual(app.ui.menuFigure.popup_calls, [popup_pos])
+
+    def test_figure_window_shows_empty_shared_contextual_menu(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"figure": FigurePlugin({})}
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+
+        mdi_area = app.ui.mdiArea
+        other = mdi_area.addSubWindow(QtWidgets.QLabel("other"))
+        other.show()
+        widget = FigureWindow(
+            figure_number=1,
+            services=manager.services,
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
+
+        self.assertEqual(app.ui.menuFigure.actions(), [])
+
+        mdi_area.setActiveSubWindow(subwindow)
+        self.qapp.processEvents()
+        self.assertTrue(app.ui.menuFigure.menuAction().isVisible())
+        self.assertFalse(app.ui.menuTable.menuAction().isVisible())
+
+        mdi_area.setActiveSubWindow(other)
+        self.qapp.processEvents()
+        self.assertFalse(app.ui.menuFigure.menuAction().isVisible())
+
+        popup_pos = QtCore.QPoint(20, 30)
+        event = QtGui.QContextMenuEvent(
+            QtGui.QContextMenuEvent.Mouse,
+            QtCore.QPoint(5, 5),
+            popup_pos,
+        )
+
+        widget.contextMenuEvent(event)
+
+        self.assertEqual(app.ui.menuFigure.popup_calls, [popup_pos])
+        self.assertIs(mdi_area.activeSubWindow(), subwindow)
+
+    def test_table_widget_shows_shared_contextual_menu(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"table": TablePlugin({})}
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+
+        mdi_area = app.ui.mdiArea
+        other = mdi_area.addSubWindow(QtWidgets.QLabel("other"))
+        other.show()
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services=manager.services,
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
+
+        mdi_area.setActiveSubWindow(subwindow)
+        self.qapp.processEvents()
+        self.assertTrue(app.ui.menuTable.menuAction().isVisible())
+        self.assertFalse(app.ui.menuFigure.menuAction().isVisible())
+
+        mdi_area.setActiveSubWindow(other)
+        self.qapp.processEvents()
+        self.assertFalse(app.ui.menuTable.menuAction().isVisible())
+
+        popup_pos = QtCore.QPoint(10, 12)
+        expected_global = widget.ui.tableView.viewport().mapToGlobal(popup_pos)
+
+        widget._show_context_menu(popup_pos)
+
+        self.assertEqual(app.ui.menuTable.popup_calls, [expected_global])
+        self.assertIs(mdi_area.activeSubWindow(), subwindow)
+
+    def test_table_plugin_registers_delete_action_with_shared_table_menu(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"table": TablePlugin({})}
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+
+        mdi_area = app.ui.mdiArea
+        widget = TableWidget("Table0", ["a"], services=manager.services)
+        called = []
+        widget.request_delete_selected_data = lambda: called.append("delete") or True
+        subwindow = mdi_area.addSubWindow(widget)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        mdi_area.setActiveSubWindow(subwindow)
+
+        manager.services["lookup_menu_action"]("table", "Delete Selected Data").trigger()
+
+        self.assertEqual(called, ["delete"])
 
     def test_rebuild_window_macros_menu_populates_actions_with_tuple_args(self):
         plugin = HydePlugin({})
