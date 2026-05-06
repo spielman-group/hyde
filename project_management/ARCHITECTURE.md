@@ -70,7 +70,7 @@ example.hy/
   store for explicit saved window macros.
 
 ### Project load order
-1. GUI sends visible `hyde.load_project(...)`.
+1. GUI dispatches hidden `hyde.load_project(...)` through the kernel-runtime path.
 2. Kernel enters no-project state, resets to Hyde baseline, runs
    `procedures/__init__.py`, restores saved objects, and signals project activation.
 3. GUI restores `main_window` state from `session.toml`.
@@ -79,7 +79,7 @@ example.hy/
    their normal recreation paths.
 
 ### Project save order
-1. GUI sends visible `hyde.save_project(...)`.
+1. GUI dispatches hidden `hyde.save_project(...)` through the kernel-runtime path.
 2. Kernel writes `manifest.toml` and `data/*`.
 3. GUI writes `session.toml`, `session.py`, and `terminal/history.py`.
 
