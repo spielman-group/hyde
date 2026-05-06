@@ -31,6 +31,10 @@ Only first-class `@hyde.figure` figures participate in that relationship in the
 initial deployment. Non-decorated figures remain ordinary kernel-side matplotlib
 figures and do not open Hyde figure windows.
 
+For saved macros and `session.py` restore source, the stable figure handle is the
+figure label/title used to identify the figure in user-facing source, for example
+`plt.figure("Figure0")`.
+
 The GUI does not own canonical plot structure, artist state, or recreation source.
 For first-class figures, the recreation and editability truth is a kernel-owned IR
 attached directly to the live figure, for example `fig._hyde_ir`.
@@ -87,12 +91,16 @@ The Figure window is an MDI child containing:
 - figure-window controls or menus that operate on the active figure
 - close behavior integrated with the generic saveable-window flow for first-class
   figures
+- title-bar warning text when Hyde cannot yet lower complete recreation source for the
+  active first-class figure
 
 The window may cache transient viewport concerns such as:
 
 - geometry
 - focus
 - visibility
+- `window_pos`
+- `window_state='minimized'`
 - temporary resize/stretch presentation during drag
 
 The window does not cache authoritative scientific state or canonical plot structure.
@@ -147,7 +155,9 @@ Initial actions are:
 - `Regenerate From IR`
 
 These actions are scoped to the active figure window only. They do not operate on
-other figures implicitly.
+other figures implicitly. User-facing recreation source keeps the stable figure handle
+derived from the figure label, while live GUI routing continues to resolve the active
+runtime figure through the current matplotlib registry identity.
 
 ## Command Generation
 
@@ -172,6 +182,10 @@ state-control language:
 Saved figure macros are generated from `fig._hyde_ir` only. They lower to ordinary
 object-oriented matplotlib Python source and are written into the project's bounded
 macro block in `procedures/__init__.py`.
+
+Project session restore uses the same lower-level recreation-source builder in
+`session.py`, wrapped as `@hyde.figure(..., register=False)` and invoked after project
+activation so first-class figures reopen through the same figure-building path.
 
 ## Synchronization
 

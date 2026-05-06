@@ -8,7 +8,9 @@ Hyde runs as two cooperating processes plus one GUI-owned helper thread:
 2. **Kernel Process**
    The `spyder_kernels` IPython kernel that holds the authoritative Python namespace. It is started in-process by `hyde/execution/kernel_launcher.py`, so the real kernel process is the direct `ProcessTree` child of the GUI.
 3. **Runtime Helper Thread**
-   A GUI-owned `threading.Thread` fed by `queue.Queue`. It owns the non-UI Jupyter client used for silent/background execution against the same kernel.
+   A GUI-owned `threading.Thread` fed by `queue.Queue`. It does not own a second
+   frontend kernel session; instead it schedules silent/background execution through the
+   GUI-owned shared frontend `QtKernelClient`.
 
 ## Communication Inventory
 Hyde uses three communication paths:
@@ -21,7 +23,10 @@ Hyde uses three communication paths:
    A lyse-compatible `labscript_utils.ls_zprocess.ZMQServer` bound to the existing
    `ports.lyse` labconfig entry and owned by a first-party GUI plugin.
 
-The Python Terminal and the runtime helper both connect to the same kernel, but they use separate Jupyter client sessions for different purposes.
+The Python Terminal and the runtime helper both connect to the same kernel through one
+shared GUI-owned frontend `QtKernelClient` session. The Python Terminal presents the
+visible rich-console UI on top of that shared client, while the runtime helper reuses
+the same client for silent background execution.
 
 External clients that already target lyse's labconfig port may also talk to Hyde
 through the plugin-owned GUI listener.
@@ -53,16 +58,17 @@ Across Hyde, "IR" means internal representation/internal state in the same sense
 existing state-to-Python path used by `features/...`: structured Hyde state that can
 lower back to standard Python source. It is not globally synonymous with kernel-owned
 state. The difference is feature-specific ownership. Table state currently lives in the
-GUI long enough to emit commands, while the figure PRD chooses a kernel-owned
-figure-local IR attached directly to the live matplotlib `Figure` so figure runtime
-truth and recreation/editability truth stay aligned.
+GUI long enough to emit commands, while Hyde keeps figure IR kernel-owned and attached
+directly to the live matplotlib `Figure` so figure runtime truth and
+recreation/editability truth stay aligned.
 
 The table feature is the first implemented example of a public Hyde helper, with
-`hyde.table(...)` serving as the kernel-facing entry point for table creation and
-appending. The same public symbol also supports decorator use for saved parameterized
-table recreation macros. Project persistence is the second implemented example, with
-`hyde.save_project(...)` and `hyde.load_project(...)` serving as the explicit save/load
-entry points used by the GUI File menu.
+`hyde.create_table(...)` serving as the imperative kernel-facing entry point for table
+creation and appending, and `@hyde.table` serving as the recreation decorator used for
+saved parameterized table macros and non-registering session restore. Project
+persistence is the second implemented example, with `hyde.save_project(...)` and
+`hyde.load_project(...)` serving as the explicit save/load entry points used by the GUI
+File menu.
 
 The figure feature adds a distinct private kernel service rather than a broad new public
 helper API. First-class figures are created through `@hyde.figure`. Those figures carry:
@@ -76,7 +82,8 @@ deployment. They do not open Hyde GUI figure windows and do not participate in t
 private figure-window `comm` service unless a future explicit promotion path is
 defined.
 
-The public `hyde.table(...)` helper also accepts optional recreation-layout kwargs:
+The public `hyde.create_table(...)` helper also accepts optional recreation-layout
+kwargs:
 
 - `geometry=(x, y, width, height)`
 - `column_widths={"array_name": width, ...}`
@@ -209,6 +216,7 @@ GUI behavior:
 ## Lane 2A: GUI -> Kernel (Visible Command Session)
 
 ### Transport
+- `hyde/user_interface/main/frontend_kernel.py`
 - `hyde/user_interface/plugins/python_terminal/__init__.py`
 - `qtconsole.client.QtKernelClient`
 - shared connection file: `kernel-hyde.json`
@@ -218,7 +226,7 @@ This is the user's visible interactive console session.
 
 ### Behavior
 - the Python Terminal is a minimal `RichJupyterWidget`
-- it creates its own `QtKernelClient`
+- it attaches to the GUI-owned shared frontend `QtKernelClient`
 - user-entered Python is sent directly to the kernel over standard Jupyter `execute_request`
 - this session owns the visible rich IPython prompt/history behavior seen by the user
 - the user may access Hyde's supported feature surface in the kernel via `import hyde`
@@ -237,7 +245,7 @@ This is the user's visible interactive console session.
 
 ### Transport
 - `hyde/user_interface/main/runtime_helper.py`
-- `jupyter_client.BlockingKernelClient`
+- `hyde/user_interface/main/frontend_kernel.py`
 - shared connection file: `kernel-hyde.json`
 
 ### Purpose
@@ -249,6 +257,10 @@ This is the GUI-owned background control session.
 - relay project-state completion messages emitted by kernel-side save/load helpers
 - trigger silent helper calls generated by `TableState` / `TableCodec` that publish the current table-macro registry after procedures reload
 - execute remote requests forwarded from the GUI-owned lyse-compatible listener
+
+This lane reuses the shared frontend `QtKernelClient` through
+`FrontendKernelService.execute(..., silent=True)`. It does not own a second frontend
+execution session.
 
 Project load itself is not owned by the runtime helper. The authoritative visible
 `hyde.load_project(...)` command performs the project bootstrap and saved-object restore

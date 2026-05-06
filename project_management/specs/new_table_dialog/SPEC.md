@@ -2,7 +2,7 @@
 
 ## Feature Checklist
 - [x] Present a Hyde-native dialog for creating a new table from selected live objects.
-- [x] Generate the kernel-facing `hyde.table(...)` command string from the dialog state.
+- [x] Generate the kernel-facing `hyde.create_table(...)` command string from the dialog state.
 - [x] Support table creation from selected 1D numeric arrays / array-like objects.
 - [ ] Support pandas DataFrame table creation.
 - [ ] Support style macros.
@@ -16,7 +16,7 @@ mode, then generates the explicit Python command that asks the kernel to create 
 table.
 
 The dialog owns `TableState(HydeGuiState)` and uses `TableCodec` to generate
-`hyde.table(...)`. It is still a string factory, but all Python generation belongs to
+`hyde.create_table(...)`. It is still a string factory, but all Python generation belongs to
 the `HydeGuiState` / `FeatureCodec` pair rather than to ad hoc widget helpers.
 `TableState` remains the shared table-specific state object owned by both the dialog
 and the table window, while reusable mutation state lives outside the table package.
@@ -30,7 +30,7 @@ It includes:
 - choosing the initial display mode for supported objects
 - entering an optional table title
 - maintaining a `TableState` instance representing that dialog state
-- generating the `hyde.table(...)` command string
+- generating the `hyde.create_table(...)` command string
 - sending that command to the kernel so the kernel triggers table creation
 - opening the resulting table in the GUI after the kernel-side helper runs
 
@@ -91,7 +91,7 @@ selects the inputs and generates the table-creation command.
 ## Command Generation
 
 The dialog follows Hyde's string-factory rule.
-When the user clicks `Do It`, the GUI generates an explicit `hyde.table(...)` string
+When the user clicks `Do It`, the GUI generates an explicit `hyde.create_table(...)` string
 through `TableState` / `TableCodec` and sends it to the kernel.
 
 The kernel receives that command, creates the table through the kernel-facing Hyde
@@ -114,7 +114,7 @@ It should be populated from the same namespace-tracking path used by Python Vari
 so that table-creation choices are based on authoritative kernel state.
 
 The dialog may cache only transient metadata needed to populate the object list and
-build the `hyde.table(...)` call.
+build the `hyde.create_table(...)` call.
 
 ## Explicit Exclusions
 

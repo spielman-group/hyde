@@ -5,8 +5,8 @@
 - [x] Allow the user to save a recreation macro, close without saving, or cancel the close.
 - [x] Support overwrite confirmation when a chosen macro name already exists.
 - [x] Support shift-click hide without prompting.
-- [ ] Activate the same generic save-window flow for first-class figure windows.
-- [ ] Support figure, layout, and other non-table saveable windows.
+- [x] Activate the same generic save-window flow for first-class figure windows.
+- [ ] Support additional non-table saveable windows beyond first-class figures.
 
 ## Purpose
 
@@ -28,13 +28,16 @@ For tables, that recreation data is the table feature's internal state
 For first-class figures, the analogous recreation data is the figure feature's IR
 attached to the live matplotlib `Figure`. In Hyde, `IR` here means feature-specific
 internal representation or internal state in the same sense as the existing
-state-to-Python generation path used by `features/...` today. The figure PRD makes a
-figure-specific choice that this IR lives in the kernel on the live figure. The dialog
-never owns that figure IR and never reconstructs it in the GUI.
+state-to-Python generation path used by `features/...` today. Hyde keeps this IR in
+the kernel on the live figure. The dialog never owns that figure IR and never
+reconstructs it in the GUI.
 
 ## Initial Deployment Scope
 
-The initial deployment activates this dialog only for table windows.
+The initial deployment activates this dialog for:
+
+- table windows
+- first-class figure windows
 
 It includes:
 
@@ -49,7 +52,6 @@ It includes:
 It does not include:
 
 - application-wide save-all-on-quit flows
-- active figure integration
 - layout or gizmo integration
 - bulk macro management
 
@@ -100,11 +102,10 @@ This same generic synchronization rule applies to both:
 
 - direct scientific execution from the dialog
 - save-all-on-quit
-- non-table saveable windows
+- non-saveable windows
 
 ## Future Work
 
-- first-class figure integration using IR-backed recreation macros
 - layout integration
 - project-shutdown figure persistence that reuses the same IR-backed recreation source
 - macro browser / rename / delete workflows

@@ -1,76 +1,24 @@
-# Action Plan
+# Hyde Plan
 
-This document is a living checklist tracking the specific steps we will follow (or have followed) to build Hyde, organized by our strategy phases.
+## Completed Base Work
+- core GUI + kernel architecture
+- Procedure Browser and project bootstrap
+- Python Terminal
+- Python Variables
+- table editor and table macros
+- first-class figure windows and graph macros
+- project save/load with `session.toml` + `session.py`
 
-## Phase I: Articulate Design Philosophy
-- [x] Clear existing prototype code.
-- [x] Establish the `project_management/` documentation hierarchy.
-- [x] Draft the `STRATEGY.md`.
-- [x] Draft this `PLAN.md`.
-- [x] Refine `HYDE.md` to cleanly articulate vision and goals.
-- [x] Refine `ARCHITECTURE.md` to define design philosophy.
-- [x] Test the documentation by spawining a sub-agent and verifying that it correctly and completly understood the design philosophy.
+## Active Remaining Work
+- define the Python Terminal display policy for output from silent runtime-helper work
+- expand broader table interaction tests
 
-## Phase II: Minimum Feature Set Prototype
-- [x] Spec: Draft `specs/IPC_PROTOCOL.md` defining how the PyQt window interacts with the Jupyter kernel.
-- [x] Impl: Scaffold the core PyQt MainWindow shell (the resulting code should run without error, yielding a near-featurless MDI container.)
-- [x] Impl: Launch `spyder_kernels` directly as the managed `ProcessTree` child.
-- [x] Impl: Create and wire in the `python_terminal` widget.
-- [x] Impl: Integrate unified `zlog` and managed `ProcessTree` hierarchy.
-- [x] Impl: Create the MDI Logging window for process observability.
+## Backlog
+- DataFrame and broader table semantics
+- richer first-class figure editing surfaces
+- GridSpec / multi-subplot figure editing
+- release packaging and announcement
 
-## Phase III: Core System Tests
-- [x] Add tests executing kernel startup/shutdown.
-- [x] Add tests verifying strings are executed in the separated namespace.
-
-## Phase IV: Iterative Feature Deployment
-### Feature A: Procedure Browser & Kernel Initialization
-- [x] Spec: Draft `specs/procedure_browser/SPEC.md`.
-- [x] Impl: Implement `procedures/__init__.py` bootstrapping and automated kernel execution.
-- [x] Impl: Create the MDI Procedure Browser.
-- [x] Test: Verify environment synchronization between script and kernel.
-- [x] Refinement: Move procedure-file change tracking into the GUI-owned `FileWatcher`, with canonical `procedures/__init__.py` bootstrap dispatched through the runtime helper.
-- [x] Refinement: Mask runtime-helper-owned `procedures/__init__.py` execution input at the kernel protocol level with `silent=True`.
-- [x] Refinement: Add a plugin-owned lyse-compatible remote listener on the existing `ports.lyse` labconfig entry that queues incoming agnostic paths into the runtime helper, which dispatches visible `remote(...)` in the kernel.
-- [ ] Refinement: Define the Python Terminal display policy for output originating from runtime-helper-owned silent execution.
-
-### Feature B: Matplotlib Figure Capture
-- [x] Spec: Refine `specs/figure_window/SPEC.md` and adjacent figure docs around the strict first-class `@hyde.figure` window model.
-- [ ] Impl: Add the Hyde matplotlib backend with transparent instrumented matplotlib subclasses and strict 1:1 mapping between registry key, live kernel `Figure`, and GUI figure window for first-class `@hyde.figure` figures.
-- [ ] Impl: Render first-class `@hyde.figure` figures through native MDI figure windows while keeping undecorated figures outside the Hyde window system in this deployment.
-- [ ] Impl: Attach kernel-owned figure IR and parallel command-log artifacts directly to first-class `@hyde.figure` figures.
-- [ ] Impl: Route figure render metadata and semantic figure edit actions over Jupyter `comm`, keeping the live kernel `Figure` as runtime truth and the figure IR as recreation/editability truth.
-- [ ] Impl: Add close-time graph-macro save flow and `Windows -> Graph Macros` refresh using the existing bounded macro pattern.
-- [ ] Test: Verify figure rendering, resize redraw, close behavior, semantic edit actions, and IR-driven macro generation.
-
-### Feature C: Python Variables
-- [x] Spec: Draft and refine `specs/python_variables/SPEC.md`.
-- [x] Impl: Capture namespace variables using Spyder comms.
-- [x] Impl: Show tracked variables in a GUI browser with Arrays / Variables / Strings filters and an Info pane.
-- [x] Test: Verify namespace syncing on startup, after kernel execution, and after `procedures/__init__.py` reload.
-
-### Feature E: Project Save/Load
-- [x] Spec: Draft `specs/project_save_load/SPEC.md`.
-- [x] Impl: Add public `hyde.save_project(...)` / `hyde.load_project(...)` helpers for explicit kernel-state persistence.
-- [x] Impl: Save kernel objects into `manifest.toml` and `data/*` using exclusion-based persistence.
-- [x] Refinement: Exclude packages, interactive namespace artifacts, and runtime helper objects from kernel-state persistence.
-- [x] Impl: Save GUI session state into `session.toml` and visible command history into `terminal/history.py`.
-- [x] Refinement: Move first-party UI discovery to `hyde.user_interface.plugins` and keep shell/support modules outside the plugin namespace.
-- [x] Impl: Wire `File -> Save`, `File -> Save As...`, and project load into the explicit save/load flow.
-- [x] Refinement: `File -> Save As...` prompts before overwriting an existing non-empty project.
-- [x] Refinement: GUI session restore warns on malformed/missing `session.toml` and does not block kernel-state restore.
-- [x] Refinement: Collect GUI session payloads centrally from plugin `get_save_data()` and restore plugin-owned session state on `project_loaded`.
-- [x] Refinement: In-place `File -> Save` overwrites the current saved state instead of preserving an older synchronized copy.
-- [x] Refinement: Switching projects resets the kernel namespace before the new project's procedures/state are loaded.
-- [x] Test: Add focused save/load integration coverage.
-
-### Feature D: Table Editor
-- [x] Spec: Refine `specs/table/SPEC.md` and define the Python Variables table-launch contract.
-- [x] Impl: Create the table editor MDI window, New Table dialog, and Python Variables table-launch/appending integration.
-- [x] Test: Verify kernel-to-GUI table-open relay and direct-kernel handling for `hyde.table(...)`.
-- [x] Impl: Add save-on-close table recreation macros and `Windows -> Table Macros`.
-- [ ] Test: Expand coverage for GUI row rendering, muted cell-edit execution, and broader table interaction behavior.
-- [x] Refinement: Replace the old executor-triggered table-data fetch hop with a direct kernel call from the runtime helper against the managed kernel child.
-
-## Phase V: Announcement and Release
-- [ ] TBD.
+## Rule For Agents
+Work from the active remaining items first. Do not reopen completed architectural work
+unless the user explicitly asks for a redesign.

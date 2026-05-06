@@ -164,8 +164,8 @@ Any durable or user-directed visualization action will still need to generate ex
 For first-class figures, that future command path must create or target a decorated
 figure workflow; once such a figure exists, later figure edits happen through semantic
 figure `comm` actions against the figure feature's IR rather than through Python
-Variables holding any plot state in the GUI. In this figure workflow, the PRD chooses
-that IR to live in the kernel on the live figure.
+Variables holding any plot state in the GUI. In this figure workflow, Hyde keeps that
+IR in the kernel on the live figure.
 
 ## Editable Operations
 
@@ -186,8 +186,8 @@ Future figure actions do not imply a generic `plt.plot(...)` shortcut for arbitr
 selections. They must remain compatible with Hyde's first-class figure model:
 
 - the created or targeted figure is a first-class `@hyde.figure` figure
-- the figure's authoritative internal state is the figure feature's IR, which this PRD
-  places in the kernel on the live figure
+- the figure's authoritative internal state is the figure feature's IR, which Hyde
+  keeps in the kernel on the live figure
 - later GUI edits on that figure use semantic `comm` actions, not Python Variables-side
   state mutation
 
@@ -204,10 +204,10 @@ In the initial deployment, the active actions are:
   Delete the selected object or objects from the live namespace after confirmation.
 - `Edit`
   Open the New Table dialog with the selected array-like objects so the dialog can
-  generate `hyde.table(...)`.
+  generate `hyde.create_table(...)`.
 - `Append to Table`
   Append the selected array-like objects to the currently active table using
-  `hyde.table(..., target=<table_name>)`.
+  `hyde.create_table(..., target=<table_name>)`.
 
 The remaining Igor actions are intentionally not part of the initial deployment.
 
@@ -219,7 +219,7 @@ deferred until the table widget defines DataFrame semantics.
 ## Table Integration
 
 Python Variables launches the table widget through the New Table dialog and the
-kernel-facing `hyde.table(...)` API.
+kernel-facing `hyde.create_table(...)` API.
 
 - `Edit` opens the New Table dialog with the selected array-like objects
 - `Append to Table` appends the selected array-like objects to the active table
@@ -238,8 +238,8 @@ Examples of the intended pattern include:
 
 - deleting objects with explicit Python statements such as `del name`
 - copying a valid Python expression for the selected object
-- creating a new table with `hyde.table(arr1, arr2)`
-- appending to an existing table with `hyde.table(arr1, target="Table0")`
+- creating a new table with `hyde.create_table(arr1, arr2)`
+- appending to an existing table with `hyde.create_table(arr1, target="Table0")`
 
 GUI state that is only needed to generate the command string may be transient, but it is never authoritative scientific state.
 
@@ -259,7 +259,10 @@ Namespace changes caused by:
 
 must update the Python Variables view.
 
-The browser establishes its own namespace-view comm path and requests an initial snapshot after that path is ready, so startup and project reopen begin with a populated list rather than waiting for a future user command.
+The browser establishes its own namespace-view comm path on the shared frontend kernel
+client when available and requests an initial snapshot after that path is ready, so
+startup and project reopen begin with a populated list rather than waiting for a
+future user command.
 
 ## Cross-Project Browsing
 

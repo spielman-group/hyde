@@ -18,14 +18,13 @@ surface that edits one subplot of one live kernel-side figure.
 In this feature family, figure `IR` means the same thing that `internal state` means in
 the table state-to-Python generation path: it is the authoritative feature-owned
 internal representation used for semantic editing and for lowering back to standard
-matplotlib Python source. The current figure PRD makes a figure-specific choice that
-this IR lives in the kernel on the live figure.
+matplotlib Python source. Hyde keeps this IR in the kernel on the live figure.
 
 ## Current Deployment Boundary
 
 This dialog is not part of the current figure-window deployment.
 
-The current figure PRD limits the initial figure semantic surface to:
+The current figure implementation limits the initial figure semantic surface to:
 
 - one figure
 - one subplot

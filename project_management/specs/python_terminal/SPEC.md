@@ -14,9 +14,9 @@
 ## Specification
 
 - The Python Terminal is a plain `RichJupyterWidget` wrapper in `hyde/user_interface/plugins/python_terminal/__init__.py`.
-- It creates a `QtKernelClient`, loads `kernel-hyde.json`, starts the normal Jupyter channels, and exposes the standard rich IPython console UI.
-- User-entered commands travel directly from the GUI to the kernel over the Python Terminal's own Jupyter client session.
-- `procedures/__init__.py` execution is owned by the GUI-owned runtime helper, which uses its own non-UI Jupyter client connected to the same kernel.
+- The GUI owns one shared frontend `QtKernelClient` in `frontend_kernel.py`, loads `kernel-hyde.json`, starts the normal Jupyter channels, and exposes that client to the Python Terminal and other frontend services.
+- User-entered commands travel directly from the GUI to the kernel over that shared frontend client session.
+- `procedures/__init__.py` execution is owned by the GUI-owned runtime helper, which reuses the shared frontend client for silent execution instead of opening a second frontend execution session.
 - Input masking for runtime-helper-driven `procedures/__init__.py` execution is implemented at the kernel protocol level with `silent=True`.
 - The Python Terminal is inaccessible in Hyde's explicit no-project state and becomes available only after a project is activated.
 - While `hyde.HYDE_GUI` is true, `quit` / `quit()` / `exit` / `exit()` are rebound in the kernel namespace to `hyde.quit()` so terminal-driven quit follows Hyde's orderly shutdown path.
@@ -44,12 +44,12 @@
 
 ### User-Typed Commands
 - The user types directly into the embedded rich IPython console.
-- The Python Terminal sends those commands to the kernel through its `QtKernelClient`.
+- The Python Terminal sends those commands to the kernel through the shared frontend `QtKernelClient`.
 - These commands are visible in the Python Terminal and participate in normal IPython history/prompt numbering.
 
 ### Package Startup and Reload
 - Initial loading and reload of `procedures/__init__.py` are owned by the GUI-owned runtime helper, not the Python Terminal.
-- The runtime helper uses a separate non-UI Jupyter client connected to the same kernel.
+- The runtime helper reuses the shared frontend client through `FrontendKernelService`.
 - The runtime helper executes the canonical package initialization string with `silent=True`, so the kernel does not emit `execute_input` for that request and does not consume the visible prompt history.
 - File changes under `procedures/` trigger the same runtime-helper execution path as initial load.
 
@@ -58,13 +58,15 @@
   runtime-helper workflow.
 - Once a first-class figure exists, routine GUI edits are private semantic `comm`
   actions against the figure feature's IR rather than visible terminal commands. For
-  this feature, the PRD makes that IR kernel-owned and attached to the live figure.
+  this feature, Hyde keeps that IR kernel-owned and attached to the live figure.
 - Figure redraw payloads and edit acknowledgments therefore do not echo as terminal
   input or consume prompt numbers.
 
 ## Output Policy
-- A separate Jupyter client session can execute silently without producing `execute_input`.
-- Whether output from that session should appear in the visible Python Terminal is a frontend display-policy decision.
+- Silent execution requests on the shared frontend client can execute without producing
+  `execute_input`.
+- Whether output from those silent requests should appear in the visible Python Terminal
+  is a frontend display-policy decision.
 - Figure-window traffic is not part of that display-policy question. Figure updates are
   delivered to figure windows over the dedicated figure `comm` path rather than through
   terminal echo.
