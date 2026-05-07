@@ -571,7 +571,7 @@ def _main_namespace():
     return sys.modules["__main__"].__dict__
 
 
-def _resolve_ir_operand_value(operand, namespace, figure=None):
+def _resolve_ir_operand_value(operand, namespace, figure=None, use_bound_values=True):
     if operand is None:
         return None
     kind = operand.get("kind")
@@ -579,9 +579,10 @@ def _resolve_ir_operand_value(operand, namespace, figure=None):
         operand_name = operand["value"]
         if operand_name in namespace:
             return namespace[operand_name]
-        bound_values = getattr(figure, "_hyde_bound_values", {})
-        if operand_name in bound_values:
-            return bound_values[operand_name]
+        if use_bound_values:
+            bound_values = getattr(figure, "_hyde_bound_values", {})
+            if operand_name in bound_values:
+                return bound_values[operand_name]
         raise KeyError(operand_name)
     if kind == "literal":
         return operand.get("value")
@@ -867,7 +868,7 @@ def _apply_subplot_axis_state(axis, subplot):
         _add_zero_line(axis, axis_name, axis_state)
 
 
-def regenerate_figure_from_ir(figure):
+def regenerate_figure_from_ir(figure, use_bound_values=True):
     figure_ir = getattr(figure, "_hyde_ir", None)
     if figure_ir is None:
         raise ValueError("Figure does not have Hyde IR.")
@@ -904,14 +905,29 @@ def regenerate_figure_from_ir(figure):
         axis._hyde_subplot_id = subplot["id"]
         if subplot["title"]:
             axis.set_title(subplot["title"])
+        plotted_count = 0
         for trace in subplot["traces"]:
-            x_values = _resolve_ir_operand_value(trace["x_source"], namespace, figure)
-            y_values = _resolve_ir_operand_value(trace["y_source"], namespace, figure)
+            try:
+                x_values = _resolve_ir_operand_value(
+                    trace["x_source"],
+                    namespace,
+                    figure,
+                    use_bound_values=use_bound_values,
+                )
+                y_values = _resolve_ir_operand_value(
+                    trace["y_source"],
+                    namespace,
+                    figure,
+                    use_bound_values=use_bound_values,
+                )
+            except KeyError:
+                continue
             args = [y_values] if x_values is None else [x_values, y_values]
             kwargs = dict(trace["kwargs"] or {})
             line = axis.plot(*args, **kwargs)[0]
             line._hyde_trace_id = trace["id"]
-        if subplot["legend"]:
+            plotted_count += 1
+        if subplot["legend"] and plotted_count > 0:
             axis.legend()
         _apply_subplot_axis_state(axis, subplot)
     finally:
@@ -934,7 +950,10 @@ def apply_figure_action(figure, action):
         figure.canvas.draw_idle()
         return figure
     if action_type == "regenerate_from_ir":
-        return regenerate_figure_from_ir(figure)
+        return regenerate_figure_from_ir(
+            figure,
+            use_bound_values=bool(action.get("use_bound_values", True)),
+        )
     if action_type == "refresh_from_live_state":
         live_state = getattr(figure, "_hyde_live_state", None)
         if live_state is None:

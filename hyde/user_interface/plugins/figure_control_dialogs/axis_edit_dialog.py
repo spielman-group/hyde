@@ -3,6 +3,7 @@ import copy
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec
+from hyde.user_interface.matplotlib_color_picker import MatplotlibColorLineEdit
 
 AXIS_TAB_TITLES = [
     "Axis",
@@ -349,15 +350,15 @@ class AxisEditDialog(QtWidgets.QDialog):
         self.draw_on_top_checkbox.toggled.connect(self._on_controls_changed)
         form.addRow("Z order", self.draw_on_top_checkbox)
 
-        self.side_color_edit = QtWidgets.QLineEdit(axis_tab)
+        self.side_color_edit = MatplotlibColorLineEdit(axis_tab)
         self.side_color_edit.editingFinished.connect(self._on_controls_changed)
         form.addRow("Axis color", self.side_color_edit)
 
-        self.axis_label_color_edit = QtWidgets.QLineEdit(axis_tab)
+        self.axis_label_color_edit = MatplotlibColorLineEdit(axis_tab)
         self.axis_label_color_edit.editingFinished.connect(self._on_controls_changed)
         form.addRow("Label color", self.axis_label_color_edit)
 
-        self.tick_label_color_edit = QtWidgets.QLineEdit(axis_tab)
+        self.tick_label_color_edit = MatplotlibColorLineEdit(axis_tab)
         self.tick_label_color_edit.editingFinished.connect(self._on_controls_changed)
         form.addRow("Tick label color", self.tick_label_color_edit)
 
@@ -461,7 +462,7 @@ class AxisEditDialog(QtWidgets.QDialog):
         self.grid_width_spin.valueChanged.connect(self._on_controls_changed)
         form.addRow("Grid width", self.grid_width_spin)
 
-        self.grid_color_edit = QtWidgets.QLineEdit(ticks_grid_tab)
+        self.grid_color_edit = MatplotlibColorLineEdit(ticks_grid_tab)
         self.grid_color_edit.editingFinished.connect(self._on_controls_changed)
         form.addRow("Grid color", self.grid_color_edit)
 
@@ -484,7 +485,7 @@ class AxisEditDialog(QtWidgets.QDialog):
         self.zero_line_width_spin.valueChanged.connect(self._on_controls_changed)
         form.addRow("Zero width", self.zero_line_width_spin)
 
-        self.zero_line_color_edit = QtWidgets.QLineEdit(ticks_grid_tab)
+        self.zero_line_color_edit = MatplotlibColorLineEdit(ticks_grid_tab)
         self.zero_line_color_edit.editingFinished.connect(self._on_controls_changed)
         form.addRow("Zero color", self.zero_line_color_edit)
 
@@ -761,7 +762,7 @@ class AxisEditDialog(QtWidgets.QDialog):
             self.label_offset_spin.setValue(float(label_state.get("offset") or 0.0))
             self.label_rotation_spin.setValue(float(label_state.get("rotation") or 0.0))
             self.line_spacing_spin.setValue(float(label_state.get("line_spacing") or 1.2))
-            self.axis_label_color_edit.setText(
+            self.axis_label_color_edit.set_committed_text(
                 _format_optional_text(label_state.get("color"))
             )
             self._set_combo_data(
@@ -785,10 +786,10 @@ class AxisEditDialog(QtWidgets.QDialog):
             self.draw_between_min_spin.setValue(float(draw_between[0]) * 100.0)
             self.draw_between_max_spin.setValue(float(draw_between[1]) * 100.0)
             self.draw_on_top_checkbox.setChecked(bool(side_state.get("draw_on_top")))
-            self.side_color_edit.setText(
+            self.side_color_edit.set_committed_text(
                 _format_optional_text(side_state.get("spine_color"))
             )
-            self.tick_label_color_edit.setText(
+            self.tick_label_color_edit.set_committed_text(
                 _format_optional_text(side_state.get("tick_label_color"))
             )
             self.tick_label_rotation_spin.setValue(
@@ -858,7 +859,9 @@ class AxisEditDialog(QtWidgets.QDialog):
                 grid_state.get("linestyle", "-"),
             )
             self.grid_width_spin.setValue(float(grid_state.get("linewidth") or 0.0))
-            self.grid_color_edit.setText(_format_optional_text(grid_state.get("color")))
+            self.grid_color_edit.set_committed_text(
+                _format_optional_text(grid_state.get("color"))
+            )
             self.zero_line_visible_checkbox.setChecked(bool(zero_line_state.get("visible")))
             self._set_combo_data(
                 self.zero_line_style_combo,
@@ -867,7 +870,7 @@ class AxisEditDialog(QtWidgets.QDialog):
             self.zero_line_width_spin.setValue(
                 float(zero_line_state.get("linewidth") or 0.0)
             )
-            self.zero_line_color_edit.setText(
+            self.zero_line_color_edit.set_committed_text(
                 _format_optional_text(zero_line_state.get("color"))
             )
         finally:

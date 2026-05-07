@@ -107,6 +107,22 @@ class TestFigureCodec(unittest.TestCase):
         self.assertIn("ax = fig.add_subplot(111)", macro)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
 
+    def test_figure_state_generates_empty_figure_builder_code(self):
+        state = FigureState()
+        state.set_title("EmptyFigure")
+        state.set_x_name("delay")
+
+        source = state.python_source()
+
+        self.assertIn("@hyde.figure(register=False)", source)
+        self.assertIn("def _hyde_figure():", source)
+        self.assertIn("_hyde_figure()", source)
+        self.assertIn("fig = plt.figure('EmptyFigure')", source)
+        self.assertIn("ax = fig.add_subplot(111)", source)
+        self.assertNotIn("ax.plot(", source)
+        self.assertNotIn("delay", source)
+        self.assertIn("fig.show()", source)
+
     def test_figure_codec_rejects_removed_track_command(self):
         state = FigureState()
         state.set_title("DelayGraph")
@@ -227,6 +243,48 @@ class TestFigurePluginDispatch(unittest.TestCase):
             self.assertEqual(state["settings"]["figsize"], (5.0, 3.0))
         finally:
             dialog.close()
+
+    def test_new_figure_dialog_dispatches_empty_figure_when_no_data_selected(self):
+        executed = []
+
+        plugin = type("FakePlugin", (), {})()
+        plugin.workspace = type(
+            "FakeWorkspace",
+            (),
+            {"next_generated_title": lambda self: "Figure0"},
+        )()
+        plugin.services = {
+            "python_execution_service": FakeExecutionService(executed),
+        }
+
+        service = FigureFeatureService(plugin)
+
+        class FakeDialog:
+            def __init__(self, objects_metadata, preselection=None, parent=None):
+                del objects_metadata, preselection, parent
+
+            def exec_(self):
+                return True
+
+            def get_command(self, default_title=None):
+                del default_title
+                return (
+                    "@hyde.figure(register=False)\n"
+                    "def _hyde_figure():\n"
+                    "    fig = plt.figure('Figure0')\n"
+                    "    ax = fig.add_subplot(111)\n"
+                    "    fig.show()\n\n"
+                    "_hyde_figure()\n"
+                    "del _hyde_figure"
+                )
+
+        with patch("hyde.user_interface.plugins.figure.NewFigureDialog", FakeDialog):
+            self.assertTrue(service.show_new_figure_dialog({}, parent=None))
+
+        self.assertEqual(len(executed), 1)
+        self.assertIn("def _hyde_figure():", executed[0][0])
+        self.assertIn("ax = fig.add_subplot(111)", executed[0][0])
+        self.assertNotIn("ax.plot(", executed[0][0])
 
     def test_figure_macro_dispatch_uses_shared_callable_invocation(self):
         executed = []

@@ -72,6 +72,7 @@ class TestFigureCommActions(unittest.TestCase):
             fig = plt.figure("Graph0")
             ax = fig.add_subplot(111)
             ax.plot(x, y, label="y")
+            ax.legend()
             return fig
 
         figure = Graph0([0, 1, 2], [1, 4, 9])
@@ -456,6 +457,7 @@ class TestFigureCommActions(unittest.TestCase):
             return fig
 
         figure = Graph0([0, 1, 2], [1, 4, 9])
+        figure._hyde_ir["layout"]["subplots"][0]["legend"] = True
         figure.clear()
 
         apply_figure_action(figure, {"type": "regenerate_from_ir"})
@@ -463,6 +465,11 @@ class TestFigureCommActions(unittest.TestCase):
         self.assertEqual(len(figure.axes), 1)
         self.assertEqual(len(figure.axes[0].lines), 1)
         self.assertEqual(figure.axes[0].lines[0].get_label(), "y")
+        self.assertIsNotNone(figure.axes[0].get_legend())
+        self.assertEqual(
+            [text.get_text() for text in figure.axes[0].get_legend().texts],
+            ["y"],
+        )
 
     def test_apply_figure_action_refreshes_from_live_state(self):
         plt = self._configure_pyplot()
@@ -580,6 +587,37 @@ class TestFigureCommActions(unittest.TestCase):
                 list(figure.axes[0].lines[0].get_ydata()),
                 [2, 5, 10],
             )
+        finally:
+            for name, value in previous_values.items():
+                if value is None:
+                    main_namespace.pop(name, None)
+                else:
+                    main_namespace[name] = value
+
+    def test_refresh_figure_drops_traces_when_required_namespace_data_is_deleted(self):
+        plt = self._configure_pyplot()
+        main_namespace = __import__("sys").modules["__main__"].__dict__
+        previous_values = {
+            name: main_namespace.get(name)
+            for name in ("delay", "fit_delay")
+        }
+        try:
+            main_namespace["delay"] = [0, 1, 2]
+            main_namespace["fit_delay"] = [1, 4, 9]
+
+            @hyde.figure
+            def Graph0(delay, fit_delay):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(delay, fit_delay, label="fit_delay")
+                return fig
+
+            figure = Graph0(main_namespace["delay"], main_namespace["fit_delay"])
+            del main_namespace["delay"]
+
+            hyde.refresh_figure(figure)
+
+            self.assertEqual(len(figure.axes[0].lines), 0)
         finally:
             for name, value in previous_values.items():
                 if value is None:

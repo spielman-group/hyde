@@ -312,6 +312,34 @@ class TestTableWidget(unittest.TestCase):
             widget.shutdown_client()
             widget.close()
 
+    def test_deleted_namespace_column_is_removed_from_table_headers(self):
+        queued = []
+        namespace_service = FakeNamespaceViewService({"x": {"type": "ndarray"}})
+        widget = TableWidget(
+            "Table0",
+            ["x"],
+            services={
+                "python_execution_service": FakeExecutionService(queued),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            widget.model.update_data({"x": [1, 2, 3]})
+            queued.clear()
+
+            namespace_service.emit({})
+
+            self.assertEqual(widget.names, [])
+            self.assertEqual(widget.table_state.normalized_state()["items"], [])
+            self.assertEqual(
+                widget.model.headerData(1, QtCore.Qt.Horizontal, QtCore.Qt.DisplayRole),
+                "",
+            )
+            self.assertEqual(queued, [])
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
     def test_table_refresh_recovers_after_timed_out_request(self):
         queued = []
         namespace_service = FakeNamespaceViewService(

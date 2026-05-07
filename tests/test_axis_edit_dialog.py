@@ -381,6 +381,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(dialog.label_rotation_spin.value(), 12.0)
             self.assertEqual(dialog.line_spacing_spin.value(), 1.6)
             self.assertEqual(dialog.axis_label_color_edit.text(), "#aa5500")
+            self.assertEqual(dialog.axis_label_color_edit.swatch_color_text(), "#aa5500")
             self.assertEqual(dialog.autoscale_combo.currentData(), "tight")
             self.assertEqual(dialog.minimum_edit.text(), "1.0")
             self.assertEqual(dialog.maximum_edit.text(), "8.0")
@@ -667,6 +668,39 @@ class TestAxisEditDialog(unittest.TestCase):
         self.assertEqual(latest["ticks"]["major"]["labels"], ["one", "three", "nine"])
         self.assertEqual(latest["grid"]["linestyle"], ":")
         self.assertEqual(latest["zero_line"]["linestyle"], "--")
+
+    def test_axis_color_fields_accept_named_and_tuple_matplotlib_colors(self):
+        sent = []
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
+                ),
+            },
+        )
+
+        dialog = AxisEditDialog(figure, parent=mdi_area)
+        try:
+            dialog.axis_label_color_edit.setText("green")
+            dialog.axis_label_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.axis_label_color_edit.text(), "#008000")
+            self.assertEqual(dialog.axis_label_color_edit.swatch_color_text(), "#008000")
+
+            dialog.grid_color_edit.setText("(0.4, 0.9, 1.0, 0.5)")
+            dialog.grid_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.grid_color_edit.text(), "#66e6ff80")
+            self.assertEqual(dialog.grid_color_edit.swatch_color_text(), "#66e6ff80")
+        finally:
+            dialog.close()
+
+        axis_actions = [action for _, action in sent if action["type"] == "set_axis_state"]
+        self.assertTrue(axis_actions)
+        latest = axis_actions[-1]["state"]
+        self.assertEqual(latest["label"]["color"], "#008000")
+        self.assertEqual(latest["grid"]["color"], "#66e6ff80")
 
     def test_preview_and_dispatch_support_mixed_auto_manual_range_modes(self):
         sent = []

@@ -566,7 +566,7 @@ def refresh_figure(figure):
     if getattr(resolved_figure, "_hyde_is_first_class", False):
         apply_figure_action(
             resolved_figure,
-            {"type": "regenerate_from_ir"},
+            {"type": "regenerate_from_ir", "use_bound_values": False},
         )
         return resolved_figure
     state = getattr(resolved_figure, "_hyde_live_state", None)

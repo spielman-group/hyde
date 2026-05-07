@@ -513,7 +513,9 @@ class FigureWindow(QtWidgets.QWidget):
         self._refresh_in_flight = True
         self._refresh_requested = False
         if self.snapshot_state.figure_ir() is not None:
-            requested = self.request_regenerate_from_ir()
+            requested = self.request_figure_action(
+                {"type": "regenerate_from_ir", "use_bound_values": False}
+            )
         else:
             requested = self.request_refresh_from_live_state()
         if requested:

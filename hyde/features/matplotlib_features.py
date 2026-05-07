@@ -121,8 +121,6 @@ class FigureCodec(FeatureCodec):
         if command not in cls._valid_commands:
             raise ValueError(f"Unsupported figure command: {command!r}.")
 
-        if command == "create" and not normalized["items"]:
-            raise ValueError("Figure creation requires at least one plotted object.")
         if settings["figsize"] is not None:
             if settings["figsize"][0] <= 0 or settings["figsize"][1] <= 0:
                 raise ValueError("Figure figsize values must be positive.")
@@ -181,7 +179,7 @@ class FigureCodec(FeatureCodec):
         normalized = cls.normalize_state(state)
         settings = normalized["settings"]
         names = []
-        if settings["x_name"]:
+        if settings["x_name"] and normalized["items"]:
             names.append(settings["x_name"])
         names.extend(normalized["items"])
         return tuple(_ordered_unique(names))

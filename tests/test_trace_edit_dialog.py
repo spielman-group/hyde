@@ -262,6 +262,9 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             self.assertEqual(dialog.trace_list.count(), 2)
             self.assertEqual(dialog.trace_list.currentItem().text(), "trace_a")
             self.assertEqual(dialog.line_color_edit.text(), "#123456")
+            self.assertEqual(dialog.marker_face_color_edit.text(), "auto")
+            self.assertEqual(dialog.marker_face_color_edit.swatch_color_text(), "#123456")
+            self.assertEqual(dialog.marker_edge_color_edit.swatch_color_text(), "#123456")
             self.assertEqual(dialog.line_style_combo.currentData(), "--")
             self.assertEqual(dialog.line_width_spin.value(), 2.5)
             self.assertEqual(dialog.marker_combo.currentData(), "s")
@@ -349,6 +352,41 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         )
         self.assertEqual(dialog.line_style_combo.currentData(), "None")
         self.assertEqual(dialog.marker_combo.currentData(), "s")
+
+    def test_dialog_accepts_named_matplotlib_line_color(self):
+        sent = []
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
+                ),
+            },
+        )
+
+        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        try:
+            dialog.line_color_edit.setText("green")
+            dialog.line_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.line_color_edit.text(), "#008000")
+            self.assertEqual(dialog.marker_face_color_edit.swatch_color_text(), "#008000")
+        finally:
+            dialog.close()
+
+        self.assertEqual(
+            sent[-1],
+            (
+                7,
+                {
+                    "type": "set_trace_style",
+                    "subplot_id": "subplot0",
+                    "trace_id": "trace0",
+                    "style": {"color": "#008000"},
+                },
+            ),
+        )
 
     def test_invalid_line_color_input_reverts_without_dispatching(self):
         sent = []

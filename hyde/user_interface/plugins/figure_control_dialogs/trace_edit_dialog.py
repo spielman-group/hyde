@@ -1,6 +1,10 @@
-from matplotlib import colors as mcolors
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtWidgets
+
+from hyde.user_interface.matplotlib_color_picker import (
+    MatplotlibColorLineEdit,
+    normalize_matplotlib_color_text,
+)
 
 SUPPORTED_STYLE_DEFAULTS = {
     "visible": True,
@@ -68,23 +72,8 @@ def _normalize_marker(value):
 def _normalize_color(value, fallback):
     if value in (None, ""):
         return fallback
-    if str(value).lower() == "auto":
-        return "auto"
-    try:
-        return mcolors.to_hex(value)
-    except Exception:
-        return str(value)
-
-
-def _parse_color_input(text, *, fallback, allow_auto=False):
-    if text in (None, ""):
-        return None
-    if allow_auto and str(text).lower() == "auto":
-        return "auto"
-    try:
-        return mcolors.to_hex(text)
-    except Exception:
-        return None
+    normalized = normalize_matplotlib_color_text(value, allow_auto=True)
+    return fallback if normalized in (None, "") else normalized
 
 
 def _trace_display_name(trace):
@@ -159,7 +148,7 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         form_layout.addRow("Mode", self.mode_combo)
 
-        self.line_color_edit = QtWidgets.QLineEdit(self)
+        self.line_color_edit = MatplotlibColorLineEdit(self, allow_empty=False)
         self.line_color_edit.editingFinished.connect(self._on_line_color_changed)
         form_layout.addRow("Line color", self.line_color_edit)
 
@@ -199,13 +188,21 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         self.marker_size_spin.valueChanged.connect(self._on_marker_size_changed)
         form_layout.addRow("Marker size", self.marker_size_spin)
 
-        self.marker_face_color_edit = QtWidgets.QLineEdit(self)
+        self.marker_face_color_edit = MatplotlibColorLineEdit(
+            self,
+            allow_empty=False,
+            allow_auto=True,
+        )
         self.marker_face_color_edit.editingFinished.connect(
             self._on_marker_face_color_changed
         )
         form_layout.addRow("Marker face", self.marker_face_color_edit)
 
-        self.marker_edge_color_edit = QtWidgets.QLineEdit(self)
+        self.marker_edge_color_edit = MatplotlibColorLineEdit(
+            self,
+            allow_empty=False,
+            allow_auto=True,
+        )
         self.marker_edge_color_edit.editingFinished.connect(
             self._on_marker_edge_color_changed
         )
@@ -309,7 +306,7 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
             self.mode_combo.setCurrentIndex(
                 self.mode_combo.findData(self._mode_from_style(style))
             )
-            self.line_color_edit.setText(style["color"])
+            self.line_color_edit.set_committed_text(style["color"])
             self.line_style_combo.setCurrentIndex(
                 self.line_style_combo.findData(style["linestyle"])
             )
@@ -322,9 +319,10 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
                 self.marker_combo.findData(style["marker"])
             )
             self.marker_size_spin.setValue(style["markersize"])
-            self.marker_face_color_edit.setText(style["markerfacecolor"])
-            self.marker_edge_color_edit.setText(style["markeredgecolor"])
+            self.marker_face_color_edit.set_committed_text(style["markerfacecolor"])
+            self.marker_edge_color_edit.set_committed_text(style["markeredgecolor"])
             self.marker_edge_width_spin.setValue(style["markeredgewidth"])
+            self._update_color_field_previews(trace_id)
         finally:
             self._loading_controls = False
 
@@ -340,6 +338,12 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
     def _record_for_trace(self, trace_id):
         record = self._trace_records_by_id.get(str(trace_id))
         return None if record is None else dict(record)
+
+    def _update_color_field_previews(self, trace_id):
+        style = self._current_styles[str(trace_id)]
+        line_color = style["color"]
+        self.marker_face_color_edit.set_swatch_preview_text(line_color)
+        self.marker_edge_color_edit.set_swatch_preview_text(line_color)
 
     def _send_style_update(self, trace_id, patch, replace=False, reload_controls=False):
         trace_id = str(trace_id)
@@ -362,6 +366,8 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
             self._current_styles[trace_id] = dict(patch)
         else:
             self._current_styles[trace_id].update(patch)
+        if trace_id == self._current_trace_id():
+            self._update_color_field_previews(trace_id)
         if self._current_styles[trace_id] == self._original_styles[trace_id]:
             self._touched_trace_ids.discard(trace_id)
         else:
@@ -409,15 +415,8 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         trace_id = self._current_trace_id()
         if trace_id is None:
             return
-        text = self.line_color_edit.text().strip()
-        color = _parse_color_input(
-            text,
-            fallback=self._current_styles[trace_id]["color"],
-        )
-        if color is None:
-            self.line_color_edit.setText(
-                self._current_styles[trace_id]["color"]
-            )
+        color = self.line_color_edit.text().strip()
+        if color == self._current_styles[trace_id]["color"]:
             return
         self._send_style_update(trace_id, {"color": color})
 
@@ -486,18 +485,13 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         trace_id = self._current_trace_id()
         if trace_id is None:
             return
-        text = self.marker_face_color_edit.text().strip()
-        color = _parse_color_input(
-            text,
-            fallback=self._current_styles[trace_id]["markerfacecolor"],
-            allow_auto=True,
-        )
-        if color is None:
-            self.marker_face_color_edit.setText(
-                self._current_styles[trace_id]["markerfacecolor"]
-            )
+        color = self.marker_face_color_edit.text().strip()
+        if color == self._current_styles[trace_id]["markerfacecolor"]:
             return
-        self._send_style_update(trace_id, {"markerfacecolor": color})
+        self._send_style_update(
+            trace_id,
+            {"markerfacecolor": color},
+        )
 
     def _on_marker_edge_color_changed(self):
         if self._loading_controls:
@@ -505,18 +499,13 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         trace_id = self._current_trace_id()
         if trace_id is None:
             return
-        text = self.marker_edge_color_edit.text().strip()
-        color = _parse_color_input(
-            text,
-            fallback=self._current_styles[trace_id]["markeredgecolor"],
-            allow_auto=True,
-        )
-        if color is None:
-            self.marker_edge_color_edit.setText(
-                self._current_styles[trace_id]["markeredgecolor"]
-            )
+        color = self.marker_edge_color_edit.text().strip()
+        if color == self._current_styles[trace_id]["markeredgecolor"]:
             return
-        self._send_style_update(trace_id, {"markeredgecolor": color})
+        self._send_style_update(
+            trace_id,
+            {"markeredgecolor": color},
+        )
 
     def _on_marker_edge_width_changed(self, value):
         if self._loading_controls:

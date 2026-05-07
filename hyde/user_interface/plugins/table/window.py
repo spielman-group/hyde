@@ -125,9 +125,24 @@ class TableViewModel(QtCore.QAbstractTableModel):
         self.data_cache = {name: [] for name in names}
         self.row_count = 0
 
+    def set_names(self, names):
+        self.beginResetModel()
+        self.names = list(names)
+        self.data_cache = {
+            name: self.data_cache.get(name, [])
+            for name in self.names
+        }
+        longest = max([len(v) for v in self.data_cache.values()] + [0])
+        self.row_count = max(longest + 1, 1)
+        self.endResetModel()
+
     def update_data(self, new_data):
         self.beginResetModel()
-        self.data_cache.update(new_data)
+        incoming = dict(new_data or {})
+        self.data_cache = {
+            name: incoming.get(name, self.data_cache.get(name, []))
+            for name in self.names
+        }
         longest = max([len(v) for v in self.data_cache.values()] + [0])
         self.row_count = max(longest + 1, 1)
         self.endResetModel()
@@ -284,9 +299,20 @@ class TableWidget(QtWidgets.QWidget):
         for name in names:
             if name not in self.names:
                 self.names.append(name)
-        self.model.names = self.names
+        self.model.set_names(self.names)
         self.table_state.set_items(self.names)
         if refresh:
+            self.refresh_data()
+
+    def remove_columns(self, names, refresh=True):
+        removed = [name for name in names if name in self.names]
+        if not removed:
+            return
+        self.names = [name for name in self.names if name not in removed]
+        self.model.set_names(self.names)
+        self.table_state.set_items(self.names)
+        self._update_selection_info()
+        if refresh and self.names:
             self.refresh_data()
 
     def bind_subwindow(self, subwindow):
@@ -399,6 +425,7 @@ class TableWidget(QtWidgets.QWidget):
     def _on_namespace_view_updated(self, view):
         if self._closed:
             return
+        view = dict(view or {})
         confirmed_columns = [
             name
             for name in self._pending_created_columns
@@ -411,11 +438,17 @@ class TableWidget(QtWidgets.QWidget):
                 for name in self._pending_created_columns
                 if name not in confirmed_columns
             ]
-        new_state = self._tracked_namespace_state_from_view(view or {})
+        removed_columns = [
+            name for name in self.names if name not in view
+        ]
+        if removed_columns:
+            self.remove_columns(removed_columns, refresh=False)
+        new_state = self._tracked_namespace_state_from_view(view)
         if new_state == self._tracked_namespace_state:
             return
         self._tracked_namespace_state = new_state
-        self.refresh_data()
+        if self.names:
+            self.refresh_data()
 
     def _activate_value_editor(self):
         if self.ui.valueEdit.isReadOnly():
