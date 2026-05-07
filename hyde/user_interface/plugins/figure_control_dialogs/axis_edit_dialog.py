@@ -321,8 +321,9 @@ class AxisEditDialog(QtWidgets.QDialog):
         form.addRow("Line width", self.side_line_width_spin)
 
         self.side_offset_spin = QtWidgets.QDoubleSpinBox(axis_tab)
-        self.side_offset_spin.setRange(-999.0, 999.0)
-        self.side_offset_spin.setSingleStep(1.0)
+        self.side_offset_spin.setRange(0.0, 1.0)
+        self.side_offset_spin.setDecimals(3)
+        self.side_offset_spin.setSingleStep(0.01)
         self.side_offset_spin.valueChanged.connect(self._on_controls_changed)
         form.addRow("Offset", self.side_offset_spin)
 
@@ -739,6 +740,7 @@ class AxisEditDialog(QtWidgets.QDialog):
         draw_between = side_state.get("draw_between") or (0.0, 1.0)
         display_range = tick_state.get("display_range") or (None, None)
         limit_mode = dict(range_state.get("limit_mode", {}) or {})
+        margins = dict(context["subplot"].get("margins", {}) or {})
 
         self._loading_controls = True
         try:
@@ -782,7 +784,7 @@ class AxisEditDialog(QtWidgets.QDialog):
             self.side_line_width_spin.setValue(
                 float(side_state.get("spine_width") or 0.0)
             )
-            self.side_offset_spin.setValue(float(side_state.get("offset") or 0.0))
+            self.side_offset_spin.setValue(float(margins.get(context["side"]) or 0.0))
             self.draw_between_min_spin.setValue(float(draw_between[0]) * 100.0)
             self.draw_between_max_spin.setValue(float(draw_between[1]) * 100.0)
             self.draw_on_top_checkbox.setChecked(bool(side_state.get("draw_on_top")))
@@ -1088,7 +1090,7 @@ class AxisEditDialog(QtWidgets.QDialog):
         )
         width = float(self.side_line_width_spin.value())
         side_state["spine_width"] = None if width <= 0 else width
-        side_state["offset"] = float(self.side_offset_spin.value())
+        context["subplot"]["margins"][context["side"]] = float(self.side_offset_spin.value())
         draw_between = (
             float(self.draw_between_min_spin.value()) / 100.0,
             float(self.draw_between_max_spin.value()) / 100.0,
@@ -1107,6 +1109,10 @@ class AxisEditDialog(QtWidgets.QDialog):
         side_state["tick_label_rotation"] = float(self.tick_label_rotation_spin.value())
         side_state["tick_label_offset"] = float(self.tick_label_offset_spin.value())
 
+        try:
+            self._draft_figure_ir = FigureIRCodec.validate_state(self._draft_figure_ir)
+        except ValueError as exc:
+            return {"valid": False, "message": str(exc)}
         return {"valid": True, "message": ""}
 
     def _dispatch_selected_state(self):
@@ -1130,6 +1136,13 @@ class AxisEditDialog(QtWidgets.QDialog):
             "replace": True,
         }
         sent = self.figure_window.request_figure_action(side_action) or sent
+        layout_action = {
+            "type": "set_subplot_margins",
+            "subplot_id": context["subplot_id"],
+            "state": dict(context["subplot"].get("margins", {}) or {}),
+            "replace": True,
+        }
+        sent = self.figure_window.request_figure_action(layout_action) or sent
         if sent:
             self._live_updates_sent = True
         return sent
@@ -1160,6 +1173,13 @@ class AxisEditDialog(QtWidgets.QDialog):
                 "replace": True,
             }
             sent = self.figure_window.request_figure_action(action) or sent
+        action = {
+            "type": "set_subplot_margins",
+            "subplot_id": subplot["id"],
+            "state": dict(subplot.get("margins", {}) or {}),
+            "replace": True,
+        }
+        sent = self.figure_window.request_figure_action(action) or sent
         if sent:
             self._live_updates_sent = True
         return sent

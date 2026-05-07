@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -73,3 +74,32 @@ class TestMatplotlibColorHelpers(unittest.TestCase):
             self.assertEqual(dialog.selected_color_text(), "#66e6ff80")
         finally:
             dialog.close()
+
+    def test_line_edit_opens_picker_parented_to_top_level_window(self):
+        window = QtWidgets.QDialog()
+        layout = QtWidgets.QVBoxLayout(window)
+        widget = MatplotlibColorLineEdit(window, allow_empty=False)
+        layout.addWidget(widget)
+        window.show()
+        try:
+            swatch = widget.findChild(QtWidgets.QToolButton)
+            self.assertIsNotNone(swatch)
+            original_init = MatplotlibColorDialog.__init__
+            seen = {}
+
+            def wrapped_init(dialog_self, parent=None, **kwargs):
+                seen["parent"] = parent
+                original_init(dialog_self, parent, **kwargs)
+
+            with patch.object(MatplotlibColorDialog, "__init__", new=wrapped_init):
+                with patch.object(
+                    MatplotlibColorDialog,
+                    "exec_",
+                    return_value=QtWidgets.QDialog.Rejected,
+                ) as exec_:
+                    swatch.click()
+
+            self.assertEqual(exec_.call_count, 1)
+            self.assertIs(seen["parent"], window)
+        finally:
+            window.close()

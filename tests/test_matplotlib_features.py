@@ -568,6 +568,36 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIn("_hyde_bottom_bounds = ax.get_xlim()", source)
         self.assertIn("ax.spines['bottom'].set_bounds(", source)
 
+    def test_figure_ir_lowers_subplot_margins_to_python(self):
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+
+        updated = FigureIRCodec.update_state(
+            figure_ir,
+            {
+                "type": "set_subplot_margins",
+                "subplot_id": "subplot0",
+                "state": {
+                    "left": 0.12,
+                    "bottom": 0.2,
+                    "right": 0.97,
+                    "top": 0.98,
+                },
+            },
+        )
+
+        subplot = updated["layout"]["subplots"][0]
+        self.assertEqual(
+            subplot["margins"],
+            {"left": 0.12, "bottom": 0.2, "right": 0.97, "top": 0.98},
+        )
+
+        source = FigureIRCodec.state_to_python(updated)
+
+        self.assertIn(
+            "fig.subplots_adjust(left=0.12, bottom=0.2, right=0.97, top=0.98)",
+            source,
+        )
+
     def test_default_diff_lowering_omits_blank_label_visibility_until_explicitly_hidden(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
         defaults = _figure_defaults_snapshot(figure_ir)

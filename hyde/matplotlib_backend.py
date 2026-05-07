@@ -371,11 +371,24 @@ def _default_axis_side_state(side):
     }
 
 
+def _default_subplot_margins():
+    temp_figure = Figure(figsize=tuple(float(value) for value in rcParams["figure.figsize"]))
+    temp_figure.add_subplot(111)
+    subplotpars = temp_figure.subplotpars
+    return {
+        "left": float(subplotpars.left),
+        "bottom": float(subplotpars.bottom),
+        "right": float(subplotpars.right),
+        "top": float(subplotpars.top),
+    }
+
+
 def _default_subplot_state(subplot_id="subplot0", subplot_code="111"):
     return {
         "id": str(subplot_id),
         "subplot_code": str(subplot_code),
         "title": None,
+        "margins": _default_subplot_margins(),
         "xlabel": None,
         "ylabel": None,
         "x_limits": None,
@@ -874,6 +887,15 @@ def regenerate_figure_from_ir(figure, use_bound_values=True):
         raise ValueError("Figure does not have Hyde IR.")
 
     normalized = FigureIRCodec.validate_state(figure_ir)
+    default_subplot = None
+    figure_defaults = getattr(figure, "_hyde_defaults", None)
+    if figure_defaults is not None:
+        try:
+            default_subplot = FigureIRCodec.validate_state(figure_defaults)["layout"][
+                "subplots"
+            ][0]
+        except Exception:
+            default_subplot = None
     namespace = _main_namespace()
     preserved_size = figure.get_size_inches()
     manager = getattr(figure.canvas, "manager", None)
@@ -901,6 +923,20 @@ def regenerate_figure_from_ir(figure, use_bound_values=True):
             return figure
 
         subplot = subplots[0]
+        margin_kwargs = {}
+        default_margins = (
+            {}
+            if default_subplot is None
+            else dict(default_subplot.get("margins", {}) or {})
+        )
+        for side in ("left", "bottom", "right", "top"):
+            value = subplot["margins"].get(side)
+            if value is None:
+                value = default_margins.get(side)
+            if value is not None:
+                margin_kwargs[side] = float(value)
+        if margin_kwargs:
+            figure.subplots_adjust(**margin_kwargs)
         axis = figure.add_subplot(int(subplot["subplot_code"]))
         axis._hyde_subplot_id = subplot["id"]
         if subplot["title"]:
@@ -1024,7 +1060,7 @@ def apply_figure_action(figure, action):
             axis.legend()
         figure.canvas.draw_idle()
         return figure
-    if action_type in {"set_axis_state", "set_axis_side_state"}:
+    if action_type in {"set_axis_state", "set_axis_side_state", "set_subplot_margins"}:
         return regenerate_figure_from_ir(figure)
     raise ValueError(f"Unsupported figure action: {action_type!r}.")
 

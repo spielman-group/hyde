@@ -567,6 +567,24 @@ def _default_axis_side_state(side):
     }
 
 
+def _default_subplot_margins():
+    return {
+        "left": None,
+        "bottom": None,
+        "right": None,
+        "top": None,
+    }
+
+
+def _normalize_subplot_margins(margins):
+    normalized = _default_subplot_margins()
+    if isinstance(margins, dict):
+        _deep_merge_dict(normalized, margins)
+    for side in ("left", "bottom", "right", "top"):
+        normalized[side] = _normalize_optional_float(normalized.get(side))
+    return normalized
+
+
 def _normalize_axis_side_state(side, side_state):
     normalized = _default_axis_side_state(side)
     if isinstance(side_state, dict):
@@ -671,6 +689,7 @@ class FigureIRCodec(FeatureCodec):
             "id": f"subplot{index}",
             "subplot_code": "111",
             "title": None,
+            "margins": _default_subplot_margins(),
             "xlabel": None,
             "ylabel": None,
             "x_limits": None,
@@ -700,6 +719,9 @@ class FigureIRCodec(FeatureCodec):
                     normalized[field] = None
                 else:
                     normalized[field] = tuple(value)
+            normalized["margins"] = _normalize_subplot_margins(
+                subplot.get("margins")
+            )
             normalized["traces"] = [
                 cls._normalize_trace(trace, trace_index)
                 for trace_index, trace in enumerate(subplot.get("traces", []))
@@ -729,6 +751,7 @@ class FigureIRCodec(FeatureCodec):
                 for side in ("bottom", "top", "left", "right")
             }
         else:
+            normalized["margins"] = _normalize_subplot_margins(None)
             normalized["axes"] = {
                 "x": _normalize_axis_state("x", None),
                 "y": _normalize_axis_state("y", None),
@@ -796,6 +819,23 @@ class FigureIRCodec(FeatureCodec):
         for subplot in layout["subplots"]:
             if subplot["subplot_code"] != "111":
                 raise ValueError("Initial Hyde figure IR only supports subplot code '111'.")
+            margins = subplot["margins"]
+            for side in ("left", "bottom", "right", "top"):
+                value = margins[side]
+                if value is not None and not 0.0 <= value <= 1.0:
+                    raise ValueError("Subplot margins must stay within [0, 1].")
+            if (
+                margins["left"] is not None
+                and margins["right"] is not None
+                and margins["left"] >= margins["right"]
+            ):
+                raise ValueError("Subplot left margin must be smaller than right.")
+            if (
+                margins["bottom"] is not None
+                and margins["top"] is not None
+                and margins["bottom"] >= margins["top"]
+            ):
+                raise ValueError("Subplot bottom margin must be smaller than top.")
             for axis_name in ("x", "y"):
                 axis_state = subplot["axes"][axis_name]
                 if axis_state["scale_mode"] not in {"linear", "log", "log2"}:
@@ -904,6 +944,12 @@ class FigureIRCodec(FeatureCodec):
                 side_state = _default_axis_side_state(side)
             _deep_merge_dict(side_state, action.get("state"))
             subplot["axis_sides"][side] = side_state
+        elif action_type == "set_subplot_margins":
+            margins = copy.deepcopy(subplot["margins"])
+            if action.get("replace"):
+                margins = _default_subplot_margins()
+            _deep_merge_dict(margins, action.get("state"))
+            subplot["margins"] = margins
         elif action_type in {"set_subplot_title", "set_figure_title"}:
             title = None if action.get("title") in (None, "") else str(action.get("title"))
             subplot["title"] = title
@@ -1370,6 +1416,21 @@ class FigureIRCodec(FeatureCodec):
         subplot = subplots[0]
         ticker_lines = []
         lines.append(f"ax = fig.add_subplot({subplot['subplot_code']})")
+        margin_kwargs = []
+        default_margins = (
+            {}
+            if default_subplot is None
+            else dict(default_subplot.get("margins", {}) or {})
+        )
+        for side in ("left", "bottom", "right", "top"):
+            value = subplot["margins"].get(side)
+            if value is None:
+                continue
+            if default_subplot is not None and value == default_margins.get(side):
+                continue
+            margin_kwargs.append(f"{side}={value!r}")
+        if margin_kwargs:
+            lines.append(f"fig.subplots_adjust({', '.join(margin_kwargs)})")
         if subplot["title"] and (
             default_subplot is None or subplot["title"] != default_subplot["title"]
         ):

@@ -446,6 +446,45 @@ class TestFigureCommActions(unittest.TestCase):
         self.assertEqual(axis.spines["bottom"].get_bounds(), expected_bounds)
         self.assertFalse(axis.get_axisbelow())
 
+    def test_apply_figure_action_updates_ir_and_live_subplot_margins(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            return fig
+
+        figure = Graph0([0, 1, 2], [1, 4, 9])
+
+        apply_figure_action(
+            figure,
+            {
+                "type": "set_subplot_margins",
+                "subplot_id": "subplot0",
+                "state": {
+                    "left": 0.12,
+                    "bottom": 0.2,
+                    "right": 0.97,
+                    "top": 0.98,
+                },
+            },
+        )
+
+        subplot = figure._hyde_ir["layout"]["subplots"][0]
+        self.assertEqual(
+            subplot["margins"],
+            {"left": 0.12, "bottom": 0.2, "right": 0.97, "top": 0.98},
+        )
+
+        axis = figure.axes[0]
+        position = axis.get_position()
+        self.assertAlmostEqual(position.x0, 0.12)
+        self.assertAlmostEqual(position.y0, 0.2)
+        self.assertAlmostEqual(position.x1, 0.97)
+        self.assertAlmostEqual(position.y1, 0.98)
+
     def test_apply_figure_action_regenerates_live_figure_from_ir(self):
         plt = self._configure_pyplot()
 

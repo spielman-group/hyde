@@ -167,6 +167,14 @@ def make_figure_ir():
             },
         }
     )
+    subplot["margins"].update(
+        {
+            "left": 0.12,
+            "bottom": 0.2,
+            "right": 0.97,
+            "top": 0.98,
+        }
+    )
     subplot["axis_sides"]["bottom"].update(
         {
             "spine_visible": False,
@@ -229,6 +237,15 @@ def make_figure_defaults():
         {
             "spine_width": 3.0,
             "spine_color": "#abcdef",
+            "offset": 12.0,
+        }
+    )
+    subplot["margins"].update(
+        {
+            "left": 0.125,
+            "bottom": 0.11,
+            "right": 0.9,
+            "top": 0.88,
         }
     )
     return FigureIRCodec.validate_state(defaults)
@@ -389,7 +406,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertFalse(dialog.side_visible_checkbox.isChecked())
             self.assertFalse(dialog.side_ticks_checkbox.isChecked())
             self.assertFalse(dialog.side_tick_labels_checkbox.isChecked())
-            self.assertEqual(dialog.side_offset_spin.value(), 12.0)
+            self.assertEqual(dialog.side_offset_spin.value(), 0.2)
             self.assertEqual(dialog.draw_between_min_spin.value(), 10.0)
             self.assertEqual(dialog.draw_between_max_spin.value(), 90.0)
             self.assertEqual(dialog.major_tick_mode_combo.currentData(), "manual")
@@ -419,6 +436,10 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(dialog.zero_line_width_spin.value(), 1.75)
             self.assertEqual(dialog.zero_line_color_edit.text(), "#335577")
             self.assertTrue(dialog.preview_pane.toPlainText())
+            self.assertIn(
+                "fig.subplots_adjust(left=0.12, bottom=0.2, right=0.97, top=0.98)",
+                dialog.preview_pane.toPlainText(),
+            )
         finally:
             dialog.close()
 
@@ -438,7 +459,7 @@ class TestAxisEditDialog(unittest.TestCase):
                 },
             }
         )
-        subplot["axis_sides"]["bottom"].update({"offset": 12.0})
+        subplot["margins"].update({"bottom": 0.2})
         figure = make_active_figure_window(
             mdi_area,
             {
@@ -464,7 +485,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(dialog.grid_color_edit.text(), "#123456")
             self.assertEqual(dialog.side_line_width_spin.value(), 3.0)
             self.assertEqual(dialog.side_color_edit.text(), "#abcdef")
-            self.assertEqual(dialog.side_offset_spin.value(), 12.0)
+            self.assertEqual(dialog.side_offset_spin.value(), 0.2)
             self.assertTrue(dialog.reverse_axis_checkbox.isChecked())
 
             dialog.axis_label_edit.setText("Delay [ms]")
@@ -476,8 +497,12 @@ class TestAxisEditDialog(unittest.TestCase):
         side_actions = [
             action for _, action in sent if action["type"] == "set_axis_side_state"
         ]
+        margin_actions = [
+            action for _, action in sent if action["type"] == "set_subplot_margins"
+        ]
         self.assertTrue(axis_actions)
         self.assertTrue(side_actions)
+        self.assertTrue(margin_actions)
         self.assertEqual(axis_actions[-1]["state"]["label"]["offset"], 9.0)
         self.assertEqual(axis_actions[-1]["state"]["label"]["rotation"], 11.0)
         self.assertEqual(axis_actions[-1]["state"]["label"]["color"], "#654321")
@@ -487,7 +512,7 @@ class TestAxisEditDialog(unittest.TestCase):
         self.assertEqual(axis_actions[-1]["state"]["grid"]["color"], "#123456")
         self.assertEqual(side_actions[-1]["state"]["spine_width"], 3.0)
         self.assertEqual(side_actions[-1]["state"]["spine_color"], "#abcdef")
-        self.assertEqual(side_actions[-1]["state"]["offset"], 12.0)
+        self.assertEqual(margin_actions[-1]["state"]["bottom"], 0.2)
 
     def test_label_visibility_defaults_checked_and_preview_changes_when_hidden(self):
         mdi_area = QtWidgets.QMdiArea()
@@ -575,7 +600,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertTrue(dialog.side_visible_checkbox.isChecked())
             self.assertTrue(dialog.side_ticks_checkbox.isChecked())
             self.assertTrue(dialog.side_tick_labels_checkbox.isChecked())
-            self.assertEqual(dialog.side_offset_spin.value(), 18.0)
+            self.assertEqual(dialog.side_offset_spin.value(), 0.98)
             self.assertEqual(dialog.side_line_width_spin.value(), 2.5)
             self.assertTrue(dialog.draw_on_top_checkbox.isChecked())
 
@@ -614,7 +639,7 @@ class TestAxisEditDialog(unittest.TestCase):
         finally:
             dialog.close()
 
-        self.assertEqual(len(sent), 4)
+        self.assertEqual(len(sent), 6)
         self.assertEqual(sent[0][1]["type"], "set_axis_state")
         self.assertEqual(sent[0][1]["axis"], "x")
         self.assertEqual(sent[0][1]["state"]["label"]["text"], "Delay [ms]")
@@ -622,9 +647,12 @@ class TestAxisEditDialog(unittest.TestCase):
         self.assertEqual(sent[1][1]["type"], "set_axis_side_state")
         self.assertEqual(sent[1][1]["side"], "bottom")
         self.assertTrue(sent[1][1]["replace"])
-        self.assertEqual(sent[2][1]["type"], "set_axis_state")
-        self.assertEqual(sent[3][1]["type"], "set_axis_side_state")
-        self.assertTrue(sent[3][1]["state"]["spine_visible"])
+        self.assertEqual(sent[2][1]["type"], "set_subplot_margins")
+        self.assertEqual(sent[2][1]["state"]["bottom"], 0.2)
+        self.assertEqual(sent[3][1]["type"], "set_axis_state")
+        self.assertEqual(sent[4][1]["type"], "set_axis_side_state")
+        self.assertEqual(sent[5][1]["type"], "set_subplot_margins")
+        self.assertTrue(sent[4][1]["state"]["spine_visible"])
 
     def test_live_update_dispatches_extended_axis_state_fields(self):
         sent = []
@@ -701,6 +729,44 @@ class TestAxisEditDialog(unittest.TestCase):
         latest = axis_actions[-1]["state"]
         self.assertEqual(latest["label"]["color"], "#008000")
         self.assertEqual(latest["grid"]["color"], "#66e6ff80")
+
+    def test_axis_color_swatch_opens_picker_and_commits_selected_color(self):
+        sent = []
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
+                ),
+            },
+        )
+
+        dialog = AxisEditDialog(figure, parent=mdi_area)
+        try:
+            swatch = dialog.axis_label_color_edit.findChild(QtWidgets.QToolButton)
+            self.assertIsNotNone(swatch)
+
+            with patch(
+                "hyde.user_interface.matplotlib_color_picker.MatplotlibColorDialog.exec_",
+                autospec=True,
+                return_value=QtWidgets.QDialog.Accepted,
+            ), patch(
+                "hyde.user_interface.matplotlib_color_picker.MatplotlibColorDialog.selected_color_text",
+                autospec=True,
+                return_value="#112233",
+            ):
+                swatch.click()
+
+            self.assertEqual(dialog.axis_label_color_edit.text(), "#112233")
+            self.assertEqual(dialog.axis_label_color_edit.swatch_color_text(), "#112233")
+        finally:
+            dialog.close()
+
+        axis_actions = [action for _, action in sent if action["type"] == "set_axis_state"]
+        self.assertTrue(axis_actions)
+        self.assertEqual(axis_actions[-1]["state"]["label"]["color"], "#112233")
 
     def test_preview_and_dispatch_support_mixed_auto_manual_range_modes(self):
         sent = []
@@ -798,6 +864,7 @@ class TestAxisEditDialog(unittest.TestCase):
                 "set_axis_side_state",
                 "set_axis_side_state",
                 "set_axis_side_state",
+                "set_subplot_margins",
             ],
         )
         self.assertEqual(sent[0][1]["state"]["label"]["text"], "Delay [s]")
@@ -830,7 +897,7 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.close()
 
         self.assertEqual(
-            [action["type"] for _, action in sent[-6:]],
+            [action["type"] for _, action in sent[-7:]],
             [
                 "set_axis_state",
                 "set_axis_state",
@@ -838,10 +905,11 @@ class TestAxisEditDialog(unittest.TestCase):
                 "set_axis_side_state",
                 "set_axis_side_state",
                 "set_axis_side_state",
+                "set_subplot_margins",
             ],
         )
-        self.assertEqual(sent[-6][1]["state"]["label"]["text"], "Delay")
-        self.assertTrue(sent[-6][1]["replace"])
+        self.assertEqual(sent[-7][1]["state"]["label"]["text"], "Delay")
+        self.assertTrue(sent[-7][1]["replace"])
 
     def test_to_clip_copies_preview_source(self):
         mdi_area = QtWidgets.QMdiArea()

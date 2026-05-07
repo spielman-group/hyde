@@ -235,15 +235,7 @@ class MatplotlibColorDialog(QtWidgets.QColorDialog):
             self._named_colors_list.addItem(item)
 
         if left_layout is not None:
-            while left_layout.count():
-                item = left_layout.takeAt(0)
-                widget = item.widget()
-                child_layout = item.layout()
-                if widget is not None:
-                    widget.hide()
-                    widget.setParent(None)
-                elif child_layout is not None:
-                    child_layout.setParent(None)
+            self._hide_layout_widgets(left_layout)
             left_layout.addWidget(self._named_colors_label)
             left_layout.addWidget(self._named_colors_list, 1)
 
@@ -256,6 +248,18 @@ class MatplotlibColorDialog(QtWidgets.QColorDialog):
         if self._html_edit is not None:
             self._html_edit.setMaxLength(256)
             self._html_edit.editingFinished.connect(self._on_html_editing_finished)
+
+    def _hide_layout_widgets(self, layout):
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            if item is None:
+                continue
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget is not None:
+                widget.hide()
+            elif child_layout is not None:
+                self._hide_layout_widgets(child_layout)
 
     def _apply_initial_text(self, initial_text, preview_text):
         text = "" if initial_text is None else str(initial_text).strip()
@@ -410,8 +414,11 @@ class MatplotlibColorLineEdit(QtWidgets.QLineEdit):
         return None
 
     def _open_color_dialog(self):
+        dialog_parent = self.window()
+        if not isinstance(dialog_parent, QtWidgets.QWidget):
+            dialog_parent = self
         dialog = MatplotlibColorDialog(
-            self,
+            dialog_parent,
             initial_text=self.text(),
             preview_text=self._swatch_preview_text,
             allow_empty=self._allow_empty,
