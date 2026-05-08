@@ -181,7 +181,6 @@ def make_figure_ir():
             "ticks_visible": False,
             "tick_labels_visible": False,
             "offset": 12.0,
-            "draw_between": (0.1, 0.9),
         }
     )
     subplot["axis_sides"]["top"].update(
@@ -407,8 +406,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertFalse(dialog.side_ticks_checkbox.isChecked())
             self.assertFalse(dialog.side_tick_labels_checkbox.isChecked())
             self.assertEqual(dialog.side_offset_spin.value(), 0.2)
-            self.assertEqual(dialog.draw_between_min_spin.value(), 10.0)
-            self.assertEqual(dialog.draw_between_max_spin.value(), 90.0)
+            self.assertEqual(dialog.spine_offset_spin.value(), 12.0)
             self.assertEqual(dialog.major_tick_mode_combo.currentData(), "manual")
             self.assertEqual(dialog.major_tick_positions_edit.text(), "1.0, 2.0, 4.0, 8.0")
             self.assertEqual(dialog.major_tick_labels_edit.text(), "1, 2, 4, 8")
@@ -438,6 +436,10 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertTrue(dialog.preview_pane.toPlainText())
             self.assertIn(
                 "fig.subplots_adjust(left=0.12, bottom=0.2, right=0.97, top=0.98)",
+                dialog.preview_pane.toPlainText(),
+            )
+            self.assertIn(
+                "ax.spines['bottom'].set_position(('outward', 12.0))",
                 dialog.preview_pane.toPlainText(),
             )
         finally:
@@ -486,6 +488,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(dialog.side_line_width_spin.value(), 3.0)
             self.assertEqual(dialog.side_color_edit.text(), "#abcdef")
             self.assertEqual(dialog.side_offset_spin.value(), 0.2)
+            self.assertEqual(dialog.spine_offset_spin.value(), 12.0)
             self.assertTrue(dialog.reverse_axis_checkbox.isChecked())
 
             dialog.axis_label_edit.setText("Delay [ms]")
@@ -512,6 +515,7 @@ class TestAxisEditDialog(unittest.TestCase):
         self.assertEqual(axis_actions[-1]["state"]["grid"]["color"], "#123456")
         self.assertEqual(side_actions[-1]["state"]["spine_width"], 3.0)
         self.assertEqual(side_actions[-1]["state"]["spine_color"], "#abcdef")
+        self.assertEqual(side_actions[-1]["state"]["offset"], 12.0)
         self.assertEqual(margin_actions[-1]["state"]["bottom"], 0.2)
 
     def test_label_visibility_defaults_checked_and_preview_changes_when_hidden(self):

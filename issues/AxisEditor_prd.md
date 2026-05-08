@@ -86,8 +86,8 @@ Supported:
 - `LogLin` as a Hyde translation for log-axis tick formatting policy
 - mirrored-side controls for `left`, `bottom`, `right`, `top`
 - axis line thickness
-- axis offset, mapped to spine outward positioning
-- `draw between`, mapped to normalized partial-axis extent
+- `Shift axis` for `left`, `bottom`, `right`, `top`, mapped to subplot margin edits
+- `Offset axis` for `left`, `bottom`, `right`, `top`, mapped to spine outward positioning
 - `draw on top of traces`
 - font family, style, and size for axis-side presentation
 - separate color controls for axis line, axis label, and tick labels
@@ -258,10 +258,10 @@ The lower pane is a read-only draft preview/status surface:
     same-scale sides.
 12. As a Hyde user, I want axis thickness controls, so that I can emphasize or soften
     axis presentation.
-13. As a Hyde user, I want axis offset controls, so that I can move a side outward in
-    presentation space.
-14. As a Hyde user, I want `draw between` extent controls, so that I can shorten the
-    visible span of an axis side.
+13. As a Hyde user, I want axis-edge shift controls, so that I can move the plot-area
+    edges using matplotlib-native subplot margin edits.
+14. As a Hyde user, I want axis offset controls, so that I can move axis spines
+    outward using matplotlib's spine positioning.
 15. As a Hyde user, I want to draw axes on top of traces when needed, so that I can
     improve readability for dense plots.
 16. As a Hyde user, I want axis font controls, so that labels and tick text can match

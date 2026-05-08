@@ -562,7 +562,6 @@ def _default_axis_side_state(side):
         "tick_label_rotation": 0.0,
         "tick_label_offset": 0.0,
         "offset": 0.0,
-        "draw_between": (0.0, 1.0),
         "draw_on_top": False,
     }
 
@@ -589,6 +588,7 @@ def _normalize_axis_side_state(side, side_state):
     normalized = _default_axis_side_state(side)
     if isinstance(side_state, dict):
         _deep_merge_dict(normalized, side_state)
+    normalized.pop("draw_between", None)
     normalized["side"] = side
     normalized["axis"] = _AXIS_SIDE_TO_AXIS[side]
     normalized["spine_visible"] = bool(normalized.get("spine_visible"))
@@ -608,11 +608,6 @@ def _normalize_axis_side_state(side, side_state):
         normalized.get("tick_label_offset", 0.0) or 0.0
     )
     normalized["offset"] = float(normalized.get("offset", 0.0) or 0.0)
-    normalized["draw_between"] = _normalize_float_pair(
-        normalized.get("draw_between"),
-        "axis side draw_between",
-        default=(0.0, 1.0),
-    )
     normalized["draw_on_top"] = bool(normalized.get("draw_on_top"))
     return normalized
 
@@ -887,12 +882,6 @@ class FigureIRCodec(FeatureCodec):
             for side, side_state in subplot["axis_sides"].items():
                 if side_state["axis"] != _AXIS_SIDE_TO_AXIS[side]:
                     raise ValueError(f"Axis side {side!r} is mapped to the wrong axis.")
-                draw_between = side_state["draw_between"]
-                if (
-                    draw_between is not None
-                    and (draw_between[0] < 0 or draw_between[1] > 1 or draw_between[0] > draw_between[1])
-                ):
-                    raise ValueError("Axis side draw_between must stay within [0, 1].")
             for trace in subplot["traces"]:
                 if trace["kind"] != "line":
                     raise ValueError(f"Unsupported figure trace kind: {trace['kind']!r}.")
@@ -1146,21 +1135,6 @@ class FigureIRCodec(FeatureCodec):
                 lines.append(
                     f"ax.spines[{side!r}].set_position(('outward', {side_state['offset']!r}))"
                 )
-            default_draw_between = (
-                (0.0, 1.0)
-                if default_side_state is None
-                else default_side_state["draw_between"]
-            )
-            if side_state["draw_between"] != default_draw_between:
-                bounds_name = f"_hyde_{side}_bounds"
-                get_limits = f"ax.get_{axis_name}lim()"
-                low_fraction, high_fraction = side_state["draw_between"]
-                lines.append(f"{bounds_name} = {get_limits}")
-                lines.append(
-                    f"ax.spines[{side!r}].set_bounds("
-                    f"{bounds_name}[0] + ({bounds_name}[1] - {bounds_name}[0]) * {low_fraction!r}, "
-                    f"{bounds_name}[0] + ({bounds_name}[1] - {bounds_name}[0]) * {high_fraction!r})"
-                )
         return lines
 
     @classmethod
@@ -1230,6 +1204,7 @@ class FigureIRCodec(FeatureCodec):
             lines.append(f"ax.{position_method}.labelpad = {label['offset']!r}")
         return lines
 
+    @classmethod
     @classmethod
     def _range_lines(cls, axis_name, axis_state, default_axis_state=None):
         if default_axis_state is not None and axis_state["range"] == default_axis_state["range"]:
@@ -1414,7 +1389,7 @@ class FigureIRCodec(FeatureCodec):
             return "\n".join(lines)
 
         subplot = subplots[0]
-        ticker_lines = []
+        needs_ticker_import = False
         lines.append(f"ax = fig.add_subplot({subplot['subplot_code']})")
         margin_kwargs = []
         default_margins = (
@@ -1471,7 +1446,8 @@ class FigureIRCodec(FeatureCodec):
                 default_axis_state=default_axis_state,
             )
             if needs_ticker:
-                ticker_lines.extend(locator_lines)
+                needs_ticker_import = True
+                lines.extend(locator_lines)
             lines.extend(
                 cls._tick_label_style_lines(
                     axis_name,
@@ -1487,9 +1463,8 @@ class FigureIRCodec(FeatureCodec):
                     default_axis_state=default_axis_state,
                 )
             )
-        if ticker_lines:
+        if needs_ticker_import:
             lines.insert(1, "import matplotlib.ticker as mticker")
-            lines.extend(ticker_lines)
         for opaque in subplot["opaque_nodes"]:
             if opaque["source"]:
                 lines.extend(opaque["source"].splitlines())

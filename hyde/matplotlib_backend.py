@@ -366,7 +366,6 @@ def _default_axis_side_state(side):
         "tick_label_rotation": 0.0,
         "tick_label_offset": 0.0,
         "offset": 0.0,
-        "draw_between": (0.0, 1.0),
         "draw_on_top": False,
     }
 
@@ -776,7 +775,6 @@ def _set_axis_side_state(axis, axis_name, subplot):
             "direction": _tick_direction(subplot["axes"][axis_name]["ticks"]["direction"]),
         },
     )
-    limits = getattr(axis, f"get_{axis_name}lim")()
     for side_name in (_primary_side(axis_name), _mirror_side(axis_name)):
         side_state = subplot["axis_sides"][side_name]
         spine = axis.spines[side_name]
@@ -787,11 +785,6 @@ def _set_axis_side_state(axis, axis_name, subplot):
             spine.set_linewidth(side_state["spine_width"])
         if side_state["offset"]:
             spine.set_position(("outward", side_state["offset"]))
-        if side_state["draw_between"] != (0.0, 1.0):
-            low = limits[0] + (limits[1] - limits[0]) * side_state["draw_between"][0]
-            high = limits[0] + (limits[1] - limits[0]) * side_state["draw_between"][1]
-            spine.set_bounds(low, high)
-
 
 def _set_axis_ticks(axis, axis_name, axis_state):
     axis_axis = getattr(axis, _semantic_axis(axis_name))
@@ -872,10 +865,10 @@ def _apply_subplot_axis_state(axis, subplot):
     for axis_name in ("x", "y"):
         axis_state = subplot["axes"][axis_name]
         _set_axis_scale(axis, axis_name, axis_state)
-        _set_axis_label(axis, axis_name, axis_state)
         _set_axis_range(axis, axis_name, axis_state)
-        _set_axis_side_state(axis, axis_name, subplot)
         _set_axis_ticks(axis, axis_name, axis_state)
+        _set_axis_side_state(axis, axis_name, subplot)
+        _set_axis_label(axis, axis_name, axis_state)
         _set_axis_tick_label_style(axis, axis_name, subplot)
         _set_axis_grid(axis, axis_name, axis_state)
         _add_zero_line(axis, axis_name, axis_state)

@@ -505,19 +505,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_figure_ir_lowers_partial_axis_ranges_and_resolved_side_state_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
-        with_bottom_extent = FigureIRCodec.update_state(
-            figure_ir,
-            {
-                "type": "set_axis_side_state",
-                "subplot_id": "subplot0",
-                "side": "bottom",
-                "state": {
-                    "draw_between": (0.1, 0.9),
-                },
-            },
-        )
         with_top_layer = FigureIRCodec.update_state(
-            with_bottom_extent,
+            figure_ir,
             {
                 "type": "set_axis_side_state",
                 "subplot_id": "subplot0",
@@ -565,8 +554,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIn("ax.autoscale(enable=True, axis='y')", source)
         self.assertIn("ax.set_ylim(top=3.0)", source)
         self.assertIn("ax.set_axisbelow(False)", source)
-        self.assertIn("_hyde_bottom_bounds = ax.get_xlim()", source)
-        self.assertIn("ax.spines['bottom'].set_bounds(", source)
+        self.assertNotIn("import matplotlib.transforms as mtransforms", source)
+        self.assertNotIn("set_bounds(", source)
+        self.assertNotIn("ax.set_position(", source)
 
     def test_figure_ir_lowers_subplot_margins_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))

@@ -144,7 +144,6 @@ def _primary_side_for_axis(axis_name):
 def _mirror_side_for_axis(axis_name):
     return "top" if axis_name == "x" else "right"
 
-
 def _label_choice_for_side(side, axis_name):
     return "primary" if side == _primary_side_for_axis(axis_name) else "mirror"
 
@@ -325,24 +324,14 @@ class AxisEditDialog(QtWidgets.QDialog):
         self.side_offset_spin.setDecimals(3)
         self.side_offset_spin.setSingleStep(0.01)
         self.side_offset_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Offset", self.side_offset_spin)
+        form.addRow("Shift axis", self.side_offset_spin)
 
-        draw_between_widget = QtWidgets.QWidget(axis_tab)
-        draw_between_layout = QtWidgets.QHBoxLayout(draw_between_widget)
-        draw_between_layout.setContentsMargins(0, 0, 0, 0)
-        self.draw_between_min_spin = QtWidgets.QDoubleSpinBox(draw_between_widget)
-        self.draw_between_min_spin.setRange(0.0, 100.0)
-        self.draw_between_min_spin.setSingleStep(1.0)
-        self.draw_between_min_spin.valueChanged.connect(self._on_controls_changed)
-        draw_between_layout.addWidget(self.draw_between_min_spin)
-        draw_between_layout.addWidget(QtWidgets.QLabel("to", draw_between_widget))
-        self.draw_between_max_spin = QtWidgets.QDoubleSpinBox(draw_between_widget)
-        self.draw_between_max_spin.setRange(0.0, 100.0)
-        self.draw_between_max_spin.setSingleStep(1.0)
-        self.draw_between_max_spin.valueChanged.connect(self._on_controls_changed)
-        draw_between_layout.addWidget(self.draw_between_max_spin)
-        draw_between_layout.addWidget(QtWidgets.QLabel("%", draw_between_widget))
-        form.addRow("Draw between", draw_between_widget)
+        self.spine_offset_spin = QtWidgets.QDoubleSpinBox(axis_tab)
+        self.spine_offset_spin.setRange(-999.0, 999.0)
+        self.spine_offset_spin.setDecimals(1)
+        self.spine_offset_spin.setSingleStep(1.0)
+        self.spine_offset_spin.valueChanged.connect(self._on_controls_changed)
+        form.addRow("Offset axis", self.spine_offset_spin)
 
         self.draw_on_top_checkbox = QtWidgets.QCheckBox(
             "Draw on top of traces",
@@ -737,7 +726,6 @@ class AxisEditDialog(QtWidgets.QDialog):
         grid_state = dict(axis_state.get("grid", {}) or {})
         zero_line_state = dict(axis_state.get("zero_line", {}) or {})
         limits = range_state.get("limits") or (None, None)
-        draw_between = side_state.get("draw_between") or (0.0, 1.0)
         display_range = tick_state.get("display_range") or (None, None)
         limit_mode = dict(range_state.get("limit_mode", {}) or {})
         margins = dict(context["subplot"].get("margins", {}) or {})
@@ -785,8 +773,7 @@ class AxisEditDialog(QtWidgets.QDialog):
                 float(side_state.get("spine_width") or 0.0)
             )
             self.side_offset_spin.setValue(float(margins.get(context["side"]) or 0.0))
-            self.draw_between_min_spin.setValue(float(draw_between[0]) * 100.0)
-            self.draw_between_max_spin.setValue(float(draw_between[1]) * 100.0)
+            self.spine_offset_spin.setValue(float(side_state.get("offset") or 0.0))
             self.draw_on_top_checkbox.setChecked(bool(side_state.get("draw_on_top")))
             self.side_color_edit.set_committed_text(
                 _format_optional_text(side_state.get("spine_color"))
@@ -1091,16 +1078,7 @@ class AxisEditDialog(QtWidgets.QDialog):
         width = float(self.side_line_width_spin.value())
         side_state["spine_width"] = None if width <= 0 else width
         context["subplot"]["margins"][context["side"]] = float(self.side_offset_spin.value())
-        draw_between = (
-            float(self.draw_between_min_spin.value()) / 100.0,
-            float(self.draw_between_max_spin.value()) / 100.0,
-        )
-        if draw_between[0] > draw_between[1]:
-            return {
-                "valid": False,
-                "message": "Draw-between start must not exceed the end.",
-            }
-        side_state["draw_between"] = draw_between
+        side_state["offset"] = float(self.spine_offset_spin.value())
         side_state["draw_on_top"] = bool(self.draw_on_top_checkbox.isChecked())
         side_color = self.side_color_edit.text().strip()
         side_state["spine_color"] = None if not side_color else side_color

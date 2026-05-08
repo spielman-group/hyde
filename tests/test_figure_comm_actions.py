@@ -347,7 +347,7 @@ class TestFigureCommActions(unittest.TestCase):
         self.assertFalse(tick.tick1line.get_visible())
         self.assertFalse(tick.label1.get_visible())
 
-    def test_apply_figure_action_resolves_partial_axis_ranges_and_side_state(self):
+    def test_apply_figure_action_resolves_partial_axis_ranges_without_axis_compression(self):
         plt = self._configure_pyplot()
 
         @hyde.figure
@@ -361,17 +361,6 @@ class TestFigureCommActions(unittest.TestCase):
         y_values = [-3, -1, 2, -2]
         figure = Graph0(x_values, y_values)
 
-        apply_figure_action(
-            figure,
-            {
-                "type": "set_axis_side_state",
-                "subplot_id": "subplot0",
-                "side": "bottom",
-                "state": {
-                    "draw_between": (0.1, 0.9),
-                },
-            },
-        )
         apply_figure_action(
             figure,
             {
@@ -433,17 +422,17 @@ class TestFigureCommActions(unittest.TestCase):
             subplot["axes"]["y"]["range"]["limit_mode"],
             {"min": "auto", "max": "manual"},
         )
-        self.assertEqual(subplot["axis_sides"]["bottom"]["draw_between"], (0.1, 0.9))
         self.assertTrue(subplot["axis_sides"]["top"]["draw_on_top"])
 
         axis = figure.axes[0]
         self.assertEqual(tuple(axis.get_xlim()), expected_xlim)
         self.assertEqual(tuple(axis.get_ylim()), expected_ylim)
-        expected_bounds = (
-            expected_xlim[0] + (expected_xlim[1] - expected_xlim[0]) * 0.1,
-            expected_xlim[0] + (expected_xlim[1] - expected_xlim[0]) * 0.9,
-        )
-        self.assertEqual(axis.spines["bottom"].get_bounds(), expected_bounds)
+        expected_position = expected_axis.get_position()
+        axis_position = axis.get_position()
+        self.assertAlmostEqual(axis_position.x0, expected_position.x0)
+        self.assertAlmostEqual(axis_position.y0, expected_position.y0)
+        self.assertAlmostEqual(axis_position.width, expected_position.width)
+        self.assertAlmostEqual(axis_position.height, expected_position.height)
         self.assertFalse(axis.get_axisbelow())
 
     def test_apply_figure_action_updates_ir_and_live_subplot_margins(self):
