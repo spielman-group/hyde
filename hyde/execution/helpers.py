@@ -8,14 +8,14 @@ def resolve_names(args, frame, validate_1d=True):
     Args:
         args: Tuple of live Python objects.
         frame: The execution frame to search (locals then globals).
-        validate_1d: If True, validates each object is a 1D numeric array-like.
+        validate_1d: If True, validates each object is a 1D array-like.
         
     Returns:
         list: Resolved names for each object.
         
     Raises:
         ValueError: If a unique name cannot be resolved for an object.
-        TypeError: If an object fails 1D numeric validation.
+        TypeError: If an object fails 1D validation.
     """
     names = []
     locals_dict = frame.f_locals
@@ -37,7 +37,7 @@ def resolve_names(args, frame, validate_1d=True):
         if len(unique_names) == 1:
             name = unique_names[0]
             if validate_1d:
-                validate_1d_numeric(obj, name)
+                validate_1d_arraylike(obj, name)
             names.append(name)
         elif len(unique_names) > 1:
             raise ValueError(
@@ -50,10 +50,12 @@ def resolve_names(args, frame, validate_1d=True):
             )
             
     return names
-def validate_1d_numeric(obj, name):
+
+
+def validate_1d_arraylike(obj, name):
     """
-    Verifies object is a 1D numeric array-like.
-    
+    Verifies object is a 1D array-like.
+
     Raises:
         TypeError: If validation fails.
     """
@@ -61,9 +63,7 @@ def validate_1d_numeric(obj, name):
         arr = np.asanyarray(obj)
         if arr.ndim != 1:
             raise TypeError(f"Object '{name}' must be 1D (has dimension {arr.ndim}).")
-        if arr.dtype.kind not in 'biuf':
-            raise TypeError(f"Object '{name}' must be numeric (has kind '{arr.dtype.kind}').")
     except Exception as e:
         if isinstance(e, TypeError):
             raise
-        raise TypeError(f"Object '{name}' is not an array-like numeric type.")
+        raise TypeError(f"Object '{name}' is not an array-like 1D type.")

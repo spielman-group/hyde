@@ -1,4 +1,8 @@
 import unittest
+from unittest.mock import patch
+
+import numpy as np
+import hyde
 
 from qtutils.qt import QtCore, QtWidgets
 try:
@@ -17,6 +21,31 @@ from hyde.user_interface.plugins.table.window import (
 )
 
 class TestTableCodec(unittest.TestCase):
+    def test_create_table_accepts_mixed_numeric_and_string_arrays(self):
+        x = np.array([1.0, 2.0, 3.0])
+        string_array0 = np.array(["a", "b", "c"])
+
+        with patch.object(hyde, "HYDE_GUI", True), patch.object(
+            hyde,
+            "signal_open_table",
+        ) as signal_open_table:
+            hyde.create_table(
+                x,
+                string_array0,
+                target="Table0",
+                title="Table0",
+                column_widths={"x": 100, "string_array0": 100},
+            )
+
+        signal_open_table.assert_called_once_with(
+            ["x", "string_array0"],
+            "Table0",
+            title="Table0",
+            geometry=None,
+            column_widths={"x": 100, "string_array0": 100},
+            window_state=None,
+        )
+
     def test_table_state_open_generation_includes_optional_layout_kwargs(self):
         state = TableState()
         state.set_items(["delay2", "fit_delay2"])
