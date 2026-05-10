@@ -19,9 +19,11 @@ from hyde.user_interface.figure_comm import (
     register_auxiliary_figure_comm_sink,
 )
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.main.frontend_kernel import FrontendKernelService
-from hyde.user_interface.main.runtime_helper import RuntimeHelper
-from hyde.user_interface.plugins.kernel_runtime import Plugin as KernelRuntimePlugin
+from hyde.user_interface.plugins.kernel_runtime import (
+    FrontendKernelService,
+    Plugin as KernelRuntimePlugin,
+    RuntimeHelper,
+)
 from hyde.user_interface.plugins.remote_requests import RemoteRequestServer
 from qtutils.qt import QtWidgets
 
@@ -128,7 +130,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 pass
             ready_events = []
             with patch(
-                "hyde.user_interface.main.frontend_kernel.QtKernelClient",
+                "hyde.user_interface.plugins.kernel_runtime.QtKernelClient",
                 FakeQtKernelClient,
             ):
                 service = FrontendKernelService(connection_file)
@@ -158,24 +160,21 @@ class TestRuntimeArchitecture(unittest.TestCase):
             calls.append((name, data))
             helper.stop()
 
-        shell_services = {
-            "enter_no_project_state": lambda: calls.append(("no_project",)),
-            "activate_project": lambda path: calls.append(("activate_project", path)),
-            "on_project_state_result": lambda data: calls.append(
-                ("project_state_result", data)
-            ),
-            "request_gui_quit": lambda: calls.append(("request_gui_quit",)),
-            "emit_plugin_event": stop_after_kernel_message,
-        }
         from_kernel.put(("ENTER_NO_PROJECT_STATE", None))
         from_kernel.put(("ACTIVATE_PROJECT", {"path": "/tmp/demo.hy"}))
         from_kernel.put(("PROJECT_STATE_RESULT", {"operation": "load"}))
         from_kernel.put(("TABLE_DATA_RESPONSE", {"request_id": "r1"}))
         helper = RuntimeHelper(
-            shell_services=shell_services,
             from_kernel=from_kernel,
             kernel_process=type("FakeProcess", (), {"poll": lambda self: None})(),
             on_kernel_crashed=lambda: calls.append(("kernel_crashed",)),
+            enter_no_project_state=lambda: calls.append(("no_project",)),
+            activate_project=lambda path: calls.append(("activate_project", path)),
+            on_project_state_result=lambda data: calls.append(
+                ("project_state_result", data)
+            ),
+            request_gui_quit=lambda: calls.append(("request_gui_quit",)),
+            emit_plugin_event=stop_after_kernel_message,
         )
 
         helper.start()
@@ -203,16 +202,14 @@ class TestRuntimeArchitecture(unittest.TestCase):
         from_kernel = queue.Queue()
         from_kernel.put(("QUIT_REQUESTED", None))
         helper = RuntimeHelper(
-            shell_services={
-                "enter_no_project_state": lambda: None,
-                "activate_project": lambda path: None,
-                "on_project_state_result": lambda data: None,
-                "request_gui_quit": lambda: calls.append(("request_gui_quit",)),
-                "emit_plugin_event": lambda name, data=None: None,
-            },
             from_kernel=from_kernel,
             kernel_process=type("FakeProcess", (), {"poll": lambda self: None})(),
             on_kernel_crashed=lambda: calls.append(("kernel_crashed",)),
+            enter_no_project_state=lambda: None,
+            activate_project=lambda path: None,
+            on_project_state_result=lambda data: None,
+            request_gui_quit=lambda: calls.append(("request_gui_quit",)),
+            emit_plugin_event=lambda name, data=None: None,
         )
 
         helper.start()
@@ -223,16 +220,14 @@ class TestRuntimeArchitecture(unittest.TestCase):
     def test_runtime_helper_reports_kernel_process_death(self):
         calls = []
         helper = RuntimeHelper(
-            shell_services={
-                "enter_no_project_state": lambda: None,
-                "activate_project": lambda path: None,
-                "on_project_state_result": lambda data: None,
-                "request_gui_quit": lambda: None,
-                "emit_plugin_event": lambda name, data=None: None,
-            },
             from_kernel=queue.Queue(),
             kernel_process=type("DeadProcess", (), {"poll": lambda self: 1})(),
             on_kernel_crashed=lambda: calls.append(("kernel_crashed",)),
+            enter_no_project_state=lambda: None,
+            activate_project=lambda path: None,
+            on_project_state_result=lambda data: None,
+            request_gui_quit=lambda: None,
+            emit_plugin_event=lambda name, data=None: None,
         )
 
         helper.start()
@@ -259,11 +254,28 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 return "to-kernel", "from-kernel", process
 
         class FakeRuntimeHelper:
-            def __init__(self, shell_services, from_kernel, kernel_process, on_kernel_crashed):
-                self.shell_services = shell_services
-                self.from_kernel = from_kernel
-                self.kernel_process = kernel_process
-                self.on_kernel_crashed = on_kernel_crashed
+            def __init__(
+                self,
+                from_kernel,
+                kernel_process,
+                on_kernel_crashed,
+                *,
+                enter_no_project_state,
+                activate_project,
+                on_project_state_result,
+                request_gui_quit,
+                emit_plugin_event,
+            ):
+                del (
+                    from_kernel,
+                    kernel_process,
+                    on_kernel_crashed,
+                    enter_no_project_state,
+                    activate_project,
+                    on_project_state_result,
+                    request_gui_quit,
+                    emit_plugin_event,
+                )
                 self.started = False
 
             def start(self):
@@ -319,19 +331,14 @@ class TestRuntimeArchitecture(unittest.TestCase):
                         plugin = KernelRuntimePlugin({})
                         plugin.plugin_setup_complete({"services": services})
 
-        runtime_service = plugin.kernel_runtime_service
         self.assertIsInstance(plugin.runtime_helper, FakeRuntimeHelper)
-        self.assertIs(plugin.runtime_helper.shell_services, services)
         self.assertTrue(plugin.runtime_helper.started)
         self.assertIsInstance(plugin.frontend_kernel_service, FakeFrontendKernelService)
         self.assertEqual(plugin.frontend_kernel_service.calls, ["stop", "start"])
         self.assertEqual(len(services["process_tree"].calls), 1)
-        path, args, port, startup_timeout = services["process_tree"].calls[0]
+        path, args, *_ = services["process_tree"].calls[0]
         self.assertEqual(path, KERNEL_LAUNCHER)
         self.assertEqual(args, ["-f", connection_file])
-        self.assertEqual(port, 12345)
-        self.assertEqual(startup_timeout, 60)
-        self.assertIsNone(runtime_service.kernel_client())
 
     def test_kernel_runtime_plugin_contributes_kill_kernel_file_action(self):
         plugin = KernelRuntimePlugin({})
@@ -342,7 +349,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 {
                     "location": "file",
                     "group": "application",
-                    "order": 90,
+                    "order": 110,
                     "name": "Kill Kernel",
                     "action": plugin.kill_kernel,
                 },

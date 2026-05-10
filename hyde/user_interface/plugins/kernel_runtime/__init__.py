@@ -1,16 +1,195 @@
+import logging
 import os
+import threading
 import time
 
+from qtconsole.client import QtKernelClient
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore
 
 from hyde.paths import CONNECTION_FILE, KERNEL_LAUNCHER
-from hyde.user_interface.main.frontend_kernel import FrontendKernelService
-from hyde.user_interface.main.runtime_helper import RuntimeHelper
 from hyde.user_interface.plugin_tools import HydePlugin
 
 
 qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
+LOGGER = logging.getLogger("hyde")
+
+
+class FrontendKernelService(QtCore.QObject):
+    ready = QtCore.Signal()
+
+    def __init__(self, connection_file, parent=None):
+        super().__init__(parent)
+        self.connection_file = connection_file
+        self._kernel_client = None
+        self._ready = False
+        self._poll_timer = QtCore.QTimer(self)
+        self._poll_timer.setInterval(100)
+        self._poll_timer.timeout.connect(self._try_connect)
+        self._connecting = False
+        self._ready_probe_msg_id = None
+        self._ready_probe_at = None
+
+    def start(self):
+        if self._kernel_client is not None or self._poll_timer.isActive():
+            return
+        self._poll_timer.start()
+        self._try_connect()
+
+    def stop(self):
+        self._poll_timer.stop()
+        self._connecting = False
+        client = self._kernel_client
+        self._kernel_client = None
+        self._ready = False
+        self._ready_probe_msg_id = None
+        self._ready_probe_at = None
+        if client is None:
+            return
+        try:
+            client.shell_channel.message_received.disconnect(self._on_shell_message)
+        except Exception:
+            pass
+        try:
+            client.stop_channels()
+        except Exception:
+            LOGGER.exception("Failed to stop shared frontend kernel client channels.")
+
+    def is_ready(self):
+        return self._ready
+
+    def kernel_client(self):
+        return self._kernel_client
+
+    def execute(self, code, silent=True):
+        if self._kernel_client is None or not self._ready:
+            return False
+        self._kernel_client.execute(code, silent=bool(silent))
+        return True
+
+    def shutdown_kernel(self, reply=False):
+        if self._kernel_client is None:
+            return False
+        self._kernel_client.shutdown(reply=reply)
+        return True
+
+    def _try_connect(self):
+        if self._connecting:
+            return
+        if self._kernel_client is None and not os.path.exists(self.connection_file):
+            return
+        if self._kernel_client is None:
+            self._connecting = True
+            client = QtKernelClient(connection_file=self.connection_file)
+            client.load_connection_file()
+            client.start_channels()
+            client.shell_channel.message_received.connect(self._on_shell_message)
+            self._kernel_client = client
+            self._ready = False
+            self._connecting = False
+            self._send_readiness_probe(force=True)
+            return
+        self._send_readiness_probe()
+
+    def _send_readiness_probe(self, force=False):
+        if self._kernel_client is None or self._ready:
+            return
+        now = time.monotonic()
+        if (
+            not force
+            and self._ready_probe_at is not None
+            and now - self._ready_probe_at < 0.5
+        ):
+            return
+        self._ready_probe_msg_id = self._kernel_client.kernel_info()
+        self._ready_probe_at = now
+
+    def _on_shell_message(self, message):
+        if self._ready or self._kernel_client is None:
+            return
+        msg_type = (
+            message.get("msg_type")
+            or message.get("header", {}).get("msg_type")
+        )
+        if msg_type != "kernel_info_reply":
+            return
+        parent_msg_id = message.get("parent_header", {}).get("msg_id")
+        if self._ready_probe_msg_id and parent_msg_id not in (None, self._ready_probe_msg_id):
+            return
+        self._ready = True
+        self._ready_probe_msg_id = None
+        self._ready_probe_at = None
+        self._poll_timer.stop()
+        try:
+            self._kernel_client.shell_channel.message_received.disconnect(self._on_shell_message)
+        except Exception:
+            pass
+        self.ready.emit()
+
+
+class RuntimeHelper:
+    """Background helper for Lane 1 kernel control messages."""
+
+    def __init__(
+        self,
+        from_kernel,
+        kernel_process,
+        on_kernel_crashed,
+        *,
+        enter_no_project_state,
+        activate_project,
+        on_project_state_result,
+        request_gui_quit,
+        emit_plugin_event,
+    ):
+        self.from_kernel = from_kernel
+        self.kernel_process = kernel_process
+        self.on_kernel_crashed = on_kernel_crashed
+        self.enter_no_project_state = enter_no_project_state
+        self.activate_project = activate_project
+        self.on_project_state_result = on_project_state_result
+        self.request_gui_quit = request_gui_quit
+        self.emit_plugin_event = emit_plugin_event
+        self._stopping = threading.Event()
+        self.thread = threading.Thread(target=self.mainloop, daemon=True)
+
+    def start(self):
+        self.thread.start()
+
+    def stop(self):
+        self._stopping.set()
+
+    def mainloop(self):
+        while not self._stopping.is_set():
+            if self.kernel_process.poll() is not None:
+                if not self._stopping.is_set():
+                    self.on_kernel_crashed()
+                return
+
+            try:
+                task, data = self.from_kernel.get(timeout=0.01)
+            except Exception:
+                time.sleep(0.05)
+                continue
+
+            if task == "ENTER_NO_PROJECT_STATE":
+                self.enter_no_project_state()
+            elif task == "ACTIVATE_PROJECT":
+                self.activate_project(data.get("path"))
+            elif task == "QUIT_REQUESTED":
+                self._stopping.set()
+                self.request_gui_quit()
+                return
+            elif task == "PROJECT_STATE_RESULT":
+                self.on_project_state_result(data)
+            else:
+                self.emit_plugin_event(
+                    "kernel_message",
+                    {
+                        "task": task,
+                        "data": data,
+                    },
+                )
 
 
 class _MainThreadExecutor(QtCore.QObject):
@@ -30,15 +209,12 @@ class KernelRuntimeService:
     def __init__(self, plugin):
         self.plugin = plugin
 
-    def frontend_kernel_service(self):
-        return self.plugin.frontend_kernel_service
-
     def is_ready(self):
-        service = self.frontend_kernel_service()
+        service = self.plugin.frontend_kernel_service
         return service is not None and service.is_ready()
 
     def kernel_client(self):
-        service = self.frontend_kernel_service()
+        service = self.plugin.frontend_kernel_service
         return None if service is None else service.kernel_client()
 
     def execute(self, code, silent=True):
@@ -93,7 +269,7 @@ class Plugin(HydePlugin):
             {
                 "location": "file",
                 "group": "application",
-                "order": 90,
+                "order": 110,
                 "name": "Kill Kernel",
                 "action": self.kill_kernel,
             },
@@ -111,7 +287,7 @@ class Plugin(HydePlugin):
             )
             self.frontend_kernel_service.ready.connect(self.services["on_kernel_ready"])
             self._main_thread_executor = _MainThreadExecutor(
-                self._execute_frontend,
+                self.execute_frontend,
                 parent=ui_parent,
             )
         self.start_runtime()
@@ -125,6 +301,7 @@ class Plugin(HydePlugin):
         if os.path.exists(CONNECTION_FILE):
             os.remove(CONNECTION_FILE)
         output_redirection_port = None
+        # Logging owns output policy; kernel launch only needs its port.
         logging_service = self.services.get("runtime_output_service")
         if logging_service is not None:
             try:
@@ -144,10 +321,14 @@ class Plugin(HydePlugin):
         self.frontend_kernel_service.stop()
         self.frontend_kernel_service.start()
         self.runtime_helper = RuntimeHelper(
-            self.services,
             self.kernel_from_child,
             self.kernel_process,
             self._handle_kernel_crash,
+            enter_no_project_state=self.services["enter_no_project_state"],
+            activate_project=self.services["activate_project"],
+            on_project_state_result=self.services["on_project_state_result"],
+            request_gui_quit=self.services["request_gui_quit"],
+            emit_plugin_event=self.services["emit_plugin_event"],
         )
         self.runtime_helper.start()
 
@@ -157,15 +338,9 @@ class Plugin(HydePlugin):
         current_thread = QtCore.QThread.currentThread()
         executor_thread = self._main_thread_executor.thread()
         if current_thread is executor_thread:
-            return self._execute_frontend(code, silent=silent)
+            return self.frontend_kernel_service.execute(code, silent=bool(silent))
         self._main_thread_executor.execute_requested.emit(str(code), bool(silent))
         return True
-
-    def _execute_frontend(self, code, silent=True):
-        service = self.frontend_kernel_service
-        if service is None:
-            return False
-        return service.execute(code, silent=bool(silent))
 
     def kill_kernel(self, checked=False):
         del checked
@@ -193,6 +368,9 @@ class Plugin(HydePlugin):
         QtCore.QTimer.singleShot(0, self._complete_shutdown_runtime)
 
     def stop_runtime(self, shutdown_kernel):
+        # Application shutdown asks the live kernel to exit through Jupyter
+        # first; _complete_shutdown_runtime owns the bounded wait and fallback
+        # SIGTERM path.
         helper = self.runtime_helper
         self.runtime_helper = None
         if helper is not None:
