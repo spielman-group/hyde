@@ -5,6 +5,7 @@ import unittest
 import tempfile
 import builtins
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="hyde-mpl-"))
@@ -279,13 +280,22 @@ class TestProjectStateHelpers(unittest.TestCase):
         original_main_exit = sys.modules["__main__"].__dict__.get("exit")
         original_hyde = sys.modules["__main__"].__dict__.get("hyde")
         try:
-            hyde.gui_mode(True)
+            with patch(
+                "hyde.execution.kernel_signals.install_signal_marker_handlers"
+            ) as install_handlers, patch(
+                "hyde.execution.kernel_signals.restore_signal_marker_handlers"
+            ) as restore_handlers:
+                hyde.gui_mode(True)
 
-            self.assertIs(sys.modules["__main__"].__dict__["hyde"], hyde)
-            self.assertIs(sys.modules["__main__"].__dict__["quit"], hyde.quit)
-            self.assertIs(sys.modules["__main__"].__dict__["exit"], hyde.quit)
-            self.assertIs(builtins.quit, hyde.quit)
-            self.assertIs(builtins.exit, hyde.quit)
+                self.assertIs(sys.modules["__main__"].__dict__["hyde"], hyde)
+                self.assertIs(sys.modules["__main__"].__dict__["quit"], hyde.quit)
+                self.assertIs(sys.modules["__main__"].__dict__["exit"], hyde.quit)
+                self.assertIs(builtins.quit, hyde.quit)
+                self.assertIs(builtins.exit, hyde.quit)
+                install_handlers.assert_called_once_with()
+
+                hyde.gui_mode(False)
+                restore_handlers.assert_called_once_with()
         finally:
             hyde.gui_mode(False)
             if original_main_quit is None:

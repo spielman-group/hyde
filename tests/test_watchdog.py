@@ -333,6 +333,58 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertEqual(startup_timeout, 60)
         self.assertIsNone(runtime_service.kernel_client())
 
+    def test_kernel_runtime_plugin_contributes_kill_kernel_file_action(self):
+        plugin = KernelRuntimePlugin({})
+
+        self.assertEqual(
+            plugin.get_menu_contributions(),
+            [
+                {
+                    "location": "file",
+                    "group": "application",
+                    "order": 90,
+                    "name": "Kill Kernel",
+                    "action": plugin.kill_kernel,
+                },
+            ],
+        )
+
+    def test_kernel_runtime_plugin_kill_kernel_terminates_running_process(self):
+        calls = []
+
+        plugin = KernelRuntimePlugin({})
+        plugin.kernel_process = type(
+            "RunningProcess",
+            (),
+            {
+                "poll": lambda self: None,
+                "terminate": lambda self: calls.append("terminate"),
+            },
+        )()
+
+        self.assertTrue(plugin.kill_kernel())
+        self.assertEqual(calls, ["terminate"])
+
+    def test_kernel_runtime_plugin_kill_kernel_ignores_missing_process(self):
+        plugin = KernelRuntimePlugin({})
+
+        self.assertFalse(plugin.kill_kernel())
+
+    def test_kernel_runtime_plugin_kill_kernel_ignores_stopped_process(self):
+        calls = []
+        plugin = KernelRuntimePlugin({})
+        plugin.kernel_process = type(
+            "StoppedProcess",
+            (),
+            {
+                "poll": lambda self: 0,
+                "terminate": lambda self: calls.append("terminate"),
+            },
+        )()
+
+        self.assertFalse(plugin.kill_kernel())
+        self.assertEqual(calls, [])
+
     def test_kernel_runtime_plugin_shutdown_finalizes_when_process_is_stopped(self):
         calls = []
 

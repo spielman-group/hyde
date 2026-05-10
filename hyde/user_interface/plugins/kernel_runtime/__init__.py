@@ -88,6 +88,17 @@ class Plugin(HydePlugin):
             "python_execution_service": self.python_execution_service,
         }
 
+    def get_menu_contributions(self):
+        return [
+            {
+                "location": "file",
+                "group": "application",
+                "order": 90,
+                "name": "Kill Kernel",
+                "action": self.kill_kernel,
+            },
+        ]
+
     def on_setup_complete(self, data=None):
         del data
         if self.frontend_kernel_service is None:
@@ -155,6 +166,13 @@ class Plugin(HydePlugin):
         if service is None:
             return False
         return service.execute(code, silent=bool(silent))
+
+    def kill_kernel(self, checked=False):
+        del checked
+        if self.kernel_process is None or self.kernel_process.poll() is not None:
+            return False
+        self.kernel_process.terminate()
+        return True
 
     @inmain_decorator()
     def _handle_kernel_crash(self):

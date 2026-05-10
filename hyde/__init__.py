@@ -78,6 +78,9 @@ def gui_mode(enable=True):
     HYDE_GUI = bool(enable)
     main_module = sys.modules["__main__"]
     if HYDE_GUI:
+        from .execution.kernel_signals import install_signal_marker_handlers
+
+        install_signal_marker_handlers()
         hyde_module = sys.modules[__name__]
         main_module.__dict__["hyde"] = hyde_module
         main_module.__dict__["quit"] = quit
@@ -90,6 +93,9 @@ def gui_mode(enable=True):
             main_module.__dict__["__hyde_clean_sys_path__"] = list(sys.path)
             main_module.__dict__["__hyde_clean_dict__"] = main_module.__dict__.copy()
     else:
+        from .execution.kernel_signals import restore_signal_marker_handlers
+
+        restore_signal_marker_handlers()
         if _ORIGINAL_BUILTINS_QUIT is not None:
             builtins.quit = _ORIGINAL_BUILTINS_QUIT
         if _ORIGINAL_BUILTINS_EXIT is not None:
