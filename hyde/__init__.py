@@ -81,6 +81,12 @@ def gui_mode(enable=True):
         from .execution.kernel_signals import install_signal_marker_handlers
 
         install_signal_marker_handlers()
+        # Importing labscript_utils.ls_zprocess installs zprocess KillLock's
+        # SIGTERM handler. Enable ProcessTree IPC only after Hyde's marker is
+        # installed so KillLock wraps Hyde rather than Hyde replacing KillLock.
+        from .execution.ipc import enable_process_tree_ipc
+
+        enable_process_tree_ipc()
         hyde_module = sys.modules[__name__]
         main_module.__dict__["hyde"] = hyde_module
         main_module.__dict__["quit"] = quit

@@ -1,7 +1,32 @@
 import sys
 
 import numpy as np
-from labscript_utils.ls_zprocess import ProcessTree
+
+
+_ProcessTree = None
+
+
+def enable_process_tree_ipc():
+    global _ProcessTree
+    if _ProcessTree is None:
+        from labscript_utils.ls_zprocess import ProcessTree
+
+        _ProcessTree = ProcessTree
+
+
+def _parent_tree():
+    if _ProcessTree is None:
+        return None
+    tree = _ProcessTree.instance()
+    if tree is None or not hasattr(tree, "to_parent"):
+        return None
+    return tree
+
+
+def put_parent_message(message):
+    tree = _parent_tree()
+    if tree is not None:
+        tree.to_parent.put(message)
 
 
 def signal_open_table(
@@ -19,11 +44,7 @@ def signal_open_table(
     which is a direct ProcessTree child of the GUI process.
     """
     try:
-        tree = ProcessTree.instance()
-        if tree is None or not hasattr(tree, "to_parent"):
-            return
-
-        tree.to_parent.put([
+        put_parent_message([
             "OPEN_TABLE_REQUEST",
             {
                 "names": list(names),
@@ -42,10 +63,7 @@ def signal_open_table(
 def signal_enter_no_project_state():
     """Ask the GUI to enter its explicit no-project state."""
     try:
-        tree = ProcessTree.instance()
-        if tree is None or not hasattr(tree, "to_parent"):
-            return
-        tree.to_parent.put(["ENTER_NO_PROJECT_STATE", None])
+        put_parent_message(["ENTER_NO_PROJECT_STATE", None])
     except Exception:
         return
 
@@ -53,10 +71,7 @@ def signal_enter_no_project_state():
 def signal_activate_project(path):
     """Ask the GUI to activate a project after a successful kernel-side transition."""
     try:
-        tree = ProcessTree.instance()
-        if tree is None or not hasattr(tree, "to_parent"):
-            return
-        tree.to_parent.put(["ACTIVATE_PROJECT", {"path": path}])
+        put_parent_message(["ACTIVATE_PROJECT", {"path": path}])
     except Exception:
         return
 
@@ -64,10 +79,7 @@ def signal_activate_project(path):
 def signal_quit_requested():
     """Ask the GUI to perform an orderly Hyde shutdown."""
     try:
-        tree = ProcessTree.instance()
-        if tree is None or not hasattr(tree, "to_parent"):
-            return
-        tree.to_parent.put(["QUIT_REQUESTED", None])
+        put_parent_message(["QUIT_REQUESTED", None])
     except Exception:
         return
 
@@ -79,8 +91,8 @@ def push_table_data(names, request_id):
     Raises:
         RuntimeError: If called outside a Hyde-managed ProcessTree.
     """
-    tree = ProcessTree.instance()
-    if tree is None or not hasattr(tree, "to_parent"):
+    tree = _parent_tree()
+    if tree is None:
         raise RuntimeError(
             "Hyde data push failed: No managed parent process available. "
             "Are you running in a Hyde-managed IPython session?"
@@ -111,10 +123,7 @@ def push_table_data(names, request_id):
 def publish_project_state_result(operation, path, success=True, errors=None, object_count=0, mode="save"):
     """Publish kernel-side project save/load completion back to the GUI."""
     try:
-        tree = ProcessTree.instance()
-        if tree is None or not hasattr(tree, "to_parent"):
-            return
-        tree.to_parent.put([
+        put_parent_message([
             "PROJECT_STATE_RESULT",
             {
                 "operation": operation,

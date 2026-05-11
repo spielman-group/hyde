@@ -44,7 +44,7 @@ class Plugin(HydePlugin):
         super().__init__(initial_settings)
         self.logging_window_service = LoggingWindowService(self)
 
-    def on_setup_complete(self, data=None):
+    def setup(self, data=None):
         del data
         self.logging_window_service.ensure_widget()
         self.hide_mdi_subwindow("logging")

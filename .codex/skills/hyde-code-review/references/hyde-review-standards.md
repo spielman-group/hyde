@@ -106,6 +106,7 @@ Prefer tests that are:
 - contract-focused
 - grounded in public behavior and documented architecture
 - targeted at the smallest behavior that proves the requirement
+- capable of failing for the real running-system defect they claim to cover
 
 Raise findings for tests that:
 
@@ -113,6 +114,8 @@ Raise findings for tests that:
 - mirror workaround behavior rather than intended Hyde behavior
 - become verbose because the implementation is over-factored
 - validate private plumbing when a public command or documented flow would test the requirement more directly
+- assert imports, mocks, or callback order while leaving the actual user-visible or
+  contract-visible behavior untested
 
 When the architecture is the contract, it is valid to test that contract. For example:
 
@@ -132,6 +135,7 @@ Use this quick pass before finalizing the review:
 6. Check whether the patch created a second implementation path or a hidden bypass.
 7. Check whether new state or policy is actually required.
 8. Check whether the tests verify the contract concisely.
+9. Check whether each test would fail for the defect it is meant to prevent.
 
 ## Spec Selection Guide
 

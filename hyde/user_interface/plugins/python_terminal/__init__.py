@@ -101,7 +101,7 @@ class Plugin(HydePlugin):
         self.python_terminal_service = PythonTerminalService(self)
         self._action = None
 
-    def on_setup_complete(self, data=None):
+    def setup(self, data=None):
         del data
         self.bind_menu_action("_action", "window", "Python Terminal")
 

@@ -8,7 +8,10 @@ from qtutils import inmain_decorator
 from qtutils.qt import QtCore
 
 from hyde.paths import CONNECTION_FILE, KERNEL_LAUNCHER
-from hyde.user_interface.plugin_tools import HydePlugin
+from hyde.user_interface.plugin_tools import (
+    HydePlugin,
+    SETUP_PRIORITY_RUNTIME_START,
+)
 
 
 qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
@@ -275,7 +278,16 @@ class Plugin(HydePlugin):
             },
         ]
 
-    def on_setup_complete(self, data=None):
+    def get_setup_activities(self):
+        return super().get_setup_activities() + [
+            {
+                "name": "start_runtime",
+                "priority": SETUP_PRIORITY_RUNTIME_START,
+                "action": self.start_runtime_activity,
+            },
+        ]
+
+    def setup(self, data=None):
         del data
         if self.frontend_kernel_service is None:
             ui_parent = self.services["ui"]
@@ -290,6 +302,9 @@ class Plugin(HydePlugin):
                 self.execute_frontend,
                 parent=ui_parent,
             )
+
+    def start_runtime_activity(self, data=None):
+        del data
         self.start_runtime()
 
     def get_event_handlers(self):

@@ -135,7 +135,7 @@ class Plugin(HydePlugin):
         self._figure_to_comm = {}
         self._comm_to_figure = {}
 
-    def on_setup_complete(self, data=None):
+    def setup(self, data=None):
         del data
         if self._signals_connected:
             return

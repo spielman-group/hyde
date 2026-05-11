@@ -188,7 +188,7 @@ class Plugin(HydePlugin):
         self._new_table_action = None
         self._macro_menu = None
 
-    def on_setup_complete(self, data=None):
+    def setup(self, data=None):
         del data
         if self._signals_connected:
             return

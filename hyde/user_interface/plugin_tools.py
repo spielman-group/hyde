@@ -4,6 +4,7 @@ import os
 
 from labscript_utils.plugins import (
     DEFAULT_PRIORITY,
+    DEFAULT_SETUP_PRIORITY,
     BasePlugin,
     MenuContext,
     PluginManager,
@@ -11,6 +12,13 @@ from labscript_utils.plugins import (
 from qtutils.qt import QtCore, QtGui
 
 from hyde.user_interface.base import RuntimeCommandState
+
+
+SETUP_PRIORITY_BIND_SERVICES = DEFAULT_SETUP_PRIORITY
+SETUP_PRIORITY_PLUGIN_SETUP = DEFAULT_SETUP_PRIORITY + 10
+# Side-effectful runtime startup must wait until all plugins have received
+# services and completed ordinary setup, including output-window creation.
+SETUP_PRIORITY_RUNTIME_START = DEFAULT_SETUP_PRIORITY + 20
 
 
 class _NullConfig:
@@ -74,12 +82,25 @@ class HydePlugin(BasePlugin):
         super().__init__(initial_settings)
         self.services = {}
 
-    def plugin_setup_complete(self, data=None):
+    def get_setup_activities(self):
+        return [
+            {
+                "name": "bind_services",
+                "priority": SETUP_PRIORITY_BIND_SERVICES,
+                "action": self.bind_services,
+            },
+            {
+                "name": "setup",
+                "priority": SETUP_PRIORITY_PLUGIN_SETUP,
+                "action": self.setup,
+            },
+        ]
+
+    def bind_services(self, data=None):
         data = data or {}
         self.services = data.get("services", {})
-        self.on_setup_complete(data)
 
-    def on_setup_complete(self, data=None):
+    def setup(self, data=None):
         del data
 
     def service(self, key, default=None):

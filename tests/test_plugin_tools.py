@@ -19,6 +19,7 @@ from hyde.user_interface.plugin_tools import (
     HydeMenuContext,
     HydePlugin,
     HydePluginManager,
+    SETUP_PRIORITY_RUNTIME_START,
 )
 from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure.window import FigureWindow
@@ -195,7 +196,7 @@ class TestPluginTools(unittest.TestCase):
                     }
                 ]
 
-            def on_setup_complete(self, data=None):
+            def setup(self, data=None):
                 del data
                 self.setup_services = self.services
                 self.bound_action = self.bind_menu_action(
@@ -227,6 +228,62 @@ class TestPluginTools(unittest.TestCase):
         self.assertEqual(
             [action.text() for action in app.ui.menuWindow.actions()],
             ["Plugin Tool"],
+        )
+
+    def test_setup_plugins_runs_runtime_start_after_all_plugin_setup(self):
+        events = []
+        test_case = self
+
+        class RuntimeOutputService:
+            def port(self):
+                events.append("port")
+                test_case.assertIn("logging_setup", events)
+                test_case.assertIn("runtime_setup", events)
+                return 12345
+
+        class LoggingLikePlugin(HydePlugin):
+            def __init__(self):
+                super().__init__({})
+                self.runtime_output_service = RuntimeOutputService()
+
+            def get_services(self):
+                return {"runtime_output_service": self.runtime_output_service}
+
+            def setup(self, data=None):
+                del data
+                events.append("logging_setup")
+
+        class RuntimeLikePlugin(HydePlugin):
+            def get_setup_activities(self):
+                return super().get_setup_activities() + [
+                    {
+                        "name": "start_runtime",
+                        "priority": SETUP_PRIORITY_RUNTIME_START,
+                        "action": self.start_runtime,
+                    },
+                ]
+
+            def setup(self, data=None):
+                del data
+                events.append("runtime_setup")
+
+            def start_runtime(self, data=None):
+                del data
+                events.append("runtime_start")
+                self.services["runtime_output_service"].port()
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {
+            "runtime": RuntimeLikePlugin({}),
+            "logging": LoggingLikePlugin(),
+        }
+        app = make_plugin_host(manager)
+
+        HydeApp.setup_plugins(app)
+
+        self.assertEqual(
+            events,
+            ["logging_setup", "runtime_setup", "runtime_start", "port"],
         )
 
     def test_setup_plugins_registers_contextual_menu_locations_and_visibility_services(self):

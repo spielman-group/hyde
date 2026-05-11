@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import threading
 
-from labscript_utils.ls_zprocess import ProcessTree
+from .execution.ipc import put_parent_message
 
 
 _VALID_KINDS = ("table", "figure")
@@ -92,15 +92,10 @@ def serialize_window_macro_registry(kind):
 def publish_window_macro_registry(kind):
     normalized_kind = _normalize_kind(kind)
     try:
-        tree = ProcessTree.instance()
-        if tree is None or not hasattr(tree, "to_parent"):
-            return
-        tree.to_parent.put(
-            [
-                "WINDOW_MACROS_RESPONSE",
-                serialize_window_macro_registry(normalized_kind),
-            ]
-        )
+        put_parent_message([
+            "WINDOW_MACROS_RESPONSE",
+            serialize_window_macro_registry(normalized_kind),
+        ])
     except Exception:
         pass
 

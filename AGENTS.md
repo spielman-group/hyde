@@ -42,6 +42,12 @@ For command-emitting GUI surfaces or GUI-side lowering/state work, follow
 
 ## Tests
 Run Hyde tests in the `labscript` conda environment.
+- Tests must verify behavior or an explicit architectural contract whenever possible.
+  Do not accept tests that only assert incidental call order, helper wiring, import
+  shape, or mock interactions when a real behavior can be exercised instead.
+- Before adding or keeping a test, ask what defect it would catch in the running
+  application. If the answer is only "this implementation changed," rewrite the test
+  around the observable contract.
 
 ## Documentation Rules
 - Specs and architecture docs should describe the intended present-tense system.

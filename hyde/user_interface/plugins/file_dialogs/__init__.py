@@ -16,7 +16,7 @@ class Plugin(HydePlugin):
         super().__init__(initial_settings)
         self._actions = {}
 
-    def on_setup_complete(self, data=None):
+    def setup(self, data=None):
         del data
         self._bind_actions()
         self._set_project_action_state(

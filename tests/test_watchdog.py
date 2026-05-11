@@ -329,7 +329,11 @@ class TestRuntimeArchitecture(unittest.TestCase):
                         FakeRuntimeHelper,
                     ):
                         plugin = KernelRuntimePlugin({})
-                        plugin.plugin_setup_complete({"services": services})
+                        for activity in sorted(
+                            plugin.get_setup_activities(),
+                            key=lambda item: item["priority"],
+                        ):
+                            activity["action"]({"services": services})
 
         self.assertIsInstance(plugin.runtime_helper, FakeRuntimeHelper)
         self.assertTrue(plugin.runtime_helper.started)

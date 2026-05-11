@@ -320,6 +320,18 @@ class TestHydeStartup(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
+    def _record_quit_requests(self, app):
+        quit_requests = []
+        helper = app.plugin_manager.plugins["kernel_runtime"].runtime_helper
+        request_gui_quit = helper.request_gui_quit
+
+        def record_request_gui_quit():
+            quit_requests.append("QUIT_REQUESTED")
+            request_gui_quit()
+
+        helper.request_gui_quit = record_request_gui_quit
+        return quit_requests
+
     def test_startup_enters_no_project_state(self):
         process_tree = ProcessTree.instance()
         process_tree.zlock_client.set_process_name("hyde-startup-test")
@@ -359,6 +371,78 @@ class TestHydeStartup(unittest.TestCase):
                 timeout=10,
                 message="Hyde did not finish asynchronous shutdown.",
             )
+            process_events(0.2)
+
+    def test_file_quit_action_shuts_down_live_kernel_and_app(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name("hyde-file-quit-test")
+        app = HydeApp(self.qapp, process_tree, DummySplash(), argv=[])
+        try:
+            wait_until(
+                lambda: app._startup_complete
+                and app.plugin_service("kernel_runtime_service").is_ready(),
+                timeout=60,
+                message="Hyde did not finish startup with a ready kernel.",
+            )
+            quit_requests = self._record_quit_requests(app)
+
+            lookup_menu_action(app, "file", "Quit").trigger()
+
+            wait_until(
+                lambda: quit_requests and app._close_ready,
+                timeout=10,
+                message=(
+                    "File -> Quit did not receive the live kernel quit message "
+                    "and complete Hyde shutdown."
+                ),
+            )
+            self.assertEqual(quit_requests, ["QUIT_REQUESTED"])
+            self.assertTrue(app.shutting_down)
+            self.assertTrue(app._runtime_shutdown)
+        finally:
+            if not app._close_ready:
+                app.begin_shutdown_from_close_event()
+                wait_until(
+                    lambda: app._close_ready,
+                    timeout=10,
+                    message="Hyde did not finish cleanup shutdown.",
+            )
+            process_events(0.2)
+
+    def test_main_window_close_requests_kernel_quit_and_shuts_down_app(self):
+        process_tree = ProcessTree.instance()
+        process_tree.zlock_client.set_process_name("hyde-window-close-test")
+        app = HydeApp(self.qapp, process_tree, DummySplash(), argv=[])
+        try:
+            wait_until(
+                lambda: app._startup_complete
+                and app.plugin_service("kernel_runtime_service").is_ready(),
+                timeout=60,
+                message="Hyde did not finish startup with a ready kernel.",
+            )
+            quit_requests = self._record_quit_requests(app)
+
+            app.ui.close()
+
+            wait_until(
+                lambda: quit_requests and app._close_ready,
+                timeout=10,
+                message=(
+                    "Main-window close did not receive the live kernel quit "
+                    "message and complete Hyde shutdown."
+                ),
+            )
+            self.assertEqual(quit_requests, ["QUIT_REQUESTED"])
+            self.assertTrue(app.shutting_down)
+            self.assertTrue(app._runtime_shutdown)
+        finally:
+            if not app._close_ready:
+                app.begin_shutdown_from_close_event()
+                wait_until(
+                    lambda: app._close_ready,
+                    timeout=10,
+                    message="Hyde did not finish cleanup shutdown.",
+                )
             process_events(0.2)
 
 

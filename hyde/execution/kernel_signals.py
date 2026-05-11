@@ -41,7 +41,12 @@ def _signal_marker_handler(signum, frame):
 
 def install_signal_marker_handlers():
     for signum in (signal.SIGINT, signal.SIGTERM):
-        if signal.getsignal(signum) is _signal_marker_handler:
+        # Hyde may install first and then be wrapped by zprocess KillLock.
+        # Later gui_mode(True) calls must not replace that active wrapper.
+        if (
+            signum in _PREVIOUS_SIGNAL_HANDLERS
+            or signal.getsignal(signum) is _signal_marker_handler
+        ):
             continue
         _PREVIOUS_SIGNAL_HANDLERS[signum] = signal.getsignal(signum)
         signal.signal(signum, _signal_marker_handler)
@@ -49,6 +54,9 @@ def install_signal_marker_handlers():
 
 def restore_signal_marker_handlers():
     for signum, previous_handler in list(_PREVIOUS_SIGNAL_HANDLERS.items()):
+        # If another handler has wrapped Hyde's marker, leave both the active
+        # wrapper and Hyde's registration record intact. Dropping the record
+        # would let a later gui_mode(True) replace the wrapper.
         if signal.getsignal(signum) is _signal_marker_handler:
             signal.signal(signum, previous_handler)
-        _PREVIOUS_SIGNAL_HANDLERS.pop(signum, None)
+            _PREVIOUS_SIGNAL_HANDLERS.pop(signum, None)
