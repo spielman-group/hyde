@@ -142,7 +142,7 @@ Use this quick pass before finalizing the review:
 Load additional Markdown specs only when relevant:
 
 - Read `project_management/specs/IPC_PROTOCOL.md` for process ownership, runtime-helper boundaries, and command-path rules.
-- Read `project_management/specs/command_window/SPEC.md` for visible user command behavior versus silent runtime-helper execution.
+- Read `project_management/specs/python_terminal/SPEC.md` for visible user command behavior versus silent runtime-helper execution.
 - Read `project_management/specs/project_save_load/SPEC.md` for authoritative public save/load command paths.
 - Read `project_management/specs/new_table_dialog/SPEC.md` for string-factory behavior in a GUI dialog.
 - Read `project_management/specs/data_browser/SPEC.md` for viewport-only and command-source behavior.

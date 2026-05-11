@@ -23,7 +23,7 @@ Read these Markdown sources before finalizing a review:
 Then read only the relevant feature/spec Markdown files for the patch under review. Prioritize:
 
 - `project_management/specs/IPC_PROTOCOL.md`
-- `project_management/specs/command_window/SPEC.md`
+- `project_management/specs/python_terminal/SPEC.md`
 - `project_management/specs/project_save_load/SPEC.md`
 - `project_management/specs/new_table_dialog/SPEC.md`
 - `project_management/specs/data_browser/SPEC.md`

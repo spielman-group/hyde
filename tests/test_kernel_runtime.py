@@ -58,8 +58,8 @@ class FakeKernelClient:
     def execute(self, code, silent=True):
         self.calls.append((code, silent))
 
-    def shutdown(self, reply=False, timeout=None):
-        self.calls.append(("shutdown", reply if timeout is None else (reply, timeout)))
+    def shutdown(self, restart=False):
+        self.calls.append(("shutdown", restart))
 
 
 class FakeCommManager:
@@ -150,6 +150,13 @@ class TestRuntimeArchitecture(unittest.TestCase):
 
                 self.assertTrue(service.is_ready())
                 self.assertEqual(ready_events, ["ready"])
+
+    def test_frontend_kernel_service_requests_real_kernel_shutdown(self):
+        service = FrontendKernelService("/tmp/kernel.json")
+        service._kernel_client = FakeKernelClient()
+
+        self.assertTrue(service.shutdown_kernel())
+        self.assertEqual(service.kernel_client().calls, [("shutdown", False)])
 
     def test_runtime_helper_routes_lane_one_messages_and_kernel_messages(self):
         calls = []
@@ -346,6 +353,69 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertEqual(port, 12345)
         self.assertEqual(startup_timeout, 60)
 
+    def test_kernel_runtime_plugin_logs_runtime_output_port_failure(self):
+        class FakeProcessTree:
+            def __init__(self):
+                self.calls = []
+
+            def subprocess(
+                self,
+                path,
+                args=None,
+                output_redirection_port=None,
+                startup_timeout=None,
+            ):
+                self.calls.append((path, args, output_redirection_port, startup_timeout))
+                process = type("FakeProcess", (), {"poll": lambda self: None})()
+                return "to-kernel", "from-kernel", process
+
+        class BrokenLoggingService:
+            def port(self):
+                raise RuntimeError("port unavailable")
+
+        class FakeFrontendKernelService:
+            def stop(self):
+                pass
+
+            def start(self):
+                pass
+
+        class FakeRuntimeHelper:
+            def __init__(self, *args, **kwargs):
+                self.started = False
+
+            def start(self):
+                self.started = True
+
+        services = {
+            "ui": object(),
+            "process_tree": FakeProcessTree(),
+            "runtime_output_service": BrokenLoggingService(),
+            "emit_plugin_event": lambda name, data=None: None,
+            "on_kernel_crashed": lambda: None,
+            "enter_no_project_state": lambda: None,
+            "activate_project": lambda path: None,
+            "on_project_state_result": lambda data: None,
+            "request_gui_quit": lambda: None,
+        }
+
+        plugin = KernelRuntimePlugin({})
+        plugin.services = services
+        plugin.frontend_kernel_service = FakeFrontendKernelService()
+
+        with patch(
+            "hyde.user_interface.plugins.kernel_runtime.RuntimeHelper",
+            FakeRuntimeHelper,
+        ):
+            with self.assertLogs("hyde", level="ERROR") as logs:
+                plugin.start_runtime()
+
+        self.assertIn(
+            "Failed to acquire runtime output redirection port",
+            "\n".join(logs.output),
+        )
+        self.assertEqual(services["process_tree"].calls[0][2], None)
+
     def test_kernel_runtime_plugin_contributes_kill_kernel_file_action(self):
         plugin = KernelRuntimePlugin({})
 
@@ -413,8 +483,8 @@ class TestRuntimeArchitecture(unittest.TestCase):
             def start(self):
                 calls.append(("frontend_start",))
 
-            def shutdown_kernel(self, reply=False):
-                calls.append(("shutdown_kernel", reply))
+            def shutdown_kernel(self):
+                calls.append(("shutdown_kernel",))
 
             def is_ready(self):
                 return True
@@ -456,7 +526,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
             calls,
             [
                 ("helper_stop",),
-                ("shutdown_kernel", False),
+                ("shutdown_kernel",),
                 ("frontend_stop",),
                 ("finalize_quit",),
             ],
@@ -475,8 +545,8 @@ class TestRuntimeArchitecture(unittest.TestCase):
             def stop(self):
                 calls.append(("frontend_stop",))
 
-            def shutdown_kernel(self, reply=False):
-                calls.append(("shutdown_kernel", reply))
+            def shutdown_kernel(self):
+                calls.append(("shutdown_kernel",))
 
         class RunningProcess:
             def __init__(self):
@@ -527,7 +597,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
             calls,
             [
                 ("helper_stop",),
-                ("shutdown_kernel", False),
+                ("shutdown_kernel",),
                 ("frontend_stop",),
                 ("terminate",),
                 ("finalize_quit",),

@@ -385,6 +385,15 @@ class TestHydeStartup(unittest.TestCase):
                 message="Hyde did not finish startup with a ready kernel.",
             )
             quit_requests = self._record_quit_requests(app)
+            kernel_process = app.plugin_manager.plugins["kernel_runtime"].kernel_process
+            original_terminate = kernel_process.terminate
+            forced_terminations = []
+
+            def record_terminate(*args, **kwargs):
+                forced_terminations.append("terminate")
+                return original_terminate(*args, **kwargs)
+
+            kernel_process.terminate = record_terminate
 
             lookup_menu_action(app, "file", "Quit").trigger()
 
@@ -397,6 +406,8 @@ class TestHydeStartup(unittest.TestCase):
                 ),
             )
             self.assertEqual(quit_requests, ["QUIT_REQUESTED"])
+            self.assertEqual(forced_terminations, [])
+            self.assertIsNotNone(kernel_process.poll())
             self.assertTrue(app.shutting_down)
             self.assertTrue(app._runtime_shutdown)
         finally:

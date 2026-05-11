@@ -70,10 +70,10 @@ class FrontendKernelService(QtCore.QObject):
         self._kernel_client.execute(code, silent=bool(silent))
         return True
 
-    def shutdown_kernel(self, reply=False):
+    def shutdown_kernel(self):
         if self._kernel_client is None:
             return False
-        self._kernel_client.shutdown(reply=reply)
+        self._kernel_client.shutdown(restart=False)
         return True
 
     def _try_connect(self):
@@ -323,6 +323,25 @@ class Plugin(HydePlugin):
                 output_redirection_port = logging_service.port()
             except Exception:
                 output_redirection_port = None
+                LOGGER.exception(
+                    "Failed to acquire runtime output redirection port; "
+                    "launching kernel without redirected runtime output."
+                )
+            if output_redirection_port is None:
+                LOGGER.info(
+                    "Launching kernel without redirected runtime output: "
+                    "runtime output service returned no port."
+                )
+            else:
+                LOGGER.info(
+                    "Launching kernel with runtime output redirection port %s.",
+                    output_redirection_port,
+                )
+        else:
+            LOGGER.info(
+                "Launching kernel without redirected runtime output: "
+                "runtime output service is unavailable."
+            )
         (
             self.kernel_to_child,
             self.kernel_from_child,
@@ -392,9 +411,9 @@ class Plugin(HydePlugin):
             helper.stop()
         if shutdown_kernel and self.frontend_kernel_service is not None:
             try:
-                self.frontend_kernel_service.shutdown_kernel(reply=False)
+                self.frontend_kernel_service.shutdown_kernel()
             except Exception:
-                pass
+                LOGGER.exception("Failed to request kernel shutdown.")
         if self.frontend_kernel_service is not None:
             self.frontend_kernel_service.stop()
 
