@@ -336,9 +336,11 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIsInstance(plugin.frontend_kernel_service, FakeFrontendKernelService)
         self.assertEqual(plugin.frontend_kernel_service.calls, ["stop", "start"])
         self.assertEqual(len(services["process_tree"].calls), 1)
-        path, args, *_ = services["process_tree"].calls[0]
+        path, args, port, startup_timeout = services["process_tree"].calls[0]
         self.assertEqual(path, KERNEL_LAUNCHER)
         self.assertEqual(args, ["-f", connection_file])
+        self.assertEqual(port, 12345)
+        self.assertEqual(startup_timeout, 60)
 
     def test_kernel_runtime_plugin_contributes_kill_kernel_file_action(self):
         plugin = KernelRuntimePlugin({})
