@@ -3,12 +3,12 @@ import os
 
 # Set desktop app ID before anything else
 import desktop_app
-desktop_app.set_process_appid('hyde')
+from hyde.paths import APPLICATION_NAME, SPLASH_SVG
+desktop_app.set_process_appid(APPLICATION_NAME)
 
 # Splash screen
 import labscript_utils.splash
-from hyde.paths import SPLASH_SVG
-splash = labscript_utils.splash.Splash(SPLASH_SVG)
+splash = labscript_utils.splash.Splash(SPLASH_SVG, application_name=APPLICATION_NAME)
 splash.show()
 
 # Update splash text and import qtutils, which can take time
@@ -20,12 +20,12 @@ splash.update_text('importing labscript mechanics')
 if os.environ.get("HYDE_DISABLE_LABSCRIPT_ERROR_DIALOGS") != "1":
     import labscript_utils.excepthook
 from labscript_utils.setup_logging import setup_logging
-setup_logging('hyde')
+setup_logging(APPLICATION_NAME)
 from labscript_utils.ls_zprocess import ProcessTree
 
 splash.update_text('initializing ProcessTree')
 process_tree = ProcessTree.instance()
-process_tree.zlock_client.set_process_name('hyde')
+process_tree.zlock_client.set_process_name(APPLICATION_NAME)
 
 # Core application
 splash.update_text('loading Hyde UI')
@@ -56,7 +56,7 @@ if __name__ == '__main__':
     if qapplication is None:
         qapplication = QtWidgets.QApplication(sys.argv)
         
-    qapplication.setApplicationName('hyde')
+    qapplication.setApplicationName(APPLICATION_NAME)
     force_light_palette(qapplication)
     
     try:

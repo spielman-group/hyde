@@ -5,6 +5,7 @@ import tempfile
 
 HYDE_DIR = os.path.dirname(os.path.abspath(__file__))
 HYDE_PKG_DIR = HYDE_DIR
+APPLICATION_NAME = "hyde"
 
 CONNECTION_FILE = os.path.join(
     tempfile.mkdtemp(prefix="hyde-session-"),
