@@ -351,6 +351,8 @@ class Plugin(HydePlugin):
             args=["-f", CONNECTION_FILE],
             output_redirection_port=output_redirection_port,
             startup_timeout=60,
+            heartbeat_interval=10,
+            allowed_missed_heartbeats=10,
         )
         self.frontend_kernel_service.stop()
         self.frontend_kernel_service.start()

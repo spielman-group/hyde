@@ -253,9 +253,18 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 args=None,
                 output_redirection_port=None,
                 startup_timeout=None,
+                heartbeat_interval=None,
+                allowed_missed_heartbeats=None,
             ):
                 self.calls.append(
-                    (path, list(args or []), output_redirection_port, startup_timeout)
+                    (
+                        path,
+                        list(args or []),
+                        output_redirection_port,
+                        startup_timeout,
+                        heartbeat_interval,
+                        allowed_missed_heartbeats,
+                    )
                 )
                 process = type("FakeProcess", (), {"poll": lambda self: None})()
                 return "to-kernel", "from-kernel", process
@@ -347,11 +356,20 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIsInstance(plugin.frontend_kernel_service, FakeFrontendKernelService)
         self.assertEqual(plugin.frontend_kernel_service.calls, ["stop", "start"])
         self.assertEqual(len(services["process_tree"].calls), 1)
-        path, args, port, startup_timeout = services["process_tree"].calls[0]
+        (
+            path,
+            args,
+            port,
+            startup_timeout,
+            heartbeat_interval,
+            allowed_missed_heartbeats,
+        ) = services["process_tree"].calls[0]
         self.assertEqual(path, KERNEL_LAUNCHER)
         self.assertEqual(args, ["-f", connection_file])
         self.assertEqual(port, 12345)
         self.assertEqual(startup_timeout, 60)
+        self.assertEqual(heartbeat_interval, 10)
+        self.assertEqual(allowed_missed_heartbeats, 10)
 
     def test_kernel_runtime_plugin_logs_runtime_output_port_failure(self):
         class FakeProcessTree:
@@ -364,8 +382,19 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 args=None,
                 output_redirection_port=None,
                 startup_timeout=None,
+                heartbeat_interval=None,
+                allowed_missed_heartbeats=None,
             ):
-                self.calls.append((path, args, output_redirection_port, startup_timeout))
+                self.calls.append(
+                    (
+                        path,
+                        args,
+                        output_redirection_port,
+                        startup_timeout,
+                        heartbeat_interval,
+                        allowed_missed_heartbeats,
+                    )
+                )
                 process = type("FakeProcess", (), {"poll": lambda self: None})()
                 return "to-kernel", "from-kernel", process
 
@@ -415,6 +444,8 @@ class TestRuntimeArchitecture(unittest.TestCase):
             "\n".join(logs.output),
         )
         self.assertEqual(services["process_tree"].calls[0][2], None)
+        self.assertEqual(services["process_tree"].calls[0][4], 10)
+        self.assertEqual(services["process_tree"].calls[0][5], 10)
 
     def test_kernel_runtime_plugin_contributes_kill_kernel_file_action(self):
         plugin = KernelRuntimePlugin({})
