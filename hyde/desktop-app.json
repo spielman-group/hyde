@@ -1,4 +1,4 @@
 {
     "product_name": "Labscript Suite",
-    "modules": {"hyde": {"display_name": "hyde - the labscript suite"}}
+    "modules": {"hyde": {"display_name": "hyde - the labscript suite", "short_display_name": "hyde"}}
 }
