@@ -12,7 +12,7 @@ class TestWindowTitle(unittest.TestCase):
         self.assertEqual(
             window_title(
                 "Figure7",
-                title="Shared Plot",
+                title_suffix="Shared Plot",
                 warning_text="Macro Incomplete",
             ),
             "Figure7: Shared Plot [Macro Incomplete]",
@@ -22,6 +22,10 @@ class TestWindowTitle(unittest.TestCase):
             "Figure7 [Macro Incomplete]",
         )
         self.assertEqual(
-            window_title("Figure7", title="Figure7", warning_text="Macro Incomplete"),
+            window_title(
+                "Figure7",
+                title_suffix="Figure7",
+                warning_text="Macro Incomplete",
+            ),
             "Figure7: Figure7 [Macro Incomplete]",
         )

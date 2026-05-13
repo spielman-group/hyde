@@ -302,7 +302,7 @@ class FigureWindow(QtWidgets.QWidget):
             self._subwindow.setWindowTitle(
                 window_title(
                     self.window_handle(),
-                    title=title,
+                    title_suffix=title,
                     warning_text=(
                         "Macro Incomplete"
                         if self.snapshot_state.has_save_warning()

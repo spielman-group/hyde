@@ -15,7 +15,8 @@ This affects all Hyde MDI windows: tool windows, tables, figures, and the Python
 - Restore MDI windows in the same stacking order they had when saved.
 - Support minimized and maximized restore states.
 - Use Qt’s existing MDI container and `QMdiSubWindow.objectName()` for identity.
-- Keep the patch focused; broader “handle language” cleanup is a separate TRD.
+- Keep the patch focused; rely on the existing `objectName()`-based identity model
+  without redefining generic MDI identity again in this work.
 
 ## Persistence Model
 
@@ -80,6 +81,8 @@ Use `QMdiSubWindow.objectName()` as the single MDI-level stable identity.
 - Tool windows: existing MDI keys, e.g. `python_terminal`
 - Tables: table identity strings, e.g. `Table0`
 - Figures: add generated figure object names, e.g. `Figure0`
+- Title-bar text remains presentation only. It begins with `objectName()` and any
+  caller-provided text is suffix-only additional detail, not replacement identity text.
 
 Do not add a new MDI registry or `QMdiSubWindow` subclass.
 

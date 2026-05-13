@@ -87,7 +87,8 @@ It does not include:
 The Table window is a single MDI subwindow containing:
 
 - a title bar whose base text is the stable table `QMdiSubWindow.objectName()` and
-  which may append source-object summary text such as `Table0: delay2, fit_delay2`
+  which may append suffix-only source-object summary text such as
+  `Table0: delay2, fit_delay2`
 - a compact selection/status strip above the grid
 - a main spreadsheet-like grid
 - scrollbars for navigating the displayed data
@@ -208,7 +209,7 @@ Examples of the intended pattern:
 - `hyde.create_table(arr1, arr2)` for creating a new table from selected arrays
 - `hyde.create_table(arr1, target="Table0")` for appending to an existing table,
   where `"Table0"` is the target table subwindow `objectName()`
-- `hyde.create_table(arr1, title="Table0", geometry=(5, 42, 510, 242), column_widths={"arr1": 262})`
+- `hyde.create_table(arr1, title="delay2, fit_delay2", geometry=(5, 42, 510, 242), column_widths={"arr1": 262})`
   for recreating a saved table layout
 - `array0 = np.array([value])` for creating a new array from the first inactive column
 

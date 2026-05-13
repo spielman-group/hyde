@@ -15,7 +15,7 @@ other current generic window-handle behavior.
 
 Window titles remain presentation text only. They are derived from the stable
 `objectName()` and may append additional descriptive suffix text without changing MDI
-identity.
+identity. Caller-provided title text is suffix-only detail, not a replacement title.
 
 ## User Stories
 
@@ -43,8 +43,8 @@ identity.
   and `Figure` prefixes respectively.
 - The generated table or figure name is assigned to the subwindow `objectName()`.
 - The window title is derived presentation text. It begins with `objectName()` and may
-  append `": ..."` detail text. Lookup, ordering, and persistence never depend on the
-  title text.
+  append `": ..."` detail text. Caller-provided title text is suffix-only additional
+  detail. Lookup, ordering, and persistence never depend on the title text.
 
 ## Testing Decisions
 

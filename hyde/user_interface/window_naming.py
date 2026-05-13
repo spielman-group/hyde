@@ -23,13 +23,13 @@ def stable_window_name(subwindow, fallback=None):
     return None if fallback is None else str(fallback)
 
 
-def window_title(stable_name, title=None, detail_text=None, warning_text=None):
+def window_title(stable_name, title_suffix=None, detail_text=None, warning_text=None):
     stable_name = str(stable_name)
-    title_text = str(title).strip() if title is not None else ""
+    suffix_text = str(title_suffix).strip() if title_suffix is not None else ""
     detail = str(detail_text).strip() if detail_text is not None else ""
     suffix = ""
-    if title_text:
-        suffix = title_text
+    if suffix_text:
+        suffix = suffix_text
     elif detail:
         suffix = detail
     base_title = stable_name if not suffix else f"{stable_name}: {suffix}"

@@ -90,7 +90,7 @@ class TableWorkspaceService:
         subwindow.setWindowTitle(
             window_title(
                 stable_name,
-                title=title,
+                title_suffix=title,
                 detail_text=", ".join(names),
             )
         )

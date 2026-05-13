@@ -42,7 +42,8 @@ For first-class figures, this stable `objectName()` is also the base user-facing
 figure name used in recreation source, for example `plt.figure("Figure0")`.
 The GUI window title is derived presentation text. It begins with the stable
 `objectName()` and may append `": ..."` detail text without changing the figure's MDI
-identity.
+identity. Any caller-provided title text is suffix-only additional detail, not a
+replacement title.
 
 The GUI does not own canonical plot structure, artist state, or recreation source.
 For first-class figures, the recreation and editability truth is a kernel-owned IR
@@ -99,7 +100,8 @@ The Figure window is an MDI child containing:
 - the rendered matplotlib figure canvas
 - figure-window controls or menus that operate on the active figure
 - a title bar whose base text is the stable figure `objectName()` and which may append
-  descriptive suffix text
+  descriptive suffix text supplied as additional detail rather than replacement title
+  text
 - close behavior integrated with the generic saveable-window flow for first-class
   figures
 - title-bar warning text when Hyde cannot yet lower complete recreation source for the
