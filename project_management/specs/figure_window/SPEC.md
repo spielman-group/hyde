@@ -31,9 +31,18 @@ Only first-class `@hyde.figure` figures participate in that relationship in the
 initial deployment. Non-decorated figures remain ordinary kernel-side matplotlib
 figures and do not open Hyde figure windows.
 
-For saved macros and `session.py` restore source, the stable figure handle is the
-figure label/title used to identify the figure in user-facing source, for example
-`plt.figure("Figure0")`.
+For generic MDI behavior, saved macros, and `session.py` restore source, the stable
+figure window identity is the `QMdiSubWindow.objectName()` string, for example
+`Figure0`.
+
+Hyde generates table and figure subwindow names through one shared naming path.
+Figures use the `Figure` prefix and tables use the `Table` prefix.
+
+For first-class figures, this stable `objectName()` is also the base user-facing
+figure name used in recreation source, for example `plt.figure("Figure0")`.
+The GUI window title is derived presentation text. It begins with the stable
+`objectName()` and may append `": ..."` detail text without changing the figure's MDI
+identity.
 
 The GUI does not own canonical plot structure, artist state, or recreation source.
 For first-class figures, the recreation and editability truth is a kernel-owned IR
@@ -89,6 +98,8 @@ The Figure window is an MDI child containing:
 
 - the rendered matplotlib figure canvas
 - figure-window controls or menus that operate on the active figure
+- a title bar whose base text is the stable figure `objectName()` and which may append
+  descriptive suffix text
 - close behavior integrated with the generic saveable-window flow for first-class
   figures
 - title-bar warning text when Hyde cannot yet lower complete recreation source for the
@@ -144,8 +155,9 @@ active figure and launches the correct figure-edit surface.
 
 ## Context Menu And Window Actions
 
-The active figure window exposes figure-scoped actions that operate against the figure
-identity established by the matplotlib registry key.
+The active figure window exposes figure-scoped actions that operate against the active
+window selected in the MDI workspace and resolve to the live figure through Hyde's
+existing runtime figure-routing path.
 
 Initial actions are:
 
@@ -155,9 +167,9 @@ Initial actions are:
 - `Regenerate From IR`
 
 These actions are scoped to the active figure window only. They do not operate on
-other figures implicitly. User-facing recreation source keeps the stable figure handle
-derived from the figure label, while live GUI routing continues to resolve the active
-runtime figure through the current matplotlib registry identity.
+other figures implicitly. User-facing recreation source keeps the stable
+`objectName()`-derived figure name, while live GUI routing continues to resolve the
+active runtime figure through the current matplotlib registry identity.
 
 ## Command Generation
 

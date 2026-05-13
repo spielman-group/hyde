@@ -27,6 +27,11 @@ authoritative model.
 The table is not a standalone data store. It mirrors kernel-owned objects and sends
 explicit Python commands when the user edits supported cells.
 
+For generic MDI behavior, session restore, and append targeting, the stable table
+window identity is the `QMdiSubWindow.objectName()` string, for example `Table0`.
+Hyde generates table and figure subwindow names through one shared naming path.
+Tables use the `Table` prefix and figures use the `Figure` prefix.
+
 The table follows Hyde's state-control pattern:
 
 - `TableWidget` owns `TableState(HydeGuiState)` for table construction, recreation,
@@ -81,7 +86,8 @@ It does not include:
 
 The Table window is a single MDI subwindow containing:
 
-- a title bar that identifies the table by source objects
+- a title bar whose base text is the stable table `QMdiSubWindow.objectName()` and
+  which may append source-object summary text such as `Table0: delay2, fit_delay2`
 - a compact selection/status strip above the grid
 - a main spreadsheet-like grid
 - scrollbars for navigating the displayed data
@@ -103,7 +109,8 @@ data.
 The initial table API is deliberately split in two:
 
 - `hyde.create_table(...)` creates a new table from selected supported objects
-- `hyde.create_table(..., target=<table_name>)` appends supported objects to an existing table
+- `hyde.create_table(..., target=<table_name>)` appends supported objects to an
+  existing table, where `<table_name>` is the target subwindow `objectName()`
 - `hyde.create_table(..., geometry=(x, y, width, height))` recreates a saved table window layout
 - `hyde.create_table(..., column_widths={"array_name": width, ...})` recreates saved data-column widths
 - `@hyde.table` registers an explicit saved table recreation macro
@@ -199,7 +206,8 @@ Examples of the intended pattern:
 - `array[row] = value` for a 1D array-like object
 - `array = np.append(array, value)` for appending one value below an existing column
 - `hyde.create_table(arr1, arr2)` for creating a new table from selected arrays
-- `hyde.create_table(arr1, target="Table0")` for appending to an existing table
+- `hyde.create_table(arr1, target="Table0")` for appending to an existing table,
+  where `"Table0"` is the target table subwindow `objectName()`
 - `hyde.create_table(arr1, title="Table0", geometry=(5, 42, 510, 242), column_widths={"arr1": 262})`
   for recreating a saved table layout
 - `array0 = np.array([value])` for creating a new array from the first inactive column
@@ -222,7 +230,7 @@ table, and the menu invokes them with those visible names.
 Saved table recreation source may include non-default `geometry` and `column_widths`
 kwargs so a recreated table can reopen with its saved layout.
 Project session restore uses the same lower-level recreation builder in `session.py`,
-but preserves the stable table handle through `target=<table_handle>` and adds
+but preserves the stable table `objectName()` through `target=<table_name>` and adds
 `window_state='minimized'` only when needed.
 
 The save dialog receives the current `TableState` directly when it opens. The dialog
@@ -258,8 +266,8 @@ Layout state is intentionally represented in two persistence products:
 
 The lower-level recreation-source builder is shared. Explicit macros in
 `procedures/__init__.py` clear `target` so the user can reopen a fresh table by name,
-while `session.py` restore preserves `target` so the live handle remains stable across
-project reopen.
+while `session.py` restore preserves `target` so the live table `objectName()`
+remains stable across project reopen.
 
 ## Explicit Exclusions
 
@@ -297,7 +305,7 @@ These capabilities are deferred until their underlying backend behavior is defin
 
 ### 13_table_with_features.png
 ![Table Features](13_table_with_features.png)
-- What it shows: a table titled `Table0:delay2,fit_delay2` with a point column, two
+- What it shows: a table titled `Table0: delay2, fit_delay2` with a point column, two
   data columns, a current-cell value strip, a gear menu, and scrollbars.
 - Hyde interpretation: the table supports direct cell editing and kernel-synchronized
   display of selected array-like objects.

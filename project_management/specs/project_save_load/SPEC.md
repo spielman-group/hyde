@@ -241,9 +241,10 @@ The table plugin currently persists:
 - table geometry
 - `window_state='minimized'`
 - saved data-column widths
-- active table handle
+- active table `objectName()`
 - table counter
-- stable table handles through `target=<handle>` in `session.py` restore blocks
+- stable table `objectName()` values through `target=<table_name>` in `session.py`
+  restore blocks
 
 Table recreation source generated from `TableState` may also include:
 

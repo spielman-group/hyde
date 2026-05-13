@@ -196,9 +196,10 @@ class HydePlugin(BasePlugin):
         subwindow = self.mdi_subwindow(mdi_key or session_key)
         if subwindow is None:
             return {}
+        object_name = subwindow_identity(subwindow, fallback=mdi_key or session_key)
         return {
             "tool_windows": {
-                session_key: capture_subwindow_state(subwindow),
+                object_name: capture_subwindow_state(subwindow),
             }
         }
 
@@ -209,9 +210,10 @@ class HydePlugin(BasePlugin):
         subwindow = self.mdi_subwindow(key)
         if subwindow is None:
             return None
+        object_name = subwindow_identity(subwindow, fallback=key)
         restore_subwindow_state(
             subwindow,
-            session.get("tool_windows", {}).get(session_key, {}),
+            session.get("tool_windows", {}).get(object_name, {}),
         )
         return subwindow
 
@@ -395,6 +397,7 @@ class HydeMDIContext:
         contribution = info["contribution"]
         widget = contribution["factory"](parent=self.mdi_area, data=info["data"])
         subwindow = self.mdi_area.addSubWindow(widget)
+        subwindow.setObjectName(key)
         if self.configure_subwindow is not None:
             self.configure_subwindow(subwindow)
         title = contribution.get("title")
@@ -439,6 +442,13 @@ class HydeMDIContext:
         if self.created_callback is not None:
             self.created_callback(key, None, None)
         return widget, subwindow
+
+
+def subwindow_identity(subwindow, fallback=None):
+    if subwindow is None:
+        return fallback
+    object_name = str(subwindow.objectName() or "").strip()
+    return object_name or fallback
 
 
 def capture_subwindow_state(subwindow):

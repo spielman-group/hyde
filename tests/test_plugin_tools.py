@@ -160,6 +160,73 @@ class TestPluginTools(unittest.TestCase):
             context.subwindow("plugin_window").windowTitle(),
             "Plugin Window",
         )
+        self.assertEqual(
+            context.subwindow("plugin_window").objectName(),
+            "plugin_window",
+        )
+
+    def test_tool_window_session_helpers_use_subwindow_object_name_identity(self):
+        main_window = QtWidgets.QMainWindow()
+        mdi_area = QtWidgets.QMdiArea()
+        main_window.setCentralWidget(mdi_area)
+        main_window.show()
+        self.qapp.processEvents()
+        context = HydeMDIContext(mdi_area)
+        plugin = HydePlugin({})
+        plugin.services = {"mdi_context": context}
+        context.add(
+            "demo",
+            {
+                "context": "mdi",
+                "key": "real_window",
+                "title": "Real Window",
+                "factory": lambda parent=None, data=None: QtWidgets.QWidget(parent),
+            },
+            {"services": {}},
+        )
+
+        plugin.ensure_mdi_widget("real_window")
+        subwindow = plugin.mdi_subwindow("real_window")
+        subwindow.setGeometry(QtCore.QRect(11, 22, 333, 444))
+        subwindow.show()
+        self.qapp.processEvents()
+
+        save_data = plugin.tool_window_save_data(
+            "legacy_session_key",
+            mdi_key="real_window",
+        )
+
+        self.assertEqual(
+            set(save_data["tool_windows"]),
+            {"real_window"},
+        )
+
+        subwindow.hide()
+        subwindow.setGeometry(QtCore.QRect(1, 2, 3, 4))
+        restored = plugin.restore_tool_window(
+            {
+                "tool_windows": {
+                    "real_window": {
+                        "visible": True,
+                        "geometry": [11, 22, 333, 444],
+                    }
+                }
+            },
+            "legacy_session_key",
+            mdi_key="real_window",
+        )
+
+        self.assertIs(restored, subwindow)
+        self.assertTrue(subwindow.isVisible())
+        self.assertEqual(
+            (
+                subwindow.geometry().x(),
+                subwindow.geometry().y(),
+                subwindow.geometry().width(),
+                subwindow.geometry().height(),
+            ),
+            (11, 22, 333, 444),
+        )
 
     def test_configure_persistent_subwindow_uses_blank_icon_instead_of_app_icon(self):
         dummy_app = type("DummyApp", (), {"_subwindow_filters": []})()
