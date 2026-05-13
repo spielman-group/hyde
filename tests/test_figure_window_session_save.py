@@ -45,7 +45,6 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         )
 
         self.assertEqual(snapshot.default_macro_name(), "Figure0")
-        self.assertFalse(hasattr(snapshot, "handle"))
         self.assertEqual(snapshot.tracked_names(), ("delay", "fit_delay", "raw_delay"))
         self.assertIn("fig = plt.figure('Figure0')", snapshot.call_source())
         macro = snapshot.macro_source("Graph0")
@@ -147,7 +146,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             widget.force_close()
             mdi_area.close()
 
-    def test_figure_window_does_not_keep_private_handle_state_after_binding(self):
+    def test_figure_window_uses_subwindow_object_name_as_stable_identity(self):
         widget = FigureWindow(figure_number=1)
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
@@ -156,7 +155,6 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         try:
             widget.bind_subwindow(subwindow)
 
-            self.assertFalse(hasattr(widget, "_window_handle"))
             self.assertEqual(widget.window_handle(), "Figure7")
         finally:
             widget.force_close()

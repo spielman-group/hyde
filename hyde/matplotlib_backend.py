@@ -159,7 +159,7 @@ def finalize_figure_build_session(session, result):
                 existing_names.add(label)
     except Exception:
         existing_names = set()
-    resolved_name, _ = resolve_requested_name(
+    resolved_name = resolve_requested_name(
         "Figure",
         existing_names,
         requested_name=requested_name,
@@ -1260,7 +1260,6 @@ class FigureManagerHyde(FigureManagerBase):
         return {
             "event": event,
             "figure_number": self.num,
-            "title": self.get_window_title(),
             "snapshot": figure_snapshot_payload(self.canvas.figure, self.num),
         }
 

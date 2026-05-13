@@ -278,7 +278,6 @@ class TableCodec(FeatureCodec):
             "settings": {
                 "command": "open",
                 "name": None,
-                "append_name": None,
                 "geometry": None,
                 "column_widths": {},
                 "request_id": None,
@@ -304,10 +303,6 @@ class TableCodec(FeatureCodec):
         settings["command"] = str(settings.get("command", "open"))
         name = settings.get("name")
         settings["name"] = None if name in (None, "") else str(name)
-        append_name = settings.get("append_name")
-        settings["append_name"] = (
-            None if append_name in (None, "") else str(append_name)
-        )
         geometry = settings.get("geometry")
         if geometry in (None, []):
             settings["geometry"] = None
@@ -339,8 +334,8 @@ class TableCodec(FeatureCodec):
 
         if command in {"open", "append", "push_table_data"} and not normalized["items"]:
             raise ValueError(f"Table command {command!r} requires at least one item.")
-        if command == "append" and not settings["append_name"]:
-            raise ValueError("Table append requires settings.append_name.")
+        if command == "append" and not settings["name"]:
+            raise ValueError("Table append requires settings.name.")
         if command == "push_table_data" and not settings["request_id"]:
             raise ValueError("Table data push requires settings.request_id.")
 
@@ -392,7 +387,7 @@ class TableCodec(FeatureCodec):
     @classmethod
     def _append_table_arguments(cls, normalized):
         arguments = list(normalized["items"])
-        arguments.append(f"name={normalized['settings']['append_name']!r}")
+        arguments.append(f"name={normalized['settings']['name']!r}")
         return ", ".join(arguments)
 
     @classmethod

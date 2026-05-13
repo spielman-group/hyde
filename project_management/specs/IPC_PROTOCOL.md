@@ -160,23 +160,39 @@ GUI behavior:
 - restore `session.toml` after a successful load result for the active project
 
 #### `['OPEN_TABLE_REQUEST', payload]`
-Sent when the kernel requests that the GUI open or update a table.
+Sent when the kernel requests that the GUI open a table.
 
 Payload:
 ```python
 {
     'names': ['x', 'y'],
-    'target': None,
-    'title': 'My Table',
+    'name': 'Table0',
     'geometry': (5, 42, 510, 242),
     'column_widths': {'y': 262},
+    'window_state': 'minimized',
 }
 ```
 
 GUI behavior:
-- create a new table window when `target` is `None`
-- append columns to an existing table when `target` matches an open table handle
-- ignore `geometry` and `column_widths` for append-to-target requests
+- create a new table window when `name` is free
+- otherwise fall forward to the next available stable `TableN` name
+- restore saved `geometry`, `column_widths`, and `window_state` when provided
+
+#### `['APPEND_TABLE_REQUEST', payload]`
+Sent when the kernel requests that the GUI append columns to an existing table.
+
+Payload:
+```python
+{
+    'names': ['x', 'y'],
+    'name': 'Table0',
+}
+```
+
+GUI behavior:
+- append columns to the existing open table whose `QMdiSubWindow.objectName()` is
+  `name`
+- ignore the request if no such open table exists
 
 #### `['TABLE_DATA_RESPONSE', payload]`
 Sent when the kernel pushes structured table data back to the GUI.

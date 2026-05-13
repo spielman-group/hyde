@@ -37,7 +37,7 @@ class TableWorkspaceService:
         column_widths=None,
         window_state=None,
     ):
-        handle, _ = resolve_requested_name(
+        handle = resolve_requested_name(
             "Table",
             self.tables,
             requested_name=name,
@@ -166,7 +166,7 @@ class TableFeatureService:
         state = TableState()
         state.set_items(names)
         state.set_command("append")
-        state.set_append_name(active_table_handle)
+        state.set_name(active_table_handle)
         self.plugin.services["python_execution_service"].execute_visible(
             state.python_source()
         )

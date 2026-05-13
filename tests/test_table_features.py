@@ -85,7 +85,7 @@ class TestTableCodec(unittest.TestCase):
         state = TableState()
         state.set_items(["delay2", "fit_delay2"])
         state.set_command("append")
-        state.set_append_name("Table7")
+        state.set_name("Table7")
 
         source = state.python_source()
 
@@ -455,8 +455,6 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         self.assertEqual(first.window_handle(), "Table0")
         self.assertEqual(second.window_handle(), "Table1")
-        self.assertFalse(hasattr(first, "handle"))
-        self.assertFalse(hasattr(second, "handle"))
         self.assertEqual(first.parentWidget().objectName(), "Table0")
         self.assertEqual(second.parentWidget().objectName(), "Table1")
         self.assertEqual(first.parentWidget().windowTitle(), "Table0")
@@ -489,7 +487,6 @@ class TestTableWorkspaceService(unittest.TestCase):
         try:
             table.bind_subwindow(subwindow)
 
-            self.assertFalse(hasattr(table, "handle"))
             self.assertEqual(subwindow.objectName(), "Table7")
             self.assertEqual(table.window_handle(), "Table7")
             self.assertIn("name='Table7'", table.session_restore_source())

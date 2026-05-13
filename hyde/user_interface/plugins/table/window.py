@@ -47,14 +47,6 @@ class TableState(HydeGuiState):
         else:
             self.apply_action({"type": "clear", "path": ("settings", "name")})
 
-    def set_append_name(self, name):
-        if name:
-            self.apply_action(
-                {"type": "set", "path": ("settings", "append_name"), "value": name}
-            )
-        else:
-            self.apply_action({"type": "clear", "path": ("settings", "append_name")})
-
     def set_geometry(self, geometry):
         if geometry:
             self.apply_action(

@@ -23,8 +23,8 @@
 
 ### IPC lanes
 - **Lane 1: control**. `zprocess.ProcessTree` carries orchestration plus the narrow
-  implemented table relays (`OPEN_TABLE_REQUEST`, `TABLE_DATA_RESPONSE`, project-state
-  notifications).
+  implemented table relays (`OPEN_TABLE_REQUEST`, `APPEND_TABLE_REQUEST`,
+  `TABLE_DATA_RESPONSE`, project-state notifications).
 - **Lane 2: execution and metadata**. Standard Jupyter execution plus Jupyter `comm`
   channels carry visible commands, silent background execution through the
   kernel-runtime plugin's shared frontend client, Spyder namespace view, and

@@ -6,7 +6,6 @@ from qtutils.qt import QtCore, QtWidgets
 
 from hyde.user_interface.figure_comm import COMM_TARGET
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
-from hyde.user_interface.window_naming import resolve_requested_name
 
 from .dialogs import NewFigureDialog
 from .window import FigureState, FigureWindow
@@ -43,16 +42,9 @@ class FigureWorkspaceService:
                 figure_number=figure_number,
                 services=services,
             )
-            stable_name, _ = resolve_requested_name(
-                "Figure",
-                {
-                    live_figure.window_handle()
-                    for live_figure in self.figures.values()
-                },
-                requested_name=(
-                    snapshot.get("default_macro_name")
-                    or payload.get("title")
-                ),
+            stable_name = str(
+                snapshot.get("default_macro_name")
+                or f"Figure{figure_number}"
             )
             subwindow = self.plugin.services["mdi_area"].addSubWindow(figure)
             subwindow.setWindowIcon(blank_window_icon())

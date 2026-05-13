@@ -25,7 +25,7 @@ from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure.window import FigureWindow
 from hyde.user_interface.plugins.table import Plugin as TablePlugin
 from hyde.user_interface.plugins.table.window import TableWidget
-from hyde.user_interface.window_naming import next_numbered_name, stable_window_name
+from hyde.user_interface.window_naming import resolve_requested_name, stable_window_name
 
 
 class RecordingMenu(QtWidgets.QMenu):
@@ -608,14 +608,19 @@ class TestPluginTools(unittest.TestCase):
 
         self.assertEqual(triggered, [("Macro0", ("x", "y"))])
 
-    def test_next_numbered_name_is_shared_counter_based_naming_helper(self):
-        name, next_counter = next_numbered_name("Table", {"Table0", "Table1"}, 0)
-        self.assertEqual(name, "Table2")
-        self.assertEqual(next_counter, 3)
-
-        name, next_counter = next_numbered_name("Figure", {"Figure0"}, 0)
-        self.assertEqual(name, "Figure1")
-        self.assertEqual(next_counter, 2)
+    def test_resolve_requested_name_accepts_requested_name_or_falls_forward(self):
+        self.assertEqual(
+            resolve_requested_name("Table", {"Table0", "Table1"}, requested_name="Table7"),
+            "Table7",
+        )
+        self.assertEqual(
+            resolve_requested_name("Table", {"Table0", "Table1"}, requested_name="Table0"),
+            "Table2",
+        )
+        self.assertEqual(
+            resolve_requested_name("Figure", {"Figure0"}, requested_name=None),
+            "Figure1",
+        )
 
 if __name__ == "__main__":
     unittest.main()
