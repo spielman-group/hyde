@@ -50,6 +50,14 @@ Window order:
    - `minimized`: call `showMinimized()`
    - `maximized`: call `showMaximized()`
 
+Implementation note:
+
+- First-class figure windows arrive over the Jupyter figure `comm` path rather than the
+  ProcessTree restore lane used by `hyde.task_complete(...)`.
+- Hyde therefore finalizes saved mixed-window MDI ordering over a small number of GUI
+  event-loop turns after successful `session_restore`, rather than assuming every
+  named subwindow already exists at the instant `task_complete(...)` is received.
+
 If session restore fails, skip final ordering/state finalization and let the existing raised error appear through the current log/output path.
 
 ## Completion Signal

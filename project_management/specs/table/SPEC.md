@@ -283,6 +283,10 @@ table name through `name=<table_name>`. That requested name becomes the table
 window's `objectName()` if it is free; otherwise Hyde falls forward to the next
 available `TableN` name.
 
+During project load, table windows reopen from `session.py` before the shell reapplies
+saved mixed-workspace MDI ordering. That ordering step uses the stable subwindow
+`objectName()` across tool windows, tables, and figures.
+
 ## Explicit Exclusions
 
 The following Igor concepts are not part of the initial Hyde table:

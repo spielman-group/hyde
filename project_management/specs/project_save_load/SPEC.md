@@ -146,6 +146,17 @@ Muted GUI micro-mutations and runtime-helper-owned silent execution are excluded
   the loaded `session.toml` payload to plugins so each plugin can restore its own GUI
   session state, and then executes `session.py` silently so saveable windows reopen
   through their normal recreation paths.
+- `session.py` executes inside a wrapper that reports
+  `hyde.task_complete("session_restore", success=...)`.
+- If `session_restore` succeeds, the GUI reapplies saved MDI stacking order and any
+  deferred tool-window minimized/maximized presentation state.
+- First-class figure windows are created over the Jupyter figure `comm` path, so the
+  GUI may need a small number of event-loop turns after `session_restore` succeeds
+  before all named saveable windows exist. Hyde therefore finalizes saved MDI order
+  with a short settling pass rather than assuming every restored subwindow is present
+  immediately when `task_complete(...)` arrives.
+- If `session_restore` fails, the existing error path remains intact and that final
+  ordering/presentation pass is skipped.
 - If load fails after entering no-project state, both the kernel and the GUI remain in no-project state.
 
 ## Command Generation
@@ -187,7 +198,9 @@ Hyde command contract for save/load.
 6. kernel restores saved objects into `__main__`
 7. kernel sets `HYDE_PROJECT_DIR` to the loaded project and signals GUI activation
 8. GUI restores `main_window` state and emits `project_loaded` with the parsed `session.toml` payload so plugins restore their own GUI session state
-9. GUI dispatches `session.py` through the kernel-runtime hidden execution path so saveable windows reopen after normal project activation
+9. GUI dispatches wrapped `session.py` through the kernel-runtime hidden execution path so saveable windows reopen after normal project activation
+10. On successful `hyde.task_complete("session_restore", True)`, GUI reapplies saved `main_window.mdi_window_order` plus deferred tool-window presentation state
+11. If late-arriving first-class figure windows are still entering through the figure `comm` path, GUI repeats the ordering pass over a small number of event-loop turns until the named restored subwindow set stabilizes
 
 Saved kernel objects override same-name objects produced by `procedures/__init__.py`.
 Objects from the previously loaded project do not survive a project switch unless they are recreated by procedures or restored from the new project's saved state.
@@ -238,7 +251,7 @@ Kernel objects are saved by exclusion, not whitelist.
 The table plugin currently persists:
 
 - table geometry
-- `window_state='minimized'`
+- `window_state='minimized'` or `window_state='maximized'`
 - saved data-column widths
 - active table `objectName()`
 - stable table `objectName()` values through `name=<table_name>` in `session.py`
@@ -270,5 +283,7 @@ Figure project/session restore therefore follows these rules:
 - the figure IR remains the recreation and editability truth
 - project/session restore reopens figures from IR-backed recreation source in
   `session.py`
+- figure restore metadata may request `window_pos`, `window_state='minimized'`, or
+  `window_state='maximized'`
 - Hyde does not pickle live matplotlib `Figure` objects as the persistence format
 - Hyde does not rely on GUI-owned semantic figure state during save or restore

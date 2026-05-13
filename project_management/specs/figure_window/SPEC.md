@@ -116,7 +116,7 @@ The window may cache transient viewport concerns such as:
 - focus
 - visibility
 - `window_pos`
-- `window_state='minimized'`
+- `window_state='minimized'` or `window_state='maximized'`
 - temporary resize/stretch presentation during drag
 
 The window does not cache authoritative scientific state or canonical plot structure.
@@ -288,6 +288,10 @@ Close behavior follows this sequence:
 2. first-class figures prompt through the save-window path unless bypassed by the
    supported close gesture
 3. kernel-side close removes the corresponding live figure and attached IR
+
+During project load, first-class figures reopen from `session.py` before the shell
+reapplies saved mixed-workspace MDI ordering. That final ordering step uses the
+stable subwindow `objectName()` across tool windows, tables, and figures.
 
 ## Explicit Exclusions
 

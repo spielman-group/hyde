@@ -37,8 +37,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Non-decorated figures stay out of the Hyde window system.
 - Live matplotlib `Figure` is runtime truth.
 - `fig._hyde_ir` is recreation/editability truth.
-- Figure windows restore from `session.py` and preserve `window_pos` plus minimized
-  state.
+- Figure windows restore from `session.py` and preserve `window_pos` plus
+  minimized/maximized window state.
 - Figures that cannot yet lower complete recreation source are marked
   `[Macro Incomplete]`.
 
@@ -47,6 +47,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Declarative GUI state saves to `session.toml`.
 - Open saveable windows save to `session.py`.
 - Visible command history saves to `terminal/history.py`.
+- Mixed MDI restore preserves named `objectName()` order across tool windows, tables,
+  and figures after successful `session.py` completion.
 
 ## Remaining Near-Term Gaps
 - define the final Python Terminal output policy for silent kernel-runtime execution

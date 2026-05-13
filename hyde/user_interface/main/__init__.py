@@ -102,6 +102,8 @@ class HydeApp:
         self._session_restore_presentation_deferred = False
         self._session_restore_tool_windows = {}
         self._session_restore_session = None
+        self._session_restore_finalize_retries = 0
+        self._session_restore_last_named_count = None
         self.plugin_manager = HydePluginManager(
             plugin_package="hyde.user_interface.plugins",
             plugins_dir=os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins"),
@@ -547,20 +549,42 @@ class HydeApp:
         self._session_restore_presentation_deferred = False
         self._session_restore_tool_windows = {}
         self._session_restore_session = None
+        self._session_restore_finalize_retries = 0
+        self._session_restore_last_named_count = None
+
+    def _schedule_session_restore_order_finalize(self):
+        QtCore.QTimer.singleShot(0, self._finalize_session_restore_order)
+
+    def _finalize_session_restore_order(self):
+        session = self._session_restore_session
+        if session is None:
+            return
+        mdi_area = getattr(self.ui, "mdiArea", None)
+        if mdi_area is None:
+            self._clear_session_restore_state()
+            return
+        window_order = session.get("main_window", {}).get("mdi_window_order", [])
+        apply_mdi_window_order(mdi_area, window_order)
+        named_count = sum(
+            1
+            for subwindow in mdi_area.subWindowList(QtWidgets.QMdiArea.StackingOrder)
+            if str(subwindow.objectName() or "").strip()
+        )
+        if (
+            self._session_restore_finalize_retries <= 0
+            or named_count == self._session_restore_last_named_count
+        ):
+            self._clear_session_restore_state()
+            return
+        self._session_restore_last_named_count = named_count
+        self._session_restore_finalize_retries -= 1
+        self._schedule_session_restore_order_finalize()
 
     def _complete_session_restore(self, success):
         session = self._session_restore_session
         if session is None:
             return
         if success:
-            main_window = session.get("main_window", {})
-            window_order = main_window.get("mdi_window_order", [])
-            mdi_area = getattr(self.ui, "mdiArea", None)
-            if mdi_area is not None:
-                apply_mdi_window_order(
-                    mdi_area,
-                    window_order,
-                )
             for name, (subwindow, info) in list(
                 self._session_restore_tool_windows.items()
             ):
@@ -569,11 +593,10 @@ class HydeApp:
                     info,
                     session_key=name,
                 )
-            if mdi_area is not None:
-                apply_mdi_window_order(
-                    mdi_area,
-                    window_order,
-                )
+            self._session_restore_finalize_retries = 3
+            self._session_restore_last_named_count = None
+            self._schedule_session_restore_order_finalize()
+            return
         self._clear_session_restore_state()
 
     @inmain_decorator()

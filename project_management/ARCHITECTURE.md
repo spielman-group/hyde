@@ -89,6 +89,12 @@ example.hy/
 4. GUI emits `project_loaded` so plugins restore their declarative GUI state.
 5. GUI executes `session.py` silently so first-class figures and tables reopen through
    their normal recreation paths.
+6. If `session.py` reports `hyde.task_complete("session_restore", True)`, the GUI
+   reapplies saved MDI stacking order and deferred tool-window presentation state.
+   Because first-class figure windows arrive asynchronously over the figure `comm`
+   path, Hyde may retry that ordering pass over a small number of event-loop turns
+   until the named MDI subwindow set stabilizes. If session restore fails, that
+   finalization step is skipped.
 
 ### Project save order
 1. GUI dispatches hidden `hyde.save_project(...)` through the kernel-runtime path.
