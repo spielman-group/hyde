@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import ast
 import logging
+import textwrap
 from pathlib import Path
 
 import tomllib
 import tomli_w
-from qtutils.qt import QtCore
+from qtutils.qt import QtCore, QtWidgets
 
 
 def _encode_qbytearray(value):
@@ -50,6 +51,7 @@ def _plugin_items(app):
 
 def capture_session(app):
     logger = logging.getLogger("hyde")
+    mdi_area = getattr(app.ui, "mdiArea", None)
     session = {
         "format_version": 1,
         "main_window": {
@@ -68,6 +70,10 @@ def capture_session(app):
             continue
         if plugin_data:
             _merge_session_data(session, plugin_data)
+    if mdi_area is not None:
+        session["main_window"]["mdi_window_order"] = capture_mdi_window_order(
+            mdi_area
+        )
     return session
 
 def capture_session_source(app):
@@ -172,3 +178,46 @@ def restore_main_window(app, session):
         app.ui.restoreGeometry(_decode_qbytearray(geometry))
     if state:
         app.ui.restoreState(_decode_qbytearray(state))
+
+
+def capture_mdi_window_order(mdi_area):
+    return [
+        name
+        for name in (
+            str(subwindow.objectName() or "").strip()
+            for subwindow in mdi_area.subWindowList(QtWidgets.QMdiArea.StackingOrder)
+        )
+        if name
+    ]
+
+
+def apply_mdi_window_order(mdi_area, window_order):
+    if not isinstance(window_order, (list, tuple)):
+        return
+    subwindows = {
+        str(subwindow.objectName() or "").strip(): subwindow
+        for subwindow in mdi_area.subWindowList(QtWidgets.QMdiArea.StackingOrder)
+        if str(subwindow.objectName() or "").strip()
+    }
+    for name in window_order:
+        subwindow = subwindows.get(str(name).strip())
+        if subwindow is None or subwindow.isHidden():
+            continue
+        subwindow.raise_()
+
+
+def build_session_restore_wrapper(session_source):
+    stripped_source = str(session_source or "").strip()
+    if not stripped_source:
+        return ""
+    indented_source = textwrap.indent(f"{stripped_source}\n", "    ")
+    return (
+        "import hyde\n"
+        "try:\n"
+        f"{indented_source}"
+        "except Exception:\n"
+        '    hyde.task_complete("session_restore", False)\n'
+        "    raise\n"
+        "else:\n"
+        '    hyde.task_complete("session_restore", True)\n'
+    )

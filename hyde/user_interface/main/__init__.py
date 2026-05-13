@@ -11,6 +11,8 @@ from hyde.paths import (
 )
 from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.main.project_state import (
+    apply_mdi_window_order,
+    build_session_restore_wrapper,
     try_read_history,
     try_read_session,
     try_read_session_source,
@@ -23,6 +25,7 @@ from hyde.user_interface.plugin_tools import (
     HydeMenuContext,
     HydePluginManager,
     blank_window_icon,
+    finalize_subwindow_state,
 )
 
 class PersistentSubwindowFilter(QtCore.QObject):
@@ -96,6 +99,9 @@ class HydeApp:
         self._close_ready = False
         self._quit_command_sent = False
         self._startup_complete = False
+        self._session_restore_presentation_deferred = False
+        self._session_restore_tool_windows = {}
+        self._session_restore_session = None
         self.plugin_manager = HydePluginManager(
             plugin_package="hyde.user_interface.plugins",
             plugins_dir=os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins"),
@@ -170,6 +176,21 @@ class HydeApp:
             "activate_project": self.activate_project,
             "on_project_state_result": self.on_project_state_result,
             "request_gui_quit": self.request_gui_quit,
+            "get_session_restore_presentation_deferred": (
+                getattr(
+                    self,
+                    "get_session_restore_presentation_deferred",
+                    lambda: False,
+                )
+            ),
+            "register_session_restore_tool_window": (
+                getattr(
+                    self,
+                    "register_session_restore_tool_window",
+                    lambda name, subwindow, info: None,
+                )
+            ),
+            "on_task_complete": getattr(self, "on_task_complete", lambda data: None),
         }
 
     def get_current_project_dir(self):
@@ -189,6 +210,15 @@ class HydeApp:
 
     def set_quit_command_sent(self, value):
         self._quit_command_sent = bool(value)
+
+    def get_session_restore_presentation_deferred(self):
+        return self._session_restore_presentation_deferred
+
+    def register_session_restore_tool_window(self, name, subwindow, info):
+        self._session_restore_tool_windows[str(name)] = (
+            subwindow,
+            dict(info or {}),
+        )
 
     def lookup_menu_action(self, location, name, path=()):
         menu_context = getattr(self, "menu_context", None)
@@ -513,8 +543,48 @@ class HydeApp:
         self.emit_plugin_event("application_shutdown", {})
         self.emit_plugin_event("request_runtime_shutdown", {})
 
+    def _clear_session_restore_state(self):
+        self._session_restore_presentation_deferred = False
+        self._session_restore_tool_windows = {}
+        self._session_restore_session = None
+
+    def _complete_session_restore(self, success):
+        session = self._session_restore_session
+        if session is None:
+            return
+        if success:
+            main_window = session.get("main_window", {})
+            window_order = main_window.get("mdi_window_order", [])
+            mdi_area = getattr(self.ui, "mdiArea", None)
+            if mdi_area is not None:
+                apply_mdi_window_order(
+                    mdi_area,
+                    window_order,
+                )
+            for name, (subwindow, info) in list(
+                self._session_restore_tool_windows.items()
+            ):
+                finalize_subwindow_state(
+                    subwindow,
+                    info,
+                    session_key=name,
+                )
+            if mdi_area is not None:
+                apply_mdi_window_order(
+                    mdi_area,
+                    window_order,
+                )
+        self._clear_session_restore_state()
+
+    @inmain_decorator()
+    def on_task_complete(self, data):
+        data = dict(data or {})
+        if data.get("name") != "session_restore":
+            return
+        self._complete_session_restore(bool(data.get("success", False)))
 
     def restore_project_session(self):
+        self._clear_session_restore_state()
         warnings = []
         history_entries, history_error = try_read_history(self.current_project_dir)
         if history_error:
@@ -536,10 +606,17 @@ class HydeApp:
                 "Project Session Restore Warnings",
                 "\n".join(warnings),
             )
+        self._session_restore_presentation_deferred = True
+        self._session_restore_session = session
         if session:
             restore_main_window(self, session)
         self.emit_plugin_event("project_loaded", {"session": session})
-        if session_source.strip():
+        wrapped_session_source = build_session_restore_wrapper(session_source)
+        if wrapped_session_source:
             python_execution_service = self.plugin_service("python_execution_service")
             if python_execution_service is not None:
-                python_execution_service.execute_hidden(session_source)
+                if python_execution_service.execute_hidden(wrapped_session_source):
+                    return
+            self._complete_session_restore(False)
+        else:
+            self._complete_session_restore(True)

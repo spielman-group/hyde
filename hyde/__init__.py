@@ -31,6 +31,7 @@ from .execution.ipc import (
     publish_project_state_result,
     signal_open_table,
     signal_quit_requested,
+    signal_task_complete,
 )
 
 __version__ = "0.1.0.dev0"
@@ -107,6 +108,17 @@ def gui_mode(enable=True):
             builtins.quit = _ORIGINAL_BUILTINS_QUIT
         if _ORIGINAL_BUILTINS_EXIT is not None:
             builtins.exit = _ORIGINAL_BUILTINS_EXIT
+
+
+def task_complete(name, success=True):
+    """
+    Report completion of a named background task back to the Hyde GUI.
+
+    Args:
+        name (str): Stable task name understood by the GUI.
+        success (bool): Whether the task completed successfully.
+    """
+    signal_task_complete(name, success=success)
 
 
 def new_project(path, load=True, overwrite=False):

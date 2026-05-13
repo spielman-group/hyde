@@ -28,8 +28,10 @@ from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.main.project_state import (
+    capture_session,
     write_session,
 )
+from hyde.user_interface.plugin_tools import HydeMDIContext, HydePlugin
 
 
 def lookup_menu_action(app, location, text, path=()):
@@ -153,6 +155,54 @@ class PluginManagerStub:
         return handlers
 
 
+class SessionRestoreToolWindowPlugin:
+    def __init__(self, app, mdi_area, window_keys):
+        self.app = app
+        self.window_keys = tuple(window_keys)
+        self.helper = HydePlugin({})
+        self.mdi_context = HydeMDIContext(mdi_area)
+        self.helper.services = {
+            "mdi_context": self.mdi_context,
+            "get_session_restore_presentation_deferred": (
+                lambda: getattr(
+                    self.app,
+                    "_session_restore_presentation_deferred",
+                    False,
+                )
+            ),
+            "register_session_restore_tool_window": (
+                lambda name, subwindow, info: (
+                    self.app._session_restore_tool_windows.__setitem__(
+                        name,
+                        (subwindow, dict(info)),
+                    )
+                )
+            ),
+        }
+        for key in self.window_keys:
+            self.mdi_context.add(
+                "tests",
+                {
+                    "context": "mdi",
+                    "key": key,
+                    "title": key,
+                    "factory": lambda parent=None, data=None: QtWidgets.QWidget(parent),
+                },
+                {"services": {}},
+            )
+            self.helper.ensure_mdi_widget(key)
+
+    def get_event_handlers(self):
+        return {"project_loaded": self.on_project_loaded}
+
+    def on_project_loaded(self, data):
+        for key in self.window_keys:
+            self.helper.restore_tool_window(data["session"], key)
+
+    def subwindow(self, key):
+        return self.helper.mdi_subwindow(key)
+
+
 class TestProjectStateHelpers(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -232,6 +282,18 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app = type("RestoredApp", (), {})()
             restored_app.ui = QtWidgets.QMainWindow()
             restored_app.current_project_dir = str(project_dir)
+            restored_app._session_restore_presentation_deferred = False
+            restored_app._session_restore_tool_windows = {}
+            restored_app._session_restore_session = None
+            restored_app._clear_session_restore_state = (
+                lambda: HydeApp._clear_session_restore_state(restored_app)
+            )
+            restored_app._complete_session_restore = (
+                lambda success: HydeApp._complete_session_restore(
+                    restored_app,
+                    success,
+                )
+            )
             restored_app.plugin_manager = PluginManagerStub({"session": RestoringPlugin()})
             restored_app.plugin_service = lambda key: (
                 DummyPythonTerminalService()
@@ -250,7 +312,257 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertEqual(events[1][0], "session_source")
             self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", events[1][1])
             self.assertIn("Figure0(delay)", events[1][1])
+            self.assertIn('hyde.task_complete("session_restore", True)', events[1][1])
             self.assertTrue(events[1][2])
+
+    def test_restore_project_session_finalizes_staged_order_and_states_after_success(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir) / "session_restore_finalize.hy"
+            project_dir.mkdir()
+            (project_dir / "session.toml").write_text(
+                "\n".join(
+                    [
+                        "format_version = 1",
+                        "",
+                        "[main_window]",
+                        "mdi_window_order = ['python_terminal', 'Table0', 'logging']",
+                        "",
+                        "[tool_windows.python_terminal]",
+                        "window_state = 'minimized'",
+                        "geometry = [10, 20, 240, 160]",
+                        "geometry_minimized = [40, 50, 180, 30]",
+                        "",
+                        "[tool_windows.logging]",
+                        "window_state = 'visible'",
+                        "geometry = [300, 40, 220, 140]",
+                        "",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (project_dir / "session.py").write_text(
+                "Table0()\n",
+                encoding="utf-8",
+            )
+            terminal_dir = project_dir / "terminal"
+            terminal_dir.mkdir()
+            (terminal_dir / "history.py").write_text("history = []\n", encoding="utf-8")
+
+            events = []
+            main_window = QtWidgets.QMainWindow()
+            mdi_area = QtWidgets.QMdiArea()
+            main_window.setCentralWidget(mdi_area)
+            main_window.mdiArea = mdi_area
+            main_window.show()
+            self.qapp.processEvents()
+
+            restored_app = type("RestoredApp", (), {})()
+            restored_app.ui = main_window
+            restored_app.current_project_dir = str(project_dir)
+            restored_app._session_restore_presentation_deferred = False
+            restored_app._session_restore_tool_windows = {}
+            restored_app._session_restore_session = None
+            restored_app._clear_session_restore_state = (
+                lambda: HydeApp._clear_session_restore_state(restored_app)
+            )
+            restored_app._complete_session_restore = (
+                lambda success: HydeApp._complete_session_restore(
+                    restored_app,
+                    success,
+                )
+            )
+            tool_plugin = SessionRestoreToolWindowPlugin(
+                restored_app,
+                mdi_area,
+                ("logging", "python_terminal"),
+            )
+            restored_app.plugin_manager = PluginManagerStub(
+                {"tools": tool_plugin},
+                services={
+                    "visible_terminal_service": DummyPythonTerminalService(),
+                    "python_execution_service": DummyExecutionService(events),
+                },
+            )
+            restored_app.plugin_service = (
+                lambda key: restored_app.plugin_manager.services.get(key)
+            )
+            restored_app.emit_plugin_event = (
+                lambda name, data=None: HydeApp.emit_plugin_event(
+                    restored_app,
+                    name,
+                    data,
+                )
+            )
+
+            HydeApp.restore_project_session(restored_app)
+
+            terminal_subwindow = tool_plugin.subwindow("python_terminal")
+            self.assertTrue(terminal_subwindow.isVisible())
+            self.assertFalse(terminal_subwindow.isMinimized())
+
+            restored_table = mdi_area.addSubWindow(QtWidgets.QLabel("Table0"))
+            restored_table.setObjectName("Table0")
+            restored_table.show()
+            self.qapp.processEvents()
+
+            HydeApp.on_task_complete(
+                restored_app,
+                {"name": "session_restore", "success": True},
+            )
+            self.qapp.processEvents()
+
+            order = [
+                subwindow.objectName()
+                for subwindow in mdi_area.subWindowList(QtWidgets.QMdiArea.StackingOrder)
+                if str(subwindow.objectName()).strip()
+            ]
+            self.assertEqual(order, ["python_terminal", "Table0", "logging"])
+            self.assertTrue(terminal_subwindow.isMinimized())
+            self.assertIn('hyde.task_complete("session_restore", True)', events[0][1])
+
+    def test_restore_project_session_skips_finalization_after_failed_session_restore(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir) / "session_restore_failure.hy"
+            project_dir.mkdir()
+            (project_dir / "session.toml").write_text(
+                "\n".join(
+                    [
+                        "format_version = 1",
+                        "",
+                        "[main_window]",
+                        "mdi_window_order = ['python_terminal', 'Table0', 'logging']",
+                        "",
+                        "[tool_windows.python_terminal]",
+                        "window_state = 'minimized'",
+                        "geometry = [10, 20, 240, 160]",
+                        "geometry_minimized = [40, 50, 180, 30]",
+                        "",
+                        "[tool_windows.logging]",
+                        "window_state = 'visible'",
+                        "geometry = [300, 40, 220, 140]",
+                        "",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (project_dir / "session.py").write_text(
+                "Table0()\n",
+                encoding="utf-8",
+            )
+            terminal_dir = project_dir / "terminal"
+            terminal_dir.mkdir()
+            (terminal_dir / "history.py").write_text("history = []\n", encoding="utf-8")
+
+            events = []
+            main_window = QtWidgets.QMainWindow()
+            mdi_area = QtWidgets.QMdiArea()
+            main_window.setCentralWidget(mdi_area)
+            main_window.mdiArea = mdi_area
+            main_window.show()
+            self.qapp.processEvents()
+
+            restored_app = type("RestoredApp", (), {})()
+            restored_app.ui = main_window
+            restored_app.current_project_dir = str(project_dir)
+            restored_app._session_restore_presentation_deferred = False
+            restored_app._session_restore_tool_windows = {}
+            restored_app._session_restore_session = None
+            restored_app._clear_session_restore_state = (
+                lambda: HydeApp._clear_session_restore_state(restored_app)
+            )
+            restored_app._complete_session_restore = (
+                lambda success: HydeApp._complete_session_restore(
+                    restored_app,
+                    success,
+                )
+            )
+            tool_plugin = SessionRestoreToolWindowPlugin(
+                restored_app,
+                mdi_area,
+                ("logging", "python_terminal"),
+            )
+            restored_app.plugin_manager = PluginManagerStub(
+                {"tools": tool_plugin},
+                services={
+                    "visible_terminal_service": DummyPythonTerminalService(),
+                    "python_execution_service": DummyExecutionService(events),
+                },
+            )
+            restored_app.plugin_service = (
+                lambda key: restored_app.plugin_manager.services.get(key)
+            )
+            restored_app.emit_plugin_event = (
+                lambda name, data=None: HydeApp.emit_plugin_event(
+                    restored_app,
+                    name,
+                    data,
+                )
+            )
+
+            HydeApp.restore_project_session(restored_app)
+
+            terminal_subwindow = tool_plugin.subwindow("python_terminal")
+            restored_table = mdi_area.addSubWindow(QtWidgets.QLabel("Table0"))
+            restored_table.setObjectName("Table0")
+            restored_table.show()
+            self.qapp.processEvents()
+            initial_order = [
+                subwindow.objectName()
+                for subwindow in mdi_area.subWindowList(QtWidgets.QMdiArea.StackingOrder)
+                if str(subwindow.objectName()).strip()
+            ]
+
+            HydeApp.on_task_complete(
+                restored_app,
+                {"name": "session_restore", "success": False},
+            )
+            self.qapp.processEvents()
+
+            final_order = [
+                subwindow.objectName()
+                for subwindow in mdi_area.subWindowList(QtWidgets.QMdiArea.StackingOrder)
+                if str(subwindow.objectName()).strip()
+            ]
+            self.assertEqual(final_order, initial_order)
+            self.assertFalse(terminal_subwindow.isMinimized())
+            self.assertIn('hyde.task_complete("session_restore", False)', events[0][1])
+
+    def test_capture_session_records_named_mdi_window_order(self):
+        main_window = QtWidgets.QMainWindow()
+        mdi_area = QtWidgets.QMdiArea()
+        main_window.setCentralWidget(mdi_area)
+        main_window.mdiArea = mdi_area
+        main_window.show()
+        self.qapp.processEvents()
+
+        created = []
+        for name in ("logging", "python_terminal", "Table0"):
+            subwindow = mdi_area.addSubWindow(QtWidgets.QLabel(name))
+            subwindow.setObjectName(name)
+            subwindow.show()
+            created.append(subwindow)
+        unnamed = mdi_area.addSubWindow(QtWidgets.QLabel("unnamed"))
+        unnamed.setObjectName("   ")
+        unnamed.show()
+        created.append(unnamed)
+        self.qapp.processEvents()
+
+        created[0].raise_()
+        created[2].raise_()
+        created[1].raise_()
+        self.qapp.processEvents()
+
+        app = type("CaptureApp", (), {})()
+        app.ui = main_window
+
+        session = capture_session(app)
+
+        self.assertEqual(
+            session["main_window"]["mdi_window_order"],
+            ["logging", "Table0", "python_terminal"],
+        )
 
     def test_materialize_project_template_skips_gitkeep_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -537,6 +849,17 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
         finally:
             client.stop_channels()
             child.terminate()
+
+    def test_task_complete_publishes_process_tree_completion_message(self):
+        with patch("hyde.execution.ipc.put_parent_message") as put_parent_message:
+            hyde.task_complete("session_restore", success=False)
+
+        put_parent_message.assert_called_once_with(
+            [
+                "TASK_COMPLETE",
+                {"name": "session_restore", "success": False},
+            ]
+        )
 
     def test_save_project_excludes_live_matplotlib_figures_and_axes(self):
         project_dir = self._project(
