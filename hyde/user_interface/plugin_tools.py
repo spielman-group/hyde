@@ -18,11 +18,13 @@ from hyde.user_interface.window_naming import (
 )
 
 
+LOGGER = logging.getLogger(__name__)
 SETUP_PRIORITY_BIND_SERVICES = DEFAULT_SETUP_PRIORITY
 SETUP_PRIORITY_PLUGIN_SETUP = DEFAULT_SETUP_PRIORITY + 10
 # Side-effectful runtime startup must wait until all plugins have received
 # services and completed ordinary setup, including output-window creation.
 SETUP_PRIORITY_RUNTIME_START = DEFAULT_SETUP_PRIORITY + 20
+_TOOL_WINDOW_STATES = frozenset({"hidden", "visible", "minimized", "maximized"})
 
 
 class _NullConfig:
@@ -218,6 +220,7 @@ class HydePlugin(BasePlugin):
         restore_subwindow_state(
             subwindow,
             session.get("tool_windows", {}).get(object_name, {}),
+            session_key=object_name,
         )
         return subwindow
 
@@ -448,31 +451,110 @@ class HydeMDIContext:
         return widget, subwindow
 
 def capture_subwindow_state(subwindow):
-    return {
-        "visible": bool(subwindow.isVisible()),
+    window_state = capture_subwindow_window_state(subwindow)
+    state = {
+        "window_state": window_state,
         "geometry": capture_subwindow_geometry(subwindow),
     }
+    if window_state == "minimized":
+        state["geometry_minimized"] = _qrect_to_list(subwindow.geometry())
+    return state
 
 
-def restore_subwindow_state(subwindow, info):
-    geometry = info.get("geometry")
-    if geometry:
-        subwindow.setGeometry(QtCore.QRect(*geometry))
-    subwindow.setVisible(bool(info.get("visible", False)))
+def restore_subwindow_state(subwindow, info, *, session_key="tool window"):
+    if not isinstance(info, dict):
+        info = {}
+
+    window_state = info.get("window_state")
+    if window_state not in _TOOL_WINDOW_STATES:
+        _hide_subwindow_with_warning(
+            subwindow,
+            session_key,
+            "invalid or missing tool-window window_state",
+        )
+        return False
+
+    geometry = _coerce_geometry(info.get("geometry"))
+    if geometry is None:
+        _hide_subwindow_with_warning(
+            subwindow,
+            session_key,
+            "invalid or missing tool-window geometry",
+        )
+        return False
+
+    geometry_minimized = None
+    if window_state == "minimized":
+        geometry_minimized = _coerce_geometry(info.get("geometry_minimized"))
+        if geometry_minimized is None:
+            _hide_subwindow_with_warning(
+                subwindow,
+                session_key,
+                "minimized tool-window restore requires geometry_minimized",
+            )
+            return False
+
+    if window_state == "hidden":
+        subwindow.hide()
+        subwindow.setGeometry(geometry)
+        return True
+
+    subwindow.showNormal()
+    subwindow.setGeometry(geometry)
+    if window_state == "maximized":
+        subwindow.showMaximized()
+        return True
+    if window_state == "minimized":
+        subwindow.showMinimized()
+        subwindow.setGeometry(geometry_minimized)
+    return True
 
 
 def capture_subwindow_geometry(subwindow):
-    geometry = subwindow.geometry()
+    was_hidden = subwindow.isHidden()
+    was_minimized = subwindow.isMinimized()
+    was_maximized = subwindow.isMaximized()
+    if was_minimized or was_maximized:
+        subwindow.showNormal()
+    geometry = _qrect_to_list(subwindow.geometry())
+    if was_maximized:
+        subwindow.showMaximized()
+    elif was_minimized:
+        subwindow.showMinimized()
+    if was_hidden:
+        subwindow.hide()
+    return geometry
+
+
+def capture_subwindow_window_state(subwindow):
+    if subwindow.isHidden():
+        return "hidden"
     if subwindow.isMinimized():
-        normal_geometry = subwindow.normalGeometry()
-        if normal_geometry.isValid() and not normal_geometry.isNull():
-            geometry = normal_geometry
-    return [
-        geometry.x(),
-        geometry.y(),
-        geometry.width(),
-        geometry.height(),
-    ]
+        return "minimized"
+    if subwindow.isMaximized():
+        return "maximized"
+    return "visible"
+
+
+def _coerce_geometry(geometry):
+    if not isinstance(geometry, (list, tuple)) or len(geometry) != 4:
+        return None
+    try:
+        x, y, width, height = [int(value) for value in geometry]
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return QtCore.QRect(x, y, width, height)
+
+
+def _hide_subwindow_with_warning(subwindow, session_key, detail):
+    subwindow.hide()
+    LOGGER.warning("%s: %s.", session_key, detail)
+
+
+def _qrect_to_list(rect):
+    return [rect.x(), rect.y(), rect.width(), rect.height()]
 
 
 def capture_saveable_window_state(subwindow):

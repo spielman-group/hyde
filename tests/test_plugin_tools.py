@@ -96,6 +96,37 @@ class TestPluginTools(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
+    def make_tool_window_plugin(self, mdi_key="real_window"):
+        main_window = QtWidgets.QMainWindow()
+        mdi_area = QtWidgets.QMdiArea()
+        main_window.setCentralWidget(mdi_area)
+        main_window.resize(800, 600)
+        main_window.show()
+        self.qapp.processEvents()
+
+        context = HydeMDIContext(mdi_area)
+        plugin = HydePlugin({})
+        plugin.services = {"mdi_context": context}
+        context.add(
+            "demo",
+            {
+                "context": "mdi",
+                "key": mdi_key,
+                "title": "Real Window",
+                "factory": lambda parent=None, data=None: QtWidgets.QWidget(parent),
+            },
+            {"services": {}},
+        )
+        plugin.ensure_mdi_widget(mdi_key)
+        subwindow = plugin.mdi_subwindow(mdi_key)
+        return main_window, plugin, subwindow
+
+    def rect_values(self, rect):
+        return [rect.x(), rect.y(), rect.width(), rect.height()]
+
+    def subwindow_geometry(self, subwindow):
+        return self.rect_values(subwindow.geometry())
+
     def test_plugin_manager_discovers_only_plugin_packages(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             package_root = Path(tmpdir) / "sample_plugins"
@@ -166,27 +197,7 @@ class TestPluginTools(unittest.TestCase):
         )
 
     def test_tool_window_session_helpers_use_subwindow_object_name_identity(self):
-        main_window = QtWidgets.QMainWindow()
-        mdi_area = QtWidgets.QMdiArea()
-        main_window.setCentralWidget(mdi_area)
-        main_window.show()
-        self.qapp.processEvents()
-        context = HydeMDIContext(mdi_area)
-        plugin = HydePlugin({})
-        plugin.services = {"mdi_context": context}
-        context.add(
-            "demo",
-            {
-                "context": "mdi",
-                "key": "real_window",
-                "title": "Real Window",
-                "factory": lambda parent=None, data=None: QtWidgets.QWidget(parent),
-            },
-            {"services": {}},
-        )
-
-        plugin.ensure_mdi_widget("real_window")
-        subwindow = plugin.mdi_subwindow("real_window")
+        _, plugin, subwindow = self.make_tool_window_plugin()
         subwindow.setGeometry(QtCore.QRect(11, 22, 333, 444))
         subwindow.show()
         self.qapp.processEvents()
@@ -200,14 +211,22 @@ class TestPluginTools(unittest.TestCase):
             set(save_data["tool_windows"]),
             {"real_window"},
         )
+        self.assertEqual(
+            save_data["tool_windows"]["real_window"],
+            {
+                "window_state": "visible",
+                "geometry": [11, 22, 333, 444],
+            },
+        )
 
         subwindow.hide()
-        subwindow.setGeometry(QtCore.QRect(1, 2, 3, 4))
+        self.qapp.processEvents()
+        subwindow.setGeometry(QtCore.QRect(1, 2, 300, 200))
         restored = plugin.restore_tool_window(
             {
                 "tool_windows": {
                     "real_window": {
-                        "visible": True,
+                        "window_state": "visible",
                         "geometry": [11, 22, 333, 444],
                     }
                 }
@@ -218,38 +237,186 @@ class TestPluginTools(unittest.TestCase):
 
         self.assertIs(restored, subwindow)
         self.assertTrue(subwindow.isVisible())
-        self.assertEqual(
+        self.assertEqual(self.subwindow_geometry(subwindow), [11, 22, 333, 444])
+
+    def test_tool_window_session_helpers_capture_hidden_minimized_and_maximized(self):
+        _, plugin, subwindow = self.make_tool_window_plugin()
+        normal_geometry = [12, 18, 230, 140]
+
+        subwindow.showNormal()
+        subwindow.setGeometry(QtCore.QRect(*normal_geometry))
+        subwindow.hide()
+        self.qapp.processEvents()
+        hidden_state = plugin.tool_window_save_data(
+            "legacy_session_key",
+            mdi_key="real_window",
+        )["tool_windows"]["real_window"]
+        self.assertEqual(hidden_state["window_state"], "hidden")
+        self.assertEqual(hidden_state["geometry"], normal_geometry)
+        self.assertNotIn("geometry_minimized", hidden_state)
+
+        subwindow.showNormal()
+        subwindow.setGeometry(QtCore.QRect(*normal_geometry))
+        subwindow.showMaximized()
+        self.qapp.processEvents()
+        maximized_state = plugin.tool_window_save_data(
+            "legacy_session_key",
+            mdi_key="real_window",
+        )["tool_windows"]["real_window"]
+        self.assertEqual(maximized_state["window_state"], "maximized")
+        self.assertEqual(maximized_state["geometry"], normal_geometry)
+        self.assertNotIn("geometry_minimized", maximized_state)
+
+        subwindow.showNormal()
+        subwindow.setGeometry(QtCore.QRect(*normal_geometry))
+        subwindow.showMinimized()
+        self.qapp.processEvents()
+        minimized_geometry = self.subwindow_geometry(subwindow)
+        minimized_state = plugin.tool_window_save_data(
+            "legacy_session_key",
+            mdi_key="real_window",
+        )["tool_windows"]["real_window"]
+        self.assertEqual(minimized_state["window_state"], "minimized")
+        self.assertEqual(minimized_state["geometry"], normal_geometry)
+        self.assertEqual(minimized_state["geometry_minimized"], minimized_geometry)
+
+    def test_restore_tool_window_accepts_hidden_visible_minimized_and_maximized(self):
+        restore_cases = [
             (
-                subwindow.geometry().x(),
-                subwindow.geometry().y(),
-                subwindow.geometry().width(),
-                subwindow.geometry().height(),
+                "hidden",
+                {
+                    "window_state": "hidden",
+                    "geometry": [10, 20, 230, 140],
+                },
             ),
-            (11, 22, 333, 444),
-        )
+            (
+                "visible",
+                {
+                    "window_state": "visible",
+                    "geometry": [30, 40, 240, 150],
+                },
+            ),
+            (
+                "maximized",
+                {
+                    "window_state": "maximized",
+                    "geometry": [50, 60, 250, 160],
+                },
+            ),
+            (
+                "minimized",
+                {
+                    "window_state": "minimized",
+                    "geometry": [70, 80, 260, 170],
+                    "geometry_minimized": [90, 100, 190, 33],
+                },
+            ),
+        ]
+
+        for window_state, saved_state in restore_cases:
+            with self.subTest(window_state=window_state):
+                _, plugin, subwindow = self.make_tool_window_plugin()
+                subwindow.setGeometry(QtCore.QRect(1, 2, 300, 200))
+                subwindow.show()
+                self.qapp.processEvents()
+
+                restored = plugin.restore_tool_window(
+                    {"tool_windows": {"real_window": saved_state}},
+                    "legacy_session_key",
+                    mdi_key="real_window",
+                )
+
+                self.assertIs(restored, subwindow)
+                self.qapp.processEvents()
+                if window_state == "hidden":
+                    self.assertTrue(subwindow.isHidden())
+                    self.assertEqual(self.subwindow_geometry(subwindow), saved_state["geometry"])
+                elif window_state == "visible":
+                    self.assertTrue(subwindow.isVisible())
+                    self.assertFalse(subwindow.isMinimized())
+                    self.assertFalse(subwindow.isMaximized())
+                    self.assertEqual(self.subwindow_geometry(subwindow), saved_state["geometry"])
+                elif window_state == "maximized":
+                    self.assertTrue(subwindow.isMaximized())
+                    subwindow.showNormal()
+                    self.qapp.processEvents()
+                    self.assertEqual(self.subwindow_geometry(subwindow), saved_state["geometry"])
+                else:
+                    self.assertTrue(subwindow.isMinimized())
+                    self.assertEqual(
+                        self.subwindow_geometry(subwindow),
+                        saved_state["geometry_minimized"],
+                    )
+                    subwindow.showNormal()
+                    self.qapp.processEvents()
+                    self.assertEqual(self.subwindow_geometry(subwindow), saved_state["geometry"])
+
+    def test_restore_tool_window_hides_invalid_state_and_logs_warning(self):
+        invalid_sessions = [
+            (
+                "invalid window_state",
+                {
+                    "window_state": "floating",
+                    "geometry": [1, 2, 200, 100],
+                },
+                "window_state",
+            ),
+            (
+                "missing window_state",
+                {
+                    "geometry": [1, 2, 200, 100],
+                },
+                "window_state",
+            ),
+            (
+                "invalid geometry",
+                {
+                    "window_state": "visible",
+                    "geometry": [1, 2, 0, 100],
+                },
+                "geometry",
+            ),
+            (
+                "missing geometry",
+                {
+                    "window_state": "visible",
+                },
+                "geometry",
+            ),
+            (
+                "missing geometry_minimized",
+                {
+                    "window_state": "minimized",
+                    "geometry": [1, 2, 200, 100],
+                },
+                "geometry_minimized",
+            ),
+        ]
+
+        for label, saved_state, expected_text in invalid_sessions:
+            with self.subTest(case=label):
+                _, plugin, subwindow = self.make_tool_window_plugin()
+                subwindow.setGeometry(QtCore.QRect(1, 2, 300, 200))
+                subwindow.show()
+                self.qapp.processEvents()
+
+                with self.assertLogs(
+                    "hyde.user_interface.plugin_tools",
+                    level="WARNING",
+                ) as logs:
+                    restored = plugin.restore_tool_window(
+                        {"tool_windows": {"real_window": saved_state}},
+                        "legacy_session_key",
+                        mdi_key="real_window",
+                    )
+
+                self.assertIs(restored, subwindow)
+                self.assertTrue(subwindow.isHidden())
+                self.assertIn("real_window", "\n".join(logs.output))
+                self.assertIn(expected_text, "\n".join(logs.output))
 
     def test_blank_object_name_falls_back_to_mdi_key_for_shared_identity_helper(self):
-        main_window = QtWidgets.QMainWindow()
-        mdi_area = QtWidgets.QMdiArea()
-        main_window.setCentralWidget(mdi_area)
-        main_window.show()
-        self.qapp.processEvents()
-        context = HydeMDIContext(mdi_area)
-        plugin = HydePlugin({})
-        plugin.services = {"mdi_context": context}
-        context.add(
-            "demo",
-            {
-                "context": "mdi",
-                "key": "real_window",
-                "title": "Real Window",
-                "factory": lambda parent=None, data=None: QtWidgets.QWidget(parent),
-            },
-            {"services": {}},
-        )
-
-        plugin.ensure_mdi_widget("real_window")
-        subwindow = plugin.mdi_subwindow("real_window")
+        _, plugin, subwindow = self.make_tool_window_plugin()
         subwindow.setObjectName("   ")
 
         save_data = plugin.tool_window_save_data(
