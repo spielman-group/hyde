@@ -125,7 +125,6 @@ Tests should verify user-visible contracts:
 ## Out of Scope
 
 - Broad removal of all “handle” terminology.
-- Public API rename of table `target=...`.
 - New MDI registry.
 - `QMdiSubWindow` subclassing.
 - Robust hidden-execution lifecycle tracking beyond `task_complete`.

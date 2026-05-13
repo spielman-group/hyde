@@ -99,7 +99,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             macro = widget.macro_source("Graph0")
 
             self.assertIn("@hyde.figure(window_pos=(10, 20))", macro)
-            self.assertIn("fig = plt.figure('Figure0')", macro)
+            self.assertIn("fig = plt.figure('Figure1')", macro)
         finally:
             widget.close()
 
@@ -136,7 +136,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             )
             self.assertIn("def Figure7(delay, fit_delay, raw_delay):", source)
             self.assertIn("Figure7(delay, fit_delay, raw_delay)", source)
-            self.assertIn("fig = plt.figure('Graph0')", source)
+            self.assertIn("fig = plt.figure('Figure7')", source)
             self.assertIn(
                 "ax.plot(delay, fit_delay, label='fit_delay')",
                 source,
@@ -186,8 +186,8 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             macro = widget.macro_source("Figure0")
             source = widget.session_restore_source()
 
-            self.assertIn("fig = plt.figure('Figure0', figsize=(5.0, 3.0))", macro)
-            self.assertIn("fig = plt.figure('Figure0', figsize=(5.0, 3.0))", source)
+            self.assertIn("fig = plt.figure('Figure1', figsize=(5.0, 3.0))", macro)
+            self.assertIn("fig = plt.figure('Figure1', figsize=(5.0, 3.0))", source)
         finally:
             widget.close()
 
@@ -213,7 +213,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(subwindow.windowTitle(), "Figure7: Figure0 [Macro Incomplete]")
+            self.assertEqual(subwindow.windowTitle(), "Figure7 [Macro Incomplete]")
         finally:
             widget.close()
 

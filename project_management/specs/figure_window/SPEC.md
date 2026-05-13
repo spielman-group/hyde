@@ -40,6 +40,9 @@ Figures use the `Figure` prefix and tables use the `Table` prefix.
 
 For first-class figures, this stable `objectName()` is also the base user-facing
 figure name used in recreation source, for example `plt.figure("Figure0")`.
+When figure creation requests a preferred figure name, Hyde accepts it if it is free;
+otherwise Hyde falls forward to the next available figure name and rewrites the live
+kernel figure label plus saved recreation source to that resolved stable name.
 The GUI window title is derived presentation text. It begins with the stable
 `objectName()` and may append `": ..."` detail text without changing the figure's MDI
 identity. Any caller-provided title text is suffix-only additional detail, not a

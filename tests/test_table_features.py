@@ -32,15 +32,13 @@ class TestTableCodec(unittest.TestCase):
             hyde.create_table(
                 x,
                 string_array0,
-                target="Table0",
-                title="Table0",
+                name="Table0",
                 column_widths={"x": 100, "string_array0": 100},
             )
 
         signal_open_table.assert_called_once_with(
             ["x", "string_array0"],
-            "Table0",
-            title="Table0",
+            name="Table0",
             geometry=None,
             column_widths={"x": 100, "string_array0": 100},
             window_state=None,
@@ -49,33 +47,52 @@ class TestTableCodec(unittest.TestCase):
     def test_table_state_open_generation_includes_optional_layout_kwargs(self):
         state = TableState()
         state.set_items(["delay2", "fit_delay2"])
-        state.set_title("Table0")
+        state.set_name("Table7")
         state.set_geometry((5, 42, 510, 242))
         state.set_column_widths({"delay2": 140, "fit_delay2": 262})
 
         source = state.python_source()
 
         self.assertIn("hyde.create_table(delay2, fit_delay2", source)
-        self.assertIn("title='Table0'", source)
+        self.assertIn("name='Table7'", source)
         self.assertIn("geometry=(5, 42, 510, 242)", source)
         self.assertIn("column_widths={'delay2': 140, 'fit_delay2': 262}", source)
 
-    def test_table_recreation_sources_clear_target_for_macros_but_preserve_it_for_session_restore(self):
+    def test_table_state_open_generation_omits_name_when_not_explicit(self):
         state = TableState()
         state.set_items(["delay2", "fit_delay2"])
-        state.set_target("Table0")
-        state.set_title("Table_Fun")
+        state.set_geometry((5, 42, 510, 242))
+
+        source = state.python_source()
+
+        self.assertIn("hyde.create_table(delay2, fit_delay2", source)
+        self.assertNotIn("name=", source)
+
+    def test_table_recreation_sources_preserve_requested_name(self):
+        state = TableState()
+        state.set_items(["delay2", "fit_delay2"])
+        state.set_name("Table0")
         state.set_geometry((5, 42, 510, 242))
         state.set_column_widths({"delay2": 140, "fit_delay2": 262})
 
         macro = state.macro_source("Table0")
-        session_function = state.recreation_function_source(
-            "Table0",
-            preserve_target=True,
-        )
+        session_function = state.recreation_function_source("Table0")
 
-        self.assertNotIn("target='Table0'", macro)
-        self.assertIn("target='Table0'", session_function)
+        self.assertIn("name='Table0'", macro)
+        self.assertIn("name='Table0'", session_function)
+
+    def test_table_state_append_generation_uses_append_table_api(self):
+        state = TableState()
+        state.set_items(["delay2", "fit_delay2"])
+        state.set_command("append")
+        state.set_append_name("Table7")
+
+        source = state.python_source()
+
+        self.assertEqual(
+            source,
+            "hyde.append_table(delay2, fit_delay2, name='Table7')",
+        )
 
 class TestMutationCodec(unittest.TestCase):
     def test_mutation_state_generates_edit_append_new_array_and_delete_commands(self):
@@ -114,7 +131,7 @@ class TestSaveWindowDialog(unittest.TestCase):
 
         state = TableState()
         state.set_items(["delay2", "fit_delay2"])
-        state.set_title("Table_Fun")
+        state.set_name("Table_Fun")
         state.set_geometry((5, 42, 510, 242))
         state.set_column_widths({"fit_delay2": 262})
 
@@ -428,13 +445,13 @@ class TestTableWorkspaceService(unittest.TestCase):
         self.assertIsNone(workspace.lookup_table("Table0"))
         self.assertEqual(mdi_area.subWindowList(), [])
 
-    def test_new_tables_keep_unique_handles_when_titles_match(self):
+    def test_new_tables_keep_unique_handles_when_requested_names_conflict(self):
         mdi_area = QtWidgets.QMdiArea()
         plugin = FakeTablePlugin(mdi_area, save_result=True)
         workspace = TableWorkspaceService(plugin)
 
-        first = workspace.open_table(["a"], title="Shared")
-        second = workspace.open_table(["b"], title="Shared")
+        first = workspace.open_table(["a"], name="Table0")
+        second = workspace.open_table(["b"], name="Table0")
 
         self.assertEqual(first.window_handle(), "Table0")
         self.assertEqual(second.window_handle(), "Table1")
@@ -442,13 +459,13 @@ class TestTableWorkspaceService(unittest.TestCase):
         self.assertFalse(hasattr(second, "handle"))
         self.assertEqual(first.parentWidget().objectName(), "Table0")
         self.assertEqual(second.parentWidget().objectName(), "Table1")
-        self.assertEqual(first.parentWidget().windowTitle(), "Table0: Shared")
-        self.assertEqual(second.parentWidget().windowTitle(), "Table1: Shared")
+        self.assertEqual(first.parentWidget().windowTitle(), "Table0")
+        self.assertEqual(second.parentWidget().windowTitle(), "Table1")
 
         workspace.clear()
         self._drain_events()
 
-    def test_open_table_uses_stable_name_in_default_title(self):
+    def test_open_table_uses_stable_name_as_window_title(self):
         mdi_area = QtWidgets.QMdiArea()
         plugin = FakeTablePlugin(mdi_area, save_result=True)
         workspace = TableWorkspaceService(plugin)
@@ -456,7 +473,8 @@ class TestTableWorkspaceService(unittest.TestCase):
         table = workspace.open_table(["a", "b"])
 
         self.assertEqual(table.window_handle(), "Table0")
-        self.assertEqual(table.parentWidget().windowTitle(), "Table0: a, b")
+        self.assertEqual(table.parentWidget().windowTitle(), "Table0")
+        self.assertIn("name='Table0'", table.session_restore_source())
 
         workspace.clear()
         self._drain_events()
@@ -474,7 +492,7 @@ class TestTableWorkspaceService(unittest.TestCase):
             self.assertFalse(hasattr(table, "handle"))
             self.assertEqual(subwindow.objectName(), "Table7")
             self.assertEqual(table.window_handle(), "Table7")
-            self.assertIn("target='Table7'", table.session_restore_source())
+            self.assertIn("name='Table7'", table.session_restore_source())
         finally:
             table.close()
             mdi_area.close()
@@ -485,7 +503,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         plugin = FakeTablePlugin(mdi_area, save_result=True)
         workspace = TableWorkspaceService(plugin)
 
-        table = workspace.open_table(["a", "b"], title="Table_Fun")
+        table = workspace.open_table(["a", "b"], name="Table_Fun")
         subwindow = table.parentWidget()
         subwindow.setObjectName("Table7")
 
@@ -494,7 +512,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         self.assertEqual(table.window_handle(), "Table7")
         self.assertIn("def Table7(a, b):", source)
         self.assertIn("Table7(a, b)", source)
-        self.assertIn("target='Table7'", source)
+        self.assertIn("name='Table7'", source)
 
         workspace.clear()
         self._drain_events()
@@ -507,7 +525,7 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         table = workspace.open_table(
             ["a"],
-            title="Table_Fun",
+            name="Table_Fun",
             geometry=(5, 42, 510, 242),
             window_state="minimized",
         )
@@ -550,7 +568,7 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         table = plugin.workspace.open_table(
             ["a", "b"],
-            title="Table_Fun",
+            name="Table_Fun",
             geometry=(5, 42, 510, 242),
             column_widths={"a": 120, "b": 260},
         )
@@ -566,11 +584,10 @@ class TestTableWorkspaceService(unittest.TestCase):
         toml_data = plugin.get_session_toml_data()
         session_source = plugin.get_session_restore_source()
 
-        self.assertEqual(toml_data, {"table_counter": 1})
-        self.assertIn("def Table0(a, b):", session_source)
-        self.assertIn("Table0(a, b)", session_source)
-        self.assertIn("title='Table_Fun'", session_source)
-        self.assertIn("target='Table0'", session_source)
+        self.assertEqual(toml_data, {})
+        self.assertIn("def Table_Fun(a, b):", session_source)
+        self.assertIn("Table_Fun(a, b)", session_source)
+        self.assertIn("name='Table_Fun'", session_source)
         self.assertIn("geometry=(5, 42, 510, 242)", session_source)
         self.assertIn("column_widths={'a': 120, 'b': 260}", session_source)
         self.assertIn(
@@ -597,7 +614,7 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         table = plugin.workspace.open_table(
             ["a", "b"],
-            title="Table_Fun",
+            name="Table_Fun",
             geometry=(5, 42, 510, 242),
             column_widths={"a": 120, "b": 260},
         )
@@ -616,7 +633,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         plugin.workspace.clear()
         mdi_area.close()
 
-    def test_append_to_active_table_uses_subwindow_object_name_as_target(self):
+    def test_append_to_active_table_uses_append_table_api(self):
         mdi_area = QtWidgets.QMdiArea()
         plugin = Plugin({})
         execution = FakeExecutionService()
@@ -637,7 +654,10 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         self.assertTrue(appended)
         self.assertEqual(len(execution.visible_calls), 1)
-        self.assertIn("target='Table7'", execution.visible_calls[0])
+        self.assertEqual(
+            execution.visible_calls[0],
+            "hyde.append_table(b, name='Table7')",
+        )
 
         plugin.workspace.clear()
         self._drain_events()

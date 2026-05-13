@@ -64,7 +64,8 @@ recreation/editability truth stay aligned.
 
 The table feature is the first implemented example of a public Hyde helper, with
 `hyde.create_table(...)` serving as the imperative kernel-facing entry point for table
-creation and appending, and `@hyde.table` serving as the recreation decorator used for
+creation and reopen, `hyde.append_table(...)` serving as the explicit append-to-
+existing entry point, and `@hyde.table` serving as the recreation decorator used for
 saved parameterized table macros and non-registering session restore. Project
 persistence is the second implemented example, with `hyde.save_project(...)` and
 `hyde.load_project(...)` serving as the explicit save/load entry points used by the GUI

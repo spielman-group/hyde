@@ -207,7 +207,7 @@ In the initial deployment, the active actions are:
   generate `hyde.create_table(...)`.
 - `Append to Table`
   Append the selected array-like objects to the currently active table using
-  `hyde.create_table(..., target=<table_name>)`.
+  `hyde.append_table(..., name=<table_name>)`.
 
 The remaining Igor actions are intentionally not part of the initial deployment.
 
@@ -239,7 +239,7 @@ Examples of the intended pattern include:
 - deleting objects with explicit Python statements such as `del name`
 - copying a valid Python expression for the selected object
 - creating a new table with `hyde.create_table(arr1, arr2)`
-- appending to an existing table with `hyde.create_table(arr1, target="Table0")`
+- appending to an existing table with `hyde.append_table(arr1, name="Table0")`
 
 GUI state that is only needed to generate the command string may be transient, but it is never authoritative scientific state.
 

@@ -277,8 +277,8 @@ class TableCodec(FeatureCodec):
             "state_version": cls.state_version,
             "settings": {
                 "command": "open",
-                "title": None,
-                "target": None,
+                "name": None,
+                "append_name": None,
                 "geometry": None,
                 "column_widths": {},
                 "request_id": None,
@@ -302,10 +302,12 @@ class TableCodec(FeatureCodec):
 
         settings = normalized["settings"]
         settings["command"] = str(settings.get("command", "open"))
-        title = settings.get("title")
-        settings["title"] = None if title in (None, "") else str(title)
-        target = settings.get("target")
-        settings["target"] = None if target in (None, "") else str(target)
+        name = settings.get("name")
+        settings["name"] = None if name in (None, "") else str(name)
+        append_name = settings.get("append_name")
+        settings["append_name"] = (
+            None if append_name in (None, "") else str(append_name)
+        )
         geometry = settings.get("geometry")
         if geometry in (None, []):
             settings["geometry"] = None
@@ -337,8 +339,8 @@ class TableCodec(FeatureCodec):
 
         if command in {"open", "append", "push_table_data"} and not normalized["items"]:
             raise ValueError(f"Table command {command!r} requires at least one item.")
-        if command == "append" and not settings["target"]:
-            raise ValueError("Table append requires settings.target.")
+        if command == "append" and not settings["append_name"]:
+            raise ValueError("Table append requires settings.append_name.")
         if command == "push_table_data" and not settings["request_id"]:
             raise ValueError("Table data push requires settings.request_id.")
 
@@ -377,10 +379,8 @@ class TableCodec(FeatureCodec):
         arguments = list(normalized["items"])
         settings = normalized["settings"]
         kwargs = []
-        if settings["target"]:
-            kwargs.append(f"target={settings['target']!r}")
-        if settings["title"]:
-            kwargs.append(f"title={settings['title']!r}")
+        if settings["name"]:
+            kwargs.append(f"name={settings['name']!r}")
         if include_layout and settings["geometry"] is not None:
             kwargs.append(f"geometry={settings['geometry']!r}")
         if include_layout and settings["column_widths"]:
@@ -390,17 +390,27 @@ class TableCodec(FeatureCodec):
         return ", ".join(arguments)
 
     @classmethod
+    def _append_table_arguments(cls, normalized):
+        arguments = list(normalized["items"])
+        arguments.append(f"name={normalized['settings']['append_name']!r}")
+        return ", ".join(arguments)
+
+    @classmethod
     def state_to_python(cls, state, context=None):
         del context
         normalized = cls.validate_state(state)
         settings = normalized["settings"]
         command = settings["command"]
 
-        if command in {"open", "append"}:
-            include_layout = command == "open"
+        if command == "open":
             return (
                 "hyde.create_table("
-                f"{cls._table_python_arguments(normalized, include_layout=include_layout)})"
+                f"{cls._table_python_arguments(normalized, include_layout=True)})"
+            )
+        if command == "append":
+            return (
+                "hyde.append_table("
+                f"{cls._append_table_arguments(normalized)})"
             )
         if command == "push_table_data":
             return (
@@ -417,18 +427,12 @@ class TableCodec(FeatureCodec):
         state,
         macro_name,
         context=None,
-        *,
-        preserve_target=False,
     ):
         del context
         normalized = cls.validate_state(state)
         parameters = ", ".join(normalized["items"])
         macro_state = copy.deepcopy(normalized)
         macro_state["settings"]["command"] = "open"
-        if not preserve_target:
-            macro_state["settings"]["target"] = None
-        if macro_state["settings"]["title"] is None:
-            macro_state["settings"]["title"] = macro_name
         # Table recreation macros intentionally preserve saved GUI layout even
         # though session.toml also stores it, because macros must fully reopen
         # the table window as the user last arranged it.

@@ -57,7 +57,6 @@ identity. Caller-provided title text is suffix-only detail, not a replacement ti
 
 ## Out of Scope
 
-- Changing public table restore syntax such as `target=...`, unless a separate API decision is made.
 - Changing scientific state ownership, figure IR, table data semantics, or kernel restore behavior.
 - Changing the minimized/maximized geometry persistence model except where it consumes MDI identity.
 - Adding compatibility shims for old internal terminology.

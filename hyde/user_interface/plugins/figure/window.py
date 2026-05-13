@@ -5,7 +5,11 @@ import logging
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import FigureCodec, FigureIRCodec
+from hyde.features.matplotlib_features import (
+    FigureCodec,
+    FigureIRCodec,
+    figure_ir_apply_title,
+)
 from hyde.user_interface.base import HydeGuiState
 from hyde.user_interface.namespace_tracking import tracked_namespace_signature
 from hyde.user_interface.plugin_tools import (
@@ -195,17 +199,24 @@ class FigureSnapshotState:
         if title:
             self._default_macro_name = title
 
-    def macro_source(self, macro_name):
+    def macro_source(self, macro_name, figure_title=None):
         if self._save_error:
             raise MacroStoreError(self._save_error)
         if self._figure_ir is not None:
+            figure_ir = self._figure_ir
+            if figure_title not in (None, ""):
+                figure_ir = figure_ir_apply_title(figure_ir, figure_title)
             return FigureIRCodec.state_to_macro_source(
-                self._figure_ir,
+                figure_ir,
                 macro_name,
                 context={"figure_defaults": self._figure_defaults},
             )
         if self._live_state is not None:
-            return FigureCodec.state_to_macro_source(self._live_state, macro_name)
+            live_state = self._live_state
+            if figure_title not in (None, ""):
+                live_state = FigureCodec.normalize_state(live_state)
+                live_state["settings"]["title"] = str(figure_title)
+            return FigureCodec.state_to_macro_source(live_state, macro_name)
         if not self._call_source:
             raise MacroStoreError("This figure does not have a saveable recreation macro yet.")
         body = "\n".join(f"    {line}" for line in self._call_source.splitlines())
@@ -284,7 +295,6 @@ class FigureWindow(QtWidgets.QWidget):
         self._remember_subwindow_geometry()
 
     def update_payload(self, payload):
-        title = payload.get("title")
         snapshot = dict(payload.get("snapshot", {}) or {})
         self.snapshot_state.update(
             default_macro_name=snapshot.get("default_macro_name"),
@@ -302,7 +312,6 @@ class FigureWindow(QtWidgets.QWidget):
             self._subwindow.setWindowTitle(
                 window_title(
                     self.window_handle(),
-                    title_suffix=title,
                     warning_text=(
                         "Macro Incomplete"
                         if self.snapshot_state.has_save_warning()
@@ -351,9 +360,13 @@ class FigureWindow(QtWidgets.QWidget):
         register=None,
         window_pos=None,
         window_state=None,
+        figure_title=None,
     ):
         return build_window_function_source(
-            self.snapshot_state.macro_source(macro_name),
+            self.snapshot_state.macro_source(
+                macro_name,
+                figure_title=figure_title,
+            ),
             decorator_name=decorator_name,
             register=register,
             window_pos=window_pos,
@@ -366,7 +379,7 @@ class FigureWindow(QtWidgets.QWidget):
             return None
         handle = self.window_handle()
         return build_window_restore_source(
-            self.snapshot_state.macro_source(handle),
+            self.snapshot_state.macro_source(handle, figure_title=handle),
             handle=handle,
             arguments=self.snapshot_state.tracked_names(),
             decorator_name="@hyde.figure",
@@ -599,7 +612,7 @@ class FigureWindow(QtWidgets.QWidget):
         self.close_from_kernel()
 
     def default_macro_name(self):
-        return self.snapshot_state.default_macro_name()
+        return self.window_handle() or self.snapshot_state.default_macro_name()
 
     def window_handle(self):
         return stable_window_name(self._subwindow)
@@ -611,6 +624,7 @@ class FigureWindow(QtWidgets.QWidget):
             decorator_name="@hyde.figure",
             window_pos=None if geometry is None else tuple(geometry[:2]),
             window_state=self.window_state(),
+            figure_title=self.window_handle(),
         )
 
     def closeEvent(self, event):

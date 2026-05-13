@@ -32,12 +32,12 @@ from hyde.user_interface.plugins.table.window_macro_store import (
 from unittest.mock import patch
 
 
-def build_table_macro_source(macro_name, names, title=None, geometry=None, column_widths=None):
+def build_table_macro_source(macro_name, names, name=None, geometry=None, column_widths=None):
     from hyde.user_interface.plugins.table.window import TableState
 
     state = TableState()
     state.set_items(names)
-    state.set_title(title)
+    state.set_name(name)
     state.set_geometry(geometry)
     state.set_column_widths(column_widths or {})
     return state.macro_source(macro_name)
@@ -87,14 +87,25 @@ class TestTableDecorator(unittest.TestCase):
             try:
                 @hyde.table(register=False)
                 def Table0(a):
-                    hyde.create_table(a, target="Table0", title="Table_Fun")
+                    hyde.create_table(a, name="Table0")
 
                 Table0(np.array([1, 2, 3]))
             finally:
                 hyde.gui_mode(False)
 
         signal_open_table.assert_called_once()
-        self.assertEqual(signal_open_table.call_args.args[1], "Table0")
+        self.assertEqual(signal_open_table.call_args.kwargs["name"], "Table0")
+
+    def test_append_table_requires_separate_public_api(self):
+        a = np.array([1, 2, 3])
+        with patch("hyde.signal_append_table") as signal_append_table:
+            hyde.gui_mode(True)
+            try:
+                hyde.append_table(a, name="Table0")
+            finally:
+                hyde.gui_mode(False)
+
+        signal_append_table.assert_called_once_with(["a"], name="Table0")
 
     def test_table_api_rejects_direct_imperative_use(self):
         with self.assertRaises(TypeError):
@@ -279,7 +290,8 @@ class TestFigureDecorator(unittest.TestCase):
 
         @hyde.figure(register=False)
         def Figure0(x):
-            fig = plt.figure("Figure0")
+            fig = plt.figure(len(plt.get_fignums()) + 1)
+            fig.set_label("Figure0")
             ax = fig.add_subplot(111)
             ax.plot(x, label="x")
             return fig
@@ -287,6 +299,45 @@ class TestFigureDecorator(unittest.TestCase):
         figure = Figure0([0, 1, 2])
 
         self.assertEqual(figure.get_label(), "Figure0")
+
+    def test_decorated_figure_conflict_falls_forward_to_next_free_handle(self):
+        from hyde.matplotlib_backend import FigureHyde, finalize_figure_build_session
+
+        first = FigureHyde()
+        first._hyde_is_first_class = True
+        first.set_label("Figure0")
+        first._hyde_ir["settings"]["title"] = "Figure0"
+
+        second = FigureHyde()
+        second.set_label("Figure0")
+
+        session = type(
+            "FakeSession",
+            (),
+            {
+                "created_figures": [second],
+                "source_artifact": None,
+                "ast_artifact": None,
+                "bound_values": {},
+                "metadata": {},
+            },
+        )()
+        manager = type(
+            "FakeManager",
+            (),
+            {"canvas": type("FakeCanvas", (), {"figure": first})()},
+        )()
+
+        with patch(
+            "matplotlib._pylab_helpers.Gcf.get_all_fig_managers",
+            return_value=[manager],
+        ):
+            resolved = finalize_figure_build_session(session, second)
+
+        self.assertEqual(first.get_label(), "Figure0")
+        self.assertEqual(resolved.get_label(), "Figure1")
+        self.assertEqual(first._hyde_ir["settings"]["title"], "Figure0")
+        self.assertEqual(resolved._hyde_ir["settings"]["title"], "Figure1")
 
     def test_decorated_builder_raises_when_no_figure_is_created(self):
         self._configure_pyplot()
@@ -331,7 +382,7 @@ class TestWindowMacroStore(unittest.TestCase):
             validate_macro_name("not valid")
 
     def test_insert_new_macro_adds_bounded_block(self):
-        macro = build_table_macro_source("Table0", ["a", "b"], title="Table0")
+        macro = build_table_macro_source("Table0", ["a", "b"])
 
         updated = update_macro_source("", "Table0", macro)
 
@@ -339,13 +390,14 @@ class TestWindowMacroStore(unittest.TestCase):
         self.assertIn(END_MARKER, updated)
         self.assertIn("@hyde.table", updated)
         self.assertIn("def Table0(a, b):", updated)
-        self.assertIn("hyde.create_table(a, b, title='Table0')", updated)
+        self.assertIn("hyde.create_table(a, b)", updated)
+        self.assertNotIn("title='Table0'", updated)
 
     def test_insert_new_macro_preserves_optional_layout_kwargs(self):
         macro = build_table_macro_source(
             "Table0",
             ["delay2", "fit_delay2"],
-            title="Table0",
+            name="Table0",
             geometry=(5, 42, 510, 242),
             column_widths={"fit_delay2": 262},
         )
@@ -374,7 +426,7 @@ class TestWindowMacroStore(unittest.TestCase):
                     f"{END_MARKER}\n"
                 )
 
-            macro = build_table_macro_source("Table0", ["a", "b"], title="Table0")
+            macro = build_table_macro_source("Table0", ["a", "b"])
             write_macro_source(procedures_init, "Table0", macro)
 
             with open(procedures_init, "r", encoding="utf-8") as handle:
@@ -383,7 +435,8 @@ class TestWindowMacroStore(unittest.TestCase):
             self.assertEqual(updated.count("def Table0("), 1)
             self.assertEqual(updated.count("def Table0(a, b):"), 1)
             self.assertIn("def Table1(a):", updated)
-            self.assertIn("hyde.create_table(a, b, title='Table0')", updated)
+            self.assertIn("hyde.create_table(a, b)", updated)
+            self.assertNotIn("title='Table0'", updated)
             conflict = inspect_macro_conflict(procedures_init, "Table0")
             self.assertIsNotNone(conflict)
             self.assertTrue(conflict["in_autogenerated_block"])
@@ -399,7 +452,7 @@ class TestWindowMacroStore(unittest.TestCase):
                     "    return 'user'\n"
                 )
 
-            macro = build_table_macro_source("Table0", ["a"], title="Table0")
+            macro = build_table_macro_source("Table0", ["a"])
             with self.assertRaises(ValueError):
                 write_macro_source(procedures_init, "Table0", macro)
 

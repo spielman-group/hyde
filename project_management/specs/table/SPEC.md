@@ -4,7 +4,7 @@
 - [x] Add a table MDI subwindow to the Hyde workspace.
 - [x] Display live kernel-backed data objects in a spreadsheet-like grid.
 - [x] Allow direct editing of supported data cells.
-- [x] Expose `hyde.create_table(...)` as the imperative kernel-facing table creation entry point and `@hyde.table` as the recreation decorator.
+- [x] Expose `hyde.create_table(...)` as the imperative kernel-facing table creation entry point, `hyde.append_table(...)` as the explicit append entry point, and `@hyde.table` as the recreation decorator.
 - [x] Provide a New Table dialog that generates the `hyde.create_table(...)` creation string.
 - [x] Allow Python Variables to create a new table from selected arrays via `Edit`.
 - [x] Allow Python Variables to append selected arrays to an existing table via `Append to Table`.
@@ -58,6 +58,7 @@ It includes:
 - creating that table through the New Table dialog
 - appending selected live objects to an existing open table
 - using `hyde.create_table(...)` as the kernel-facing table constructor
+- using `hyde.append_table(...)` as the explicit kernel-facing append call
 - one displayed column per selected object
 - a point/index column at the left
 - direct editing of supported cells in displayed columns
@@ -110,7 +111,10 @@ data.
 The initial table API is deliberately split in two:
 
 - `hyde.create_table(...)` creates a new table from selected supported objects
-- `hyde.create_table(..., target=<table_name>)` appends supported objects to an
+- `hyde.create_table(..., name=<table_name>)` requests a stable table name for
+  recreation or reopen; if that name is already in use, Hyde falls forward to the
+  next available table name
+- `hyde.append_table(..., name=<table_name>)` appends supported objects to an
   existing table, where `<table_name>` is the target subwindow `objectName()`
 - `hyde.create_table(..., geometry=(x, y, width, height))` recreates a saved table window layout
 - `hyde.create_table(..., column_widths={"array_name": width, ...})` recreates saved data-column widths
@@ -121,13 +125,14 @@ The New Table dialog uses this API to generate the creation string.
 Python Variables uses this API in two ways:
 
 - `Edit` opens the New Table dialog with the selected arrays
-- `Append to Table` appends the selected arrays to the currently active table
+- `Append to Table` appends the selected arrays to the currently active table through
+  `hyde.append_table(...)`
 
 Append is only valid when an existing table is active. If no target table is active,
 the action is unavailable.
 
 `geometry` and `column_widths` are table-recreation kwargs. They are meaningful for
-new/recreated tables and are omitted for append-to-target calls.
+new/recreated tables and are omitted for explicit append calls.
 
 ## Visible Controls
 
@@ -207,9 +212,9 @@ Examples of the intended pattern:
 - `array[row] = value` for a 1D array-like object
 - `array = np.append(array, value)` for appending one value below an existing column
 - `hyde.create_table(arr1, arr2)` for creating a new table from selected arrays
-- `hyde.create_table(arr1, target="Table0")` for appending to an existing table,
+- `hyde.append_table(arr1, name="Table0")` for appending to an existing table,
   where `"Table0"` is the target table subwindow `objectName()`
-- `hyde.create_table(arr1, title="delay2, fit_delay2", geometry=(5, 42, 510, 242), column_widths={"arr1": 262})`
+- `hyde.create_table(arr1, name="Table0", geometry=(5, 42, 510, 242), column_widths={"arr1": 262})`
   for recreating a saved table layout
 - `array0 = np.array([value])` for creating a new array from the first inactive column
 
@@ -220,7 +225,8 @@ enough to generate the kernel command or recreation source.
 
 The table feature deliberately exposes:
 
-- `hyde.create_table(...)` for imperative creation and append
+- `hyde.create_table(...)` for imperative creation/reopen
+- `hyde.append_table(...)` for explicit append-to-existing behavior
 - `@hyde.table` for explicit saved recreation macros and non-registering session restore
 
 Saved recreation macros are written into `procedures/__init__.py`, reloaded through the
@@ -231,7 +237,7 @@ table, and the menu invokes them with those visible names.
 Saved table recreation source may include non-default `geometry` and `column_widths`
 kwargs so a recreated table can reopen with its saved layout.
 Project session restore uses the same lower-level recreation builder in `session.py`,
-but preserves the stable table `objectName()` through `target=<table_name>` and adds
+but preserves the stable table `objectName()` through `name=<table_name>` and adds
 `window_state='minimized'` only when needed.
 
 The save dialog receives the current `TableState` directly when it opens. The dialog
@@ -266,9 +272,10 @@ Layout state is intentionally represented in two persistence products:
 - machine-generated `session.py` restore source
 
 The lower-level recreation-source builder is shared. Explicit macros in
-`procedures/__init__.py` clear `target` so the user can reopen a fresh table by name,
-while `session.py` restore preserves `target` so the live table `objectName()`
-remains stable across project reopen.
+`procedures/__init__.py` and generated `session.py` restore both preserve the stable
+table name through `name=<table_name>`. That requested name becomes the table
+window's `objectName()` if it is free; otherwise Hyde falls forward to the next
+available `TableN` name.
 
 ## Explicit Exclusions
 

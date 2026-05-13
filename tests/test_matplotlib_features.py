@@ -1300,9 +1300,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.qapp.processEvents()
 
         figure = workspace.figures[1]
-        self.assertEqual(figure.window_handle(), "Figure0")
-        self.assertEqual(figure.parentWidget().objectName(), "Figure0")
-        self.assertEqual(figure.parentWidget().windowTitle(), "Figure0: FigureA")
+        self.assertEqual(figure.window_handle(), "FigureA")
+        self.assertEqual(figure.parentWidget().objectName(), "FigureA")
+        self.assertEqual(figure.parentWidget().windowTitle(), "FigureA")
         self.assertEqual(figure.snapshot_state.figure_ir()["settings"]["title"], "FigureA")
         self.assertIsNone(figure.snapshot_state.live_state())
         workspace.clear()
@@ -1469,7 +1469,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         workspace.clear()
         mdi_area.close()
 
-    def test_plugin_session_toml_keeps_only_figure_counter(self):
+    def test_plugin_session_toml_omits_figure_name_counters(self):
         plugin = Plugin({})
         plugin.services = {
             "python_execution_service": FakeExecutionService(),
@@ -1495,7 +1495,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         )
         subwindow.setGeometry(10, 20, 300, 220)
         plugin.workspace.figures[1] = figure
-        plugin.workspace.figure_counter = 3
         figure.update_payload(
             {
                 "figure_number": 1,
@@ -1512,7 +1511,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         toml_data = plugin.get_session_toml_data()
 
-        self.assertEqual(toml_data, {"figure_counter": 3})
+        self.assertEqual(toml_data, {})
         figure.close()
         mdi_area.close()
 
@@ -1549,7 +1548,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         session_source = plugin.get_session_restore_source()
 
-        self.assertIn("Figure0(delay, fit_delay, raw_delay)", session_source)
+        self.assertIn("FigureA(delay, fit_delay, raw_delay)", session_source)
         self.assertIn("fig = plt.figure('FigureA')", session_source)
 
         plugin.workspace.close_figure(1)

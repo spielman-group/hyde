@@ -67,10 +67,8 @@ class NewFigureDialog(QtWidgets.QDialog):
             self.ui.heightSpinBox.value(),
         )
 
-    def get_command(self, default_title=None):
+    def get_command(self):
         self._sync_state_from_widgets()
-        if default_title and not self.figure_state.normalized_state()["settings"]["title"]:
-            self.figure_state.set_title(default_title)
         return self.figure_state.source_for_command("create")
 
     def normalized_state(self):

@@ -1,11 +1,12 @@
 import logging
+from functools import partial
 
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtWidgets
 
 from hyde.user_interface.figure_comm import COMM_TARGET
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
-from hyde.user_interface.window_naming import next_numbered_name
+from hyde.user_interface.window_naming import resolve_requested_name
 
 from .dialogs import NewFigureDialog
 from .window import FigureState, FigureWindow
@@ -18,19 +19,6 @@ class FigureWorkspaceService:
     def __init__(self, plugin):
         self.plugin = plugin
         self.figures = {}
-        self.figure_counter = 0
-
-    def next_generated_title(self):
-        existing_names = {
-            figure.window_handle()
-            for figure in self.figures.values()
-        }
-        title, self.figure_counter = next_numbered_name(
-            "Figure",
-            existing_names,
-            self.figure_counter,
-        )
-        return title
 
     def open_or_update_figure(self, payload):
         figure_number = int(payload.get("figure_number"))
@@ -55,16 +43,24 @@ class FigureWorkspaceService:
                 figure_number=figure_number,
                 services=services,
             )
-            stable_name = self.next_generated_title()
+            stable_name, _ = resolve_requested_name(
+                "Figure",
+                {
+                    live_figure.window_handle()
+                    for live_figure in self.figures.values()
+                },
+                requested_name=(
+                    snapshot.get("default_macro_name")
+                    or payload.get("title")
+                ),
+            )
             subwindow = self.plugin.services["mdi_area"].addSubWindow(figure)
             subwindow.setWindowIcon(blank_window_icon())
             subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
             figure.bind_subwindow(subwindow, stable_name=stable_name)
             self.figures[figure_number] = figure
             subwindow.destroyed.connect(
-                lambda *_, number=figure_number, workspace=self: (
-                    workspace._remove_figure(number)
-                )
+                partial(self._on_subwindow_destroyed, figure_number)
             )
             subwindow.show()
         else:
@@ -94,13 +90,16 @@ class FigureWorkspaceService:
         for figure in list(self.figures.values()):
             figure.force_close()
         self.figures.clear()
-        self.figure_counter = 0
 
     def _remove_figure(self, figure_number):
         figures = getattr(self, "figures", None)
         if figures is None:
             return
         figures.pop(int(figure_number), None)
+
+    def _on_subwindow_destroyed(self, figure_number, *args):
+        del args
+        self._remove_figure(figure_number)
 
 
 class FigureFeatureService:
@@ -115,8 +114,7 @@ class FigureFeatureService:
         )
         if not dialog.exec_():
             return False
-        generated_title = self.plugin.workspace.next_generated_title()
-        command = dialog.get_command(default_title=generated_title)
+        command = dialog.get_command()
         if not command:
             return False
         self.plugin.services["python_execution_service"].execute_hidden(command)
@@ -194,7 +192,7 @@ class Plugin(HydePlugin):
         }
 
     def get_session_toml_data(self):
-        return {"figure_counter": self.workspace.figure_counter}
+        return {}
 
     def get_session_restore_source(self):
         blocks = []
@@ -234,10 +232,8 @@ class Plugin(HydePlugin):
         )
 
     def on_project_loaded(self, data):
-        session = data["session"]
-        saved_counter = int(session.get("figure_counter", 0))
+        del data
         self.workspace.clear()
-        self.workspace.figure_counter = saved_counter
 
     def on_kernel_ready(self, data):
         del data

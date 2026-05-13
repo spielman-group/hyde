@@ -47,6 +47,7 @@ Anything exported from `hyde/__init__.py` is public kernel-facing API.
 
 Current deliberate public entry points:
 - `hyde.create_table(...)`
+- `hyde.append_table(...)`
 - `@hyde.table`
 - `@hyde.figure`
 - `hyde.save_project(...)`
@@ -113,13 +114,14 @@ when a project is loaded.
 - Future figure actions must target first-class `@hyde.figure` workflows.
 
 ### Tables
-- Imperative entry point: `hyde.create_table(...)`.
+- Imperative entry points: `hyde.create_table(...)` for opening/reopening a table and
+  `hyde.append_table(...)` for appending objects to an existing open table.
 - Explicit saved-macro/session decorator: `@hyde.table`.
 - GUI owns `TableState` and `MutationState` only long enough to generate commands and
   recreation source.
 - Kernel remains authoritative for table data.
 - Project session restore reuses the same recreation-source path as explicit macros, but
-  preserves stable handles via `target=<handle>` in `session.py`.
+  preserves stable names via `name=<table_name>` in `session.py`.
 
 ### Figures
 - Only first-class `@hyde.figure` figures enter Hyde MDI figure windows.

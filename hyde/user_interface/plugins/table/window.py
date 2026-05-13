@@ -39,21 +39,21 @@ class TableState(HydeGuiState):
     def set_items(self, names):
         self.apply_action({"type": "replace_items", "items": list(names)})
 
-    def set_title(self, title):
-        if title:
+    def set_name(self, name):
+        if name:
             self.apply_action(
-                {"type": "set", "path": ("settings", "title"), "value": title}
+                {"type": "set", "path": ("settings", "name"), "value": name}
             )
         else:
-            self.apply_action({"type": "clear", "path": ("settings", "title")})
+            self.apply_action({"type": "clear", "path": ("settings", "name")})
 
-    def set_target(self, target):
-        if target:
+    def set_append_name(self, name):
+        if name:
             self.apply_action(
-                {"type": "set", "path": ("settings", "target"), "value": target}
+                {"type": "set", "path": ("settings", "append_name"), "value": name}
             )
         else:
-            self.apply_action({"type": "clear", "path": ("settings", "target")})
+            self.apply_action({"type": "clear", "path": ("settings", "append_name")})
 
     def set_geometry(self, geometry):
         if geometry:
@@ -94,22 +94,20 @@ class TableState(HydeGuiState):
 
     def default_macro_name(self):
         settings = self.normalized_state()["settings"]
-        return settings["title"] or settings["target"] or "Table"
+        return settings["name"] or "Table"
 
     def recreation_function_source(
         self,
         macro_name,
         *,
-        preserve_target=False,
-        target=None,
+        name=None,
     ):
         state = copy.deepcopy(self._state)
-        if target is not None:
-            state["settings"]["target"] = target
+        if name is not None:
+            state["settings"]["name"] = name
         return self.codec.state_to_macro_source(
             state,
             macro_name,
-            preserve_target=preserve_target,
         )
 
     def macro_source(self, macro_name):
@@ -239,7 +237,6 @@ class TableWidget(QtWidgets.QWidget):
         handle,
         names,
         services=None,
-        title=None,
         geometry=None,
         column_widths=None,
         *args,
@@ -251,7 +248,6 @@ class TableWidget(QtWidgets.QWidget):
         self.services = dict(services or {})
         self.table_state = TableState()
         self.table_state.set_items(self.names)
-        self.table_state.set_title(title or self._initial_window_name)
         self.table_state.set_geometry(geometry)
         self.table_state.set_column_widths(column_widths or {})
         self.mutation_state = MutationState()
@@ -327,6 +323,7 @@ class TableWidget(QtWidgets.QWidget):
             or self._initial_window_name
         )
         bind_stable_window_name(subwindow, resolved_name)
+        self.table_state.set_name(resolved_name)
         if hasattr(self, "_initial_window_name"):
             del self._initial_window_name
         subwindow.installEventFilter(self)
@@ -601,6 +598,7 @@ class TableWidget(QtWidgets.QWidget):
 
     def capture_layout_state(self):
         if self._subwindow is not None:
+            self.table_state.set_name(self.window_handle())
             if not self._subwindow.isMinimized():
                 self._remember_subwindow_geometry()
             if self._last_normal_geometry is not None:
@@ -621,7 +619,7 @@ class TableWidget(QtWidgets.QWidget):
         return capture_saveable_window_state(self._subwindow)
 
     def default_macro_name(self):
-        return self.table_state.default_macro_name()
+        return self.window_handle() or self.table_state.default_macro_name()
 
     def window_handle(self):
         return stable_window_name(self._subwindow)
@@ -629,7 +627,10 @@ class TableWidget(QtWidgets.QWidget):
     def macro_source(self, macro_name):
         self.capture_layout_state()
         return build_window_function_source(
-            self.table_state.recreation_function_source(macro_name),
+            self.table_state.recreation_function_source(
+                macro_name,
+                name=self.window_handle(),
+            ),
             decorator_name="@hyde.table",
             window_state=self.window_state(),
         )
@@ -639,8 +640,7 @@ class TableWidget(QtWidgets.QWidget):
         return build_window_restore_source(
             self.table_state.recreation_function_source(
                 self.window_handle(),
-                preserve_target=True,
-                target=self.window_handle(),
+                name=self.window_handle(),
             ),
             handle=self.window_handle(),
             arguments=self.names,

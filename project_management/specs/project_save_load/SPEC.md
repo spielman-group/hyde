@@ -83,8 +83,7 @@ Records GUI/session state:
 
 The shell owns writing one `session.toml` file, but feature-owned GUI state is supplied
 and restored by plugins. Implemented plugin payloads currently include persistent tool
-window state, Python Variables filter state, and window-name counters such as
-`figure_counter` and `table_counter`.
+window state and Python Variables filter state.
 
 ### `session.py`
 Records executable restore source for open saveable windows.
@@ -96,7 +95,7 @@ Implemented restore blocks currently include:
 
 - first-class `@hyde.figure(..., register=False)` recreation functions plus invocations
 - `@hyde.table(..., register=False)` recreation functions plus invocations that call
-  `hyde.create_table(...)`
+  `hyde.create_table(..., name=<table_name>)`
 
 `session.py` runs silently after a successful project load once `main_window` state is
 restored, plugins have received `project_loaded`, and the kernel has already completed
@@ -242,8 +241,7 @@ The table plugin currently persists:
 - `window_state='minimized'`
 - saved data-column widths
 - active table `objectName()`
-- table counter
-- stable table `objectName()` values through `target=<table_name>` in `session.py`
+- stable table `objectName()` values through `name=<table_name>` in `session.py`
   restore blocks
 
 Table recreation source generated from `TableState` may also include:

@@ -26,10 +26,11 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Runtime helper handles Lane 1 control messages and kernel-lifecycle watching.
 
 ### Tables
-- `hyde.create_table(...)` is the imperative API.
+- `hyde.create_table(...)` opens or reopens a table by requested stable name.
+- `hyde.append_table(...)` appends objects to an existing open table.
 - `@hyde.table` is the recreation decorator.
 - Open tables restore from `session.py`.
-- Session restore preserves stable table handles and `window_state='minimized'`.
+- Session restore preserves stable table names and `window_state='minimized'`.
 
 ### Figures
 - Only first-class `@hyde.figure` figures open Hyde figure windows.

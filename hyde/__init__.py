@@ -26,6 +26,7 @@ from .recreation_registry import (
 )
 from .execution.ipc import (
     signal_activate_project,
+    signal_append_table,
     signal_enter_no_project_state,
     publish_project_state_result,
     signal_open_table,
@@ -410,8 +411,7 @@ def quit():
 
 def create_table(
     *args,
-    target=None,
-    title=None,
+    name=None,
     geometry=None,
     column_widths=None,
     window_state=None,
@@ -436,11 +436,27 @@ def create_table(
     if HYDE_GUI:
         signal_open_table(
             names,
-            target,
-            title=title,
+            name=name,
             geometry=geometry,
             column_widths=column_widths,
             window_state=window_state,
+        )
+
+
+def append_table(*args, name):
+    """
+    Append supported objects to an existing Hyde table window.
+    """
+    from .execution.helpers import resolve_names
+
+    frame = inspect.currentframe().f_back
+    names = resolve_names(args, frame, validate_1d=True)
+    if not name:
+        raise TypeError("hyde.append_table requires a non-empty name.")
+    if HYDE_GUI:
+        signal_append_table(
+            names,
+            name=name,
         )
 
 

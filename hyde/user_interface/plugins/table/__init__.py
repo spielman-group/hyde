@@ -1,10 +1,12 @@
+from functools import partial
+
 from qtutils.qt import QtCore, QtWidgets
 from hyde.user_interface.plugin_tools import (
     HydePlugin,
     apply_saveable_window_state,
     blank_window_icon,
 )
-from hyde.user_interface.window_naming import next_numbered_name, window_title
+from hyde.user_interface.window_naming import resolve_requested_name, window_title
 
 from .window import (
     TableState,
@@ -17,7 +19,6 @@ class TableWorkspaceService:
         self.plugin = plugin
         self.tables = {}
         self.active_table_handle = None
-        self.table_counter = 0
 
     def has_active_table(self):
         return self.active_table_handle is not None
@@ -26,44 +27,21 @@ class TableWorkspaceService:
         return self.tables.get(handle)
 
     def iter_open_tables(self):
-        return sorted(
-            (
-                table.window_handle(),
-                table,
-            )
-            for table in self.tables.values()
-        )
-
-    def _next_table_handle(self):
-        handle, self.table_counter = next_numbered_name(
-            "Table",
-            self.tables,
-            self.table_counter,
-        )
-        return handle
+        return sorted(self.tables.items())
 
     def open_table(
         self,
         names,
-        target=None,
-        title=None,
+        name=None,
         geometry=None,
         column_widths=None,
         window_state=None,
     ):
-        if target is not None and target in self.tables:
-            table = self.tables[target]
-            table.append_columns(names)
-            subwindow = table.parentWidget()
-            subwindow.show()
-            subwindow.setFocus()
-            subwindow.raise_()
-            return table
-
-        if target is not None:
-            handle = target
-        else:
-            handle = self._next_table_handle()
+        handle, _ = resolve_requested_name(
+            "Table",
+            self.tables,
+            requested_name=name,
+        )
 
         services = dict(self.plugin.services)
         services["save_window_dialog_service"] = self.plugin.services[
@@ -73,7 +51,6 @@ class TableWorkspaceService:
             handle,
             names,
             services=services,
-            title=title,
             geometry=geometry,
             column_widths=column_widths,
         )
@@ -87,20 +64,22 @@ class TableWorkspaceService:
         stable_name = table.window_handle()
         self.tables[stable_name] = table
 
-        subwindow.setWindowTitle(
-            window_title(
-                stable_name,
-                title_suffix=title,
-                detail_text=", ".join(names),
-            )
-        )
+        subwindow.setWindowTitle(window_title(stable_name))
         subwindow.show()
         apply_saveable_window_state(subwindow, window_state)
-        subwindow.destroyed.connect(
-            lambda *_, table_handle=stable_name, workspace=self: (
-                workspace._remove_table(table_handle)
-            )
-        )
+        subwindow.destroyed.connect(partial(self._on_subwindow_destroyed, stable_name))
+        return table
+
+    def append_to_table(self, names, name):
+        table = self.tables.get(name)
+        if table is None:
+            return None
+        table.append_columns(names)
+        subwindow = table.parentWidget()
+        if subwindow is not None:
+            subwindow.show()
+            subwindow.setFocus()
+            subwindow.raise_()
         return table
 
     def on_table_data(self, data):
@@ -140,7 +119,6 @@ class TableWorkspaceService:
                 table.services["save_window_dialog_service"] = save_window_dialog_service
         self.tables.clear()
         self.active_table_handle = None
-        self.table_counter = 0
 
     def _remove_table(self, handle):
         tables = getattr(self, "tables", None)
@@ -149,6 +127,10 @@ class TableWorkspaceService:
         tables.pop(handle, None)
         if self.active_table_handle == handle:
             self.active_table_handle = None
+
+    def _on_subwindow_destroyed(self, handle, *args):
+        del args
+        self._remove_table(handle)
 
 
 class TableFeatureService:
@@ -184,7 +166,7 @@ class TableFeatureService:
         state = TableState()
         state.set_items(names)
         state.set_command("append")
-        state.set_target(active_table_handle)
+        state.set_append_name(active_table_handle)
         self.plugin.services["python_execution_service"].execute_visible(
             state.python_source()
         )
@@ -280,7 +262,7 @@ class Plugin(HydePlugin):
         }
 
     def get_session_toml_data(self):
-        return {"table_counter": self.workspace.table_counter}
+        return {}
 
     def get_session_restore_source(self):
         blocks = []
@@ -295,9 +277,8 @@ class Plugin(HydePlugin):
         self.rebuild_table_macros_menu()
 
     def on_project_loaded(self, data):
-        session = data["session"]
+        del data
         self.workspace.clear()
-        self.workspace.table_counter = int(session.get("table_counter", 0))
 
     def on_project_activated(self, data):
         del data
@@ -314,11 +295,16 @@ class Plugin(HydePlugin):
         if task == "OPEN_TABLE_REQUEST":
             self.workspace.open_table(
                 data.get("names", []),
-                data.get("target"),
-                title=data.get("title"),
+                name=data.get("name"),
                 geometry=data.get("geometry"),
                 column_widths=data.get("column_widths"),
                 window_state=data.get("window_state"),
+            )
+            return
+        if task == "APPEND_TABLE_REQUEST":
+            self.workspace.append_to_table(
+                data.get("names", []),
+                data.get("name"),
             )
             return
         if task == "TABLE_DATA_RESPONSE":

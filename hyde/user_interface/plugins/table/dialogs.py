@@ -43,7 +43,7 @@ class NewTableDialog(QtWidgets.QDialog):
         names = [item.text() for item in selected_items]
         self.table_state.set_items(names)
         title = self.ui.titleEdit.text().strip()
-        self.table_state.set_title(title or None)
+        self.table_state.set_name(title or None)
 
     def get_command(self):
         self._sync_state_from_widgets()

@@ -29,6 +29,7 @@ from hyde.features.matplotlib_features import (
     figure_ir_default_state,
     operand_from_runtime_value,
 )
+from hyde.user_interface.window_naming import resolve_requested_name
 from hyde.user_interface.figure_comm import COMM_TARGET
 
 
@@ -142,11 +143,32 @@ def finalize_figure_build_session(session, result):
         raise ValueError("@hyde.figure functions must resolve to the one created figure.")
 
     figure = created_figure if resolved is None else resolved
-    if figure._hyde_ir["settings"].get("title") is None:
-        figure._hyde_ir = figure_ir_apply_title(
-            figure._hyde_ir,
-            figure.get_label() or None,
-        )
+    requested_name = figure.get_label() or figure._hyde_ir["settings"].get("title")
+    existing_names = set()
+    try:
+        from matplotlib._pylab_helpers import Gcf
+
+        for manager in Gcf.get_all_fig_managers():
+            live_figure = getattr(getattr(manager, "canvas", None), "figure", None)
+            if live_figure is None or live_figure is figure:
+                continue
+            if not _is_windowed_figure(live_figure):
+                continue
+            label = str(live_figure.get_label() or "").strip()
+            if label:
+                existing_names.add(label)
+    except Exception:
+        existing_names = set()
+    resolved_name, _ = resolve_requested_name(
+        "Figure",
+        existing_names,
+        requested_name=requested_name,
+    )
+    figure.set_label(resolved_name)
+    figure._hyde_ir = figure_ir_apply_title(
+        figure._hyde_ir,
+        resolved_name,
+    )
     figure._hyde_defaults = _figure_defaults_snapshot(figure._hyde_ir)
     figure._hyde_is_first_class = True
     figure._hyde_source_artifact = session.source_artifact

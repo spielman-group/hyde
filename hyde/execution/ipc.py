@@ -31,8 +31,7 @@ def put_parent_message(message):
 
 def signal_open_table(
     names,
-    target,
-    title=None,
+    name=None,
     geometry=None,
     column_widths=None,
     window_state=None,
@@ -48,8 +47,7 @@ def signal_open_table(
             "OPEN_TABLE_REQUEST",
             {
                 "names": list(names),
-                "target": target,
-                "title": title,
+                "name": name,
                 "geometry": geometry,
                 "column_widths": dict(column_widths or {}),
                 "window_state": window_state,
@@ -57,6 +55,19 @@ def signal_open_table(
         ])
     except Exception:
         # Silently fail if running outside a Hyde-managed kernel.
+        pass
+
+
+def signal_append_table(names, *, name):
+    try:
+        put_parent_message([
+            "APPEND_TABLE_REQUEST",
+            {
+                "names": list(names),
+                "name": str(name),
+            },
+        ])
+    except Exception:
         pass
 
 

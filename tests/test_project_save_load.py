@@ -171,7 +171,6 @@ class TestProjectStateHelpers(unittest.TestCase):
                 def get_session_toml_data(self):
                     return {
                         "tool_windows": {"logging": {"visible": True}},
-                        "figure_counter": 4,
                     }
 
                 def get_session_restore_source(self):
@@ -195,7 +194,6 @@ class TestProjectStateHelpers(unittest.TestCase):
             session_source = (Path(project_dir) / "session.py").read_text()
 
             self.assertTrue(session["tool_windows"]["logging"]["visible"])
-            self.assertEqual(session["figure_counter"], 4)
             self.assertNotIn("@hyde.figure", session_toml)
             self.assertIn("@hyde.figure(window_pos=(5, 42), register=False)", session_source)
             self.assertIn("def Figure0(delay, fit_delay):", session_source)
@@ -206,7 +204,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             project_dir = Path(tmpdir) / "session_restore.hy"
             project_dir.mkdir()
             (project_dir / "session.toml").write_text(
-                "format_version = 1\nfigure_counter = 2\n",
+                "format_version = 1\n",
                 encoding="utf-8",
             )
             (project_dir / "session.py").write_text(
@@ -249,7 +247,6 @@ class TestProjectStateHelpers(unittest.TestCase):
             HydeApp.restore_project_session(restored_app)
 
             self.assertEqual(events[0][0], "project_loaded")
-            self.assertEqual(events[0][1]["session"]["figure_counter"], 2)
             self.assertEqual(events[1][0], "session_source")
             self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", events[1][1])
             self.assertIn("Figure0(delay)", events[1][1])
