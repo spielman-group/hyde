@@ -5,6 +5,7 @@ import base64
 import io
 import inspect
 import logging
+import re
 import sys
 import textwrap
 import threading
@@ -35,13 +36,22 @@ from hyde.user_interface.figure_comm import COMM_TARGET
 
 _BUILD_SESSION_LOCAL = threading.local()
 LOGGER = logging.getLogger("hyde")
+_DEFAULT_FIGURE_LABEL_RE = re.compile(r"^Figure\s+(\d+)$")
+
+
+def _canonicalize_default_figure_name(name):
+    text = str(name or "")
+    match = _DEFAULT_FIGURE_LABEL_RE.fullmatch(text)
+    if match is None:
+        return text
+    return f"Figure{match.group(1)}"
 
 
 def _default_figure_title(figure, number):
     label = figure.get_label()
     if label:
-        return str(label)
-    return f"Figure {number}"
+        return _canonicalize_default_figure_name(label)
+    return f"Figure{number}"
 
 
 def _is_windowed_figure(figure):

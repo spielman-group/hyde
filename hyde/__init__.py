@@ -46,7 +46,7 @@ _TABLE_WINDOW_METADATA = contextvars.ContextVar(
     default=None,
 )
 _TABLE_WINDOW_STATES = frozenset({"visible", "minimized", "maximized"})
-_FIGURE_WINDOW_STATES = frozenset({"minimized"})
+_FIGURE_WINDOW_STATES = frozenset({"visible", "minimized", "maximized"})
 
 
 def _normalize_window_state(window_state, owner, *, allowed_states):
@@ -544,7 +544,7 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
     Decorated functions are published into `Windows -> Graph Macros` after the
     procedures package reload path rebuilds the registry unless
     ``register=False`` is provided. Internal restore paths may also pass
-    ``window_pos=...`` and ``window_state='minimized'`` to restore saved GUI
+    ``window_pos=...`` and ``window_state`` restore metadata to restore saved GUI
     state.
     """
     metadata = _build_window_metadata(

@@ -612,11 +612,22 @@ def _qrect_to_list(rect):
 
 
 def capture_saveable_window_state(subwindow):
-    return "minimized" if subwindow.isMinimized() else None
+    if subwindow is None:
+        return None
+    if subwindow.isMinimized():
+        return "minimized"
+    if subwindow.isMaximized():
+        return "maximized"
+    return None
 
 
 def apply_saveable_window_state(subwindow, window_state):
-    if subwindow is None or window_state != "minimized":
+    if subwindow is None:
+        return
+    if window_state == "maximized":
+        subwindow.showMaximized()
+        return
+    if window_state != "minimized":
         return
     subwindow.showMinimized()
 

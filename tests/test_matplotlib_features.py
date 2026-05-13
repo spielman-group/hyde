@@ -639,9 +639,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         payload = figure_snapshot_payload(figure, 1)
 
-        self.assertEqual(payload["default_macro_name"], "Figure 1")
+        self.assertEqual(payload["default_macro_name"], "Figure1")
         self.assertIsNone(payload["save_error"])
-        self.assertIn("fig = plt.figure('Figure 1')", payload["call_source"])
+        self.assertIn("fig = plt.figure('Figure1')", payload["call_source"])
         self.assertIn("ax = fig.add_subplot(111)", payload["call_source"])
         self.assertIn("ax.plot(np.array([1, 4, 9])", payload["call_source"])
         self.assertEqual(
@@ -1436,6 +1436,107 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
     def test_workspace_applies_snapshot_minimized_metadata_for_new_macro_window(self):
         mdi_area = QtWidgets.QMdiArea()
+        mdi_area.resize(800, 600)
+        mdi_area.show()
+        plugin = type("FakePlugin", (), {})()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            "get_shutting_down": lambda: False,
+        }
+        workspace = FigureWorkspaceService(plugin)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
+        image.fill(QtCore.Qt.white)
+        buffer = QtCore.QBuffer()
+        buffer.open(QtCore.QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        png_base64 = bytes(buffer.data().toBase64()).decode("ascii")
+
+        payload = {
+            "figure_number": 1,
+            "title": "FigureA",
+            "snapshot": {
+                "is_first_class": True,
+                "default_macro_name": "FigureA",
+                "call_source": "fig = plt.figure('FigureA')",
+                "figure_size": (320, 240),
+                "figure_ir": figure_ir,
+                "hyde_metadata": {"window_state": "minimized"},
+            },
+        }
+        workspace.open_or_update_figure(payload)
+        workspace.open_or_update_figure(
+            {
+                **payload,
+                "image_png_base64": png_base64,
+            }
+        )
+        self.qapp.processEvents()
+
+        figure = workspace.figures[1]
+        self.assertTrue(figure.parentWidget().isMinimized())
+        workspace.clear()
+        mdi_area.close()
+
+    def test_minimized_workspace_restore_keeps_first_draw_pixmap(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.resize(800, 600)
+        mdi_area.show()
+        plugin = type("FakePlugin", (), {})()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            "get_shutting_down": lambda: False,
+        }
+        workspace = FigureWorkspaceService(plugin)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
+        image.fill(QtCore.Qt.white)
+        buffer = QtCore.QBuffer()
+        buffer.open(QtCore.QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        png_base64 = bytes(buffer.data().toBase64()).decode("ascii")
+
+        payload = {
+            "figure_number": 1,
+            "title": "FigureA",
+            "snapshot": {
+                "is_first_class": True,
+                "default_macro_name": "FigureA",
+                "call_source": "fig = plt.figure('FigureA')",
+                "figure_size": (320, 240),
+                "figure_ir": figure_ir,
+                "hyde_metadata": {"window_state": "minimized"},
+            },
+        }
+        workspace.open_or_update_figure(payload)
+        workspace.open_or_update_figure(
+            {
+                **payload,
+                "image_png_base64": png_base64,
+            }
+        )
+        self.qapp.processEvents()
+
+        figure = workspace.figures[1]
+        self.assertTrue(figure.parentWidget().isMinimized())
+        self.assertIsNotNone(figure.image_label.pixmap())
+        self.assertFalse(figure.image_label.pixmap().isNull())
+        figure.parentWidget().showNormal()
+        self.qapp.processEvents()
+        self.assertFalse(figure.parentWidget().isMinimized())
+        self.assertIsNotNone(figure.image_label.pixmap())
+        self.assertFalse(figure.image_label.pixmap().isNull())
+        workspace.clear()
+        mdi_area.close()
+
+    def test_workspace_applies_snapshot_maximized_metadata_for_new_macro_window(self):
+        mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
         plugin = type("FakePlugin", (), {})()
         plugin.services = {
@@ -1458,14 +1559,82 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                     "call_source": "fig = plt.figure('FigureA')",
                     "figure_size": (320, 240),
                     "figure_ir": figure_ir,
-                    "hyde_metadata": {"window_state": "minimized"},
+                    "hyde_metadata": {"window_state": "maximized"},
                 },
             }
         )
         self.qapp.processEvents()
 
         figure = workspace.figures[1]
-        self.assertTrue(figure.parentWidget().isMinimized())
+        self.assertTrue(figure.parentWidget().isMaximized())
+        workspace.clear()
+        mdi_area.close()
+
+    def test_minimized_workspace_restore_returns_to_saved_normal_position(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.resize(800, 600)
+        mdi_area.show()
+        plugin = type("FakePlugin", (), {})()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            "get_shutting_down": lambda: False,
+        }
+        workspace = FigureWorkspaceService(plugin)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
+        image.fill(QtCore.Qt.white)
+        buffer = QtCore.QBuffer()
+        buffer.open(QtCore.QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        png_base64 = bytes(buffer.data().toBase64()).decode("ascii")
+
+        workspace.open_or_update_figure(
+            {
+                "figure_number": 1,
+                "title": "FigureA",
+                "snapshot": {
+                    "is_first_class": True,
+                    "default_macro_name": "FigureA",
+                    "call_source": "fig = plt.figure('FigureA')",
+                    "figure_size": (320, 240),
+                    "figure_ir": figure_ir,
+                    "hyde_metadata": {
+                        "window_pos": [120, 130],
+                        "window_state": "minimized",
+                    },
+                },
+            }
+        )
+        workspace.open_or_update_figure(
+            {
+                "figure_number": 1,
+                "title": "FigureA",
+                "snapshot": {
+                    "is_first_class": True,
+                    "default_macro_name": "FigureA",
+                    "call_source": "fig = plt.figure('FigureA')",
+                    "figure_size": (320, 240),
+                    "figure_ir": figure_ir,
+                    "hyde_metadata": {
+                        "window_pos": [120, 130],
+                        "window_state": "minimized",
+                    },
+                },
+                "image_png_base64": png_base64,
+            }
+        )
+        self.qapp.processEvents()
+
+        figure = workspace.figures[1]
+        subwindow = figure.parentWidget()
+        self.assertTrue(subwindow.isMinimized())
+        subwindow.showNormal()
+        self.qapp.processEvents()
+
+        self.assertEqual(figure.capture_geometry()[:2], [120, 130])
         workspace.clear()
         mdi_area.close()
 

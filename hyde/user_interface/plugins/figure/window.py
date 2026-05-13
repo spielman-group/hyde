@@ -1,6 +1,7 @@
 import base64
 import copy
 import logging
+import re
 
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
@@ -27,6 +28,17 @@ from hyde.user_interface.window_naming import (
 from hyde.user_interface.window_macro_store import MacroStoreError
 
 LOGGER = logging.getLogger("hyde")
+_DEFAULT_FIGURE_LABEL_RE = re.compile(r"^Figure\s+(\d+)$")
+
+
+def _canonicalize_figure_window_name(name, fallback_number):
+    text = str(name or "").strip()
+    if not text:
+        return f"Figure{int(fallback_number)}"
+    match = _DEFAULT_FIGURE_LABEL_RE.fullmatch(text)
+    if match is not None:
+        return f"Figure{match.group(1)}"
+    return text
 
 
 class FigureState(HydeGuiState):
@@ -280,13 +292,12 @@ class FigureWindow(QtWidgets.QWidget):
 
     def bind_subwindow(self, subwindow, stable_name=None):
         self._subwindow = subwindow
-        resolved_name = (
+        resolved_name = _canonicalize_figure_window_name(
             stable_name
             if stable_name is not None
-            else stable_window_name(subwindow)
+            else stable_window_name(subwindow),
+            self.figure_number,
         )
-        if resolved_name is None:
-            resolved_name = f"Figure{self.figure_number}"
         bind_stable_window_name(
             subwindow,
             resolved_name,
@@ -406,6 +417,7 @@ class FigureWindow(QtWidgets.QWidget):
             return
         if not self._initial_size_applied:
             self._pending_window_state = window_state
+            return
         apply_saveable_window_state(self._subwindow, window_state)
 
     def _apply_pending_window_state(self):
@@ -619,11 +631,12 @@ class FigureWindow(QtWidgets.QWidget):
 
     def macro_source(self, macro_name):
         geometry = self.capture_geometry()
+        window_state = self.window_state()
         return self._recreation_function_source(
             macro_name,
             decorator_name="@hyde.figure",
             window_pos=None if geometry is None else tuple(geometry[:2]),
-            window_state=self.window_state(),
+            window_state=None if window_state == "minimized" else window_state,
             figure_title=self.window_handle(),
         )
 

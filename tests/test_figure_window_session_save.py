@@ -160,6 +160,20 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             widget.force_close()
             mdi_area.close()
 
+    def test_figure_window_canonicalizes_spaced_default_figure_name(self):
+        widget = FigureWindow(figure_number=1)
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        try:
+            widget.bind_subwindow(subwindow, stable_name="Figure 1")
+
+            self.assertEqual(widget.window_handle(), "Figure1")
+            self.assertEqual(subwindow.objectName(), "Figure1")
+        finally:
+            widget.force_close()
+            mdi_area.close()
+
     def test_figure_window_sources_preserve_figsize_from_figure_ir(self):
         widget = FigureWindow(figure_number=1)
         subwindow = QtWidgets.QMdiSubWindow()
@@ -243,7 +257,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             widget.force_close()
             mdi_area.close()
 
-    def test_figure_window_sources_include_minimized_metadata(self):
+    def test_figure_window_session_restore_source_includes_minimized_metadata_only(self):
         widget = FigureWindow(figure_number=1)
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
@@ -270,14 +284,50 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             macro = widget.macro_source("Figure0")
             source = widget.session_restore_source()
 
-            self.assertIn(
-                "@hyde.figure(window_pos=(10, 20), window_state='minimized')",
-                macro,
-            )
+            self.assertIn("@hyde.figure(window_pos=(10, 20))", macro)
+            self.assertNotIn("window_state=", macro)
             self.assertIn(
                 "@hyde.figure(window_pos=(10, 20), window_state='minimized', register=False)",
                 source,
             )
+            self.assertNotIn("geometry_minimized", source)
+        finally:
+            widget.force_close()
+            mdi_area.close()
+
+    def test_figure_window_session_restore_source_preserves_maximized_metadata(self):
+        widget = FigureWindow(figure_number=1)
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Figure7")
+        widget.bind_subwindow(subwindow)
+        subwindow.setGeometry(10, 20, 300, 240)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Graph0"))
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "title": "Graph0",
+                    "snapshot": {
+                        "figure_ir": figure_ir,
+                        "live_state": None,
+                    },
+                }
+            )
+            subwindow.show()
+            self.qapp.processEvents()
+            subwindow.showMaximized()
+            self.qapp.processEvents()
+
+            source = widget.session_restore_source()
+
+            self.assertIn(
+                "@hyde.figure(window_pos=(10, 20), window_state='maximized', register=False)",
+                source,
+            )
+            self.assertIn("def Figure7(delay, fit_delay, raw_delay):", source)
+            self.assertIn("fig = plt.figure('Figure7')", source)
         finally:
             widget.force_close()
             mdi_area.close()

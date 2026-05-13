@@ -183,15 +183,18 @@ class TestFigureDecorator(unittest.TestCase):
         )
 
     def test_figure_decorator_accepts_window_state_metadata(self):
-        @hyde.figure(window_state="minimized")
-        def Graph0(x, y):
-            return x, y
+        for window_state in ("minimized", "visible", "maximized"):
+            with self.subTest(window_state=window_state):
+                @hyde.figure(window_state=window_state)
+                def Graph0(x, y):
+                    return x, y
 
-        self.assertEqual(figure_macro_names(), ("Graph0",))
-        self.assertEqual(
-            figure_macro_entries(),
-            ({"name": "Graph0", "args": ["x", "y"]},),
-        )
+                self.assertEqual(figure_macro_names(), ("Graph0",))
+                self.assertEqual(
+                    figure_macro_entries(),
+                    ({"name": "Graph0", "args": ["x", "y"]},),
+                )
+                clear_figure_macros()
 
     def test_figure_decorator_rejects_keyword_only_parameters(self):
         with self.assertRaises(TypeError):

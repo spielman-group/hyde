@@ -3,6 +3,7 @@ from functools import partial
 from qtutils.qt import QtCore, QtWidgets
 from hyde.user_interface.plugin_tools import (
     HydePlugin,
+    apply_saveable_window_state,
     blank_window_icon,
 )
 from hyde.user_interface.window_naming import resolve_requested_name, window_title
@@ -10,7 +11,6 @@ from hyde.user_interface.window_naming import resolve_requested_name, window_tit
 from .window import (
     TableState,
     TableWidget,
-    apply_table_restore_window_state,
 )
 
 
@@ -66,7 +66,7 @@ class TableWorkspaceService:
 
         subwindow.setWindowTitle(window_title(stable_name))
         subwindow.show()
-        apply_table_restore_window_state(subwindow, window_state)
+        apply_saveable_window_state(subwindow, window_state)
         subwindow.destroyed.connect(partial(self._on_subwindow_destroyed, stable_name))
         return table
 
