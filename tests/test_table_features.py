@@ -436,10 +436,65 @@ class TestTableWorkspaceService(unittest.TestCase):
         first = workspace.open_table(["a"], title="Shared")
         second = workspace.open_table(["b"], title="Shared")
 
-        self.assertEqual(first.handle, "Table0")
-        self.assertEqual(second.handle, "Table1")
-        self.assertEqual(first.parentWidget().windowTitle(), "Shared")
-        self.assertEqual(second.parentWidget().windowTitle(), "Shared")
+        self.assertEqual(first.window_handle(), "Table0")
+        self.assertEqual(second.window_handle(), "Table1")
+        self.assertFalse(hasattr(first, "handle"))
+        self.assertFalse(hasattr(second, "handle"))
+        self.assertEqual(first.parentWidget().objectName(), "Table0")
+        self.assertEqual(second.parentWidget().objectName(), "Table1")
+        self.assertEqual(first.parentWidget().windowTitle(), "Table0: Shared")
+        self.assertEqual(second.parentWidget().windowTitle(), "Table1: Shared")
+
+        workspace.clear()
+        self._drain_events()
+
+    def test_open_table_uses_stable_name_in_default_title(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = FakeTablePlugin(mdi_area, save_result=True)
+        workspace = TableWorkspaceService(plugin)
+
+        table = workspace.open_table(["a", "b"])
+
+        self.assertEqual(table.window_handle(), "Table0")
+        self.assertEqual(table.parentWidget().windowTitle(), "Table0: a, b")
+
+        workspace.clear()
+        self._drain_events()
+
+    def test_bind_subwindow_keeps_existing_object_name_as_table_identity(self):
+        table = TableWidget("LegacyHandle", ["a"])
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(table)
+        subwindow.setObjectName("Table7")
+
+        try:
+            table.bind_subwindow(subwindow)
+
+            self.assertFalse(hasattr(table, "handle"))
+            self.assertEqual(subwindow.objectName(), "Table7")
+            self.assertEqual(table.window_handle(), "Table7")
+            self.assertIn("target='Table7'", table.session_restore_source())
+        finally:
+            table.close()
+            mdi_area.close()
+            self._drain_events()
+
+    def test_session_restore_source_uses_subwindow_object_name_as_table_identity(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = FakeTablePlugin(mdi_area, save_result=True)
+        workspace = TableWorkspaceService(plugin)
+
+        table = workspace.open_table(["a", "b"], title="Table_Fun")
+        subwindow = table.parentWidget()
+        subwindow.setObjectName("Table7")
+
+        source = table.session_restore_source()
+
+        self.assertEqual(table.window_handle(), "Table7")
+        self.assertIn("def Table7(a, b):", source)
+        self.assertIn("Table7(a, b)", source)
+        self.assertIn("target='Table7'", source)
 
         workspace.clear()
         self._drain_events()
@@ -560,6 +615,32 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         plugin.workspace.clear()
         mdi_area.close()
+
+    def test_append_to_active_table_uses_subwindow_object_name_as_target(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = Plugin({})
+        execution = FakeExecutionService()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "python_execution_service": execution,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "get_current_project_dir": lambda: "/tmp/demo.hy",
+            "save_window_dialog_service": FakeSaveWindowDialogService(),
+        }
+
+        table = plugin.workspace.open_table(["a"])
+        subwindow = table.parentWidget()
+        subwindow.setObjectName("Table7")
+
+        plugin.workspace.on_subwindow_activated(subwindow)
+        appended = plugin.table_feature.append_to_active_table(["b"])
+
+        self.assertTrue(appended)
+        self.assertEqual(len(execution.visible_calls), 1)
+        self.assertIn("target='Table7'", execution.visible_calls[0])
+
+        plugin.workspace.clear()
+        self._drain_events()
 
     def test_workspace_opens_minimized_table_window(self):
         mdi_area = QtWidgets.QMdiArea()

@@ -14,6 +14,10 @@ from hyde.user_interface.plugin_tools import (
     capture_saveable_window_state,
     capture_subwindow_geometry,
 )
+from hyde.user_interface.window_naming import (
+    bind_stable_window_name,
+    stable_window_name,
+)
 
 
 class TableState(HydeGuiState):
@@ -242,12 +246,12 @@ class TableWidget(QtWidgets.QWidget):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.handle = handle
+        self._initial_window_name = str(handle)
         self.names = list(names)
         self.services = dict(services or {})
         self.table_state = TableState()
         self.table_state.set_items(self.names)
-        self.table_state.set_title(title or handle)
+        self.table_state.set_title(title or self._initial_window_name)
         self.table_state.set_geometry(geometry)
         self.table_state.set_column_widths(column_widths or {})
         self.mutation_state = MutationState()
@@ -315,8 +319,16 @@ class TableWidget(QtWidgets.QWidget):
         if refresh and self.names:
             self.refresh_data()
 
-    def bind_subwindow(self, subwindow):
+    def bind_subwindow(self, subwindow, stable_name=None):
         self._subwindow = subwindow
+        resolved_name = (
+            stable_name
+            or stable_window_name(subwindow)
+            or self._initial_window_name
+        )
+        bind_stable_window_name(subwindow, resolved_name)
+        if hasattr(self, "_initial_window_name"):
+            del self._initial_window_name
         subwindow.installEventFilter(self)
         geometry = self.table_state.normalized_state()["settings"]["geometry"]
         if geometry is not None:
@@ -612,7 +624,7 @@ class TableWidget(QtWidgets.QWidget):
         return self.table_state.default_macro_name()
 
     def window_handle(self):
-        return self.handle
+        return stable_window_name(self._subwindow)
 
     def macro_source(self, macro_name):
         self.capture_layout_state()

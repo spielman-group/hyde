@@ -45,7 +45,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         )
 
         self.assertEqual(snapshot.default_macro_name(), "Figure0")
-        self.assertEqual(snapshot.handle(), "Figure0")
+        self.assertFalse(hasattr(snapshot, "handle"))
         self.assertEqual(snapshot.tracked_names(), ("delay", "fit_delay", "raw_delay"))
         self.assertIn("fig = plt.figure('Figure0')", snapshot.call_source())
         macro = snapshot.macro_source("Graph0")
@@ -103,19 +103,20 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_figure_window_session_restore_source_uses_figure_ir_without_live_state(self):
+    def test_figure_window_session_restore_source_uses_subwindow_object_name_as_stable_identity(self):
         widget = FigureWindow(figure_number=1)
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
         subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Graph0"))
         try:
             widget.update_payload(
                 {
                     "figure_number": 1,
-                    "title": "Figure0",
+                    "title": "Graph0",
                     "snapshot": {
                         "figure_ir": figure_ir,
                         "live_state": None,
@@ -133,15 +134,30 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 "@hyde.figure(window_pos=(10, 20), window_state='minimized', register=False)",
                 source,
             )
-            self.assertIn("def Figure0(delay, fit_delay, raw_delay):", source)
-            self.assertIn("Figure0(delay, fit_delay, raw_delay)", source)
-            self.assertIn("fig = plt.figure('Figure0')", source)
+            self.assertIn("def Figure7(delay, fit_delay, raw_delay):", source)
+            self.assertIn("Figure7(delay, fit_delay, raw_delay)", source)
+            self.assertIn("fig = plt.figure('Graph0')", source)
             self.assertIn(
                 "ax.plot(delay, fit_delay, label='fit_delay')",
                 source,
             )
             self.assertNotIn("hidden=", source)
             self.assertNotIn("visible=", source)
+        finally:
+            widget.force_close()
+            mdi_area.close()
+
+    def test_figure_window_does_not_keep_private_handle_state_after_binding(self):
+        widget = FigureWindow(figure_number=1)
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Figure7")
+        try:
+            widget.bind_subwindow(subwindow)
+
+            self.assertFalse(hasattr(widget, "_window_handle"))
+            self.assertEqual(widget.window_handle(), "Figure7")
         finally:
             widget.force_close()
             mdi_area.close()
@@ -179,6 +195,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         widget = FigureWindow(figure_number=1)
         subwindow = QtWidgets.QMdiSubWindow()
         subwindow.setWidget(widget)
+        subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
         try:
             widget.update_payload(
@@ -196,9 +213,37 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(subwindow.windowTitle(), "Figure0 [Macro Incomplete]")
+            self.assertEqual(subwindow.windowTitle(), "Figure7: Figure0 [Macro Incomplete]")
         finally:
             widget.close()
+
+    def test_figure_window_uses_stable_name_when_payload_title_is_missing(self):
+        widget = FigureWindow(figure_number=1)
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Figure7")
+        widget.bind_subwindow(subwindow)
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "title": None,
+                    "snapshot": {
+                        "default_macro_name": "Graph0",
+                        "call_source": None,
+                        "save_error": "unsupported trace source",
+                        "figure_ir": None,
+                        "live_state": None,
+                        "is_first_class": True,
+                    },
+                }
+            )
+
+            self.assertEqual(subwindow.windowTitle(), "Figure7 [Macro Incomplete]")
+        finally:
+            widget.force_close()
+            mdi_area.close()
 
     def test_figure_window_sources_include_minimized_metadata(self):
         widget = FigureWindow(figure_number=1)

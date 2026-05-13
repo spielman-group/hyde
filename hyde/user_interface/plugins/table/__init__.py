@@ -4,7 +4,7 @@ from hyde.user_interface.plugin_tools import (
     apply_saveable_window_state,
     blank_window_icon,
 )
-from hyde.user_interface.window_naming import next_numbered_name
+from hyde.user_interface.window_naming import next_numbered_name, window_title
 
 from .window import (
     TableState,
@@ -26,7 +26,13 @@ class TableWorkspaceService:
         return self.tables.get(handle)
 
     def iter_open_tables(self):
-        return sorted(self.tables.items())
+        return sorted(
+            (
+                table.window_handle(),
+                table,
+            )
+            for table in self.tables.values()
+        )
 
     def _next_table_handle(self):
         handle, self.table_counter = next_numbered_name(
@@ -77,15 +83,21 @@ class TableWorkspaceService:
         # Qt's normal delete-on-close behavior instead of the persistent tool-
         # window wrapper that turns close into hide.
         subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
-        table.bind_subwindow(subwindow)
-        self.tables[handle] = table
+        table.bind_subwindow(subwindow, stable_name=handle)
+        stable_name = table.window_handle()
+        self.tables[stable_name] = table
 
-        window_title = title if title else f"{handle}: {', '.join(names)}"
-        subwindow.setWindowTitle(window_title)
+        subwindow.setWindowTitle(
+            window_title(
+                stable_name,
+                title=title,
+                detail_text=", ".join(names),
+            )
+        )
         subwindow.show()
         apply_saveable_window_state(subwindow, window_state)
         subwindow.destroyed.connect(
-            lambda *_, table_handle=handle, workspace=self: (
+            lambda *_, table_handle=stable_name, workspace=self: (
                 workspace._remove_table(table_handle)
             )
         )
@@ -103,7 +115,7 @@ class TableWorkspaceService:
             return
         widget = subwindow.widget()
         if isinstance(widget, TableWidget):
-            self.active_table_handle = widget.handle
+            self.active_table_handle = widget.window_handle()
         else:
             self.active_table_handle = None
 
@@ -116,13 +128,14 @@ class TableWorkspaceService:
                 "save_window_dialog_service",
                 None,
             )
+            table_handle = table.window_handle()
             if hasattr(table, "shutdown_client"):
                 table.shutdown_client()
             subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
             subwindow.close()
             if (
                 save_window_dialog_service is not None
-                and table.handle in self.tables
+                and self.tables.get(table_handle) is table
             ):
                 table.services["save_window_dialog_service"] = save_window_dialog_service
         self.tables.clear()

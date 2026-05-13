@@ -1300,6 +1300,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.qapp.processEvents()
 
         figure = workspace.figures[1]
+        self.assertEqual(figure.window_handle(), "Figure0")
+        self.assertEqual(figure.parentWidget().objectName(), "Figure0")
+        self.assertEqual(figure.parentWidget().windowTitle(), "Figure0: FigureA")
         self.assertEqual(figure.snapshot_state.figure_ir()["settings"]["title"], "FigureA")
         self.assertIsNone(figure.snapshot_state.live_state())
         workspace.clear()
@@ -1544,7 +1547,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure = plugin.workspace.open_or_update_figure(payload)
         figure.parentWidget().setGeometry(10, 20, 300, 220)
 
-        self.assertIn("FigureA(delay, fit_delay, raw_delay)", plugin.get_session_restore_source())
+        session_source = plugin.get_session_restore_source()
+
+        self.assertIn("Figure0(delay, fit_delay, raw_delay)", session_source)
+        self.assertIn("fig = plt.figure('FigureA')", session_source)
 
         plugin.workspace.close_figure(1)
         self.qapp.processEvents()

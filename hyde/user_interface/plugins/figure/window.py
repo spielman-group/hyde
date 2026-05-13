@@ -15,6 +15,11 @@ from hyde.user_interface.plugin_tools import (
     capture_saveable_window_state,
     capture_subwindow_geometry,
 )
+from hyde.user_interface.window_naming import (
+    bind_stable_window_name,
+    stable_window_name,
+    window_title,
+)
 from hyde.user_interface.window_macro_store import MacroStoreError
 
 LOGGER = logging.getLogger("hyde")
@@ -152,9 +157,6 @@ class FigureSnapshotState:
     def default_macro_name(self):
         return self._default_macro_name
 
-    def handle(self):
-        return self.default_macro_name()
-
     def call_source(self):
         return self._call_source
 
@@ -265,8 +267,19 @@ class FigureWindow(QtWidgets.QWidget):
                 self._on_namespace_view_updated
             )
 
-    def bind_subwindow(self, subwindow):
+    def bind_subwindow(self, subwindow, stable_name=None):
         self._subwindow = subwindow
+        resolved_name = (
+            stable_name
+            if stable_name is not None
+            else stable_window_name(subwindow)
+        )
+        if resolved_name is None:
+            resolved_name = f"Figure{self.figure_number}"
+        bind_stable_window_name(
+            subwindow,
+            resolved_name,
+        )
         subwindow.installEventFilter(self)
         self._remember_subwindow_geometry()
 
@@ -285,8 +298,18 @@ class FigureWindow(QtWidgets.QWidget):
             live_state=snapshot.get("live_state"),
             trace_styles=snapshot.get("trace_styles"),
         )
-        if title and self._subwindow is not None:
-            self._subwindow.setWindowTitle(self._window_title(str(title)))
+        if self._subwindow is not None:
+            self._subwindow.setWindowTitle(
+                window_title(
+                    self.window_handle(),
+                    title=title,
+                    warning_text=(
+                        "Macro Incomplete"
+                        if self.snapshot_state.has_save_warning()
+                        else None
+                    ),
+                )
+            )
         self._tracked_namespace_state = self._current_tracked_namespace_state()
 
         image_base64 = payload.get("image_png_base64")
@@ -308,11 +331,6 @@ class FigureWindow(QtWidgets.QWidget):
     def set_live_state(self, state):
         self.snapshot_state.set_live_state(state)
         self._tracked_namespace_state = self._current_tracked_namespace_state()
-
-    def _window_title(self, title):
-        if self.snapshot_state.has_save_warning():
-            return f"{title} [Macro Incomplete]"
-        return title
 
     def capture_geometry(self):
         if self._subwindow is None:
@@ -584,7 +602,7 @@ class FigureWindow(QtWidgets.QWidget):
         return self.snapshot_state.default_macro_name()
 
     def window_handle(self):
-        return self.snapshot_state.handle()
+        return stable_window_name(self._subwindow)
 
     def macro_source(self, macro_name):
         geometry = self.capture_geometry()

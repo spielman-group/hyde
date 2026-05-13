@@ -21,13 +21,13 @@ class FigureWorkspaceService:
         self.figure_counter = 0
 
     def next_generated_title(self):
-        existing_titles = {
-            figure.snapshot_state.default_macro_name()
+        existing_names = {
+            figure.window_handle()
             for figure in self.figures.values()
         }
         title, self.figure_counter = next_numbered_name(
             "Figure",
-            existing_titles,
+            existing_names,
             self.figure_counter,
         )
         return title
@@ -55,10 +55,11 @@ class FigureWorkspaceService:
                 figure_number=figure_number,
                 services=services,
             )
+            stable_name = self.next_generated_title()
             subwindow = self.plugin.services["mdi_area"].addSubWindow(figure)
             subwindow.setWindowIcon(blank_window_icon())
             subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
-            figure.bind_subwindow(subwindow)
+            figure.bind_subwindow(subwindow, stable_name=stable_name)
             self.figures[figure_number] = figure
             subwindow.destroyed.connect(
                 lambda *_, number=figure_number, workspace=self: (
