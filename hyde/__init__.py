@@ -45,25 +45,38 @@ _TABLE_WINDOW_METADATA = contextvars.ContextVar(
     "hyde_table_window_metadata",
     default=None,
 )
+_TABLE_WINDOW_STATES = frozenset({"visible", "minimized", "maximized"})
+_FIGURE_WINDOW_STATES = frozenset({"minimized"})
 
 
-def _normalize_window_state(window_state, owner):
+def _normalize_window_state(window_state, owner, *, allowed_states):
     if window_state is None:
         return None
-    if window_state != "minimized":
+    if window_state not in allowed_states:
+        choices = ", ".join(repr(state) for state in sorted(allowed_states))
         raise TypeError(
-            f"{owner} window_state must be 'minimized' when provided."
+            f"{owner} window_state must be one of {choices} when provided."
         )
-    return "minimized"
+    return str(window_state)
 
 
-def _build_window_metadata(owner, *, window_pos=None, window_state=None):
+def _build_window_metadata(
+    owner,
+    *,
+    window_pos=None,
+    window_state=None,
+    allowed_window_states,
+):
     metadata = {}
     if window_pos is not None:
         if not isinstance(window_pos, (list, tuple)) or len(window_pos) != 2:
             raise TypeError(f"{owner} window_pos must be a length-2 sequence.")
         metadata["window_pos"] = (int(window_pos[0]), int(window_pos[1]))
-    normalized_window_state = _normalize_window_state(window_state, owner)
+    normalized_window_state = _normalize_window_state(
+        window_state,
+        owner,
+        allowed_states=allowed_window_states,
+    )
     if normalized_window_state is not None:
         metadata["window_state"] = normalized_window_state
     return metadata
@@ -443,7 +456,11 @@ def create_table(
     metadata = dict(_TABLE_WINDOW_METADATA.get() or {})
     if window_state is None:
         window_state = metadata.get("window_state")
-    window_state = _normalize_window_state(window_state, "hyde.create_table")
+    window_state = _normalize_window_state(
+        window_state,
+        "hyde.create_table",
+        allowed_states=_TABLE_WINDOW_STATES,
+    )
 
     if HYDE_GUI:
         signal_open_table(
@@ -487,6 +504,7 @@ def table(_func=None, *, window_state=None, register=True):
     metadata = _build_window_metadata(
         "hyde.table",
         window_state=window_state,
+        allowed_window_states=_TABLE_WINDOW_STATES,
     )
 
     def decorator(func):
@@ -533,6 +551,7 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
         "hyde.figure",
         window_pos=window_pos,
         window_state=window_state,
+        allowed_window_states=_FIGURE_WINDOW_STATES,
     )
 
     def decorator(func):

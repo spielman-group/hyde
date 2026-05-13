@@ -271,14 +271,13 @@ class TestPluginTools(unittest.TestCase):
         subwindow.setGeometry(QtCore.QRect(*normal_geometry))
         subwindow.showMinimized()
         self.qapp.processEvents()
-        minimized_geometry = self.subwindow_geometry(subwindow)
         minimized_state = plugin.tool_window_save_data(
             "legacy_session_key",
             mdi_key="real_window",
         )["tool_windows"]["real_window"]
         self.assertEqual(minimized_state["window_state"], "minimized")
         self.assertEqual(minimized_state["geometry"], normal_geometry)
-        self.assertEqual(minimized_state["geometry_minimized"], minimized_geometry)
+        self.assertNotIn("geometry_minimized", minimized_state)
 
     def test_restore_tool_window_accepts_hidden_visible_minimized_and_maximized(self):
         restore_cases = [
@@ -308,7 +307,6 @@ class TestPluginTools(unittest.TestCase):
                 {
                     "window_state": "minimized",
                     "geometry": [70, 80, 260, 170],
-                    "geometry_minimized": [90, 100, 190, 33],
                 },
             ),
         ]
@@ -343,10 +341,6 @@ class TestPluginTools(unittest.TestCase):
                     self.assertEqual(self.subwindow_geometry(subwindow), saved_state["geometry"])
                 else:
                     self.assertTrue(subwindow.isMinimized())
-                    self.assertEqual(
-                        self.subwindow_geometry(subwindow),
-                        saved_state["geometry_minimized"],
-                    )
                     subwindow.showNormal()
                     self.qapp.processEvents()
                     self.assertEqual(self.subwindow_geometry(subwindow), saved_state["geometry"])
@@ -382,14 +376,6 @@ class TestPluginTools(unittest.TestCase):
                     "window_state": "visible",
                 },
                 "geometry",
-            ),
-            (
-                "missing geometry_minimized",
-                {
-                    "window_state": "minimized",
-                    "geometry": [1, 2, 200, 100],
-                },
-                "geometry_minimized",
             ),
         ]
 

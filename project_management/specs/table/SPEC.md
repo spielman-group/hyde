@@ -238,7 +238,13 @@ Saved table recreation source may include non-default `geometry` and `column_wid
 kwargs so a recreated table can reopen with its saved layout.
 Project session restore uses the same lower-level recreation builder in `session.py`,
 but preserves the stable table `objectName()` through `name=<table_name>` and adds
-`window_state='minimized'` only when needed.
+restore-state metadata only when needed:
+
+- `window_state='minimized'` or `window_state='maximized'` in the decorator line
+- no separate minimized title-bar geometry persistence in the initial path
+
+Explicit saved table macros and generated session restore both treat minimized restore
+as a state-only concern in this initial path.
 
 The save dialog receives the current `TableState` directly when it opens. The dialog
 stays thin, but it reads the existing table state to derive the default macro name and

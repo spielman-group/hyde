@@ -13,19 +13,15 @@ This slice should keep the current public table API shape
 table window's normal geometry and `window_state` while preserving the stable table
 `objectName()`.
 
-In the initial path, `geometry_minimized` belongs to machine-generated `session.py`
-restore, not explicit saved table macros.
-
 ## Acceptance criteria
 
 - [ ] Table `session.py` restore blocks preserve the stable table `objectName()` through the current `name=<table_name>` path.
 - [ ] Table session restore metadata can represent `visible`, `minimized`, and `maximized` restore states.
-- [ ] Minimized table restore uses saved normal geometry as the restored window geometry and uses separate minimized geometry for the minimized title-bar representation.
-- [ ] Explicit saved table macros do not emit `geometry_minimized` in this initial path.
-- [ ] Tests cover minimized/maximized table restore and verify that minimized title-bar geometry is not reused as normal geometry.
+- [ ] Minimized table restore uses saved normal geometry as the table's restored geometry when it returns to normal state.
+- [ ] Explicit saved table macros do not emit minimized-layout-only metadata in this initial path.
+- [ ] Tests cover minimized/maximized table restore and verify that minimized restore remains state-only.
 
 ## Blocked by
 
 - [ReloadWindowLocations_01_ToolWindowStateModel.md](./ReloadWindowLocations_01_ToolWindowStateModel.md)
 - [ReloadWindowLocations_02_SessionRestoreFinalization.md](./ReloadWindowLocations_02_SessionRestoreFinalization.md)
-

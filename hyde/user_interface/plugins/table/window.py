@@ -11,7 +11,6 @@ from hyde.user_interface.namespace_tracking import tracked_namespace_signature
 from hyde.user_interface.plugin_tools import (
     build_window_function_source,
     build_window_restore_source,
-    capture_saveable_window_state,
     capture_subwindow_geometry,
 )
 from hyde.user_interface.window_naming import (
@@ -219,6 +218,27 @@ class TableViewModel(QtCore.QAbstractTableModel):
             if row <= len(vals)
             else QtCore.Qt.NoItemFlags
         )
+
+
+def capture_table_restore_window_state(subwindow):
+    if subwindow is None:
+        return None
+    if subwindow.isMinimized():
+        return "minimized"
+    if subwindow.isMaximized():
+        return "maximized"
+    return None
+
+
+def apply_table_restore_window_state(subwindow, window_state):
+    if subwindow is None:
+        return
+    if window_state == "maximized":
+        subwindow.showMaximized()
+        return
+    if window_state != "minimized":
+        return
+    subwindow.showMinimized()
 
 
 class TableWidget(QtWidgets.QWidget):
@@ -606,9 +626,7 @@ class TableWidget(QtWidgets.QWidget):
         self._last_normal_geometry = capture_subwindow_geometry(self._subwindow)
 
     def window_state(self):
-        if self._subwindow is None:
-            return None
-        return capture_saveable_window_state(self._subwindow)
+        return capture_table_restore_window_state(self._subwindow)
 
     def default_macro_name(self):
         return self.window_handle() or self.table_state.default_macro_name()

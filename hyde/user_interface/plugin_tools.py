@@ -472,13 +472,10 @@ class HydeMDIContext:
 
 def capture_subwindow_state(subwindow):
     window_state = capture_subwindow_window_state(subwindow)
-    state = {
+    return {
         "window_state": window_state,
         "geometry": capture_subwindow_geometry(subwindow),
     }
-    if window_state == "minimized":
-        state["geometry_minimized"] = _qrect_to_list(subwindow.geometry())
-    return state
 
 
 def restore_subwindow_state(subwindow, info, *, session_key="tool window"):
@@ -583,21 +580,9 @@ def _normalize_subwindow_restore_info(subwindow, info, *, session_key):
         )
         return None
 
-    geometry_minimized = None
-    if window_state == "minimized":
-        geometry_minimized = _coerce_geometry(info.get("geometry_minimized"))
-        if geometry_minimized is None:
-            _hide_subwindow_with_warning(
-                subwindow,
-                session_key,
-                "minimized tool-window restore requires geometry_minimized",
-            )
-            return None
-
     return {
         "window_state": window_state,
         "geometry": geometry,
-        "geometry_minimized": geometry_minimized,
     }
 
 
@@ -620,7 +605,6 @@ def _apply_subwindow_presentation_state(subwindow, info):
         return
     if window_state == "minimized":
         subwindow.showMinimized()
-        subwindow.setGeometry(info["geometry_minimized"])
 
 
 def _qrect_to_list(rect):

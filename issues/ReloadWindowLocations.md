@@ -10,7 +10,7 @@ This affects all Hyde MDI windows: tool windows, tables, figures, and the Python
 
 ## Goals
 
-- Persist normal geometry separately from minimized presentation geometry.
+- Persist normal geometry without treating minimized title-bar layout as saved state.
 - Replace boolean `visible` tool-window persistence with explicit `window_state`.
 - Restore MDI windows in the same stacking order they had when saved.
 - Support minimized and maximized restore states.
@@ -30,7 +30,7 @@ This affects all Hyde MDI windows: tool windows, tables, figures, and the Python
 Geometry fields:
 
 - `geometry`: normal restored window geometry, always required for restored windows.
-- `geometry_minimized`: minimized title-bar/icon geometry, required only when `window_state == "minimized"`.
+- No `geometry_minimized`; minimized MDI title-bar placement is not treated as user-controlled restore state.
 - No `geometry_maximized`; maximized windows have a single MDI-area-determined geometry.
 
 Window order:
@@ -47,7 +47,7 @@ Window order:
 4. Apply final presentation states:
    - `visible`: leave normal
    - `hidden`: hide tool window
-   - `minimized`: call `showMinimized()`, then apply `geometry_minimized`
+   - `minimized`: call `showMinimized()`
    - `maximized`: call `showMaximized()`
 
 If session restore fails, skip final ordering/state finalization and let the existing raised error appear through the current log/output path.
@@ -92,7 +92,6 @@ For tool-window `session.toml` restore:
 
 - Missing/invalid `window_state`: warn and restore hidden.
 - Missing/invalid `geometry`: warn and restore hidden.
-- Missing/invalid `geometry_minimized` when minimized: warn and restore hidden.
 - Geometry must be four numeric values with positive width and height. Negative x/y are allowed.
 
 For table/figure `session.py` restore:
@@ -102,7 +101,7 @@ For table/figure `session.py` restore:
 
 ## Implementation Areas
 
-- Session capture/write/read helpers for `window_state`, `geometry`, `geometry_minimized`, and `mdi_window_order`.
+- Session capture/write/read helpers for `window_state`, `geometry`, and `mdi_window_order`.
 - Shared MDI helper logic for capturing normal geometry by temporarily restoring minimized/maximized windows, reading `geometry()`, then returning to the prior state.
 - Tool-window restore helpers.
 - Table and figure restore-source generation.
@@ -115,7 +114,7 @@ For table/figure `session.py` restore:
 Tests should verify user-visible contracts:
 
 - A minimized tool window reloads minimized and retains normal geometry.
-- A minimized table/figure reloads minimized and does not use title-bar geometry as normal geometry.
+- A minimized table/figure reloads minimized and restores its normal geometry when returned to normal state.
 - A maximized window reloads maximized.
 - Hidden tool windows reload hidden but retain geometry.
 - Invalid tool-window TOML state/geometry warns and hides the window.

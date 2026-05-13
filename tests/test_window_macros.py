@@ -81,6 +81,26 @@ class TestTableDecorator(unittest.TestCase):
         signal_open_table.assert_called_once()
         self.assertEqual(signal_open_table.call_args.kwargs["window_state"], "minimized")
 
+    def test_table_decorator_accepts_visible_and_maximized_window_state_metadata(self):
+        for window_state in ("visible", "maximized"):
+            with self.subTest(window_state=window_state):
+                with patch("hyde.signal_open_table") as signal_open_table:
+                    hyde.gui_mode(True)
+                    try:
+                        @hyde.table(window_state=window_state, register=False)
+                        def Table0(a):
+                            hyde.create_table(a)
+
+                        Table0(np.array([1, 2, 3]))
+                    finally:
+                        hyde.gui_mode(False)
+
+                signal_open_table.assert_called_once()
+                self.assertEqual(
+                    signal_open_table.call_args.kwargs["window_state"],
+                    window_state,
+                )
+
     def test_table_decorator_can_restore_stable_handle(self):
         with patch("hyde.signal_open_table") as signal_open_table:
             hyde.gui_mode(True)

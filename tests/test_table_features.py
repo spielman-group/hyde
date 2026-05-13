@@ -44,6 +44,19 @@ class TestTableCodec(unittest.TestCase):
             window_state=None,
         )
 
+    def test_create_table_rejects_geometry_minimized(self):
+        x = np.array([1.0, 2.0, 3.0])
+
+        with self.assertRaises(TypeError):
+            hyde.create_table(
+                x,
+                name="Table0",
+                geometry=(5, 42, 510, 242),
+                geometry_minimized=(40, 50, 180, 30),
+                column_widths={"x": 100},
+                window_state="minimized",
+            )
+
     def test_table_state_open_generation_includes_optional_layout_kwargs(self):
         state = TableState()
         state.set_items(["delay2", "fit_delay2"])
@@ -538,6 +551,36 @@ class TestTableWorkspaceService(unittest.TestCase):
         mdi_area.close()
         self._drain_events()
 
+    def test_open_table_restores_minimized_state_without_separate_titlebar_geometry(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = FakeTablePlugin(mdi_area, save_result=True)
+        workspace = TableWorkspaceService(plugin)
+        normal_geometry = (5, 42, 510, 242)
+
+        table = workspace.open_table(
+            ["a"],
+            name="Table_Fun",
+            geometry=normal_geometry,
+            window_state="minimized",
+        )
+        subwindow = table.parentWidget()
+        self._drain_events()
+
+        self.assertTrue(subwindow.isMinimized())
+
+        subwindow.showNormal()
+        self._drain_events()
+
+        self.assertEqual(
+            [subwindow.geometry().x(), subwindow.geometry().y(), subwindow.geometry().width(), subwindow.geometry().height()],
+            list(normal_geometry),
+        )
+
+        workspace.clear()
+        mdi_area.close()
+        self._drain_events()
+
     def test_open_table_requires_save_window_dialog_service(self):
         mdi_area = QtWidgets.QMdiArea()
         plugin = type("FakePlugin", (), {})()
@@ -624,6 +667,79 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         self.assertIn(
             "@hyde.table(window_state='minimized', register=False)",
+            session_source,
+        )
+
+        plugin.workspace.clear()
+        mdi_area.close()
+
+    def test_table_session_restore_source_omits_minimized_geometry_and_macro_does_too(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = Plugin({})
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "python_execution_service": FakeExecutionService(),
+            "namespace_view_service": FakeNamespaceViewService(),
+            "get_current_project_dir": lambda: "/tmp/demo.hy",
+            "save_window_dialog_service": FakeSaveWindowDialogService(),
+        }
+
+        table = plugin.workspace.open_table(
+            ["a", "b"],
+            name="Table_Fun",
+            geometry=(5, 42, 510, 242),
+            column_widths={"a": 120, "b": 260},
+        )
+        table.ui.tableView.setColumnWidth(1, 120)
+        table.ui.tableView.setColumnWidth(2, 260)
+        subwindow = table.parentWidget()
+        subwindow.show()
+        self.qapp.processEvents()
+        subwindow.showMinimized()
+        self.qapp.processEvents()
+
+        session_source = table.session_restore_source()
+        macro_source = table.macro_source("Table_Fun")
+
+        self.assertIn("geometry=(5, 42, 510, 242)", session_source)
+        self.assertIn(
+            "@hyde.table(window_state='minimized', register=False)",
+            session_source,
+        )
+        self.assertNotIn("geometry_minimized", session_source)
+        self.assertNotIn("geometry_minimized", macro_source)
+
+        plugin.workspace.clear()
+        mdi_area.close()
+        self._drain_events()
+
+    def test_table_session_restore_source_preserves_maximized_metadata(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = Plugin({})
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "python_execution_service": FakeExecutionService(),
+            "namespace_view_service": FakeNamespaceViewService(),
+            "get_current_project_dir": lambda: "/tmp/demo.hy",
+            "save_window_dialog_service": FakeSaveWindowDialogService(),
+        }
+
+        table = plugin.workspace.open_table(
+            ["a", "b"],
+            name="Table_Fun",
+            geometry=(5, 42, 510, 242),
+        )
+        table.parentWidget().show()
+        self.qapp.processEvents()
+        table.parentWidget().showMaximized()
+        self.qapp.processEvents()
+
+        session_source = plugin.get_session_restore_source()
+
+        self.assertIn(
+            "@hyde.table(window_state='maximized', register=False)",
             session_source,
         )
 
