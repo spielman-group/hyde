@@ -8,9 +8,9 @@ The goal is to introduce a shared parent class for table and figure widgets that
 
 ## Solution
 
-Introduce `HydeSaveableWidget` as the shared parent class for saveable widget windows such as tables and figures.
+Introduce `HydeInteractiveWidget` as the shared parent class for saveable widget windows such as tables and figures.
 
-`HydeSaveableWidget` will either subclass `HydeToolWidget` or share a common abstract parent with it, but in either case it will add saveable-window behavior that ordinary persistent tool windows do not have. It will own the generic saveable-window contract shape, the shared subwindow binding and geometry behavior, and the shared prompt-oriented close flow.
+`HydeInteractiveWidget` will either subclass `HydeToolWidget` or share a common abstract parent with it, but in either case it will add saveable-window behavior that ordinary persistent tool windows do not have. It will own the generic saveable-window contract shape, the shared subwindow binding and geometry behavior, and the shared prompt-oriented close flow.
 
 The parent class will own the broad saveable-window interface shape:
 
@@ -50,7 +50,7 @@ Feature-specific behavior will remain on the subclass side. Recreation-source ge
 11. As a Hyde developer, I want subclasses to provide only their final close action, so that table and figure differences stay focused and local.
 12. As a Hyde developer, I want table-specific refresh and mutation behavior to remain outside the shared parent, so that the parent does not become table-shaped.
 13. As a Hyde developer, I want figure-specific comm handling and kernel-close confirmation to remain outside the shared parent, so that the parent does not become figure-shaped.
-14. As a Hyde maintainer, I want `HydeSaveableWidget` to reuse as much generic widget/window behavior as possible from the `HydeToolWidget` direction, so that the two window families do not diverge unnecessarily.
+14. As a Hyde maintainer, I want `HydeInteractiveWidget` to reuse as much generic widget/window behavior as possible from the `HydeToolWidget` direction, so that the two window families do not diverge unnecessarily.
 15. As a Hyde maintainer, I want saveable-window state handling to stay distinct from ordinary `session.toml` tool-window persistence, so that product behavior remains clear.
 16. As a Hyde developer, I want future saveable windows to start from a parent that already knows the MDI and saveable-window rules, so that new windows do not rebuild those rules from scratch.
 17. As a Hyde developer, I want saveable-window recreation logic to remain expressible through subclass contracts, so that different scientific products can restore through their own authoritative path.
@@ -60,12 +60,12 @@ Feature-specific behavior will remain on the subclass side. Recreation-source ge
 
 ## Implementation Decisions
 
-- The parent class will be named `HydeSaveableWidget`.
-- `HydeSaveableWidget` will either subclass `HydeToolWidget` or share a common abstract parent with it. Either shape is acceptable as long as the overlap is factored cleanly.
-- `HydeSaveableWidget` is specifically for saveable widget windows such as tables and figures and is not a generic replacement for `HydeToolWidget`.
-- `HydeSaveableWidget` will own the saveable-window contract shape, including parent-level entrypoints for default macro naming, macro source generation, session-restore source generation, shared saveable-window state handling, and shared close-policy structure.
-- `HydeSaveableWidget` will own the shared MDI-child mechanics currently duplicated between tables and figures: subwindow tracking, stable-name binding, remembered normal geometry, event-filter-driven geometry updates, and generic activation helpers for popup-menu interactions.
-- `HydeSaveableWidget` will own the shared prompt-oriented close flow: shift-bypass handling, use of `save_window_dialog_service`, and the ordinary saveable-window close structure.
+- The parent class will be named `HydeInteractiveWidget`.
+- `HydeInteractiveWidget` will either subclass `HydeToolWidget` or share a common abstract parent with it. Either shape is acceptable as long as the overlap is factored cleanly.
+- `HydeInteractiveWidget` is specifically for saveable widget windows such as tables and figures and is not a generic replacement for `HydeToolWidget`.
+- `HydeInteractiveWidget` will own the saveable-window contract shape, including parent-level entrypoints for default macro naming, macro source generation, session-restore source generation, shared saveable-window state handling, and shared close-policy structure.
+- `HydeInteractiveWidget` will own the shared MDI-child mechanics currently duplicated between tables and figures: subwindow tracking, stable-name binding, remembered normal geometry, event-filter-driven geometry updates, and generic activation helpers for popup-menu interactions.
+- `HydeInteractiveWidget` will own the shared prompt-oriented close flow: shift-bypass handling, use of `save_window_dialog_service`, and the ordinary saveable-window close structure.
 - Subclasses will provide the final close action that completes feature-specific shutdown.
 - Table-specific and figure-specific runtime semantics will remain in subclasses, including recreation-source details, kernel/data transport, refresh/update logic, and feature-specific close completion.
 - Saveable-window semantics remain distinct from ordinary persistent tool-window `session.toml` persistence.
@@ -75,14 +75,14 @@ Feature-specific behavior will remain on the subclass side. Recreation-source ge
 ## Testing Decisions
 
 - Good tests should verify external saveable-window behavior and explicit architectural contracts, not helper wiring or incidental method call sequences.
-- Shared tests should validate the generic behaviors promised by `HydeSaveableWidget`: subwindow binding, remembered geometry behavior, popup-menu activation behavior, close policy, shift-bypass semantics, and save dialog integration where externally visible.
+- Shared tests should validate the generic behaviors promised by `HydeInteractiveWidget`: subwindow binding, remembered geometry behavior, popup-menu activation behavior, close policy, shift-bypass semantics, and save dialog integration where externally visible.
 - Table and figure tests should continue to validate their product-specific observable behavior rather than re-testing all generic saveable-window behavior through duplicate assertions.
 - The feature-specific tests should focus on the parts that remain subclass-owned: recreation-source behavior, runtime refresh/update behavior, and final close completion semantics.
 - Tests should avoid over-coupling to whether the common parent subclasses `HydeToolWidget` directly or shares a thinner abstract ancestor with it.
 
 ## Out of Scope
 
-- Refactoring ordinary persistent tool windows into `HydeSaveableWidget`.
+- Refactoring ordinary persistent tool windows into `HydeInteractiveWidget`.
 - Unifying saveable-window `session.py` behavior with ordinary tool-window `session.toml` persistence.
 - Flattening the real semantic difference between table and figure shutdown behavior.
 - Moving table data transport, mutation logic, or recreation lowering into the shared parent.
@@ -92,7 +92,7 @@ Feature-specific behavior will remain on the subclass side. Recreation-source ge
 
 ## Further Notes
 
-- `HydeSaveableWidget` is the chosen parallel name to `HydeToolWidget`.
+- `HydeInteractiveWidget` is the chosen parallel name to `HydeToolWidget`.
 - The design intentionally preserves a distinction between two window families:
   - persistent tool widgets
   - saveable widgets
