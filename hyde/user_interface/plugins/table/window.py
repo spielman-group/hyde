@@ -2,16 +2,12 @@ import copy
 import os
 import uuid
 
-from qtutils import UiLoader, inmain_decorator
+from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_features import TableCodec
 from hyde.user_interface.base import HydeGuiState, MutationState
 from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
-from hyde.user_interface.namespace_tracking import tracked_namespace_signature
-from hyde.user_interface.window_naming import (
-    stable_window_name,
-)
 
 
 class TableState(HydeGuiState):
@@ -216,6 +212,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
 
 class TableWidget(HydeInteractiveWidget):
     REFRESH_TIMEOUT_MS = 5000
+    ui_filename = os.path.join("plugins", "table", "table.ui")
 
     def __init__(
         self,
@@ -275,10 +272,6 @@ class TableWidget(HydeInteractiveWidget):
         self._restore_layout_requested = bool(geometry or column_widths)
         self._pending_created_columns = []
         self._tracked_namespace_state = self._current_tracked_namespace_state()
-
-        loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "table.ui")
-        self.ui = loader.load(ui_path, self)
 
         self.model = TableViewModel(self.names)
         self.ui.tableView.setModel(self.model)
@@ -427,7 +420,7 @@ class TableWidget(HydeInteractiveWidget):
         )
 
     def _tracked_namespace_state_from_view(self, view):
-        return tracked_namespace_signature(
+        return self.tracked_namespace_signature(
             view,
             list(self.names) + list(self._pending_created_columns),
         )

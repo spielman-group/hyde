@@ -6,7 +6,7 @@ from hyde.user_interface.plugin_tools import (
     apply_saveable_window_state,
     blank_window_icon,
 )
-from hyde.user_interface.window_naming import resolve_requested_name, window_title
+from hyde.user_interface.window_naming import resolve_requested_name
 
 from .window import (
     TableState,
@@ -64,7 +64,7 @@ class TableWorkspaceService:
         stable_name = table.window_handle()
         self.tables[stable_name] = table
 
-        subwindow.setWindowTitle(window_title(stable_name))
+        subwindow.setWindowTitle(table.formatted_window_title())
         subwindow.show()
         apply_saveable_window_state(subwindow, window_state)
         subwindow.destroyed.connect(partial(self._on_subwindow_destroyed, stable_name))

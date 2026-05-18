@@ -34,6 +34,11 @@ class CloseAwareToolWidget(HydeToolWidget):
         super().closeEvent(event)
 
 
+class CloseByPolicyToolWidget(CloseAwareToolWidget):
+    def close_policy(self):
+        return "close"
+
+
 class ShutdownAwareChild(QtWidgets.QWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -50,18 +55,29 @@ class TestHydeToolWidget(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
-    def test_default_shell_stores_session_key_and_services(self):
+    def test_default_shell_stores_common_window_identifier_and_services(self):
         service = object()
 
         widget = DemoToolWidget(
             services={"demo_service": service},
-            session_key="demo_tool",
+            window_identifier="demo_tool",
         )
 
+        self.assertEqual(widget.window_identifier(), "demo_tool")
         self.assertEqual(widget.session_key, "demo_tool")
         self.assertIs(widget.service("demo_service"), service)
         self.assertEqual(widget.service("missing", "fallback"), "fallback")
         self.assertIsNotNone(widget.ui)
+
+    def test_bind_subwindow_uses_window_identifier_as_default_object_name(self):
+        mdi_area = QtWidgets.QMdiArea()
+        widget = DemoToolWidget(window_identifier="demo_tool")
+        subwindow = mdi_area.addSubWindow(widget)
+
+        widget.bind_subwindow(subwindow)
+
+        self.assertEqual(widget.window_identifier(), "demo_tool")
+        self.assertEqual(subwindow.objectName(), "demo_tool")
 
     def test_default_shell_mounts_child_widget(self):
         widget = DemoToolWidget()
@@ -207,6 +223,40 @@ class TestHydeToolWidget(unittest.TestCase):
         self.qapp.processEvents()
 
         widget.shutdown()
+        closed = subwindow.close()
+        self.qapp.processEvents()
+
+        self.assertTrue(closed)
+        self.assertEqual(widget.close_events, 1)
+
+    def test_close_policy_can_allow_non_persistent_close_without_shutdown(self):
+        dummy_app = type("DummyApp", (), {"_subwindow_filters": []})()
+        mdi_area = QtWidgets.QMdiArea()
+        context = HydeMDIContext(
+            mdi_area,
+            configure_subwindow=lambda subwindow: HydeApp.configure_persistent_subwindow(
+                dummy_app,
+                subwindow,
+            ),
+        )
+        context.add(
+            "demo",
+            {
+                "context": "mdi",
+                "key": "demo_tool",
+                "title": "Demo Tool",
+                "factory": lambda parent=None, data=None: CloseByPolicyToolWidget(
+                    parent=parent,
+                    window_identifier="demo_tool",
+                ),
+            },
+            {},
+        )
+
+        widget = context.show("demo_tool")
+        subwindow = context.subwindow("demo_tool")
+        self.qapp.processEvents()
+
         closed = subwindow.close()
         self.qapp.processEvents()
 

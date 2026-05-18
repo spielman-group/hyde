@@ -15,6 +15,7 @@ except ModuleNotFoundError as exc:
 
 from hyde.user_interface.base import MutationState
 from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
 from hyde.user_interface.plugins.table import (
     Plugin,
     TableWorkspaceService,
@@ -539,6 +540,9 @@ class TestHydeInteractiveWidget(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
+    def test_interactive_widget_subclasses_shared_shell(self):
+        self.assertTrue(issubclass(HydeInteractiveWidget, HydeToolWidget))
+
     def test_close_event_prompts_before_subclass_final_close(self):
         save_window_dialog_service = FakeSaveWindowDialogService(result=True)
         widget = FakeInteractiveWidget(
@@ -591,6 +595,32 @@ class TestHydeInteractiveWidget(unittest.TestCase):
             widget.bind_subwindow(subwindow)
 
             self.assertEqual(widget.default_macro_name(), "Table7")
+        finally:
+            widget.close()
+            mdi_area.close()
+
+    def test_default_shell_mounts_child_widget_for_saveable_window(self):
+        widget = FakeInteractiveWidget()
+        child = QtWidgets.QLabel("Mounted child")
+
+        mounted = widget.mount_child_widget(child)
+
+        self.assertIs(mounted, child)
+        self.assertIs(widget.mounted_child, child)
+        self.assertIs(child.parentWidget(), widget.ui.content_widget)
+        self.assertEqual(widget.ui.content_layout.count(), 1)
+
+    def test_window_identifier_matches_window_handle_for_bound_saveable_window(self):
+        widget = FakeInteractiveWidget()
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Table7")
+        try:
+            widget.bind_subwindow(subwindow)
+
+            self.assertEqual(widget.window_identifier(), "Table7")
+            self.assertEqual(widget.window_handle(), "Table7")
         finally:
             widget.close()
             mdi_area.close()

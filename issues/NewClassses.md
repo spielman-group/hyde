@@ -6,13 +6,15 @@ Draft issue breakdown for:
 
 ## Checklist
 
-- [ ] `HTW-01` Create `HydeToolWidget` and move Logging onto the default persistent-tool-window shell
-- [ ] `HTW-02` Introduce shared ordinary tool-window plugin plumbing and migrate Procedure Browser
-- [ ] `HTW-03` Wrap Python Terminal in a mounted-child `HydeToolWidget`
-- [ ] `HTW-04` Move Python Variables to a custom-UI `HydeToolWidget` with delegated widget session state
-- [ ] `HIW-01` Introduce `HydeInteractiveWidget` and migrate table windows onto the shared saveable-window contract
-- [ ] `HIW-02` Migrate figure windows to `HydeInteractiveWidget` without flattening kernel-close semantics
-- [ ] `HIW-03` Finalize the shared saveable-window contract across tables and figures
+- [x] `HTW-01` Create `HydeToolWidget` and move Logging onto the default persistent-tool-window shell
+- [x] `HTW-02` Introduce shared ordinary tool-window plugin plumbing and migrate Procedure Browser
+- [x] `HTW-03` Wrap Python Terminal in a mounted-child `HydeToolWidget`
+- [x] `HTW-04` Move Python Variables to a custom-UI `HydeToolWidget` with delegated widget session state
+- [x] `HIW-01` Introduce `HydeInteractiveWidget` and migrate table windows onto the shared saveable-window contract
+- [x] `HIW-02` Migrate figure windows to `HydeInteractiveWidget` without flattening kernel-close semantics
+- [x] `HIW-03` Finalize the shared saveable-window contract across tables and figures
+- [x] `HWR-01` Generalize `HydeToolWidget` into the shared Hyde window shell
+- [x] `HWR-02` Rebase `HydeInteractiveWidget` onto `HydeToolWidget` and collapse duplicate widget mechanics
 
 ## Issues From `HydeToolWidget.md`
 
@@ -137,3 +139,39 @@ After both tables and figures sit on the new parent, remove the remaining parall
 - [ ] Both tables and figures consume one explicit parent-level interface for default macro naming, saveable-window state handling, and restore/macro entrypoints.
 - [ ] Shared tests validate the generic saveable-window contract once, while table and figure tests focus on subclass-specific behavior.
 - [ ] The resulting code and docs make the two Hyde window families explicit: `HydeToolWidget` for persistent tool windows and `HydeInteractiveWidget` for saveable windows.
+
+## Follow-On Revision Issues
+
+### `HWR-01` Generalize `HydeToolWidget` Into the Shared Hyde Window Shell
+
+**Type**: AFK  
+**Blocked by**: `HTW-04`, `HIW-03`  
+**User stories covered**: HydeToolWidget 1, 2, 3, 5, 7, 8; HydeInteractiveWidget 14, 16, 18, 20
+
+#### What to build
+
+Refactor `HydeToolWidget` so it becomes the common Hyde MDI widget shell rather than a tool-window-only base. Move the truly shared widget mechanics into that class: the default shared `.ui` shell, service storage and lookup, the common window identifier, mounted-child support, subwindow binding, and base shutdown/close-policy hooks. Keep ordinary tool-window behavior intact by expressing tool-specific close behavior as policy instead of structure.
+
+#### Acceptance criteria
+
+- [ ] `HydeToolWidget` can serve as the shared shell for both persistent tool windows and saveable interactive windows without duplicating base widget mechanics elsewhere.
+- [ ] The shared default `.ui` shell has neutral naming and continues to load correctly for existing tool-window consumers.
+- [ ] Ordinary tool-window behavior remains intact for Logging, Procedure Browser, Python Terminal, and Python Variables, including hide-on-close and explicit teardown behavior.
+- [ ] Tests cover the shared shell contract through public behavior rather than wrapper internals.
+
+### `HWR-02` Rebase `HydeInteractiveWidget` Onto `HydeToolWidget` and Collapse Duplicate Widget Mechanics
+
+**Type**: AFK  
+**Blocked by**: `HWR-01`  
+**User stories covered**: HydeInteractiveWidget 1, 3, 4, 5, 6, 7, 8, 10, 11, 14, 16, 18, 20
+
+#### What to build
+
+Make `HydeInteractiveWidget` a `HydeToolWidget` subclass and remove the duplicate widget shell mechanics that have drifted apart. Adopt one common window-identity concept across tool and interactive windows, keep shared `.ui` shell behavior aligned, and leave only saveable-window behavior on the interactive subclass: stable-name handling, remembered geometry, macro/session-restore generation, and prompt-oriented close flow.
+
+#### Acceptance criteria
+
+- [ ] `HydeInteractiveWidget` subclasses `HydeToolWidget` and no longer reimplements shared service, shell, mounted-child, or subwindow plumbing.
+- [ ] Table and figure windows preserve their current saveable behavior, including stable naming, geometry capture, macro/session-restore generation, and their distinct close semantics.
+- [ ] Shared identity naming is unified across the common base and interactive subclass instead of splitting `session_key` versus window-handle concepts unnecessarily.
+- [ ] Tests prove the shared-shell/subclass contract through observable behavior while keeping tool-window and saveable-window policy differences explicit.

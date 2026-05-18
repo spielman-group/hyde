@@ -12,10 +12,7 @@ from labscript_utils.plugins import (
 from qtutils.qt import QtCore, QtGui
 
 from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.window_naming import (
-    bind_stable_window_name,
-    stable_window_name,
-)
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
 
 
 LOGGER = logging.getLogger(__name__)
@@ -202,7 +199,10 @@ class HydePlugin(BasePlugin):
         subwindow = self.mdi_subwindow(mdi_key or session_key)
         if subwindow is None:
             return {}
-        object_name = stable_window_name(subwindow, fallback=mdi_key or session_key)
+        object_name = HydeToolWidget.read_subwindow_identifier(
+            subwindow,
+            fallback=mdi_key or session_key,
+        )
         return {
             "tool_windows": {
                 object_name: capture_subwindow_state(subwindow),
@@ -214,7 +214,10 @@ class HydePlugin(BasePlugin):
         subwindow = self.mdi_subwindow(key)
         if subwindow is None:
             return None
-        object_name = stable_window_name(subwindow, fallback=key)
+        object_name = HydeToolWidget.read_subwindow_identifier(
+            subwindow,
+            fallback=key,
+        )
         info = session.get("tool_windows", {}).get(object_name, {})
         presentation_deferred = False
         deferred_getter = self.service(
@@ -499,7 +502,7 @@ class HydeMDIContext:
         contribution = info["contribution"]
         widget = contribution["factory"](parent=self.mdi_area, data=info["data"])
         subwindow = self.mdi_area.addSubWindow(widget)
-        bind_stable_window_name(subwindow, key)
+        HydeToolWidget.bind_subwindow_identifier(subwindow, key)
         bind_subwindow = getattr(widget, "bind_subwindow", None)
         if callable(bind_subwindow):
             bind_subwindow(subwindow)

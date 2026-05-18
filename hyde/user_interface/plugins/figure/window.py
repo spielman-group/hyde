@@ -13,13 +13,8 @@ from hyde.features.matplotlib_features import (
 )
 from hyde.user_interface.base import HydeGuiState
 from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
-from hyde.user_interface.namespace_tracking import tracked_namespace_signature
 from hyde.user_interface.plugin_tools import (
     apply_saveable_window_state,
-)
-from hyde.user_interface.window_naming import (
-    stable_window_name,
-    window_title,
 )
 from hyde.user_interface.window_macro_store import MacroStoreError
 
@@ -269,9 +264,10 @@ class FigureWindow(HydeInteractiveWidget):
         )
         self.command_state = FigureState()
 
-        layout = QtWidgets.QVBoxLayout(self)
+        content = QtWidgets.QWidget(self.ui.content_widget)
+        layout = QtWidgets.QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.image_label = QtWidgets.QLabel(self)
+        self.image_label = QtWidgets.QLabel(content)
         self.image_label.setAlignment(QtCore.Qt.AlignCenter)
         self.image_label.setMinimumSize(240, 180)
         self.image_label.setBackgroundRole(QtGui.QPalette.Base)
@@ -280,6 +276,7 @@ class FigureWindow(HydeInteractiveWidget):
             QtWidgets.QSizePolicy.Expanding,
         )
         layout.addWidget(self.image_label)
+        self.mount_child_widget(content)
 
         python_variables_service = self.services.get("namespace_view_service")
         if python_variables_service is not None:
@@ -291,7 +288,7 @@ class FigureWindow(HydeInteractiveWidget):
         resolved_name = _canonicalize_figure_window_name(
             stable_name
             if stable_name is not None
-            else stable_window_name(subwindow),
+            else self.read_subwindow_identifier(subwindow),
             self.figure_number,
         )
         super().bind_subwindow(subwindow, stable_name=resolved_name)
@@ -312,8 +309,7 @@ class FigureWindow(HydeInteractiveWidget):
         )
         if self._subwindow is not None:
             self._subwindow.setWindowTitle(
-                window_title(
-                    self.window_handle(),
+                self.formatted_window_title(
                     warning_text=(
                         "Macro Incomplete"
                         if self.snapshot_state.has_save_warning()
@@ -524,7 +520,7 @@ class FigureWindow(HydeInteractiveWidget):
         )
 
     def _tracked_namespace_state_from_view(self, view):
-        return tracked_namespace_signature(
+        return self.tracked_namespace_signature(
             view,
             self.snapshot_state.tracked_names(),
         )

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>HydeToolWidget</class>
- <widget class="QWidget" name="HydeToolWidget">
+ <class>HydeWindowWidgetShell</class>
+ <widget class="QWidget" name="HydeWindowWidgetShell">
   <layout class="QVBoxLayout" name="outerLayout">
    <property name="leftMargin">
     <number>0</number>

@@ -1,42 +1,73 @@
 from qtutils.qt import QtCore, QtWidgets
 
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
 from hyde.user_interface.plugin_tools import (
     build_window_function_source,
     build_window_restore_source,
     capture_saveable_window_state,
     capture_subwindow_geometry,
 )
-from hyde.user_interface.window_naming import (
-    bind_stable_window_name,
-    stable_window_name,
-)
 
 
-class HydeInteractiveWidget(QtWidgets.QWidget):
-    def __init__(self, *, services=None, initial_window_name=None, parent=None):
-        super().__init__(parent)
-        self.services = dict(services or {})
-        self._subwindow = None
-        self._initial_window_name = (
-            None if initial_window_name is None else str(initial_window_name)
+def _freeze_namespace_tracking_value(value):
+    if isinstance(value, dict):
+        return tuple(
+            (str(key), _freeze_namespace_tracking_value(item))
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_namespace_tracking_value(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_namespace_tracking_value(item) for item in value))
+    return value
+
+
+def _tracked_namespace_signature(view, names):
+    tracked = []
+    view = dict(view or {})
+    for name in names:
+        metadata = dict(view.get(name, {}) or {})
+        tracked.append((name, _freeze_namespace_tracking_value(metadata)))
+    return tuple(tracked)
+
+
+class HydeInteractiveWidget(HydeToolWidget):
+    def __init__(
+        self,
+        *,
+        services=None,
+        initial_window_name=None,
+        window_identifier=None,
+        parent=None,
+    ):
+        super().__init__(
+            services=services,
+            window_identifier=(
+                window_identifier
+                if window_identifier is not None
+                else initial_window_name
+            ),
+            parent=parent,
         )
         self._last_normal_geometry = None
 
-    def service(self, key, default=None):
-        return self.services.get(key, default)
+    def close_policy(self):
+        return "close"
 
     def bind_subwindow(self, subwindow, stable_name=None):
-        self._subwindow = subwindow
+        previous_subwindow = self._subwindow
         resolved_name = (
             stable_name
-            or stable_window_name(subwindow)
-            or self._initial_window_name
+            or self.read_subwindow_identifier(subwindow)
+            or self.window_identifier()
         )
-        if resolved_name is not None:
-            bind_stable_window_name(subwindow, resolved_name)
-            self.on_stable_name_bound(resolved_name)
-        self._initial_window_name = None
-        subwindow.installEventFilter(self)
+        if previous_subwindow is not None and previous_subwindow is not subwindow:
+            previous_subwindow.removeEventFilter(self)
+        super().bind_subwindow(subwindow, window_identifier=resolved_name)
+        if previous_subwindow is not subwindow:
+            subwindow.installEventFilter(self)
+        if self.window_identifier() is not None:
+            self.on_stable_name_bound(self.window_identifier())
         self._remember_subwindow_geometry()
         return subwindow
 
@@ -69,12 +100,28 @@ class HydeInteractiveWidget(QtWidgets.QWidget):
         return capture_saveable_window_state(self._subwindow)
 
     def window_handle(self):
-        return stable_window_name(self._subwindow)
+        return self.window_identifier()
+
+    def formatted_window_title(self, title_suffix=None, warning_text=None):
+        stable_name = str(self.window_handle())
+        suffix_text = (
+            str(title_suffix).strip()
+            if title_suffix is not None
+            else ""
+        )
+        base_title = stable_name if not suffix_text else f"{stable_name}: {suffix_text}"
+        warning = str(warning_text).strip() if warning_text is not None else ""
+        if warning:
+            return f"{base_title} [{warning}]"
+        return base_title
 
     def prepare_saveable_state(self):
         capture_layout_state = getattr(self, "capture_layout_state", None)
         if callable(capture_layout_state):
             capture_layout_state()
+
+    def tracked_namespace_signature(self, view, names):
+        return _tracked_namespace_signature(view, names)
 
     def saveable_default_macro_name(self):
         raise NotImplementedError
@@ -102,7 +149,7 @@ class HydeInteractiveWidget(QtWidgets.QWidget):
         return {"window_state": window_state}
 
     def default_macro_name(self):
-        return self.window_handle() or self.saveable_default_macro_name()
+        return self.window_identifier() or self.saveable_default_macro_name()
 
     def macro_source(self, macro_name):
         self.prepare_saveable_state()

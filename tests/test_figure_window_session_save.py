@@ -3,6 +3,7 @@ import unittest
 from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import figure_ir_from_live_state
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
 from hyde.user_interface.plugins.figure.window import (
     FigureSnapshotState,
     FigureState,
@@ -31,6 +32,9 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         state.set_items(["fit_delay", "raw_delay"])
         state.set_figsize(*figsize)
         return state.normalized_state()
+
+    def test_figure_window_inherits_shared_shell(self):
+        self.assertTrue(issubclass(FigureWindow, HydeToolWidget))
 
     def test_snapshot_state_derives_recreation_source_from_figure_ir(self):
         snapshot = FigureSnapshotState()

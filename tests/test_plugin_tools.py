@@ -32,7 +32,7 @@ from hyde.user_interface.plugins.python_variables import Plugin as PythonVariabl
 from hyde.user_interface.plugins.python_terminal import Plugin as PythonTerminalPlugin
 from hyde.user_interface.plugins.table import Plugin as TablePlugin
 from hyde.user_interface.plugins.table.window import TableWidget
-from hyde.user_interface.window_naming import resolve_requested_name, stable_window_name
+from hyde.user_interface.window_naming import resolve_requested_name
 
 
 class RecordingMenu(QtWidgets.QMenu):
@@ -239,6 +239,7 @@ class TestPluginTools(unittest.TestCase):
         widget = app.mdi_context.widget("demo_tool")
         subwindow = app.mdi_context.subwindow("demo_tool")
         self.assertIsInstance(widget, DemoToolWidget)
+        self.assertEqual(widget.window_identifier(), "demo_tool")
         self.assertEqual(widget.session_key, "demo_tool")
         self.assertEqual(subwindow.objectName(), "demo_tool")
         self.assertEqual(subwindow.windowTitle(), "Demo Tool")
@@ -424,6 +425,7 @@ class TestPluginTools(unittest.TestCase):
         container = plugin.mdi_widget("python_terminal")
         terminal = manager.services["visible_terminal_service"].widget()
 
+        self.assertEqual(container.window_identifier(), "python_terminal")
         self.assertIsInstance(terminal, FakeTerminalWidget)
         self.assertIs(container.mounted_child, terminal)
         self.assertIs(terminal.parentWidget(), container.ui.content_widget)
@@ -512,6 +514,7 @@ class TestPluginTools(unittest.TestCase):
             kernel_runtime_service,
         )
         self.assertIsNotNone(widget.ui.treeView)
+        self.assertEqual(widget.window_identifier(), "python_variables")
         self.assertEqual(widget.session_key, "python_variables")
         self.assertEqual(subwindow.objectName(), "python_variables")
         self.assertEqual(subwindow.windowTitle(), "Python Variables")
@@ -866,7 +869,7 @@ class TestPluginTools(unittest.TestCase):
         )
 
         self.assertEqual(
-            stable_window_name(subwindow, fallback="real_window"),
+            str(subwindow.objectName() or "").strip() or "real_window",
             "real_window",
         )
         self.assertEqual(set(save_data["tool_windows"]), {"real_window"})
@@ -1029,6 +1032,7 @@ class TestPluginTools(unittest.TestCase):
 
         self.assertIs(service.ensure_widget(), widget)
         self.assertEqual(service.port(), widget.port)
+        self.assertEqual(widget.window_identifier(), "logging")
         self.assertEqual(widget.session_key, "logging")
         self.assertTrue(hasattr(widget.ui, "content_widget"))
         self.assertEqual(widget.ui.content_layout.count(), 1)
