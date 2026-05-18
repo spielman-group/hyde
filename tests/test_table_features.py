@@ -1,16 +1,20 @@
+import os
 import unittest
 from unittest.mock import patch
 
 import numpy as np
 import hyde
 
-from qtutils.qt import QtCore, QtWidgets
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from qtutils.qt import QtCore, QtGui, QtWidgets
 try:
     import labscript_utils.plugins  # noqa: F401
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.user_interface.base import MutationState
+from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
 from hyde.user_interface.plugins.table import (
     Plugin,
     TableWorkspaceService,
@@ -205,6 +209,52 @@ class FakeSaveWindowDialogService:
         return self.result
 
 
+class FakeInteractiveWidget(HydeInteractiveWidget):
+    def __init__(self, services=None):
+        super().__init__(services=services, initial_window_name="Table0")
+        self.capture_calls = 0
+        self.final_close_calls = 0
+
+    def capture_layout_state(self):
+        self.capture_calls += 1
+
+    def saveable_decorator_name(self):
+        return "@hyde.fake"
+
+    def saveable_default_macro_name(self):
+        return "FallbackWidget"
+
+    def macro_definition_source(self, macro_name, *, handle):
+        del handle
+        return (
+            "@hyde.fake\n"
+            f"def {macro_name}():\n"
+            "    return 'macro'\n"
+        )
+
+    def session_restore_definition_source(self, handle):
+        return (
+            "@hyde.fake\n"
+            f"def {handle}(alpha, beta):\n"
+            "    return 'restore'\n"
+        )
+
+    def session_restore_arguments(self):
+        return ("alpha", "beta")
+
+    def macro_window_metadata(self, geometry, window_state):
+        del geometry, window_state
+        return {"window_pos": (3, 4), "window_state": "maximized"}
+
+    def session_restore_window_metadata(self, geometry, window_state):
+        del geometry, window_state
+        return {"window_pos": (7, 8), "window_state": "minimized"}
+
+    def finalize_interactive_close(self, event):
+        self.final_close_calls += 1
+        event.accept()
+
+
 class FakeTablePlugin:
     def __init__(self, mdi_area, save_result=True):
         self.save_window_dialog_service = FakeSaveWindowDialogService(save_result)
@@ -224,6 +274,25 @@ class TestTableWidget(unittest.TestCase):
         cls.qapp = QtWidgets.QApplication.instance()
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
+
+    def test_constructor_preserves_qwidget_parent_and_flags(self):
+        parent = QtWidgets.QWidget()
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            None,
+            None,
+            None,
+            parent,
+            flags=QtCore.Qt.Tool,
+        )
+        try:
+            self.assertIs(widget.parentWidget(), parent)
+            self.assertTrue(widget.windowFlags() & QtCore.Qt.Tool)
+        finally:
+            widget.shutdown_client()
+            widget.close()
+            parent.close()
 
     def test_new_column_is_added_only_after_namespace_confirms_creation(self):
         executed = []
@@ -427,6 +496,141 @@ class TestTableWidget(unittest.TestCase):
             widget.shutdown_client()
             widget.close()
 
+    def test_activate_popup_menu_activates_bound_subwindow(self):
+        popup_calls = []
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        table = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "mdi_area": mdi_area,
+                "popup_menu": lambda location, global_pos: popup_calls.append(
+                    (location, global_pos)
+                ),
+            },
+        )
+        other = QtWidgets.QWidget()
+        other_subwindow = mdi_area.addSubWindow(other)
+        subwindow = mdi_area.addSubWindow(table)
+        other_subwindow.show()
+        subwindow.show()
+        table.bind_subwindow(subwindow)
+        self.qapp.processEvents()
+        mdi_area.setActiveSubWindow(other_subwindow)
+
+        try:
+            menu_pos = QtCore.QPoint(20, 30)
+
+            self.assertTrue(table.activate_popup_menu("table", menu_pos))
+            self.assertIs(mdi_area.activeSubWindow(), subwindow)
+            self.assertEqual(popup_calls, [("table", menu_pos)])
+        finally:
+            table.shutdown_client()
+            table.close()
+            other.close()
+            mdi_area.close()
+
+
+class TestHydeInteractiveWidget(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def test_close_event_prompts_before_subclass_final_close(self):
+        save_window_dialog_service = FakeSaveWindowDialogService(result=True)
+        widget = FakeInteractiveWidget(
+            services={
+                "save_window_dialog_service": save_window_dialog_service,
+                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+                "reload_procedures": lambda: None,
+            }
+        )
+
+        event = QtGui.QCloseEvent()
+        widget.closeEvent(event)
+
+        self.assertEqual(widget.capture_calls, 1)
+        self.assertEqual(widget.final_close_calls, 1)
+        self.assertTrue(event.isAccepted())
+        self.assertEqual(len(save_window_dialog_service.calls), 1)
+        self.assertIs(save_window_dialog_service.calls[0]["saveable"], widget)
+
+    def test_close_event_shift_bypasses_prompt_and_uses_subclass_final_close(self):
+        save_window_dialog_service = FakeSaveWindowDialogService(result=False)
+        widget = FakeInteractiveWidget(
+            services={
+                "save_window_dialog_service": save_window_dialog_service,
+                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+                "reload_procedures": lambda: None,
+            }
+        )
+
+        event = QtGui.QCloseEvent()
+        with patch.object(
+            QtWidgets.QApplication,
+            "keyboardModifiers",
+            return_value=QtCore.Qt.ShiftModifier,
+        ):
+            widget.closeEvent(event)
+
+        self.assertEqual(widget.capture_calls, 0)
+        self.assertEqual(widget.final_close_calls, 1)
+        self.assertTrue(event.isAccepted())
+        self.assertEqual(save_window_dialog_service.calls, [])
+
+    def test_default_macro_name_prefers_bound_window_handle(self):
+        widget = FakeInteractiveWidget()
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Table7")
+        try:
+            widget.bind_subwindow(subwindow)
+
+            self.assertEqual(widget.default_macro_name(), "Table7")
+        finally:
+            widget.close()
+            mdi_area.close()
+
+    def test_macro_source_uses_shared_saveable_contract(self):
+        widget = FakeInteractiveWidget()
+
+        source = widget.macro_source("SavedWidget")
+
+        self.assertEqual(widget.capture_calls, 1)
+        self.assertIn(
+            "@hyde.fake(window_pos=(3, 4), window_state='maximized')",
+            source,
+        )
+        self.assertIn("def SavedWidget():", source)
+        self.assertIn("return 'macro'", source)
+
+    def test_session_restore_source_uses_shared_saveable_contract(self):
+        widget = FakeInteractiveWidget()
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Table7")
+        try:
+            widget.bind_subwindow(subwindow)
+
+            source = widget.session_restore_source()
+
+            self.assertEqual(widget.capture_calls, 1)
+            self.assertIn(
+                "@hyde.fake(window_pos=(7, 8), window_state='minimized', register=False)",
+                source,
+            )
+            self.assertIn("def Table7(alpha, beta):", source)
+            self.assertIn("return 'restore'", source)
+            self.assertIn("Table7(alpha, beta)", source)
+        finally:
+            widget.close()
+            mdi_area.close()
+
 class TestTableWorkspaceService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -576,6 +780,30 @@ class TestTableWorkspaceService(unittest.TestCase):
             [subwindow.geometry().x(), subwindow.geometry().y(), subwindow.geometry().width(), subwindow.geometry().height()],
             list(normal_geometry),
         )
+
+        workspace.clear()
+        mdi_area.close()
+        self._drain_events()
+
+    def test_capture_geometry_returns_last_normal_geometry_while_minimized(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = FakeTablePlugin(mdi_area, save_result=True)
+        workspace = TableWorkspaceService(plugin)
+        normal_geometry = (5, 42, 510, 242)
+
+        table = workspace.open_table(
+            ["a"],
+            name="Table_Fun",
+            geometry=normal_geometry,
+        )
+        subwindow = table.parentWidget()
+        self._drain_events()
+
+        subwindow.showMinimized()
+        self._drain_events()
+
+        self.assertEqual(table.capture_geometry(), list(normal_geometry))
 
         workspace.clear()
         mdi_area.close()

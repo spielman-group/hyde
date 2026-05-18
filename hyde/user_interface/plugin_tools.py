@@ -209,10 +209,8 @@ class HydePlugin(BasePlugin):
             }
         }
 
-    def restore_tool_window(self, session, session_key, mdi_key=None, ensure=False):
+    def restore_tool_window(self, session, session_key, mdi_key=None):
         key = mdi_key or session_key
-        if ensure:
-            self.ensure_mdi_widget(key)
         subwindow = self.mdi_subwindow(key)
         if subwindow is None:
             return None
@@ -243,6 +241,83 @@ class HydePlugin(BasePlugin):
             session_key=object_name,
         )
         return subwindow
+
+
+class HydeToolWindowPlugin(HydePlugin):
+    """Shared plugin plumbing for ordinary persistent tool windows."""
+
+    session_key = None
+    window_title = None
+    menu_name = None
+    window_size = None
+    menu_group = "tool_windows"
+    menu_order = DEFAULT_PRIORITY
+    creation_policy = "lazy"
+
+    def create_tool_window_widget(self, parent=None):
+        raise NotImplementedError
+
+    def _tool_window_factory(self, parent=None, data=None):
+        del data
+        return self.create_tool_window_widget(parent=parent)
+
+    def get_ui_contributions(self):
+        key = self.session_key
+        title = self.window_title or self.menu_name or key
+        contribution = {
+            "context": "mdi",
+            "key": key,
+            "title": title,
+            "factory": self._tool_window_factory,
+        }
+        if self.window_size is not None:
+            contribution["size"] = self.window_size
+        return [contribution]
+
+    def get_menu_contributions(self):
+        title = self.window_title or self.menu_name or self.session_key
+        menu_name = self.menu_name or title
+        return [
+            {
+                "location": "window",
+                "group": self.menu_group,
+                "order": self.menu_order,
+                "name": menu_name,
+                "action": self.show_window,
+            }
+        ]
+
+    def setup(self, data=None):
+        del data
+        title = self.window_title or self.menu_name or self.session_key
+        menu_name = self.menu_name or title
+        self.bind_menu_action("_action", "window", menu_name)
+        if self.creation_policy == "eager":
+            self.ensure_mdi_widget(self.session_key)
+            self.hide_mdi_subwindow(self.session_key)
+
+    def show_window(self, checked=False):
+        del checked
+        self.service("show_window")(self.session_key)
+
+    def get_session_toml_data(self):
+        session = self.tool_window_save_data(self.session_key)
+        widget = self.mdi_widget(self.session_key)
+        if widget is None:
+            return session
+        getter = getattr(widget, "get_session_toml_data", None)
+        widget_session = getter() if callable(getter) else {}
+        if widget_session:
+            session[self.session_key] = widget_session
+        return session
+
+    def restore_tool_window_session(self, session):
+        widget = self.ensure_mdi_widget(self.session_key)
+        self.restore_tool_window(session, self.session_key)
+        restorer = getattr(widget, "restore_session_toml_data", None)
+        if callable(restorer):
+            restorer(dict(session.get(self.session_key, {}) or {}))
+        return widget
 
 
 class HydeMenuContext(MenuContext):
@@ -425,6 +500,9 @@ class HydeMDIContext:
         widget = contribution["factory"](parent=self.mdi_area, data=info["data"])
         subwindow = self.mdi_area.addSubWindow(widget)
         bind_stable_window_name(subwindow, key)
+        bind_subwindow = getattr(widget, "bind_subwindow", None)
+        if callable(bind_subwindow):
+            bind_subwindow(subwindow)
         if self.configure_subwindow is not None:
             self.configure_subwindow(subwindow)
         title = contribution.get("title")

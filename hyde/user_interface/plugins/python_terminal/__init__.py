@@ -1,8 +1,18 @@
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
-from hyde.user_interface.plugin_tools import HydePlugin
+
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
+from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
+
 
 class PythonTerminal(RichJupyterWidget):
-    def __init__(self, kernel_client, history_sink=None, initial_history=None, *args, **kwargs):
+    def __init__(
+        self,
+        kernel_client,
+        history_sink=None,
+        initial_history=None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self._history_sink = history_sink
         self.kernel_client = kernel_client
@@ -17,14 +27,6 @@ class PythonTerminal(RichJupyterWidget):
         return getattr(self, "input_buffer", "")
 
     def execute(self, source=None, hidden=False, interactive=False):
-        """
-        Execute code in the kernel.
-        
-        Args:
-            source: The code to execute.
-            hidden: If True, the command is executed but not shown in history/console.
-            interactive: If True, the console behaves as if the user typed it.
-        """
         command_source = self._command_source(source)
         if (
             not hidden
@@ -48,24 +50,21 @@ class PythonTerminal(RichJupyterWidget):
     def shutdown(self):
         self.kernel_client = None
 
-
 class PythonTerminalService:
     def __init__(self, plugin):
         self.plugin = plugin
         self._history_entries = []
 
     def ensure_widget(self):
-        return self.plugin.ensure_mdi_widget("python_terminal")
+        container = self.plugin.ensure_mdi_widget(self.plugin.session_key)
+        return None if container is None else container.mounted_child
 
     def widget(self):
-        return self.plugin.mdi_widget("python_terminal")
+        container = self.plugin.mdi_widget(self.plugin.session_key)
+        return None if container is None else container.mounted_child
 
     def subwindow(self):
-        return self.plugin.mdi_subwindow("python_terminal")
-
-    def ensure_kernel_client(self):
-        kernel_runtime_service = self.plugin.services.get("kernel_runtime_service")
-        return None if kernel_runtime_service is None else kernel_runtime_service.kernel_client()
+        return self.plugin.mdi_subwindow(self.plugin.session_key)
 
     def execute_visible(self, code):
         widget = self.ensure_widget()
@@ -89,60 +88,45 @@ class PythonTerminalService:
             widget.shutdown()
 
     def kernel_client(self):
-        return self.ensure_kernel_client()
+        kernel_runtime_service = self.plugin.services.get("kernel_runtime_service")
+        return (
+            None
+            if kernel_runtime_service is None
+            else kernel_runtime_service.kernel_client()
+        )
 
     def destroy(self):
-        self.plugin.destroy_mdi_widget("python_terminal")
+        self.plugin.destroy_mdi_widget(self.plugin.session_key)
 
 
-class Plugin(HydePlugin):
+class Plugin(HydeToolWindowPlugin):
+    session_key = "python_terminal"
+    window_title = "Python Terminal"
+    menu_name = "Python Terminal"
+    menu_order = 10
+
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.python_terminal_service = PythonTerminalService(self)
-        self._action = None
-
-    def setup(self, data=None):
-        del data
-        self.bind_menu_action("_action", "window", "Python Terminal")
-
-    def get_ui_contributions(self):
-        return [
-            {
-                "context": "mdi",
-                "key": "python_terminal",
-                "title": "Python Terminal",
-                "factory": self.create_widget,
-            }
-        ]
-
-    def get_menu_contributions(self):
-        return [
-            {
-                "location": "window",
-                "group": "tool_windows",
-                "order": 10,
-                "name": "Python Terminal",
-                "action": self.show_window,
-            }
-        ]
 
     def get_services(self):
         return {"visible_terminal_service": self.python_terminal_service}
 
-    def create_widget(self, parent=None, data=None):
-        del data
-        widget = PythonTerminal(
-            kernel_client=self.python_terminal_service.ensure_kernel_client(),
+    def create_tool_window_widget(self, parent=None):
+        container = HydeToolWidget(
+            parent=parent,
+            services=self.services,
+            session_key=self.session_key,
+        )
+        terminal = PythonTerminal(
+            kernel_client=self.python_terminal_service.kernel_client(),
             history_sink=self.python_terminal_service.record_history_entry,
             initial_history=self.python_terminal_service.history_entries(),
-            parent=parent,
+            parent=container.ui.content_widget,
         )
-        widget.executed.connect(self.services["on_visible_command_executed"])
-        return widget
-
-    def show_window(self, checked=False):
-        del checked
-        self.services["show_window"]("python_terminal")
+        terminal.executed.connect(self.services["on_visible_command_executed"])
+        container.mount_child_widget(terminal)
+        return container
 
     def get_event_handlers(self):
         return {
@@ -153,16 +137,13 @@ class Plugin(HydePlugin):
             "project_loaded": self.on_project_loaded,
         }
 
-    def get_session_toml_data(self):
-        return self.tool_window_save_data("python_terminal")
-
     def on_project_loaded(self, data):
-        self.restore_tool_window(data["session"], "python_terminal")
+        self.restore_tool_window_session(data["session"])
 
     def on_enter_no_project_state(self, data):
         del data
         self.set_bound_action_enabled("_action", False)
-        self.hide_mdi_subwindow("python_terminal")
+        self.hide_mdi_subwindow(self.session_key)
 
     def on_project_activated(self, data):
         del data

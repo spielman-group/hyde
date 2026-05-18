@@ -12,16 +12,12 @@ from hyde.features.matplotlib_features import (
     figure_ir_apply_title,
 )
 from hyde.user_interface.base import HydeGuiState
+from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
 from hyde.user_interface.namespace_tracking import tracked_namespace_signature
 from hyde.user_interface.plugin_tools import (
     apply_saveable_window_state,
-    build_window_function_source,
-    build_window_restore_source,
-    capture_saveable_window_state,
-    capture_subwindow_geometry,
 )
 from hyde.user_interface.window_naming import (
-    bind_stable_window_name,
     stable_window_name,
     window_title,
 )
@@ -238,15 +234,17 @@ class FigureSnapshotState:
             f"{body}\n"
             "    return fig\n"
         )
-class FigureWindow(QtWidgets.QWidget):
+class FigureWindow(HydeInteractiveWidget):
     REFRESH_TIMEOUT_MS = 5000
     CLOSE_TIMEOUT_MS = 5000
 
     def __init__(self, figure_number, services=None, parent=None):
-        super().__init__(parent)
         self.figure_number = int(figure_number)
-        self.services = dict(services or {})
-        self._subwindow = None
+        super().__init__(
+            services=services,
+            initial_window_name=f"Figure{self.figure_number}",
+            parent=parent,
+        )
         self._closed = False
         self._kernel_close_in_progress = False
         self._closing_from_kernel = False
@@ -254,7 +252,6 @@ class FigureWindow(QtWidgets.QWidget):
         self._initial_size_applied = False
         self._pending_window_pos = None
         self._pending_window_state = None
-        self._last_normal_geometry = None
         self._refresh_in_flight = False
         self._refresh_requested = False
         self._refresh_timeout_timer = QtCore.QTimer(self)
@@ -291,19 +288,13 @@ class FigureWindow(QtWidgets.QWidget):
             )
 
     def bind_subwindow(self, subwindow, stable_name=None):
-        self._subwindow = subwindow
         resolved_name = _canonicalize_figure_window_name(
             stable_name
             if stable_name is not None
             else stable_window_name(subwindow),
             self.figure_number,
         )
-        bind_stable_window_name(
-            subwindow,
-            resolved_name,
-        )
-        subwindow.installEventFilter(self)
-        self._remember_subwindow_geometry()
+        super().bind_subwindow(subwindow, stable_name=resolved_name)
 
     def update_payload(self, payload):
         snapshot = dict(payload.get("snapshot", {}) or {})
@@ -347,56 +338,14 @@ class FigureWindow(QtWidgets.QWidget):
                 if self._refresh_requested and not self._closed:
                     self._refresh_requested = False
                     self.refresh_figure()
+        elif not self._initial_size_applied and self.snapshot_state.figure_size() is not None:
+            self._apply_initial_subwindow_size()
+            self._initial_size_applied = True
+            self._apply_pending_window_state()
 
     def set_live_state(self, state):
         self.snapshot_state.set_live_state(state)
         self._tracked_namespace_state = self._current_tracked_namespace_state()
-
-    def capture_geometry(self):
-        if self._subwindow is None:
-            return None
-        if self._subwindow.isMinimized() and self._last_normal_geometry is not None:
-            return list(self._last_normal_geometry)
-        return capture_subwindow_geometry(self._subwindow)
-
-    def window_state(self):
-        if self._subwindow is None:
-            return None
-        return capture_saveable_window_state(self._subwindow)
-
-    def _recreation_function_source(
-        self,
-        macro_name,
-        decorator_name,
-        register=None,
-        window_pos=None,
-        window_state=None,
-        figure_title=None,
-    ):
-        return build_window_function_source(
-            self.snapshot_state.macro_source(
-                macro_name,
-                figure_title=figure_title,
-            ),
-            decorator_name=decorator_name,
-            register=register,
-            window_pos=window_pos,
-            window_state=window_state,
-        )
-
-    def session_restore_source(self):
-        geometry = self.capture_geometry()
-        if geometry is None:
-            return None
-        handle = self.window_handle()
-        return build_window_restore_source(
-            self.snapshot_state.macro_source(handle, figure_title=handle),
-            handle=handle,
-            arguments=self.snapshot_state.tracked_names(),
-            decorator_name="@hyde.figure",
-            window_pos=tuple(geometry[:2]),
-            window_state=self.window_state(),
-        )
 
     def apply_window_metadata(self, metadata):
         metadata = dict(metadata or {})
@@ -479,23 +428,9 @@ class FigureWindow(QtWidgets.QWidget):
         if not self._closed:
             self._resize_redraw_timer.start(150)
 
-    def eventFilter(self, watched, event):
-        subwindow = getattr(self, "_subwindow", None)
-        if (
-            watched is subwindow
-            and event.type() in (QtCore.QEvent.Move, QtCore.QEvent.Resize)
-        ):
-            self._remember_subwindow_geometry()
-        return super().eventFilter(watched, event)
-
     def contextMenuEvent(self, event):
-        mdi_area = self.services.get("mdi_area")
-        if mdi_area is not None and self._subwindow is not None:
-            mdi_area.setActiveSubWindow(self._subwindow)
-        popup_menu = self.services.get("popup_menu")
-        if popup_menu is None:
+        if not self.activate_popup_menu("figure", event.globalPos()):
             return super().contextMenuEvent(event)
-        popup_menu("figure", event.globalPos())
 
     def request_resize_redraw(self, width=None, height=None):
         if width is None or height is None:
@@ -623,35 +558,42 @@ class FigureWindow(QtWidgets.QWidget):
         self._kernel_close_in_progress = False
         self.close_from_kernel()
 
-    def default_macro_name(self):
-        return self.window_handle() or self.snapshot_state.default_macro_name()
+    def saveable_default_macro_name(self):
+        return self.snapshot_state.default_macro_name()
 
-    def window_handle(self):
-        return stable_window_name(self._subwindow)
+    def saveable_decorator_name(self):
+        return "@hyde.figure"
 
-    def macro_source(self, macro_name):
-        geometry = self.capture_geometry()
-        window_state = self.window_state()
-        return self._recreation_function_source(
+    def macro_definition_source(self, macro_name, *, handle):
+        return self.snapshot_state.macro_source(
             macro_name,
-            decorator_name="@hyde.figure",
-            window_pos=None if geometry is None else tuple(geometry[:2]),
-            window_state=None if window_state == "minimized" else window_state,
-            figure_title=self.window_handle(),
+            figure_title=handle,
         )
 
+    def session_restore_definition_source(self, handle):
+        return self.snapshot_state.macro_source(
+            handle,
+            figure_title=handle,
+        )
+
+    def session_restore_arguments(self):
+        return self.snapshot_state.tracked_names()
+
+    def macro_window_metadata(self, geometry, window_state):
+        return {
+            "window_pos": None if geometry is None else tuple(geometry[:2]),
+            "window_state": None if window_state == "minimized" else window_state,
+        }
+
+    def session_restore_window_metadata(self, geometry, window_state):
+        if geometry is None:
+            return None
+        return {
+            "window_pos": tuple(geometry[:2]),
+            "window_state": window_state,
+        }
+
     def closeEvent(self, event):
-        if self._closed or self._closing_from_kernel:
-            self._closed = True
-            self._disconnect_namespace_updates()
-            return super().closeEvent(event)
-
-        get_shutting_down = self.services.get("get_shutting_down")
-        if get_shutting_down is not None and get_shutting_down():
-            self._closed = True
-            self._disconnect_namespace_updates()
-            return super().closeEvent(event)
-
         if self._kernel_close_in_progress:
             LOGGER.debug(
                 "Figure window %s ignored duplicate close while waiting for kernel confirmation.",
@@ -659,26 +601,21 @@ class FigureWindow(QtWidgets.QWidget):
             )
             event.ignore()
             return
+        return super().closeEvent(event)
 
-        if not (QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier):
-            save_window_dialog_service = self.services.get("save_window_dialog_service")
-            get_procedures_init = self.services.get("get_procedures_init")
-            reload_procedures = self.services.get("reload_procedures")
-            if (
-                save_window_dialog_service is not None
-                and get_procedures_init is not None
-                and reload_procedures is not None
-            ):
-                procedures_init = get_procedures_init()
-                if procedures_init and not save_window_dialog_service.prompt_to_save_window_macro(
-                    saveable=self,
-                    parent=self.services.get("ui", self),
-                    procedures_init=procedures_init,
-                    reload_procedures=reload_procedures,
-                ):
-                    event.ignore()
-                    return
+    def is_close_complete(self):
+        return self._closed or self._closing_from_kernel
 
+    def complete_interactive_close(self, event):
+        self._closed = True
+        self._disconnect_namespace_updates()
+        return super().complete_interactive_close(event)
+
+    def finalize_interactive_close(self, event):
+        get_shutting_down = self.service("get_shutting_down")
+        if get_shutting_down is not None and get_shutting_down():
+            self.complete_interactive_close(event)
+            return
         self._kernel_close_in_progress = True
         if not self._queue_silent_command(
             self._command_source("close", figure_number=self.figure_number)
@@ -719,8 +656,3 @@ class FigureWindow(QtWidgets.QWidget):
                 )
         except Exception:
             pass
-
-    def _remember_subwindow_geometry(self):
-        if self._subwindow is None or self._subwindow.isMinimized():
-            return
-        self._last_normal_geometry = tuple(capture_subwindow_geometry(self._subwindow))

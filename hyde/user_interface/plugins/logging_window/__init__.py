@@ -1,16 +1,12 @@
-from qtutils.qt.QtWidgets import QWidget, QVBoxLayout
 from labscript_utils.qtwidgets.outputbox import OutputBox
-from hyde.user_interface.plugin_tools import HydePlugin
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
+from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
 
-class LoggingWindow(QWidget):
+class LoggingWindow(HydeToolWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setWindowTitle("Logging")
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Initialize the OutputBox, which populates our layout
-        self.output_box = OutputBox(self.layout)
+        self.output_box = OutputBox(self.ui.content_layout)
     
     @property
     def port(self):
@@ -39,56 +35,32 @@ class LoggingWindowService:
         return widget.port
 
 
-class Plugin(HydePlugin):
+class Plugin(HydeToolWindowPlugin):
+    session_key = "logging"
+    window_title = "Logging"
+    menu_name = "Logging"
+    window_size = (800, 600)
+    menu_order = 40
+    creation_policy = "eager"
+
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.logging_window_service = LoggingWindowService(self)
 
-    def setup(self, data=None):
-        del data
-        self.logging_window_service.ensure_widget()
-        self.hide_mdi_subwindow("logging")
-
-    def get_ui_contributions(self):
-        return [
-            {
-                "context": "mdi",
-                "key": "logging",
-                "title": "Logging",
-                "size": (800, 600),
-                "factory": self.create_widget,
-            }
-        ]
-
-    def get_menu_contributions(self):
-        return [
-            {
-                "location": "window",
-                "group": "tool_windows",
-                "order": 40,
-                "name": "Logging",
-                "action": self.show_window,
-            }
-        ]
-
     def get_services(self):
         return {"runtime_output_service": self.logging_window_service}
 
-    def create_widget(self, parent=None, data=None):
-        del data
-        return LoggingWindow(parent=parent)
-
-    def show_window(self, checked=False):
-        del checked
-        self.services["show_window"]("logging")
+    def create_tool_window_widget(self, parent=None):
+        return LoggingWindow(
+            parent=parent,
+            services=self.services,
+            session_key=self.session_key,
+        )
 
     def get_event_handlers(self):
         return {
             "project_loaded": self.on_project_loaded,
         }
 
-    def get_session_toml_data(self):
-        return self.tool_window_save_data("logging")
-
     def on_project_loaded(self, data):
-        self.restore_tool_window(data["session"], "logging")
+        self.restore_tool_window_session(data["session"])

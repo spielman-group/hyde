@@ -2,12 +2,13 @@ import copy
 import os
 import time
 
-from qtutils import UiLoader, inmain_decorator
+from qtutils import inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.hyde_features import is_eligible_for_table
 from hyde.user_interface.base import MutationState
-from hyde.user_interface.plugin_tools import HydePlugin
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
+from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
 
 NAMESPACE_VIEW_SETTINGS = {
     "check_all": False,
@@ -87,21 +88,21 @@ class SpyderFrontendComm(CommBase):
         print(error_wrapper)
 
 
-class PythonVariables(QtWidgets.QWidget):
+class PythonVariables(HydeToolWidget):
+    ui_filename = os.path.join("plugins", "python_variables", "python_variables.ui")
     namespace_view_updated = QtCore.Signal(object)
 
-    def __init__(self, connection_file, services=None, *args, **kwargs):
-        del connection_file
-        super().__init__(*args, **kwargs)
-        self.services = dict(services or {})
+    def __init__(self, services=None, session_key=None, *args, **kwargs):
+        super().__init__(
+            services=services,
+            session_key=session_key,
+            *args,
+            **kwargs,
+        )
         self._execute_requests_in_flight = set()
         self._refresh_in_flight = False
         self._refresh_pending = False
         self._closed = False
-
-        loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "python_variables.ui")
-        self.ui = loader.load(ui_path, self)
 
         self.model = QtGui.QStandardItemModel(0, 3)
         self.model.setHorizontalHeaderLabels(["Name", "Type", "Value"])
@@ -196,7 +197,15 @@ class PythonVariables(QtWidgets.QWidget):
         """Return the latest cached namespace metadata snapshot."""
         return copy.deepcopy(getattr(self, "_last_view", {}) or {})
 
-    def restore_view_state(self, info):
+    def get_session_toml_data(self):
+        return {
+            "arrays": bool(self.ui.arraysCheckBox.isChecked()),
+            "variables": bool(self.ui.variablesCheckBox.isChecked()),
+            "strings": bool(self.ui.stringsCheckBox.isChecked()),
+            "info": bool(self.ui.infoCheckBox.isChecked()),
+        }
+
+    def restore_session_toml_data(self, info):
         self.ui.arraysCheckBox.setChecked(bool(info.get("arrays", True)))
         self.ui.variablesCheckBox.setChecked(bool(info.get("variables", True)))
         self.ui.stringsCheckBox.setChecked(bool(info.get("strings", True)))
@@ -375,23 +384,6 @@ class PythonVariables(QtWidgets.QWidget):
             return
         table_feature.append_to_active_table(names)
 
-    def closeEvent(self, event):
-        if self._closed:
-            super().closeEvent(event)
-            return
-        get_shutting_down = self.services.get("get_shutting_down")
-        if get_shutting_down is not None and get_shutting_down():
-            self.shutdown()
-            super().closeEvent(event)
-            return
-        parent = self.parentWidget()
-        if parent is not None:
-            parent.hide()
-        else:
-            self.hide()
-        event.ignore()
-
-
 class NamespaceFilterProxyModel(QtCore.QSortFilterProxyModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -462,53 +454,27 @@ class PythonVariablesService:
         return True
 
 
-class Plugin(HydePlugin):
+class Plugin(HydeToolWindowPlugin):
+    session_key = "python_variables"
+    window_title = "Python Variables"
+    menu_name = "Python Variables"
+    menu_order = 60
+
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.python_variables_service = PythonVariablesService(self)
-        self._action = None
-
-    def setup(self, data=None):
-        del data
-        self.bind_menu_action("_action", "window", "Python Variables")
-
-    def get_ui_contributions(self):
-        return [
-            {
-                "context": "mdi",
-                "key": "python_variables",
-                "title": "Python Variables",
-                "factory": self.create_widget,
-            }
-        ]
-
-    def get_menu_contributions(self):
-        return [
-            {
-                "location": "window",
-                "group": "tool_windows",
-                "order": 60,
-                "name": "Python Variables",
-                "action": self.show_window,
-            }
-        ]
 
     def get_services(self):
         return {
             "namespace_view_service": self.python_variables_service,
         }
 
-    def create_widget(self, parent=None, data=None):
-        del data
+    def create_tool_window_widget(self, parent=None):
         return PythonVariables(
-            connection_file=None,
             services=self.services,
+            session_key=self.session_key,
             parent=parent,
         )
-
-    def show_window(self, checked=False):
-        del checked
-        self.services["show_window"]("python_variables")
 
     def get_event_handlers(self):
         return {
@@ -519,29 +485,13 @@ class Plugin(HydePlugin):
             "project_loaded": self.on_project_loaded,
         }
 
-    def get_session_toml_data(self):
-        widget = self.mdi_widget("python_variables")
-        if widget is None:
-            return {}
-        save_data = self.tool_window_save_data("python_variables")
-        save_data["python_variables"] = {
-            "arrays": bool(widget.ui.arraysCheckBox.isChecked()),
-            "variables": bool(widget.ui.variablesCheckBox.isChecked()),
-            "strings": bool(widget.ui.stringsCheckBox.isChecked()),
-            "info": bool(widget.ui.infoCheckBox.isChecked()),
-        }
-        return save_data
-
     def on_project_loaded(self, data):
-        session = data["session"]
-        widget = self.python_variables_service.ensure_widget()
-        self.restore_tool_window(session, "python_variables")
-        widget.restore_view_state(session.get("python_variables", {}))
+        self.restore_tool_window_session(data["session"])
 
     def on_enter_no_project_state(self, data):
         del data
         self.set_bound_action_enabled("_action", False)
-        self.hide_mdi_subwindow("python_variables")
+        self.hide_mdi_subwindow(self.session_key)
 
     def on_project_activated(self, data):
         del data
@@ -549,7 +499,7 @@ class Plugin(HydePlugin):
 
     def on_kernel_ready(self, data):
         del data
-        self.ensure_mdi_widget("python_variables")
+        self.ensure_mdi_widget(self.session_key)
 
     def on_kernel_crashed(self, data):
         del data

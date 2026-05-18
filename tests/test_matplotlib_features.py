@@ -1101,6 +1101,70 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         finally:
             widget.close()
 
+    def test_figure_window_context_menu_activates_bound_subwindow(self):
+        popup_calls = []
+        mdi_area = QtWidgets.QMdiArea()
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "mdi_area": mdi_area,
+                "popup_menu": lambda location, global_pos: popup_calls.append(
+                    (location, global_pos)
+                ),
+            },
+        )
+        other = QtWidgets.QWidget()
+        other_subwindow = mdi_area.addSubWindow(other)
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        widget.bind_subwindow(subwindow)
+        other_subwindow.show()
+        subwindow.show()
+        self.qapp.processEvents()
+        mdi_area.setActiveSubWindow(other_subwindow)
+
+        event = QtGui.QContextMenuEvent(
+            QtGui.QContextMenuEvent.Mouse,
+            QtCore.QPoint(5, 5),
+            QtCore.QPoint(20, 30),
+        )
+        widget.contextMenuEvent(event)
+
+        self.assertIs(mdi_area.activeSubWindow(), subwindow)
+        self.assertEqual(popup_calls, [("figure", QtCore.QPoint(20, 30))])
+
+        widget.force_close()
+        other.close()
+
+    def test_figure_window_close_honors_save_prompt_cancel(self):
+        queued = []
+        save_window_dialog_service = self._FakeSaveWindowDialogService(result=False)
+        mdi_area = QtWidgets.QMdiArea()
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "python_execution_service": FakeExecutionService(queued),
+                "save_window_dialog_service": save_window_dialog_service,
+                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+                "reload_procedures": lambda: None,
+            },
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
+
+        subwindow.close()
+        self.qapp.processEvents()
+
+        self.assertEqual(len(save_window_dialog_service.calls), 1)
+        self.assertEqual(queued, [])
+        self.assertFalse(widget._closed)
+        self.assertFalse(widget._kernel_close_in_progress)
+
+        widget.force_close()
+
     def test_figure_window_close_waits_for_kernel_confirmation(self):
         queued = []
         mdi_area = QtWidgets.QMdiArea()
@@ -1131,6 +1195,63 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.qapp.processEvents()
 
         self.assertTrue(widget._closed)
+
+    def test_figure_window_ignores_duplicate_close_while_waiting_for_kernel_confirmation(self):
+        queued = []
+        mdi_area = QtWidgets.QMdiArea()
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "python_execution_service": FakeExecutionService(queued),
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+                "reload_procedures": lambda: None,
+            },
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
+
+        subwindow.close()
+        self.qapp.processEvents()
+        subwindow.close()
+        self.qapp.processEvents()
+
+        self.assertEqual(queued, [("plt.close(1)", True)])
+        self.assertTrue(widget._kernel_close_in_progress)
+        self.assertFalse(widget._closed)
+
+        widget.close_from_kernel()
+        self.qapp.processEvents()
+
+    def test_figure_window_shutdown_close_bypasses_kernel_queue_and_closes_immediately(self):
+        queued = []
+        mdi_area = QtWidgets.QMdiArea()
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "python_execution_service": FakeExecutionService(queued),
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
+                "reload_procedures": lambda: None,
+                "get_shutting_down": lambda: True,
+            },
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
+
+        subwindow.close()
+        self.qapp.processEvents()
+
+        self.assertEqual(queued, [])
+        self.assertTrue(widget._closed)
+        self.assertFalse(widget._kernel_close_in_progress)
+        self.assertFalse(subwindow.isVisible())
 
     def test_figure_window_close_timeout_clears_in_flight_close(self):
         queued = []

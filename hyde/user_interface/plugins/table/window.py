@@ -7,15 +7,9 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_features import TableCodec
 from hyde.user_interface.base import HydeGuiState, MutationState
+from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
 from hyde.user_interface.namespace_tracking import tracked_namespace_signature
-from hyde.user_interface.plugin_tools import (
-    build_window_function_source,
-    build_window_restore_source,
-    capture_saveable_window_state,
-    capture_subwindow_geometry,
-)
 from hyde.user_interface.window_naming import (
-    bind_stable_window_name,
     stable_window_name,
 )
 
@@ -220,7 +214,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
             else QtCore.Qt.NoItemFlags
         )
 
-class TableWidget(QtWidgets.QWidget):
+class TableWidget(HydeInteractiveWidget):
     REFRESH_TIMEOUT_MS = 5000
 
     def __init__(
@@ -233,10 +227,36 @@ class TableWidget(QtWidgets.QWidget):
         *args,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
-        self._initial_window_name = str(handle)
+        parent = kwargs.pop("parent", None)
+        flags = kwargs.pop("flags", kwargs.pop("f", None))
+        if len(args) > 2:
+            raise TypeError("TableWidget accepts at most parent and flags QWidget arguments")
+        if args:
+            if len(args) == 2:
+                positional_parent, positional_flags = args
+            elif isinstance(args[0], QtWidgets.QWidget) or args[0] is None:
+                positional_parent, positional_flags = args[0], None
+            else:
+                positional_parent, positional_flags = None, args[0]
+            if positional_parent is not None:
+                if parent is not None:
+                    raise TypeError("parent specified both positionally and by keyword")
+                parent = positional_parent
+            if positional_flags is not None:
+                if flags is not None:
+                    raise TypeError("flags specified both positionally and by keyword")
+                flags = positional_flags
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword arguments for TableWidget: {unexpected}")
+        super().__init__(
+            services=services,
+            initial_window_name=str(handle),
+            parent=parent,
+        )
+        if flags is not None:
+            self.setWindowFlags(flags)
         self.names = list(names)
-        self.services = dict(services or {})
         self.table_state = TableState()
         self.table_state.set_items(self.names)
         self.table_state.set_geometry(geometry)
@@ -253,8 +273,6 @@ class TableWidget(QtWidgets.QWidget):
         self._initial_size_applied = False
         self._closed = False
         self._restore_layout_requested = bool(geometry or column_widths)
-        self._subwindow = None
-        self._last_normal_geometry = None
         self._pending_created_columns = []
         self._tracked_namespace_state = self._current_tracked_namespace_state()
 
@@ -306,18 +324,11 @@ class TableWidget(QtWidgets.QWidget):
         if refresh and self.names:
             self.refresh_data()
 
+    def on_stable_name_bound(self, stable_name):
+        self.table_state.set_name(stable_name)
+
     def bind_subwindow(self, subwindow, stable_name=None):
-        self._subwindow = subwindow
-        resolved_name = (
-            stable_name
-            or stable_window_name(subwindow)
-            or self._initial_window_name
-        )
-        bind_stable_window_name(subwindow, resolved_name)
-        self.table_state.set_name(resolved_name)
-        if hasattr(self, "_initial_window_name"):
-            del self._initial_window_name
-        subwindow.installEventFilter(self)
+        super().bind_subwindow(subwindow, stable_name=stable_name)
         geometry = self.table_state.normalized_state()["settings"]["geometry"]
         if geometry is not None:
             subwindow.setGeometry(QtCore.QRect(*geometry))
@@ -469,14 +480,10 @@ class TableWidget(QtWidgets.QWidget):
                     index,
                     QtCore.QItemSelectionModel.ClearAndSelect,
                 )
-
-        mdi_area = self.services.get("mdi_area")
-        if mdi_area is not None and self._subwindow is not None:
-            mdi_area.setActiveSubWindow(self._subwindow)
-        popup_menu = self.services.get("popup_menu")
-        if popup_menu is None:
-            return
-        popup_menu("table", self.ui.tableView.viewport().mapToGlobal(position))
+        self.activate_popup_menu(
+            "table",
+            self.ui.tableView.viewport().mapToGlobal(position),
+        )
 
     def _schedule_value_editor_activation(self, index):
         if not (self.model.flags(index) & QtCore.Qt.ItemIsEditable):
@@ -599,43 +606,26 @@ class TableWidget(QtWidgets.QWidget):
             widths[name] = self.ui.tableView.columnWidth(column)
         self.table_state.set_column_widths(widths)
 
-    def _remember_subwindow_geometry(self):
-        if self._subwindow is None or self._subwindow.isMinimized():
-            return
-        self._last_normal_geometry = capture_subwindow_geometry(self._subwindow)
+    def saveable_default_macro_name(self):
+        return self.table_state.default_macro_name()
 
-    def window_state(self):
-        return capture_saveable_window_state(self._subwindow)
+    def saveable_decorator_name(self):
+        return "@hyde.table"
 
-    def default_macro_name(self):
-        return self.window_handle() or self.table_state.default_macro_name()
-
-    def window_handle(self):
-        return stable_window_name(self._subwindow)
-
-    def macro_source(self, macro_name):
-        self.capture_layout_state()
-        return build_window_function_source(
-            self.table_state.recreation_function_source(
-                macro_name,
-                name=self.window_handle(),
-            ),
-            decorator_name="@hyde.table",
-            window_state=self.window_state(),
+    def macro_definition_source(self, macro_name, *, handle):
+        return self.table_state.recreation_function_source(
+            macro_name,
+            name=handle,
         )
 
-    def session_restore_source(self):
-        self.capture_layout_state()
-        return build_window_restore_source(
-            self.table_state.recreation_function_source(
-                self.window_handle(),
-                name=self.window_handle(),
-            ),
-            handle=self.window_handle(),
-            arguments=self.names,
-            decorator_name="@hyde.table",
-            window_state=self.window_state(),
+    def session_restore_definition_source(self, handle):
+        return self.table_state.recreation_function_source(
+            handle,
+            name=handle,
         )
+
+    def session_restore_arguments(self):
+        return self.names
 
     def _on_value_text_edited(self, text):
         del text
@@ -823,44 +813,12 @@ class TableWidget(QtWidgets.QWidget):
         self._value_edit_dirty = False
         return True
 
-    def closeEvent(self, event):
-        if self._closed:
-            super().closeEvent(event)
-            return
+    def is_close_complete(self):
+        return self._closed
 
-        get_shutting_down = self.services.get("get_shutting_down")
-        if get_shutting_down is not None and get_shutting_down():
-            self.shutdown_client()
-            super().closeEvent(event)
-            return
-
-        if QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier:
-            self.shutdown_client()
-            super().closeEvent(event)
-            return
-
-        save_window_dialog_service = self.services.get("save_window_dialog_service")
-        get_procedures_init = self.services.get("get_procedures_init")
-        reload_procedures = self.services.get("reload_procedures")
-        if (
-            save_window_dialog_service is not None
-            and get_procedures_init is not None
-            and reload_procedures is not None
-        ):
-            procedures_init = get_procedures_init()
-            if procedures_init:
-                self.capture_layout_state()
-                if not save_window_dialog_service.prompt_to_save_window_macro(
-                    saveable=self,
-                    parent=self.services.get("ui", self),
-                    procedures_init=procedures_init,
-                    reload_procedures=reload_procedures,
-                ):
-                    event.ignore()
-                    return
-
+    def finalize_interactive_close(self, event):
         self.shutdown_client()
-        super().closeEvent(event)
+        self.complete_interactive_close(event)
 
     def shutdown_client(self):
         if self._closed:

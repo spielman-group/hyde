@@ -2,7 +2,8 @@ import os
 from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout, QTreeView, QFileSystemModel
 from qtutils.qt.QtGui import QDesktopServices
-from hyde.user_interface.plugin_tools import HydePlugin
+from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
+
 
 class ProcedureBrowser(QWidget):
     def __init__(self, procedures_dir, *args, **kwargs):
@@ -47,46 +48,16 @@ class ProcedureBrowser(QWidget):
         if os.path.isfile(file_path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
 
-class Plugin(HydePlugin):
-    def __init__(self, initial_settings):
-        super().__init__(initial_settings)
-        self._action = None
+class Plugin(HydeToolWindowPlugin):
+    session_key = "procedures"
+    window_title = "Procedures"
+    menu_name = "Procedures"
+    window_size = (300, 500)
+    menu_order = 50
+    creation_policy = "eager"
 
-    def setup(self, data=None):
-        del data
-        self.bind_menu_action("_action", "window", "Procedures")
-        self.ensure_mdi_widget("procedures")
-        self.hide_mdi_subwindow("procedures")
-
-    def get_ui_contributions(self):
-        return [
-            {
-                "context": "mdi",
-                "key": "procedures",
-                "title": "Procedures",
-                "size": (300, 500),
-                "factory": self.create_widget,
-            }
-        ]
-
-    def get_menu_contributions(self):
-        return [
-            {
-                "location": "window",
-                "group": "tool_windows",
-                "order": 50,
-                "name": "Procedures",
-                "action": self.show_window,
-            }
-        ]
-
-    def create_widget(self, parent=None, data=None):
-        del data
+    def create_tool_window_widget(self, parent=None):
         return ProcedureBrowser(procedures_dir=None, parent=parent)
-
-    def show_window(self, checked=False):
-        del checked
-        self.services["show_window"]("procedures")
 
     def get_event_handlers(self):
         return {
@@ -95,22 +66,19 @@ class Plugin(HydePlugin):
             "enter_no_project_state": self.on_enter_no_project_state,
         }
 
-    def get_session_toml_data(self):
-        return self.tool_window_save_data("procedures")
-
     def on_project_loaded(self, data):
-        self.restore_tool_window(data["session"], "procedures")
+        self.restore_tool_window_session(data["session"])
 
     def on_project_activated(self, data):
         self.set_bound_action_enabled("_action", True)
-        widget = self.mdi_widget("procedures")
+        widget = self.mdi_widget(self.session_key)
         if widget is not None:
             widget.set_procedures_dir(data.get("procedures_dir"))
 
     def on_enter_no_project_state(self, data):
         del data
         self.set_bound_action_enabled("_action", False)
-        widget = self.mdi_widget("procedures")
+        widget = self.mdi_widget(self.session_key)
         if widget is not None:
             widget.set_procedures_dir(None)
-        self.hide_mdi_subwindow("procedures")
+        self.hide_mdi_subwindow(self.session_key)

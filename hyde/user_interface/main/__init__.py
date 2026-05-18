@@ -33,6 +33,10 @@ class PersistentSubwindowFilter(QtCore.QObject):
 
     def eventFilter(self, watched, event):
         if event.type() == QtCore.QEvent.Close:
+            widget = watched.widget()
+            allows_close = getattr(widget, "allows_subwindow_close", None)
+            if callable(allows_close) and allows_close():
+                return super().eventFilter(watched, event)
             watched.hide()
             event.ignore()
             return True

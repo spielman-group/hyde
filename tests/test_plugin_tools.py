@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -14,15 +15,21 @@ except ModuleNotFoundError as exc:
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
 from hyde.user_interface.plugin_tools import (
     HydeMDIContext,
     HydeMenuContext,
     HydePlugin,
     HydePluginManager,
+    HydeToolWindowPlugin,
     SETUP_PRIORITY_RUNTIME_START,
 )
 from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
+from hyde.user_interface.plugins.logging_window import Plugin as LoggingPlugin
 from hyde.user_interface.plugins.figure.window import FigureWindow
+from hyde.user_interface.plugins.procedure_browser import Plugin as ProcedureBrowserPlugin
+from hyde.user_interface.plugins.python_variables import Plugin as PythonVariablesPlugin
+from hyde.user_interface.plugins.python_terminal import Plugin as PythonTerminalPlugin
 from hyde.user_interface.plugins.table import Plugin as TablePlugin
 from hyde.user_interface.plugins.table.window import TableWidget
 from hyde.user_interface.window_naming import resolve_requested_name, stable_window_name
@@ -196,6 +203,48 @@ class TestPluginTools(unittest.TestCase):
             "plugin_window",
         )
 
+    def test_shared_tool_window_plugin_builds_menu_action_and_constructs_widget(self):
+        class DemoToolWidget(HydeToolWidget):
+            pass
+
+        class DemoPlugin(HydeToolWindowPlugin):
+            session_key = "demo_tool"
+            window_title = "Demo Tool"
+            menu_name = "Demo Tool"
+            window_size = (320, 240)
+
+            def create_tool_window_widget(self, parent=None):
+                return DemoToolWidget(
+                    parent=parent,
+                    services=self.services,
+                    session_key=self.session_key,
+                )
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"demo": DemoPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+
+        HydeApp.setup_plugins(app)
+        app.ui.show()
+        self.qapp.processEvents()
+
+        action = manager.services["lookup_menu_action"]("window", "Demo Tool")
+        self.assertIsNotNone(action)
+        self.assertIsNone(app.mdi_context.widget("demo_tool"))
+
+        action.trigger()
+        self.qapp.processEvents()
+
+        widget = app.mdi_context.widget("demo_tool")
+        subwindow = app.mdi_context.subwindow("demo_tool")
+        self.assertIsInstance(widget, DemoToolWidget)
+        self.assertEqual(widget.session_key, "demo_tool")
+        self.assertEqual(subwindow.objectName(), "demo_tool")
+        self.assertEqual(subwindow.windowTitle(), "Demo Tool")
+        self.assertEqual((subwindow.width(), subwindow.height()), (320, 240))
+        self.assertTrue(subwindow.isVisible())
+
     def test_tool_window_session_helpers_use_subwindow_object_name_identity(self):
         _, plugin, subwindow = self.make_tool_window_plugin()
         subwindow.setGeometry(QtCore.QRect(11, 22, 333, 444))
@@ -238,6 +287,412 @@ class TestPluginTools(unittest.TestCase):
         self.assertIs(restored, subwindow)
         self.assertTrue(subwindow.isVisible())
         self.assertEqual(self.subwindow_geometry(subwindow), [11, 22, 333, 444])
+
+    def test_shared_tool_window_plugin_restores_generic_state_before_widget_state(self):
+        class DemoToolWidget(HydeToolWidget):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.restore_snapshots = []
+
+            def restore_session_toml_data(self, session):
+                self.restore_snapshots.append(
+                    {
+                        "session": dict(session),
+                        "geometry": [
+                            self._subwindow.geometry().x(),
+                            self._subwindow.geometry().y(),
+                            self._subwindow.geometry().width(),
+                            self._subwindow.geometry().height(),
+                        ],
+                    }
+                )
+
+        class DemoPlugin(HydeToolWindowPlugin):
+            session_key = "demo_tool"
+            window_title = "Demo Tool"
+            menu_name = "Demo Tool"
+
+            def create_tool_window_widget(self, parent=None):
+                return DemoToolWidget(
+                    parent=parent,
+                    services=self.services,
+                    session_key=self.session_key,
+                )
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        plugin = DemoPlugin({})
+        manager.plugins = {"demo": plugin}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+
+        HydeApp.setup_plugins(app)
+        app.ui.show()
+        self.qapp.processEvents()
+
+        widget = plugin.ensure_mdi_widget("demo_tool")
+        subwindow = plugin.mdi_subwindow("demo_tool")
+        subwindow.setGeometry(QtCore.QRect(1, 2, 100, 80))
+
+        plugin.restore_tool_window_session(
+            {
+                "tool_windows": {
+                    "demo_tool": {
+                        "window_state": "visible",
+                        "geometry": [15, 25, 210, 160],
+                    }
+                },
+                "demo_tool": {"selected_path": "procedures/example.py"},
+            }
+        )
+
+        self.assertEqual(
+            widget.restore_snapshots,
+            [
+                {
+                    "session": {"selected_path": "procedures/example.py"},
+                    "geometry": [15, 25, 210, 160],
+                }
+            ],
+        )
+
+    def test_shared_tool_window_plugin_can_eagerly_create_hidden_widget(self):
+        class DemoToolWidget(HydeToolWidget):
+            pass
+
+        class DemoPlugin(HydeToolWindowPlugin):
+            session_key = "demo_tool"
+            window_title = "Demo Tool"
+            menu_name = "Demo Tool"
+            creation_policy = "eager"
+
+            def create_tool_window_widget(self, parent=None):
+                return DemoToolWidget(
+                    parent=parent,
+                    services=self.services,
+                    session_key=self.session_key,
+                )
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"demo": DemoPlugin({})}
+        app = make_plugin_host(manager)
+
+        HydeApp.setup_plugins(app)
+
+        widget = app.mdi_context.widget("demo_tool")
+        subwindow = app.mdi_context.subwindow("demo_tool")
+        self.assertIsInstance(widget, DemoToolWidget)
+        self.assertEqual(widget.session_key, "demo_tool")
+        self.assertTrue(subwindow.isHidden())
+
+    def test_python_terminal_plugin_mounts_console_inside_hyde_tool_widget(self):
+        class FakeTerminalWidget(QtWidgets.QWidget):
+            executed = QtCore.Signal(object)
+
+            def __init__(
+                self,
+                kernel_client,
+                history_sink=None,
+                initial_history=None,
+                *args,
+                **kwargs,
+            ):
+                super().__init__(*args, **kwargs)
+                self.kernel_client = kernel_client
+                self.history_sink = history_sink
+                self.initial_history = list(initial_history or [])
+
+            def restore_history_entries(self, entries):
+                self.initial_history = list(entries or [])
+
+            def shutdown(self):
+                self.kernel_client = None
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+        manager.services = {"kernel_runtime_service": object()}
+
+        with patch(
+            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            FakeTerminalWidget,
+        ):
+            HydeApp.setup_plugins(app)
+            plugin = manager.plugins["python_terminal"]
+            plugin.on_kernel_ready({})
+
+        container = plugin.mdi_widget("python_terminal")
+        terminal = manager.services["visible_terminal_service"].widget()
+
+        self.assertIsInstance(terminal, FakeTerminalWidget)
+        self.assertIs(container.mounted_child, terminal)
+        self.assertIs(terminal.parentWidget(), container.ui.content_widget)
+        self.assertEqual(container.ui.content_layout.count(), 1)
+
+    def test_python_variables_plugin_keeps_namespace_service_on_its_container(self):
+        class FakeChannel(QtCore.QObject):
+            message_received = QtCore.Signal(object)
+
+        class FakeKernelClient:
+            def __init__(self):
+                self.iopub_channel = FakeChannel()
+
+        class FakeSpyderComm:
+            def __init__(self, kernel_client):
+                self.kernel_client = kernel_client
+
+            def open(self):
+                return None
+
+            def wait_until_ready(self, timeout=5):
+                del timeout
+                return None
+
+            def configure_namespace_view(self, settings):
+                self.settings = dict(settings)
+
+            def request_namespace_view(self, callback):
+                callback(
+                    {
+                        "scalar": {
+                            "type": "int",
+                            "python_type": "int",
+                            "view": "7",
+                        }
+                    }
+                )
+
+            def close(self):
+                return None
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"python_variables": PythonVariablesPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+        shared_client = FakeKernelClient()
+        kernel_runtime_service = type(
+            "KernelRuntimeService",
+            (),
+            {"kernel_client": lambda _self: shared_client},
+        )()
+        app.build_plugin_services = lambda: {
+            **HydeApp.build_plugin_services(app),
+            "kernel_runtime_service": kernel_runtime_service,
+        }
+
+        with patch(
+            "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+            FakeSpyderComm,
+        ):
+            HydeApp.setup_plugins(app)
+            action = manager.services["lookup_menu_action"](
+                "window",
+                "Python Variables",
+            )
+            action.trigger()
+            self.qapp.processEvents()
+
+            plugin = manager.plugins["python_variables"]
+            widget = plugin.mdi_widget("python_variables")
+            subwindow = plugin.mdi_subwindow("python_variables")
+
+        self.assertIs(plugin.python_variables_service.widget(), widget)
+        self.assertEqual(
+            plugin.python_variables_service.namespace_view(),
+            {
+                "scalar": {
+                    "type": "int",
+                    "python_type": "int",
+                    "view": "7",
+                }
+            },
+        )
+        self.assertIs(
+            widget.service("kernel_runtime_service"),
+            kernel_runtime_service,
+        )
+        self.assertIsNotNone(widget.ui.treeView)
+        self.assertEqual(widget.session_key, "python_variables")
+        self.assertEqual(subwindow.objectName(), "python_variables")
+        self.assertEqual(subwindow.windowTitle(), "Python Variables")
+
+    def test_python_terminal_service_restores_and_captures_history_through_container(self):
+        class FakeTerminalWidget(QtWidgets.QWidget):
+            executed = QtCore.Signal(object)
+
+            def __init__(
+                self,
+                kernel_client,
+                history_sink=None,
+                initial_history=None,
+                *args,
+                **kwargs,
+            ):
+                super().__init__(*args, **kwargs)
+                self.kernel_client = kernel_client
+                self.history_sink = history_sink
+                self.history_snapshots = [list(initial_history or [])]
+
+            def execute(self, source=None, hidden=False, interactive=False):
+                del interactive
+                if (
+                    not hidden
+                    and self.history_sink is not None
+                    and isinstance(source, str)
+                    and source.strip()
+                ):
+                    self.history_sink(source)
+
+            def restore_history_entries(self, entries):
+                self.history_snapshots.append(list(entries or []))
+
+            def shutdown(self):
+                self.kernel_client = None
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+
+        with patch(
+            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            FakeTerminalWidget,
+        ):
+            HydeApp.setup_plugins(app)
+            service = manager.services["visible_terminal_service"]
+            service.restore_history_entries(["a = 1"])
+
+            terminal = service.widget()
+            service.execute_visible("b = 2")
+
+        self.assertEqual(service.history_entries(), ["a = 1", "b = 2"])
+        self.assertEqual(
+            terminal.history_snapshots,
+            [["a = 1"], ["a = 1"]],
+        )
+
+    def test_python_terminal_kernel_ready_creates_container_and_terminal_widget(self):
+        class FakeKernelRuntimeService:
+            def __init__(self):
+                self.client = object()
+
+            def kernel_client(self):
+                return self.client
+
+        class FakeTerminalWidget(QtWidgets.QWidget):
+            executed = QtCore.Signal(object)
+
+            def __init__(
+                self,
+                kernel_client,
+                history_sink=None,
+                initial_history=None,
+                *args,
+                **kwargs,
+            ):
+                super().__init__(*args, **kwargs)
+                self.kernel_client = kernel_client
+                self.history_sink = history_sink
+                self.initial_history = list(initial_history or [])
+
+            def restore_history_entries(self, entries):
+                self.initial_history = list(entries or [])
+
+            def shutdown(self):
+                self.kernel_client = None
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+
+        with patch(
+            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            FakeTerminalWidget,
+        ):
+            HydeApp.setup_plugins(app)
+            plugin = manager.plugins["python_terminal"]
+            plugin.services["kernel_runtime_service"] = FakeKernelRuntimeService()
+
+            self.assertIsNone(plugin.mdi_widget("python_terminal"))
+            self.assertIsNone(manager.services["visible_terminal_service"].widget())
+
+            plugin.on_kernel_ready({})
+
+        container = plugin.mdi_widget("python_terminal")
+        terminal = manager.services["visible_terminal_service"].widget()
+
+        self.assertIs(container.mounted_child, terminal)
+        self.assertIs(terminal.kernel_client, plugin.services["kernel_runtime_service"].client)
+
+    def test_python_terminal_kernel_crash_teardown_destroys_container_and_terminal(self):
+        class FakeTerminalWidget(QtWidgets.QWidget):
+            executed = QtCore.Signal(object)
+
+            def __init__(
+                self,
+                kernel_client,
+                history_sink=None,
+                initial_history=None,
+                *args,
+                **kwargs,
+            ):
+                del kernel_client, history_sink, initial_history
+                super().__init__(*args, **kwargs)
+                self.shutdown_calls = 0
+
+            def restore_history_entries(self, entries):
+                del entries
+
+            def shutdown(self):
+                self.shutdown_calls += 1
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+
+        with patch(
+            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            FakeTerminalWidget,
+        ):
+            HydeApp.setup_plugins(app)
+            plugin = manager.plugins["python_terminal"]
+            plugin.on_kernel_ready({})
+            terminal = manager.services["visible_terminal_service"].widget()
+
+            plugin.on_kernel_crashed({})
+
+        self.assertEqual(terminal.shutdown_calls, 1)
+        self.assertIsNone(plugin.mdi_widget("python_terminal"))
+        self.assertIsNone(plugin.mdi_subwindow("python_terminal"))
+        self.assertIsNone(manager.services["visible_terminal_service"].widget())
+        self.assertIsNone(manager.services["visible_terminal_service"].subwindow())
+
+    def test_procedure_browser_updates_state_across_project_activation_and_no_project(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"procedure_browser": ProcedureBrowserPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+
+        HydeApp.setup_plugins(app)
+
+        plugin = manager.plugins["procedure_browser"]
+        action = manager.services["lookup_menu_action"]("window", "Procedures")
+        widget = plugin.mdi_widget("procedures")
+        subwindow = plugin.mdi_subwindow("procedures")
+
+        self.assertIsNotNone(widget)
+        self.assertTrue(subwindow.isHidden())
+
+        plugin.on_enter_no_project_state({})
+        self.assertFalse(action.isEnabled())
+        self.assertIsNone(widget.procedures_dir)
+        self.assertTrue(subwindow.isHidden())
+
+        plugin.on_project_activated({"procedures_dir": "/tmp/example.hy/procedures"})
+        self.assertTrue(action.isEnabled())
+        self.assertEqual(widget.procedures_dir, "/tmp/example.hy/procedures")
 
     def test_tool_window_session_helpers_capture_hidden_minimized_and_maximized(self):
         _, plugin, subwindow = self.make_tool_window_plugin()
@@ -540,6 +995,54 @@ class TestPluginTools(unittest.TestCase):
             events,
             ["logging_setup", "runtime_setup", "runtime_start", "port"],
         )
+
+    def test_logging_window_preserves_runtime_output_service_across_visibility_changes(self):
+        class FakeOutputBox:
+            def __init__(self, layout):
+                self.port = 43210
+                layout.addWidget(QtWidgets.QLabel("fake output"))
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"logging_window": LoggingPlugin({})}
+        app = make_plugin_host(manager)
+
+        with patch(
+            "hyde.user_interface.plugins.logging_window.OutputBox",
+            FakeOutputBox,
+        ):
+            HydeApp.setup_plugins(app)
+        app.ui.show()
+        self.qapp.processEvents()
+
+        service = manager.services["runtime_output_service"]
+        action = manager.services["lookup_menu_action"]("window", "Logging")
+        widget = service.widget()
+        subwindow = service.subwindow()
+        show_calls = []
+        original_show_window = manager.services["show_window"]
+
+        def recording_show_window(key):
+            show_calls.append(key)
+            return original_show_window(key)
+
+        manager.services["show_window"] = recording_show_window
+
+        self.assertIs(service.ensure_widget(), widget)
+        self.assertEqual(service.port(), widget.port)
+        self.assertEqual(widget.session_key, "logging")
+        self.assertTrue(hasattr(widget.ui, "content_widget"))
+        self.assertEqual(widget.ui.content_layout.count(), 1)
+        self.assertFalse(subwindow.isVisible())
+
+        action.trigger()
+        self.qapp.processEvents()
+        self.assertEqual(show_calls, ["logging"])
+        self.assertIs(service.widget(), widget)
+
+        subwindow.close()
+        self.qapp.processEvents()
+        self.assertTrue(subwindow.isHidden())
+        self.assertIs(service.widget(), widget)
 
     def test_setup_plugins_registers_contextual_menu_locations_and_visibility_services(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")

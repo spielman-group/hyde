@@ -21,7 +21,12 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.plugins.python_variables import PythonVariables, PythonVariablesService
+from hyde.user_interface.plugin_tools import HydeMDIContext
+from hyde.user_interface.plugins.python_variables import (
+    Plugin as PythonVariablesPlugin,
+    PythonVariables,
+    PythonVariablesService,
+)
 
 
 def process_events(duration=0.05):
@@ -171,7 +176,6 @@ class TestPythonVariablesFinal(unittest.TestCase):
         )
 
         self.browser = PythonVariables(
-            connection_file=self.connection_file,
             services={
                 "python_execution_service": type(
                     "ExecutionService",
@@ -514,7 +518,6 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
             FakeSpyderComm,
         ):
             browser = PythonVariables(
-                connection_file="/tmp/unused.json",
                 services={"kernel_runtime_service": kernel_runtime_service},
             )
         try:
@@ -569,5 +572,138 @@ class TestPythonVariablesService(unittest.TestCase):
         shared_view["arr"]["view"][0] = "[1 9 3]"
 
         self.assertEqual(snapshot["arr"]["view"], ["[1 2 3]"])
+
+
+class TestPythonVariablesSessionPersistence(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication(sys.argv)
+
+    def _make_plugin(self):
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        self.qapp.processEvents()
+        context = HydeMDIContext(mdi_area)
+
+        class FakeChannel(QtCore.QObject):
+            message_received = QtCore.Signal(object)
+
+        class FakeKernelClient:
+            def __init__(self):
+                self.iopub_channel = FakeChannel()
+
+        class FakeSpyderComm:
+            def __init__(self, kernel_client):
+                self.kernel_client = kernel_client
+
+            def open(self):
+                return None
+
+            def wait_until_ready(self, timeout=5):
+                del timeout
+                return None
+
+            def configure_namespace_view(self, settings):
+                self.settings = dict(settings)
+
+            def request_namespace_view(self, callback):
+                callback(
+                    {
+                        "arr": {
+                            "type": "ndarray",
+                            "python_type": "ndarray",
+                            "numpy_type": "Array",
+                            "view": "[1 2 3]",
+                        },
+                        "scalar": {
+                            "type": "int",
+                            "python_type": "int",
+                            "view": "7",
+                        },
+                        "text": {
+                            "type": "str",
+                            "python_type": "str",
+                            "view": "'hello'",
+                        },
+                    }
+                )
+
+            def close(self):
+                return None
+
+        plugin = PythonVariablesPlugin({})
+        plugin.services = {
+            "mdi_context": context,
+            "kernel_runtime_service": type(
+                "KernelRuntimeService",
+                (),
+                {"kernel_client": lambda _self: FakeKernelClient()},
+            )(),
+        }
+        context.add(
+            "python_variables",
+            plugin.get_ui_contributions()[0],
+            {"services": plugin.services},
+        )
+        return plugin, mdi_area, FakeSpyderComm
+
+    def test_view_state_round_trips_through_widget_session_hooks(self):
+        plugin, mdi_area, fake_comm = self._make_plugin()
+        restored_plugin = None
+        restored_mdi_area = None
+        try:
+            with patch(
+                "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+                fake_comm,
+            ):
+                widget = plugin.ensure_mdi_widget("python_variables")
+                subwindow = plugin.mdi_subwindow("python_variables")
+                subwindow.setGeometry(QtCore.QRect(20, 30, 340, 280))
+                subwindow.show()
+                self.qapp.processEvents()
+
+                widget.ui.arraysCheckBox.setChecked(False)
+                widget.ui.variablesCheckBox.setChecked(True)
+                widget.ui.stringsCheckBox.setChecked(False)
+                widget.ui.infoCheckBox.setChecked(False)
+                self.qapp.processEvents()
+
+                session = plugin.get_session_toml_data()
+
+                restored_plugin, restored_mdi_area, _ = self._make_plugin()
+                with patch(
+                    "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+                    fake_comm,
+                ):
+                    restored_plugin.on_project_loaded({"session": session})
+
+                restored_widget = restored_plugin.mdi_widget("python_variables")
+                restored_subwindow = restored_plugin.mdi_subwindow("python_variables")
+                self.qapp.processEvents()
+
+            self.assertEqual(
+                session["python_variables"],
+                {
+                    "arrays": False,
+                    "variables": True,
+                    "strings": False,
+                    "info": False,
+                },
+            )
+            self.assertTrue(restored_subwindow.isVisible())
+            self.assertEqual(current_names(restored_widget), ["scalar"])
+            self.assertFalse(restored_widget.ui.infoCheckBox.isChecked())
+            self.assertFalse(restored_widget.ui.infoPane.isVisible())
+        finally:
+            plugin.python_variables_service.destroy()
+            mdi_area.deleteLater()
+            if restored_plugin is not None:
+                restored_plugin.python_variables_service.destroy()
+            if restored_mdi_area is not None:
+                restored_mdi_area.deleteLater()
+
+
 if __name__ == "__main__":
     unittest.main()
