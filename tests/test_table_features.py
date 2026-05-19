@@ -215,9 +215,16 @@ class FakeInteractiveWidget(HydeInteractiveWidget):
         super().__init__(services=services, initial_window_name="Table0")
         self.capture_calls = 0
         self.final_close_calls = 0
+        self._tracked_names = ()
 
     def capture_layout_state(self):
         self.capture_calls += 1
+
+    def set_tracked_names(self, names):
+        self._tracked_names = tuple(names)
+
+    def tracked_namespace_names(self):
+        return self._tracked_names
 
     def saveable_decorator_name(self):
         return "@hyde.fake"
@@ -660,6 +667,35 @@ class TestHydeInteractiveWidget(unittest.TestCase):
         finally:
             widget.close()
             mdi_area.close()
+
+    def test_execute_hidden_command_uses_runtime_service_silently(self):
+        hidden_calls = []
+        widget = FakeInteractiveWidget(
+            services={
+                "python_execution_service": FakeExecutionService(hidden_calls=hidden_calls)
+            }
+        )
+
+        self.assertTrue(widget.execute_hidden_command("alpha = 1"))
+        self.assertEqual(hidden_calls, [("alpha = 1", True)])
+
+    def test_update_tracked_namespace_state_detects_in_place_metadata_mutation(self):
+        shared_view = ["[1 2 3]"]
+        namespace_service = FakeNamespaceViewService(
+            {"a": {"type": "ndarray", "view": shared_view}}
+        )
+        widget = FakeInteractiveWidget(
+            services={"namespace_view_service": namespace_service}
+        )
+        widget.set_tracked_names(["a"])
+
+        self.assertEqual(widget.current_tracked_namespace_state(), (("a", (("type", "ndarray"), ("view", ("[1 2 3]",)))),))
+        self.assertTrue(widget.update_tracked_namespace_state())
+        self.assertFalse(widget.update_tracked_namespace_state())
+
+        shared_view[0] = "[1 9 3]"
+
+        self.assertTrue(widget.update_tracked_namespace_state())
 
 class TestTableWorkspaceService(unittest.TestCase):
     @classmethod

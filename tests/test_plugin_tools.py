@@ -21,6 +21,7 @@ from hyde.user_interface.plugin_tools import (
     HydeMenuContext,
     HydePlugin,
     HydePluginManager,
+    HydeToolWindowService,
     HydeToolWindowPlugin,
     SETUP_PRIORITY_RUNTIME_START,
 )
@@ -385,6 +386,129 @@ class TestPluginTools(unittest.TestCase):
         self.assertEqual(widget.session_key, "demo_tool")
         self.assertTrue(subwindow.isHidden())
 
+    def test_shared_tool_window_plugin_can_drive_standard_persistent_lifecycle(self):
+        class DemoToolWidget(HydeToolWidget):
+            pass
+
+        class DemoPlugin(HydeToolWindowPlugin):
+            session_key = "demo_tool"
+            window_title = "Demo Tool"
+            menu_name = "Demo Tool"
+            restore_on_project_loaded = True
+            enable_action_with_project = True
+            hide_on_enter_no_project = True
+            ensure_widget_on_kernel_ready = True
+            destroy_widget_on_kernel_crash = True
+
+            def create_tool_window_widget(self, parent=None):
+                return DemoToolWidget(
+                    parent=parent,
+                    services=self.services,
+                    session_key=self.session_key,
+                )
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"demo": DemoPlugin({})}
+        app = make_plugin_host(manager)
+
+        HydeApp.setup_plugins(app)
+        app.ui.show()
+        self.qapp.processEvents()
+
+        plugin = manager.plugins["demo"]
+        action = manager.services["lookup_menu_action"]("window", "Demo Tool")
+        handlers = plugin.get_event_handlers()
+
+        self.assertEqual(
+            set(handlers),
+            {
+                "project_loaded",
+                "project_activated",
+                "enter_no_project_state",
+                "kernel_ready",
+                "kernel_crashed",
+            },
+        )
+        self.assertIsNone(plugin.mdi_widget("demo_tool"))
+
+        plugin.on_kernel_ready({})
+        subwindow = plugin.mdi_subwindow("demo_tool")
+        self.assertIsNotNone(subwindow)
+
+        plugin.on_enter_no_project_state({})
+        self.assertFalse(action.isEnabled())
+        self.assertTrue(subwindow.isHidden())
+
+        plugin.on_project_activated({})
+        self.assertTrue(action.isEnabled())
+
+        plugin.on_project_loaded(
+            {
+                "session": {
+                    "tool_windows": {
+                        "demo_tool": {
+                            "window_state": "visible",
+                            "geometry": [15, 25, 210, 160],
+                        }
+                    }
+                }
+            }
+        )
+        self.assertTrue(subwindow.isVisible())
+        self.assertEqual(self.subwindow_geometry(subwindow), [15, 25, 210, 160])
+
+        plugin.on_kernel_crashed({})
+        self.assertIsNone(plugin.mdi_widget("demo_tool"))
+        self.assertIsNone(plugin.mdi_subwindow("demo_tool"))
+
+    def test_shared_tool_window_service_can_target_container_or_mounted_child(self):
+        class DemoToolWidget(HydeToolWidget):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.mount_child_widget(QtWidgets.QLabel("Mounted child"))
+
+        class DemoContainerService(HydeToolWindowService):
+            pass
+
+        class DemoChildService(HydeToolWindowService):
+            use_mounted_child = True
+
+        class DemoPlugin(HydeToolWindowPlugin):
+            session_key = "demo_tool"
+            window_title = "Demo Tool"
+            menu_name = "Demo Tool"
+
+            def __init__(self, initial_settings):
+                super().__init__(initial_settings)
+                self.container_service = DemoContainerService(self)
+                self.child_service = DemoChildService(self)
+
+            def create_tool_window_widget(self, parent=None):
+                return DemoToolWidget(
+                    parent=parent,
+                    services=self.services,
+                    session_key=self.session_key,
+                )
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"demo": DemoPlugin({})}
+        app = make_plugin_host(manager)
+
+        HydeApp.setup_plugins(app)
+
+        plugin = manager.plugins["demo"]
+        container = plugin.container_service.ensure_widget()
+        child = plugin.child_service.widget()
+
+        self.assertIsInstance(container, DemoToolWidget)
+        self.assertIs(child, container.mounted_child)
+        self.assertIs(plugin.child_service.subwindow(), plugin.mdi_subwindow("demo_tool"))
+
+        plugin.child_service.destroy()
+
+        self.assertIsNone(plugin.mdi_widget("demo_tool"))
+        self.assertIsNone(plugin.mdi_subwindow("demo_tool"))
+
     def test_python_terminal_plugin_mounts_console_inside_hyde_tool_widget(self):
         class FakeTerminalWidget(QtWidgets.QWidget):
             executed = QtCore.Signal(object)
@@ -672,7 +796,34 @@ class TestPluginTools(unittest.TestCase):
         self.assertIsNone(manager.services["visible_terminal_service"].widget())
         self.assertIsNone(manager.services["visible_terminal_service"].subwindow())
 
-    def test_procedure_browser_updates_state_across_project_activation_and_no_project(self):
+    def test_procedure_browser_uses_shared_tool_window_shell(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"procedure_browser": ProcedureBrowserPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+
+        HydeApp.setup_plugins(app)
+
+        plugin = manager.plugins["procedure_browser"]
+        widget = plugin.mdi_widget("procedures")
+        subwindow = plugin.mdi_subwindow("procedures")
+
+        self.assertIsInstance(widget, HydeToolWidget)
+        self.assertEqual(widget.window_identifier(), "procedures")
+        self.assertIsNotNone(widget)
+        self.assertTrue(subwindow.isHidden())
+
+        subwindow.show()
+        self.qapp.processEvents()
+
+        closed = subwindow.close()
+        self.qapp.processEvents()
+
+        self.assertFalse(closed)
+        self.assertIs(plugin.mdi_widget("procedures"), widget)
+        self.assertTrue(subwindow.isHidden())
+
+    def test_procedure_browser_updates_state_and_opens_python_files(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"procedure_browser": ProcedureBrowserPlugin({})}
         app = make_plugin_host(manager)
@@ -683,19 +834,41 @@ class TestPluginTools(unittest.TestCase):
         plugin = manager.plugins["procedure_browser"]
         action = manager.services["lookup_menu_action"]("window", "Procedures")
         widget = plugin.mdi_widget("procedures")
-        subwindow = plugin.mdi_subwindow("procedures")
-
-        self.assertIsNotNone(widget)
-        self.assertTrue(subwindow.isHidden())
 
         plugin.on_enter_no_project_state({})
         self.assertFalse(action.isEnabled())
         self.assertIsNone(widget.procedures_dir)
-        self.assertTrue(subwindow.isHidden())
+        self.assertEqual(widget.model.rootPath(), "")
 
-        plugin.on_project_activated({"procedures_dir": "/tmp/example.hy/procedures"})
-        self.assertTrue(action.isEnabled())
-        self.assertEqual(widget.procedures_dir, "/tmp/example.hy/procedures")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            procedures_dir = Path(tmpdir)
+            procedure_path = procedures_dir / "example.py"
+            procedure_path.write_text("print('hello')\n", encoding="utf-8")
+
+            plugin.on_project_activated({"procedures_dir": str(procedures_dir)})
+            self.qapp.processEvents()
+
+            self.assertTrue(action.isEnabled())
+            self.assertEqual(widget.procedures_dir, str(procedures_dir))
+            self.assertEqual(widget.model.rootPath(), str(procedures_dir))
+            self.assertEqual(
+                widget.model.filePath(widget.tree_view.rootIndex()),
+                str(procedures_dir),
+            )
+
+            with patch(
+                "hyde.user_interface.plugins.procedure_browser.QDesktopServices.openUrl"
+            ) as open_url:
+                widget.tree_view.doubleClicked.emit(
+                    widget.model.index(str(procedure_path))
+                )
+                self.qapp.processEvents()
+
+            open_url.assert_called_once()
+            self.assertEqual(
+                open_url.call_args[0][0].toLocalFile(),
+                str(procedure_path),
+            )
 
     def test_tool_window_session_helpers_capture_hidden_minimized_and_maximized(self):
         _, plugin, subwindow = self.make_tool_window_plugin()
@@ -1031,7 +1204,7 @@ class TestPluginTools(unittest.TestCase):
         manager.services["show_window"] = recording_show_window
 
         self.assertIs(service.ensure_widget(), widget)
-        self.assertEqual(service.port(), widget.port)
+        self.assertEqual(service.port(), widget.output_box.port)
         self.assertEqual(widget.window_identifier(), "logging")
         self.assertEqual(widget.session_key, "logging")
         self.assertTrue(hasattr(widget.ui, "content_widget"))
@@ -1244,6 +1417,70 @@ class TestPluginTools(unittest.TestCase):
         manager.services["lookup_menu_action"]("table", "Delete Selected Data").trigger()
 
         self.assertEqual(called, ["delete"])
+
+    def test_hyde_plugin_can_setup_configured_window_macros_menu(self):
+        executed = []
+
+        class DemoPlugin(HydePlugin):
+            window_macros_menu_title = "Demo Macros"
+            window_macros_empty_label = "No Saved Demo Macros"
+            window_macros_new_action_name = "New Demo..."
+            window_macros_new_action_attr = "_new_demo_action"
+            window_macros_attr = "demo_macros"
+
+            def __init__(self, initial_settings):
+                super().__init__(initial_settings)
+                self.demo_macros = [{"name": "Macro0", "args": ["x", "y"]}]
+                self._new_demo_action = None
+                self._macro_menu = None
+
+            def get_menu_contributions(self):
+                return [
+                    {
+                        "location": "window",
+                        "group": "demo",
+                        "order": 40,
+                        "name": "New Demo...",
+                        "action": self.show_new_demo_dialog,
+                    }
+                ]
+
+            def setup(self, data=None):
+                del data
+                self.setup_configured_window_macros_menu()
+
+            def show_new_demo_dialog(self, checked=False):
+                del checked
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"demo": DemoPlugin({})}
+        app = make_plugin_host(manager)
+        app.get_current_project_dir = lambda: "/tmp/demo.hy"
+        app.build_plugin_services = lambda: {
+            **HydeApp.build_plugin_services(app),
+            "python_execution_service": type(
+                "ExecutionService",
+                (),
+                {"execute_visible": lambda _self, code: executed.append(code) or True},
+            )(),
+        }
+
+        HydeApp.setup_plugins(app)
+
+        plugin = manager.plugins["demo"]
+        self.assertIsNotNone(plugin._new_demo_action)
+        self.assertIsNotNone(plugin._macro_menu)
+        self.assertEqual(plugin._macro_menu.title(), "Demo Macros")
+        self.assertEqual(
+            [action.text() for action in plugin._macro_menu.actions()],
+            ["Macro0"],
+        )
+        self.assertTrue(plugin._macro_menu.isEnabled())
+        self.assertTrue(plugin._new_demo_action.isEnabled())
+
+        plugin._macro_menu.actions()[0].trigger()
+
+        self.assertEqual(executed, ["Macro0(x, y)"])
 
     def test_rebuild_window_macros_menu_populates_actions_with_tuple_args(self):
         plugin = HydePlugin({})

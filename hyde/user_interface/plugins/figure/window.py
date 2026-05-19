@@ -258,7 +258,6 @@ class FigureWindow(HydeInteractiveWidget):
         self._close_timeout_timer = QtCore.QTimer(self)
         self._close_timeout_timer.setSingleShot(True)
         self._close_timeout_timer.timeout.connect(self._on_close_timeout)
-        self._tracked_namespace_state = ()
         self.snapshot_state = FigureSnapshotState(
             default_macro_name=f"Figure{self.figure_number}"
         )
@@ -317,7 +316,7 @@ class FigureWindow(HydeInteractiveWidget):
                     ),
                 )
             )
-        self._tracked_namespace_state = self._current_tracked_namespace_state()
+        self._tracked_namespace_state = self.current_tracked_namespace_state()
 
         image_base64 = payload.get("image_png_base64")
         if image_base64:
@@ -341,7 +340,7 @@ class FigureWindow(HydeInteractiveWidget):
 
     def set_live_state(self, state):
         self.snapshot_state.set_live_state(state)
-        self._tracked_namespace_state = self._current_tracked_namespace_state()
+        self._tracked_namespace_state = self.current_tracked_namespace_state()
 
     def apply_window_metadata(self, metadata):
         metadata = dict(metadata or {})
@@ -467,14 +466,8 @@ class FigureWindow(HydeInteractiveWidget):
             return
         self.request_resize_redraw()
 
-    def _queue_silent_command(self, code):
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False
-        return bool(python_execution_service.execute_hidden(code))
-
-    def _command_source(self, command, **settings):
-        return self.command_state.source_for_command(command, **settings)
+    def tracked_namespace_names(self):
+        return self.snapshot_state.tracked_names()
 
     def refresh_figure(self):
         if self._closed:
@@ -511,27 +504,11 @@ class FigureWindow(HydeInteractiveWidget):
             self._refresh_requested = False
             self.refresh_figure()
 
-    def _current_tracked_namespace_state(self):
-        python_variables_service = self.services.get("namespace_view_service")
-        if python_variables_service is None:
-            return ()
-        return self._tracked_namespace_state_from_view(
-            python_variables_service.namespace_view()
-        )
-
-    def _tracked_namespace_state_from_view(self, view):
-        return self.tracked_namespace_signature(
-            view,
-            self.snapshot_state.tracked_names(),
-        )
-
     def _on_namespace_view_updated(self, view):
         if self._closed:
             return
-        new_state = self._tracked_namespace_state_from_view(view or {})
-        if new_state == self._tracked_namespace_state:
+        if not self.update_tracked_namespace_state(view or {}):
             return
-        self._tracked_namespace_state = new_state
         self.refresh_figure()
 
     def close_from_kernel(self):
@@ -613,8 +590,11 @@ class FigureWindow(HydeInteractiveWidget):
             self.complete_interactive_close(event)
             return
         self._kernel_close_in_progress = True
-        if not self._queue_silent_command(
-            self._command_source("close", figure_number=self.figure_number)
+        if not self.execute_hidden_command(
+            self.command_state.source_for_command(
+                "close",
+                figure_number=self.figure_number,
+            )
         ):
             self._kernel_close_in_progress = False
             LOGGER.warning(

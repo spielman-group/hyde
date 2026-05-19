@@ -1,7 +1,7 @@
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
 
 from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
+from hyde.user_interface.plugin_tools import HydeToolWindowPlugin, HydeToolWindowService
 
 
 class PythonTerminal(RichJupyterWidget):
@@ -50,21 +50,12 @@ class PythonTerminal(RichJupyterWidget):
     def shutdown(self):
         self.kernel_client = None
 
-class PythonTerminalService:
+class PythonTerminalService(HydeToolWindowService):
+    use_mounted_child = True
+
     def __init__(self, plugin):
-        self.plugin = plugin
+        super().__init__(plugin)
         self._history_entries = []
-
-    def ensure_widget(self):
-        container = self.plugin.ensure_mdi_widget(self.plugin.session_key)
-        return None if container is None else container.mounted_child
-
-    def widget(self):
-        container = self.plugin.mdi_widget(self.plugin.session_key)
-        return None if container is None else container.mounted_child
-
-    def subwindow(self):
-        return self.plugin.mdi_subwindow(self.plugin.session_key)
 
     def execute_visible(self, code):
         widget = self.ensure_widget()
@@ -95,15 +86,17 @@ class PythonTerminalService:
             else kernel_runtime_service.kernel_client()
         )
 
-    def destroy(self):
-        self.plugin.destroy_mdi_widget(self.plugin.session_key)
-
 
 class Plugin(HydeToolWindowPlugin):
     session_key = "python_terminal"
     window_title = "Python Terminal"
     menu_name = "Python Terminal"
     menu_order = 10
+    restore_on_project_loaded = True
+    enable_action_with_project = True
+    hide_on_enter_no_project = True
+    ensure_widget_on_kernel_ready = True
+    destroy_widget_on_kernel_crash = True
 
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
@@ -127,32 +120,3 @@ class Plugin(HydeToolWindowPlugin):
         terminal.executed.connect(self.services["on_visible_command_executed"])
         container.mount_child_widget(terminal)
         return container
-
-    def get_event_handlers(self):
-        return {
-            "enter_no_project_state": self.on_enter_no_project_state,
-            "kernel_crashed": self.on_kernel_crashed,
-            "kernel_ready": self.on_kernel_ready,
-            "project_activated": self.on_project_activated,
-            "project_loaded": self.on_project_loaded,
-        }
-
-    def on_project_loaded(self, data):
-        self.restore_tool_window_session(data["session"])
-
-    def on_enter_no_project_state(self, data):
-        del data
-        self.set_bound_action_enabled("_action", False)
-        self.hide_mdi_subwindow(self.session_key)
-
-    def on_project_activated(self, data):
-        del data
-        self.set_bound_action_enabled("_action", True)
-
-    def on_kernel_ready(self, data):
-        del data
-        self.python_terminal_service.ensure_widget()
-
-    def on_kernel_crashed(self, data):
-        del data
-        self.python_terminal_service.destroy()

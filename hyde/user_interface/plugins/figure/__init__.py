@@ -2,7 +2,7 @@ import logging
 from functools import partial
 
 from qtutils import inmain_decorator
-from qtutils.qt import QtCore, QtWidgets
+from qtutils.qt import QtCore
 
 from hyde.user_interface.figure_comm import COMM_TARGET
 from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
@@ -114,6 +114,12 @@ class FigureFeatureService:
 
 
 class Plugin(HydePlugin):
+    window_macros_menu_title = "Graph Macros"
+    window_macros_empty_label = "No Saved Graph Macros"
+    window_macros_new_action_name = "New Figure..."
+    window_macros_new_action_attr = "_new_figure_action"
+    window_macros_attr = "figure_macros"
+
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.workspace = FigureWorkspaceService(self)
@@ -130,11 +136,8 @@ class Plugin(HydePlugin):
         del data
         if self._signals_connected:
             return
-        self.bind_menu_action("_new_figure_action", "window", "New Figure...")
-        self._macro_menu = self._ensure_macro_menu()
+        self.setup_configured_window_macros_menu()
         self.services["mdi_area"].subWindowActivated.connect(self.on_subwindow_activated)
-        self._macro_menu.aboutToShow.connect(self.rebuild_figure_macros_menu)
-        self.rebuild_figure_macros_menu()
         self._signals_connected = True
 
     def get_services(self):
@@ -183,9 +186,6 @@ class Plugin(HydePlugin):
             "project_loaded": self.on_project_loaded,
         }
 
-    def get_session_toml_data(self):
-        return {}
-
     def get_session_restore_source(self):
         blocks = []
         for figure_number in sorted(self.workspace.figures):
@@ -206,7 +206,7 @@ class Plugin(HydePlugin):
         del data
         self.workspace.clear()
         self.figure_macros = []
-        self.rebuild_figure_macros_menu()
+        self.rebuild_configured_window_macros_menu()
 
     def on_kernel_crashed(self, data):
         del data
@@ -217,7 +217,7 @@ class Plugin(HydePlugin):
     def on_project_activated(self, data):
         del data
         self.figure_macros = []
-        self.rebuild_figure_macros_menu()
+        self.rebuild_configured_window_macros_menu()
         state = FigureState()
         self.services["python_execution_service"].execute_hidden(
             state.source_for_command("publish_figure_macros")
@@ -244,23 +244,7 @@ class Plugin(HydePlugin):
             }
             for macro in data.get("macros", [])
         ]
-        self.rebuild_figure_macros_menu()
-
-    def rebuild_figure_macros_menu(self):
-        self.rebuild_window_macros_menu(
-            menu=self._macro_menu,
-            macros=self.figure_macros,
-            empty_label="No Saved Graph Macros",
-            new_action_attr="_new_figure_action",
-            on_trigger=self._execute_macro,
-        )
-
-    def _ensure_macro_menu(self):
-        if self._macro_menu is None:
-            ui = self.services["ui"]
-            self._macro_menu = QtWidgets.QMenu("Graph Macros", ui.menuWindow)
-            ui.menuWindow.addMenu(self._macro_menu)
-        return self._macro_menu
+        self.rebuild_configured_window_macros_menu()
 
     def _register_comm_target(self):
         kernel_runtime_service = self.services.get("kernel_runtime_service")

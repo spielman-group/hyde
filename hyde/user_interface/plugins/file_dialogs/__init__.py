@@ -2,23 +2,27 @@ from hyde.user_interface.plugin_tools import HydePlugin
 
 from .dialogs import (
     HealProjectDialog,
-    LoadProjectState,
     LoadProjectDialog,
+    LoadProjectState,
     NewProjectDialog,
-    QuitCommand,
+    QuitState,
     SaveAsProjectDialog,
     SaveCopyProjectDialog,
-    SaveProjectCommand,
+    SaveProjectState,
+    dispatch_hidden_command,
 )
 
-class Plugin(HydePlugin):
-    def __init__(self, initial_settings):
-        super().__init__(initial_settings)
-        self._actions = {}
 
+class Plugin(HydePlugin):
     def setup(self, data=None):
         del data
-        self._bind_actions()
+        self.bind_menu_action("_new_action", "file", "New...")
+        self.bind_menu_action("_load_action", "file", "Load...")
+        self.bind_menu_action("_heal_project_action", "file", "Heal Project...")
+        self.bind_menu_action("_save_action", "file", "Save")
+        self.bind_menu_action("_save_as_action", "file", "Save As...")
+        self.bind_menu_action("_save_copy_action", "file", "Save a Copy...")
+        self.bind_menu_action("_quit_action", "file", "Quit")
         self._set_project_action_state(
             self.services["get_current_project_dir"]() is not None
         )
@@ -80,38 +84,24 @@ class Plugin(HydePlugin):
             },
         ]
 
-    def _bind_actions(self):
-        self._actions = {}
-        bindings = {
-            "new": ("file", "New..."),
-            "load": ("file", "Load..."),
-            "heal_project": ("file", "Heal Project..."),
-            "save": ("file", "Save"),
-            "save_as": ("file", "Save As..."),
-            "save_copy": ("file", "Save a Copy..."),
-            "quit": ("file", "Quit"),
-        }
-        for action_key, (location, text) in bindings.items():
-            action = self.menu_action(location, text)
-            if action is not None:
-                self._actions[action_key] = action
-
     def _set_project_action_state(self, has_project):
-        for name in ("new", "load", "quit"):
-            action = self._actions.get(name)
-            if action is not None:
-                action.setEnabled(True)
-        for name in ("heal_project", "save", "save_as", "save_copy"):
-            action = self._actions.get(name)
-            if action is not None:
-                action.setEnabled(has_project)
+        for attr_name in ("_new_action", "_load_action", "_quit_action"):
+            self.set_bound_action_enabled(attr_name, True)
+        for attr_name in (
+            "_heal_project_action",
+            "_save_action",
+            "_save_as_action",
+            "_save_copy_action",
+        ):
+            self.set_bound_action_enabled(attr_name, has_project)
 
     def _dispatch_load_project(self, project_dir):
         state = LoadProjectState()
         state.set_project_dir(project_dir)
-        self.services["begin_project_operation"]("Loading Hyde project...")
-        self.services["python_execution_service"].execute_hidden(
-            state.python_source()
+        return dispatch_hidden_command(
+            self.services,
+            state,
+            operation_label="Loading Hyde project...",
         )
 
     def new_project(self, checked=False):
@@ -128,7 +118,13 @@ class Plugin(HydePlugin):
 
     def save_project(self, checked=False):
         del checked
-        SaveProjectCommand(self.services).run()
+        if not self.services["get_current_project_dir"]():
+            return False
+        return dispatch_hidden_command(
+            self.services,
+            SaveProjectState(),
+            operation_label="Saving Hyde project...",
+        )
 
     def save_project_as(self, checked=False):
         del checked
@@ -140,7 +136,13 @@ class Plugin(HydePlugin):
 
     def quit_application(self, checked=False):
         del checked
-        QuitCommand(self.services).run()
+        if (
+            self.services["get_shutting_down"]()
+            or self.services["get_quit_command_sent"]()
+        ):
+            return False
+        self.services["set_quit_command_sent"](True)
+        return dispatch_hidden_command(self.services, QuitState())
 
     def get_event_handlers(self):
         return {

@@ -50,6 +50,7 @@ class HydeInteractiveWidget(HydeToolWidget):
             parent=parent,
         )
         self._last_normal_geometry = None
+        self._tracked_namespace_state = ()
 
     def close_policy(self):
         return "close"
@@ -120,8 +121,38 @@ class HydeInteractiveWidget(HydeToolWidget):
         if callable(capture_layout_state):
             capture_layout_state()
 
-    def tracked_namespace_signature(self, view, names):
-        return _tracked_namespace_signature(view, names)
+    def tracked_namespace_names(self):
+        return ()
+
+    def tracked_namespace_state_from_view(self, view):
+        return _tracked_namespace_signature(
+            view,
+            self.tracked_namespace_names(),
+        )
+
+    def current_tracked_namespace_state(self):
+        python_variables_service = self.services.get("namespace_view_service")
+        if python_variables_service is None:
+            return ()
+        return self.tracked_namespace_state_from_view(
+            python_variables_service.namespace_view()
+        )
+
+    def update_tracked_namespace_state(self, view=None):
+        if view is None:
+            new_state = self.current_tracked_namespace_state()
+        else:
+            new_state = self.tracked_namespace_state_from_view(view)
+        if new_state == self._tracked_namespace_state:
+            return False
+        self._tracked_namespace_state = new_state
+        return True
+
+    def execute_hidden_command(self, code):
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return False
+        return bool(python_execution_service.execute_hidden(code))
 
     def saveable_default_macro_name(self):
         raise NotImplementedError

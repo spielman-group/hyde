@@ -915,6 +915,44 @@ class TestAxisEditDialog(unittest.TestCase):
         self.assertEqual(sent[-7][1]["state"]["label"]["text"], "Delay")
         self.assertTrue(sent[-7][1]["replace"])
 
+    def test_cancel_does_not_redispatch_opening_snapshot_after_returning_to_opening_state(
+        self,
+    ):
+        sent = []
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: (
+                    sent.append((figure_number, action)) or True
+                ),
+            },
+        )
+
+        dialog = AxisEditDialog(figure, parent=mdi_area)
+        try:
+            dialog.axis_label_edit.setText("Delay [s]")
+            dialog.axis_label_edit.editingFinished.emit()
+            dialog.axis_label_edit.setText("Delay")
+            dialog.axis_label_edit.editingFinished.emit()
+            dialog.reject()
+        finally:
+            dialog.close()
+
+        self.assertEqual(
+            [action["type"] for _, action in sent],
+            [
+                "set_axis_state",
+                "set_axis_side_state",
+                "set_subplot_margins",
+                "set_axis_state",
+                "set_axis_side_state",
+                "set_subplot_margins",
+            ],
+        )
+        self.assertEqual(sent[-1][1]["state"]["bottom"], 0.2)
+
     def test_to_clip_copies_preview_source(self):
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(

@@ -1,6 +1,6 @@
 from functools import partial
 
-from qtutils.qt import QtCore, QtWidgets
+from qtutils.qt import QtCore
 from hyde.user_interface.plugin_tools import (
     HydePlugin,
     apply_saveable_window_state,
@@ -174,6 +174,12 @@ class TableFeatureService:
 
 
 class Plugin(HydePlugin):
+    window_macros_menu_title = "Table Macros"
+    window_macros_empty_label = "No Saved Table Macros"
+    window_macros_new_action_name = "New Table..."
+    window_macros_new_action_attr = "_new_table_action"
+    window_macros_attr = "table_macros"
+
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
         self.workspace = TableWorkspaceService(self)
@@ -187,16 +193,13 @@ class Plugin(HydePlugin):
         del data
         if self._signals_connected:
             return
-        self.bind_menu_action("_new_table_action", "window", "New Table...")
-        self._macro_menu = self._ensure_macro_menu()
+        self.setup_configured_window_macros_menu()
         self.services["mdi_area"].subWindowActivated.connect(
             self.workspace.on_subwindow_activated
         )
         self.services["mdi_area"].subWindowActivated.connect(
             self.on_subwindow_activated
         )
-        self._macro_menu.aboutToShow.connect(self.rebuild_table_macros_menu)
-        self.rebuild_table_macros_menu()
         self._signals_connected = True
 
     def get_services(self):
@@ -261,9 +264,6 @@ class Plugin(HydePlugin):
             "project_activated": self.on_project_activated,
         }
 
-    def get_session_toml_data(self):
-        return {}
-
     def get_session_restore_source(self):
         blocks = []
         for handle, table in self.workspace.iter_open_tables():
@@ -274,7 +274,7 @@ class Plugin(HydePlugin):
         del data
         self.workspace.clear()
         self.table_macros = []
-        self.rebuild_table_macros_menu()
+        self.rebuild_configured_window_macros_menu()
 
     def on_project_loaded(self, data):
         del data
@@ -283,7 +283,7 @@ class Plugin(HydePlugin):
     def on_project_activated(self, data):
         del data
         self.table_macros = []
-        self.rebuild_table_macros_menu()
+        self.rebuild_configured_window_macros_menu()
         state = TableState()
         self.services["python_execution_service"].execute_hidden(
             state.source_for_command("publish_table_macros")
@@ -321,20 +321,4 @@ class Plugin(HydePlugin):
             }
             for macro in data.get("macros", [])
         ]
-        self.rebuild_table_macros_menu()
-
-    def rebuild_table_macros_menu(self):
-        self.rebuild_window_macros_menu(
-            menu=self._macro_menu,
-            macros=self.table_macros,
-            empty_label="No Saved Table Macros",
-            new_action_attr="_new_table_action",
-            on_trigger=self._execute_macro,
-        )
-
-    def _ensure_macro_menu(self):
-        if self._macro_menu is None:
-            ui = self.services["ui"]
-            self._macro_menu = QtWidgets.QMenu("Table Macros", ui.menuWindow)
-            ui.menuWindow.addMenu(self._macro_menu)
-        return self._macro_menu
+        self.rebuild_configured_window_macros_menu()

@@ -4,6 +4,9 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec
 from hyde.user_interface.matplotlib_color_picker import MatplotlibColorLineEdit
+from hyde.user_interface.plugins.figure_control_dialogs.draft_helpers import (
+    FigureControlDraftTracker,
+)
 
 AXIS_TAB_TITLES = [
     "Axis",
@@ -219,9 +222,14 @@ class AxisEditDialog(QtWidgets.QDialog):
         self._loading_controls = False
         self._live_updates_sent = False
         self._original_figure_ir = self.figure_window.snapshot_state.figure_ir()
-        self._draft_figure_ir = _merge_figure_ir_with_defaults(
-            self._original_figure_ir,
-            self.figure_window.snapshot_state.figure_defaults(),
+        self._draft_tracker = FigureControlDraftTracker()
+        self._draft_figure_ir = self._draft_tracker.seed(
+            "figure",
+            _merge_figure_ir_with_defaults(
+                self._original_figure_ir,
+                self.figure_window.snapshot_state.figure_defaults(),
+            ),
+            revert_state=self._original_figure_ir,
         )
         self._build_ui()
         self._load_initial_axis()
@@ -1088,7 +1096,10 @@ class AxisEditDialog(QtWidgets.QDialog):
         side_state["tick_label_offset"] = float(self.tick_label_offset_spin.value())
 
         try:
-            self._draft_figure_ir = FigureIRCodec.validate_state(self._draft_figure_ir)
+            self._draft_figure_ir = self._draft_tracker.replace(
+                "figure",
+                FigureIRCodec.validate_state(self._draft_figure_ir),
+            )
         except ValueError as exc:
             return {"valid": False, "message": str(exc)}
         return {"valid": True, "message": ""}
@@ -1265,6 +1276,6 @@ class AxisEditDialog(QtWidgets.QDialog):
         self._on_controls_changed()
 
     def reject(self):
-        if self._live_updates_sent:
-            self._dispatch_all_state(self._original_figure_ir)
+        if self._live_updates_sent and self._draft_tracker.changed_keys():
+            self._dispatch_all_state(self._draft_tracker.revert_state("figure"))
         super().reject()

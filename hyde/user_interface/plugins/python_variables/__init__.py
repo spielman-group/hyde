@@ -8,7 +8,7 @@ from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.hyde_features import is_eligible_for_table
 from hyde.user_interface.base import MutationState
 from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
+from hyde.user_interface.plugin_tools import HydeToolWindowPlugin, HydeToolWindowService
 
 NAMESPACE_VIEW_SETTINGS = {
     "check_all": False,
@@ -419,22 +419,7 @@ class NamespaceFilterProxyModel(QtCore.QSortFilterProxyModel):
         )
 
 
-class PythonVariablesService:
-    def __init__(self, plugin):
-        self.plugin = plugin
-
-    def ensure_widget(self):
-        return self.plugin.ensure_mdi_widget("python_variables")
-
-    def widget(self):
-        return self.plugin.mdi_widget("python_variables")
-
-    def subwindow(self):
-        return self.plugin.mdi_subwindow("python_variables")
-
-    def destroy(self):
-        self.plugin.destroy_mdi_widget("python_variables")
-
+class PythonVariablesService(HydeToolWindowService):
     def namespace_view(self):
         widget = self.ensure_widget()
         return {} if widget is None else widget.namespace_view()
@@ -459,6 +444,11 @@ class Plugin(HydeToolWindowPlugin):
     window_title = "Python Variables"
     menu_name = "Python Variables"
     menu_order = 60
+    restore_on_project_loaded = True
+    enable_action_with_project = True
+    hide_on_enter_no_project = True
+    ensure_widget_on_kernel_ready = True
+    destroy_widget_on_kernel_crash = True
 
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
@@ -475,32 +465,3 @@ class Plugin(HydeToolWindowPlugin):
             session_key=self.session_key,
             parent=parent,
         )
-
-    def get_event_handlers(self):
-        return {
-            "enter_no_project_state": self.on_enter_no_project_state,
-            "kernel_crashed": self.on_kernel_crashed,
-            "kernel_ready": self.on_kernel_ready,
-            "project_activated": self.on_project_activated,
-            "project_loaded": self.on_project_loaded,
-        }
-
-    def on_project_loaded(self, data):
-        self.restore_tool_window_session(data["session"])
-
-    def on_enter_no_project_state(self, data):
-        del data
-        self.set_bound_action_enabled("_action", False)
-        self.hide_mdi_subwindow(self.session_key)
-
-    def on_project_activated(self, data):
-        del data
-        self.set_bound_action_enabled("_action", True)
-
-    def on_kernel_ready(self, data):
-        del data
-        self.ensure_mdi_widget(self.session_key)
-
-    def on_kernel_crashed(self, data):
-        del data
-        self.python_variables_service.destroy()

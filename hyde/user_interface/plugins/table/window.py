@@ -271,7 +271,7 @@ class TableWidget(HydeInteractiveWidget):
         self._closed = False
         self._restore_layout_requested = bool(geometry or column_widths)
         self._pending_created_columns = []
-        self._tracked_namespace_state = self._current_tracked_namespace_state()
+        self._tracked_namespace_state = self.current_tracked_namespace_state()
 
         self.model = TableViewModel(self.names)
         self.ui.tableView.setModel(self.model)
@@ -328,11 +328,8 @@ class TableWidget(HydeInteractiveWidget):
         self._remember_subwindow_geometry()
         self.capture_layout_state()
 
-    def _queue_silent_command(self, code):
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False
-        return bool(python_execution_service.execute_hidden(code))
+    def tracked_namespace_names(self):
+        return tuple(self.names) + tuple(self._pending_created_columns)
 
     def _queue_refresh(self, prefix_commands=None):
         if self._closed:
@@ -347,10 +344,10 @@ class TableWidget(HydeInteractiveWidget):
             request_id=request_id,
         )
         for command in prefix:
-            if not self._queue_silent_command(command):
+            if not self.execute_hidden_command(command):
                 self._clear_refresh_in_flight()
                 return False
-        if self._queue_silent_command(refresh_command):
+        if self.execute_hidden_command(refresh_command):
             self._refresh_timeout_timer.start(self.REFRESH_TIMEOUT_MS)
             return True
         self._clear_refresh_in_flight()
@@ -411,20 +408,6 @@ class TableWidget(HydeInteractiveWidget):
             self._refresh_requested = False
             self.refresh_data()
 
-    def _current_tracked_namespace_state(self):
-        python_variables_service = self.services.get("namespace_view_service")
-        if python_variables_service is None:
-            return ()
-        return self._tracked_namespace_state_from_view(
-            python_variables_service.namespace_view()
-        )
-
-    def _tracked_namespace_state_from_view(self, view):
-        return self.tracked_namespace_signature(
-            view,
-            list(self.names) + list(self._pending_created_columns),
-        )
-
     @inmain_decorator()
     def _on_namespace_view_updated(self, view):
         if self._closed:
@@ -447,10 +430,8 @@ class TableWidget(HydeInteractiveWidget):
         ]
         if removed_columns:
             self.remove_columns(removed_columns, refresh=False)
-        new_state = self._tracked_namespace_state_from_view(view)
-        if new_state == self._tracked_namespace_state:
+        if not self.update_tracked_namespace_state(view):
             return
-        self._tracked_namespace_state = new_state
         if self.names:
             self.refresh_data()
 
@@ -796,10 +777,10 @@ class TableWidget(HydeInteractiveWidget):
             return False
 
         if pending_new_name is not None:
-            if not self._queue_silent_command(command):
+            if not self.execute_hidden_command(command):
                 return False
             self._pending_created_columns.append(pending_new_name)
-            self._tracked_namespace_state = self._current_tracked_namespace_state()
+            self._tracked_namespace_state = self.current_tracked_namespace_state()
         else:
             if not self._queue_refresh([command]):
                 return False

@@ -5,6 +5,10 @@ from hyde.user_interface.matplotlib_color_picker import (
     MatplotlibColorLineEdit,
     normalize_matplotlib_color_text,
 )
+from hyde.user_interface.plugins.figure_control_dialogs.draft_helpers import (
+    FigureControlDraftTracker,
+    normalize_empty_choice,
+)
 
 SUPPORTED_STYLE_DEFAULTS = {
     "visible": True,
@@ -57,18 +61,6 @@ def _default_trace_color(index):
     return str(colors[index % len(colors)])
 
 
-def _normalize_linestyle(value):
-    if value in (None, "", "none", "None", " ", ""):
-        return "None"
-    return str(value)
-
-
-def _normalize_marker(value):
-    if value in (None, "", "none", "None", " ", ""):
-        return "None"
-    return str(value)
-
-
 def _normalize_color(value, fallback):
     if value in (None, ""):
         return fallback
@@ -98,9 +90,9 @@ def _apply_style_values(style, values):
         elif key in {"markerfacecolor", "markeredgecolor"}:
             style[key] = _normalize_color(value, style[key])
         elif key == "linestyle":
-            style[key] = _normalize_linestyle(value)
+            style[key] = normalize_empty_choice(value)
         elif key == "marker":
-            style[key] = _normalize_marker(value)
+            style[key] = normalize_empty_choice(value)
         elif key == "visible":
             style[key] = bool(value)
         elif key in {"linewidth", "alpha", "markersize", "markeredgewidth"}:
@@ -118,9 +110,8 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         self._loading_controls = False
         self._trace_records = []
         self._trace_records_by_id = {}
-        self._original_styles = {}
-        self._current_styles = {}
-        self._touched_trace_ids = set()
+        self._draft_tracker = FigureControlDraftTracker()
+        self._current_styles = self._draft_tracker.current_states
         self._build_ui()
         self._load_traces()
 
@@ -270,8 +261,7 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
             }
             self._trace_records.append(record)
             self._trace_records_by_id[trace_id] = dict(record)
-            self._original_styles[trace_id] = dict(style)
-            self._current_styles[trace_id] = dict(style)
+            self._draft_tracker.seed(trace_id, style)
             self.trace_list.addItem(record["label"])
         if self.trace_list.count():
             self.trace_list.setCurrentRow(0)
@@ -363,15 +353,11 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         if not self.figure_window.request_figure_action(action):
             return False
         if replace:
-            self._current_styles[trace_id] = dict(patch)
+            self._draft_tracker.replace(trace_id, patch)
         else:
-            self._current_styles[trace_id].update(patch)
+            self._draft_tracker.update(trace_id, patch)
         if trace_id == self._current_trace_id():
             self._update_color_field_previews(trace_id)
-        if self._current_styles[trace_id] == self._original_styles[trace_id]:
-            self._touched_trace_ids.discard(trace_id)
-        else:
-            self._touched_trace_ids.add(trace_id)
         if reload_controls and trace_id == self._current_trace_id():
             self._load_controls_for_trace(trace_id)
         return True
@@ -516,11 +502,10 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         self._send_style_update(trace_id, {"markeredgewidth": float(value)})
 
     def reject(self):
-        for trace_id in sorted(self._touched_trace_ids):
+        for trace_id in self._draft_tracker.changed_keys():
             self._send_style_update(
                 trace_id,
-                self._original_styles[trace_id],
+                self._draft_tracker.revert_state(trace_id),
                 replace=True,
             )
-        self._touched_trace_ids.clear()
         super().reject()

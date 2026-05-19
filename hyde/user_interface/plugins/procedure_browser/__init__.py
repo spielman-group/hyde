@@ -2,16 +2,18 @@ import os
 from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout, QTreeView, QFileSystemModel
 from qtutils.qt.QtGui import QDesktopServices
+from hyde.user_interface.hyde_tool_widget import HydeToolWidget
 from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
 
 
-class ProcedureBrowser(QWidget):
+class ProcedureBrowser(HydeToolWidget):
     def __init__(self, procedures_dir, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setWindowTitle("Procedures")
-        self.layout = QVBoxLayout(self)
+        content = QWidget()
+        self.layout = QVBoxLayout(content)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # File System Model configured for the procedures directory
         self.model = QFileSystemModel()
         # Filters: only files (no dirs in top level for now), only .py files
@@ -29,8 +31,9 @@ class ProcedureBrowser(QWidget):
         self.tree_view.header().hide()
         
         self.tree_view.doubleClicked.connect(self.on_double_click)
-        
+
         self.layout.addWidget(self.tree_view)
+        self.mount_child_widget(content)
         self.set_procedures_dir(procedures_dir)
 
     def set_procedures_dir(self, procedures_dir):
@@ -55,30 +58,26 @@ class Plugin(HydeToolWindowPlugin):
     window_size = (300, 500)
     menu_order = 50
     creation_policy = "eager"
+    restore_on_project_loaded = True
+    enable_action_with_project = True
+    hide_on_enter_no_project = True
 
     def create_tool_window_widget(self, parent=None):
-        return ProcedureBrowser(procedures_dir=None, parent=parent)
-
-    def get_event_handlers(self):
-        return {
-            "project_loaded": self.on_project_loaded,
-            "project_activated": self.on_project_activated,
-            "enter_no_project_state": self.on_enter_no_project_state,
-        }
-
-    def on_project_loaded(self, data):
-        self.restore_tool_window_session(data["session"])
+        return ProcedureBrowser(
+            procedures_dir=None,
+            parent=parent,
+            services=self.services,
+            session_key=self.session_key,
+        )
 
     def on_project_activated(self, data):
-        self.set_bound_action_enabled("_action", True)
+        super().on_project_activated(data)
         widget = self.mdi_widget(self.session_key)
         if widget is not None:
             widget.set_procedures_dir(data.get("procedures_dir"))
 
     def on_enter_no_project_state(self, data):
-        del data
-        self.set_bound_action_enabled("_action", False)
+        super().on_enter_no_project_state(data)
         widget = self.mdi_widget(self.session_key)
         if widget is not None:
             widget.set_procedures_dir(None)
-        self.hide_mdi_subwindow(self.session_key)

@@ -86,6 +86,13 @@ class QuitState(SimpleCommandState):
     command_name = "quit"
 
 
+def dispatch_hidden_command(services, state, operation_label=None):
+    if operation_label:
+        services["begin_project_operation"](operation_label)
+    services["python_execution_service"].execute_hidden(state.python_source())
+    return True
+
+
 class ProjectSelectionDialog(QtWidgets.QFileDialog):
     STATE_CLASS = None
     DIALOG_TITLE = ""
@@ -202,12 +209,11 @@ class ProjectSelectionDialog(QtWidgets.QFileDialog):
         return True
 
     def dispatch_python(self):
-        if self.OPERATION_LABEL:
-            self.services["begin_project_operation"](self.OPERATION_LABEL)
-        self.services["python_execution_service"].execute_hidden(
-            self.state.python_source()
+        return dispatch_hidden_command(
+            self.services,
+            self.state,
+            operation_label=self.OPERATION_LABEL,
         )
-        return True
 
     def run(self):
         if not self.exec_():
@@ -300,7 +306,11 @@ class _ProjectSaveDialog(ProjectSelectionDialog):
         return True
 
     def handle_current_project_target(self):
-        return SaveProjectCommand(self.services).run()
+        return dispatch_hidden_command(
+            self.services,
+            SaveProjectState(),
+            operation_label="Saving Hyde project...",
+        )
 
 
 class SaveAsProjectDialog(_ProjectSaveDialog):
@@ -324,38 +334,8 @@ class SaveCopyProjectDialog(_ProjectSaveDialog):
         )
         return False
 
-
-class SaveProjectCommand:
-    def __init__(self, services):
-        self.services = services
-        self.state = SaveProjectState()
-
-    def run(self):
-        if not self.services["get_current_project_dir"]():
-            return False
-        self.services["begin_project_operation"]("Saving Hyde project...")
-        self.services["python_execution_service"].execute_hidden(
-            self.state.python_source()
-        )
-        return True
-
-
-class QuitCommand:
-    def __init__(self, services):
-        self.services = services
-        self.state = QuitState()
-
-    def run(self):
-        if self.services["get_shutting_down"]() or self.services["get_quit_command_sent"]():
-            return False
-        self.services["set_quit_command_sent"](True)
-        self.services["python_execution_service"].execute_hidden(
-            self.state.python_source()
-        )
-        return True
-
-
 __all__ = [
+    "dispatch_hidden_command",
     "HealProjectDialog",
     "HealProjectState",
     "LoadProjectDialog",
@@ -363,13 +343,11 @@ __all__ = [
     "NewProjectDialog",
     "NewProjectState",
     "ProjectSelectionDialog",
-    "QuitCommand",
     "QuitState",
     "SaveAsProjectDialog",
     "SaveAsProjectState",
     "SaveCopyProjectDialog",
     "SaveCopyProjectState",
-    "SaveProjectCommand",
     "SaveProjectState",
     "SimpleCommandState",
 ]

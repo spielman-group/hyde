@@ -9,7 +9,7 @@ from labscript_utils.plugins import (
     MenuContext,
     PluginManager,
 )
-from qtutils.qt import QtCore, QtGui
+from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.hyde_tool_widget import HydeToolWidget
@@ -80,6 +80,13 @@ class HydePluginManager(PluginManager):
 
 class HydePlugin(BasePlugin):
     """Hyde-local plugin base with shared service and menu-action helpers."""
+
+    window_macros_menu_title = None
+    window_macros_empty_label = None
+    window_macros_new_action_name = None
+    window_macros_new_action_attr = None
+    window_macros_attr = None
+    window_macros_menu_attr = "_macro_menu"
 
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
@@ -166,6 +173,43 @@ class HydePlugin(BasePlugin):
                     on_trigger(name, args)
                 )
             )
+
+    def setup_configured_window_macros_menu(self):
+        menu_title = self.window_macros_menu_title
+        if not menu_title:
+            return None
+        if self.window_macros_new_action_attr and self.window_macros_new_action_name:
+            self.bind_menu_action(
+                self.window_macros_new_action_attr,
+                "window",
+                self.window_macros_new_action_name,
+            )
+        menu_attr = self.window_macros_menu_attr
+        menu = getattr(self, menu_attr, None)
+        if menu is None:
+            ui = self.services["ui"]
+            menu = QtWidgets.QMenu(menu_title, ui.menuWindow)
+            ui.menuWindow.addMenu(menu)
+            setattr(self, menu_attr, menu)
+            menu.aboutToShow.connect(self.rebuild_configured_window_macros_menu)
+        self.rebuild_configured_window_macros_menu()
+        return menu
+
+    def rebuild_configured_window_macros_menu(self):
+        menu = getattr(self, self.window_macros_menu_attr, None)
+        if menu is None:
+            return None
+        macros = []
+        if self.window_macros_attr:
+            macros = getattr(self, self.window_macros_attr, [])
+        self.rebuild_window_macros_menu(
+            menu=menu,
+            macros=macros,
+            empty_label=self.window_macros_empty_label,
+            new_action_attr=self.window_macros_new_action_attr,
+            on_trigger=self._execute_macro,
+        )
+        return menu
 
     def _execute_macro(self, macro_name, macro_args):
         state = RuntimeCommandState()
@@ -256,6 +300,11 @@ class HydeToolWindowPlugin(HydePlugin):
     menu_group = "tool_windows"
     menu_order = DEFAULT_PRIORITY
     creation_policy = "lazy"
+    restore_on_project_loaded = False
+    enable_action_with_project = False
+    hide_on_enter_no_project = False
+    ensure_widget_on_kernel_ready = False
+    destroy_widget_on_kernel_crash = False
 
     def create_tool_window_widget(self, parent=None):
         raise NotImplementedError
@@ -303,6 +352,45 @@ class HydeToolWindowPlugin(HydePlugin):
         del checked
         self.service("show_window")(self.session_key)
 
+    def get_event_handlers(self):
+        handlers = {}
+        if self.restore_on_project_loaded:
+            handlers["project_loaded"] = self.on_project_loaded
+        if self.enable_action_with_project or self.hide_on_enter_no_project:
+            handlers["enter_no_project_state"] = self.on_enter_no_project_state
+        if self.enable_action_with_project:
+            handlers["project_activated"] = self.on_project_activated
+        if self.ensure_widget_on_kernel_ready:
+            handlers["kernel_ready"] = self.on_kernel_ready
+        if self.destroy_widget_on_kernel_crash:
+            handlers["kernel_crashed"] = self.on_kernel_crashed
+        return handlers
+
+    def on_project_loaded(self, data):
+        self.restore_tool_window_session(data["session"])
+
+    def on_enter_no_project_state(self, data):
+        del data
+        if self.enable_action_with_project:
+            self.set_bound_action_enabled("_action", False)
+        if self.hide_on_enter_no_project:
+            self.hide_mdi_subwindow(self.session_key)
+
+    def on_project_activated(self, data):
+        del data
+        if self.enable_action_with_project:
+            self.set_bound_action_enabled("_action", True)
+
+    def on_kernel_ready(self, data):
+        del data
+        if self.ensure_widget_on_kernel_ready:
+            self.ensure_mdi_widget(self.session_key)
+
+    def on_kernel_crashed(self, data):
+        del data
+        if self.destroy_widget_on_kernel_crash:
+            self.destroy_mdi_widget(self.session_key)
+
     def get_session_toml_data(self):
         session = self.tool_window_save_data(self.session_key)
         widget = self.mdi_widget(self.session_key)
@@ -321,6 +409,37 @@ class HydeToolWindowPlugin(HydePlugin):
         if callable(restorer):
             restorer(dict(session.get(self.session_key, {}) or {}))
         return widget
+
+
+class HydeToolWindowService:
+    """Shared MDI-backed service helpers for persistent tool windows."""
+
+    use_mounted_child = False
+
+    def __init__(self, plugin, window_key=None):
+        self.plugin = plugin
+        self.window_key = (
+            window_key
+            if window_key is not None
+            else getattr(plugin, "session_key", None)
+        )
+
+    def _service_widget(self, widget):
+        if widget is None or not self.use_mounted_child:
+            return widget
+        return getattr(widget, "mounted_child", None)
+
+    def ensure_widget(self):
+        return self._service_widget(self.plugin.ensure_mdi_widget(self.window_key))
+
+    def widget(self):
+        return self._service_widget(self.plugin.mdi_widget(self.window_key))
+
+    def subwindow(self):
+        return self.plugin.mdi_subwindow(self.window_key)
+
+    def destroy(self):
+        return self.plugin.destroy_mdi_widget(self.window_key)
 
 
 class HydeMenuContext(MenuContext):
