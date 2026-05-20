@@ -413,7 +413,7 @@ class TableCodec(FeatureCodec):
                 f"{list(normalized['items'])!r}, {settings['request_id']!r})"
             )
         if command == "publish_table_macros":
-            return "hyde.recreation_registry.publish_table_macro_registry()"
+            return "hyde.recreation_registry.publish_registry('table')"
         raise ValueError(f"Unsupported table command: {command!r}.")
 
     @classmethod

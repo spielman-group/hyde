@@ -108,6 +108,7 @@ explicitly named coefficient parameters, with no supported `*args` or `**kwargs`
 - A non-empty `expr` makes a parameter expression-owned while keeping that row visible.
 - Required free parameters must have usable values before `Do It` is valid.
 - The output-options surface centers on the fit-result target plus fit-curve and residual display toggles.
+- `Show Fit` and `Show Residuals` already exist in the dialog as live controls before Issue 7. The plotting slice should wire those existing controls to real behavior rather than introducing replacement toggles.
 - The result-object target defaults from the selected Y object name and falls forward to a unique indexed name when needed.
 - The dialog provides `Commands` and `Equation` preview modes plus a single status/error strip.
 - `To Clip` copies the current command preview.
@@ -163,4 +164,5 @@ explicitly named coefficient parameters, with no supported `*args` or `**kwargs`
 - This feature must stay on Hyde's existing architectural rails: the GUI is not scientific state, the GUI is a string factory except where figure editing uses semantic figure actions, and the kernel remains authoritative.
 - The implementation should prefer the smallest clear change in the existing figure-control and namespace-service paths.
 - The feature should reuse existing figure target discovery, figure draft/revert behavior, namespace metadata access, and hidden execution services instead of inventing parallel plumbing.
+- If Issues 5-7 enlarge the Curve Fit dialog shell further, prefer extracting a tiny shared helper for the modal preview pane plus status strip plus `Do It` / `To Clip` / `Cancel` footer shared with `Modify Axis`, rather than adding a new base class or letting the shell duplicate further.
 - The current first pass is explicitly an `lmfit`-native Hyde workflow, not an Igor-compatibility surface.

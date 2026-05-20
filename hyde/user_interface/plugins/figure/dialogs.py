@@ -3,7 +3,7 @@ import os
 from qtutils import UiLoader
 from qtutils.qt import QtWidgets
 
-from hyde.features.matplotlib_features import is_eligible_for_plot
+from hyde.features.matplotlib_features import sorted_eligible_names
 
 from .window import FigureState
 
@@ -34,15 +34,8 @@ class NewFigureDialog(QtWidgets.QDialog):
         self.ui.buttonBox.accepted.connect(self.accept)
         self.ui.buttonBox.rejected.connect(self.reject)
 
-    def _eligible_names(self):
-        return [
-            name
-            for name, metadata in sorted(self.objects_metadata.items())
-            if is_eligible_for_plot(metadata)
-        ]
-
     def _populate_widgets(self):
-        eligible_names = self._eligible_names()
+        eligible_names = sorted_eligible_names(self.objects_metadata)
         self.ui.xComboBox.addItem("(index)", "")
         for name in eligible_names:
             self.ui.xComboBox.addItem(name, name)

@@ -19,9 +19,7 @@ import numpy as np
 from .paths import HYDE_DIR
 from . import project_tools
 from .recreation_registry import (
-    publish_fit_function_registry,
-    publish_figure_macro_registry,
-    publish_table_macro_registry,
+    publish_registry,
     register_fit_function,
     register_figure_macro,
     register_table_macro,
@@ -525,7 +523,7 @@ def table(_func=None, *, window_state=None, register=True):
             pass
         if register:
             register_table_macro(wrapped)
-            publish_table_macro_registry()
+            publish_registry("table")
         return wrapped
 
     if _func is None:
@@ -587,7 +585,7 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
 
         if register:
             register_figure_macro(wrapped)
-            publish_figure_macro_registry()
+            publish_registry("figure")
         return wrapped
 
     if _func is None:
@@ -618,7 +616,7 @@ def fit_function(_func=None, *, independent_vars):
             register_fit_function(func, independent_vars=independent_vars)
         except TypeError as exc:
             reject_fit_function(func, reason=exc)
-        publish_fit_function_registry()
+        publish_registry("fit_function")
         return func
 
     if _func is None:

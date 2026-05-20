@@ -14,17 +14,13 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.recreation_registry import (
-    clear_fit_functions,
-    clear_figure_macros,
-    clear_table_macros,
-    figure_macro_entries,
-    figure_macro_names,
-    fit_function_entries,
+    clear,
+    entries,
+    names,
+    publish_registry,
+    rejected_entries,
     register_fit_function,
     reject_fit_function,
-    rejected_fit_function_entries,
-    table_macro_entries,
-    table_macro_names,
 )
 from hyde.user_interface.plugins.table.window_macro_store import (
     BEGIN_MARKER,
@@ -50,18 +46,16 @@ def build_table_macro_source(macro_name, names, name=None, geometry=None, column
 
 class TestTableDecorator(unittest.TestCase):
     def setUp(self):
-        clear_table_macros()
-        clear_figure_macros()
-        clear_fit_functions()
+        clear()
 
     def test_table_decorator_registers_parameterized_macro(self):
         @hyde.table
         def Table0(a, b):
             return a, b
 
-        self.assertEqual(table_macro_names(), ("Table0",))
+        self.assertEqual(names("table"), ("Table0",))
         self.assertEqual(
-            table_macro_entries(),
+            entries("table"),
             ({"name": "Table0", "args": ["a", "b"]},),
         )
 
@@ -70,7 +64,7 @@ class TestTableDecorator(unittest.TestCase):
         def Table0(a, b):
             return a, b
 
-        self.assertEqual(table_macro_names(), ())
+        self.assertEqual(names("table"), ())
 
     def test_table_decorator_accepts_window_state_metadata(self):
         with patch("hyde.signal_open_table") as signal_open_table:
@@ -152,9 +146,7 @@ class TestTableDecorator(unittest.TestCase):
 
 class TestFigureDecorator(unittest.TestCase):
     def setUp(self):
-        clear_table_macros()
-        clear_figure_macros()
-        clear_fit_functions()
+        clear()
 
     def tearDown(self):
         pyplot = getattr(matplotlib, "pyplot", None)
@@ -172,9 +164,9 @@ class TestFigureDecorator(unittest.TestCase):
         def Graph0(x, y):
             return x, y
 
-        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            figure_macro_entries(),
+            entries("figure"),
             ({"name": "Graph0", "args": ["x", "y"]},),
         )
 
@@ -183,9 +175,9 @@ class TestFigureDecorator(unittest.TestCase):
         def Graph0(x, y):
             return x, y
 
-        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            figure_macro_entries(),
+            entries("figure"),
             ({"name": "Graph0", "args": ["x", "y"]},),
         )
 
@@ -196,12 +188,12 @@ class TestFigureDecorator(unittest.TestCase):
                 def Graph0(x, y):
                     return x, y
 
-                self.assertEqual(figure_macro_names(), ("Graph0",))
+                self.assertEqual(names("figure"), ("Graph0",))
                 self.assertEqual(
-                    figure_macro_entries(),
+                    entries("figure"),
                     ({"name": "Graph0", "args": ["x", "y"]},),
                 )
-                clear_figure_macros()
+                clear(kind="figure")
 
     def test_figure_decorator_rejects_keyword_only_parameters(self):
         with self.assertRaises(TypeError):
@@ -296,7 +288,7 @@ class TestFigureDecorator(unittest.TestCase):
 
         figure = Graph0([0, 1, 2], [1, 4, 9])
 
-        self.assertEqual(figure_macro_names(), ())
+        self.assertEqual(names("figure"), ())
         self.assertTrue(getattr(figure, "_hyde_is_first_class", False))
         self.assertEqual(getattr(figure, "_hyde_metadata", {}), {"window_pos": (10, 20)})
 
@@ -400,9 +392,7 @@ class TestFigureDecorator(unittest.TestCase):
 
 class TestDecoratedProcedureRegistries(unittest.TestCase):
     def setUp(self):
-        clear_table_macros()
-        clear_figure_macros()
-        clear_fit_functions()
+        clear()
 
     def test_fit_function_registry_is_isolated_from_window_macro_kinds(self):
         @hyde.table
@@ -424,10 +414,10 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
 
         reject_fit_function(bad_fit, reason="bad signature")
 
-        self.assertEqual(table_macro_names(), ("Table0",))
-        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(names("table"), ("Table0",))
+        self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            fit_function_entries(),
+            entries("fit_function"),
             (
                 {
                     "name": "line_fit",
@@ -437,15 +427,15 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            rejected_fit_function_entries(),
+            rejected_entries("fit_function"),
             ({"name": "bad_fit", "reason": "bad signature"},),
         )
 
-        clear_table_macros()
-        self.assertEqual(table_macro_names(), ())
-        self.assertEqual(figure_macro_names(), ("Graph0",))
+        clear(kind="table")
+        self.assertEqual(names("table"), ())
+        self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            fit_function_entries(),
+            entries("fit_function"),
             (
                 {
                     "name": "line_fit",
@@ -455,14 +445,63 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            rejected_fit_function_entries(),
+            rejected_entries("fit_function"),
             ({"name": "bad_fit", "reason": "bad signature"},),
         )
 
-        clear_fit_functions()
-        self.assertEqual(figure_macro_names(), ("Graph0",))
-        self.assertEqual(fit_function_entries(), ())
-        self.assertEqual(rejected_fit_function_entries(), ())
+        clear(kind="fit_function")
+        self.assertEqual(names("figure"), ("Graph0",))
+        self.assertEqual(entries("fit_function"), ())
+        self.assertEqual(rejected_entries("fit_function"), ())
+
+    def test_clear_without_kind_resets_all_registries(self):
+        @hyde.table
+        def Table0(a):
+            return a
+
+        @hyde.figure
+        def Graph0(x):
+            return x
+
+        def line_fit(x, slope):
+            return slope * x
+
+        line_fit.__module__ = "procedures"
+        register_fit_function(line_fit, independent_vars=("x",))
+
+        clear()
+
+        self.assertEqual(names("table"), ())
+        self.assertEqual(names("figure"), ())
+        self.assertEqual(entries("fit_function"), ())
+        self.assertEqual(rejected_entries("fit_function"), ())
+
+    def test_publish_registry_without_kind_publishes_all_registry_payloads(self):
+        @hyde.table
+        def Table0(a):
+            return a
+
+        @hyde.figure
+        def Graph0(x):
+            return x
+
+        def line_fit(x, slope):
+            return slope * x
+
+        line_fit.__module__ = "procedures"
+        register_fit_function(line_fit, independent_vars=("x",))
+
+        with patch("hyde.recreation_registry.put_parent_message") as put_parent_message:
+            publish_registry()
+
+        self.assertEqual(
+            [call.args[0][0] for call in put_parent_message.call_args_list],
+            [
+                "TABLE_MACROS_RESPONSE",
+                "FIGURE_MACROS_RESPONSE",
+                "FIT_FUNCTIONS_RESPONSE",
+            ],
+        )
 
 
 class TestWindowMacroStore(unittest.TestCase):

@@ -36,13 +36,6 @@ def _normalize_kind(kind):
     return candidate
 
 
-def _normalize_macro_kind(kind):
-    candidate = _normalize_kind(kind)
-    if candidate == "fit_function":
-        raise ValueError(f"Unsupported macro kind: {kind!r}.")
-    return candidate
-
-
 def _set_registry_entry(kind, name, entry):
     normalized_kind = _normalize_kind(kind)
     with _REGISTRY_LOCK:
@@ -67,7 +60,7 @@ def _remove_registry_rejection(kind, name):
         _REGISTRIES[normalized_kind]["rejected"].pop(str(name), None)
 
 
-def _clear_registry(kind=None):
+def clear(kind=None):
     with _REGISTRY_LOCK:
         if kind is None:
             kinds = tuple(_REGISTRY_PROTOCOLS)
@@ -76,12 +69,6 @@ def _clear_registry(kind=None):
         for registry_kind in kinds:
             _REGISTRIES[registry_kind]["entries"].clear()
             _REGISTRIES[registry_kind]["rejected"].clear()
-
-
-def _registry_names(kind):
-    normalized_kind = _normalize_kind(kind)
-    with _REGISTRY_LOCK:
-        return tuple(sorted(_REGISTRIES[normalized_kind]["entries"]))
 
 
 def _registry_entries(kind):
@@ -102,8 +89,10 @@ def _rejected_registry_entries(kind):
         )
 
 
-def _validate_macro_function(kind, func):
-    normalized_kind = _normalize_macro_kind(kind)
+def _validate_recreation_function(kind, func):
+    normalized_kind = _normalize_kind(kind)
+    if normalized_kind == "fit_function":
+        raise ValueError(f"Unsupported macro kind: {kind!r}.")
     if not callable(func):
         raise TypeError(
             f"{normalized_kind.title()} recreation decorators must wrap a callable."
@@ -125,34 +114,8 @@ def _validate_macro_function(kind, func):
     return normalized_kind, signature
 
 
-def register_macro(kind, func):
-    normalized_kind, signature = _validate_macro_function(kind, func)
-    _set_registry_entry(
-        normalized_kind,
-        func.__name__,
-        {
-            "name": func.__name__,
-            "func": func,
-            "args": list(signature.parameters),
-        },
-    )
-    return func
-
-
-def clear_macros(kind=None):
-    if kind is None:
-        for macro_kind in ("table", "figure"):
-            _clear_registry(macro_kind)
-        return
-    _clear_registry(_normalize_macro_kind(kind))
-
-
-def macro_names(kind):
-    return _registry_names(_normalize_macro_kind(kind))
-
-
-def macro_entries(kind):
-    normalized_kind = _normalize_macro_kind(kind)
+def _recreation_entries(kind):
+    normalized_kind = _normalize_kind(kind)
     return tuple(
         {
             "name": entry["name"],
@@ -162,28 +125,43 @@ def macro_entries(kind):
     )
 
 
+def entries(kind):
+    normalized_kind = _normalize_kind(kind)
+    if normalized_kind in ("table", "figure"):
+        return _recreation_entries(normalized_kind)
+    return _registry_entries(normalized_kind)
+
+
+def names(kind):
+    return tuple(entry["name"] for entry in entries(kind))
+
+
+def rejected_entries(kind):
+    return _rejected_registry_entries(kind)
+
+
 def serialize_registry(kind):
     normalized_kind = _normalize_kind(kind)
     return {
-        "entries": list(
-            macro_entries(normalized_kind)
-            if normalized_kind in ("table", "figure")
-            else _registry_entries(normalized_kind)
-        ),
-        "rejected": list(_rejected_registry_entries(normalized_kind)),
+        "entries": list(entries(normalized_kind)),
+        "rejected": list(rejected_entries(normalized_kind)),
     }
 
 
-def publish_registry(kind):
-    normalized_kind = _normalize_kind(kind)
-    protocol = _REGISTRY_PROTOCOLS[normalized_kind]
-    try:
-        put_parent_message([
-            protocol["task"],
-            serialize_registry(normalized_kind),
-        ])
-    except Exception:
-        pass
+def publish_registry(kind=None):
+    if kind is None:
+        kinds = tuple(_REGISTRY_PROTOCOLS)
+    else:
+        kinds = (_normalize_kind(kind),)
+    for registry_kind in kinds:
+        protocol = _REGISTRY_PROTOCOLS[registry_kind]
+        try:
+            put_parent_message([
+                protocol["task"],
+                serialize_registry(registry_kind),
+            ])
+        except Exception:
+            pass
 
 
 def _coerce_independent_vars(independent_vars):
@@ -264,70 +242,29 @@ def reject_fit_function(func, *, reason):
     )
     return func
 
-
-def clear_fit_functions():
-    _clear_registry("fit_function")
-
-
-def fit_function_entries():
-    return _registry_entries("fit_function")
-
-
-def rejected_fit_function_entries():
-    return _rejected_registry_entries("fit_function")
-
-
-def serialize_fit_function_registry():
-    return serialize_registry("fit_function")
-
-
-def publish_fit_function_registry():
-    publish_registry("fit_function")
-
-
 def register_table_macro(func):
-    return register_macro("table", func)
-
-
-def clear_table_macros():
-    clear_macros("table")
-
-
-def table_macro_names():
-    return macro_names("table")
-
-
-def table_macro_entries():
-    return macro_entries("table")
-
-
-def serialize_table_macro_registry():
-    return serialize_registry("table")
-
-
-def publish_table_macro_registry():
-    publish_registry("table")
-
+    _, signature = _validate_recreation_function("table", func)
+    _set_registry_entry(
+        "table",
+        func.__name__,
+        {
+            "name": func.__name__,
+            "func": func,
+            "args": list(signature.parameters),
+        },
+    )
+    return func
 
 def register_figure_macro(func):
-    return register_macro("figure", func)
+    _, signature = _validate_recreation_function("figure", func)
+    _set_registry_entry(
+        "figure",
+        func.__name__,
+        {
+            "name": func.__name__,
+            "func": func,
+            "args": list(signature.parameters),
+        },
+    )
+    return func
 
-
-def clear_figure_macros():
-    clear_macros("figure")
-
-
-def figure_macro_names():
-    return macro_names("figure")
-
-
-def figure_macro_entries():
-    return macro_entries("figure")
-
-
-def serialize_figure_macro_registry():
-    return serialize_registry("figure")
-
-
-def publish_figure_macro_registry():
-    publish_registry("figure")

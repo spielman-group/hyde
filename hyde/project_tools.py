@@ -109,8 +109,7 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
     hyde.gui_mode(True)
     configure_gui_matplotlib_backend()
     import hyde.recreation_registry
-    hyde.recreation_registry.clear_macros()
-    hyde.recreation_registry.clear_fit_functions()
+    hyde.recreation_registry.clear()
 
     import procedures
     previous_exports = set(__main__.__dict__.get("__hyde_procedures_exports__", ()))
@@ -123,9 +122,7 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
         __main__.__dict__.pop(name, None)
     __main__.__dict__.update(exports)
     __main__.__hyde_procedures_exports__ = set(exports)
-    hyde.recreation_registry.publish_table_macro_registry()
-    hyde.recreation_registry.publish_figure_macro_registry()
-    hyde.recreation_registry.publish_fit_function_registry()
+    hyde.recreation_registry.publish_registry()
 
 
 def configure_gui_matplotlib_backend():

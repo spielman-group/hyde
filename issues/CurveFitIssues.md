@@ -3,9 +3,9 @@
 ## Checklist
 
 - [X] Issue 1: Launch Curve Fit from `Analysis` with attach/unattach behavior
-- [ ] Issue 2: Discover `@hyde.fit_function` definitions and scaffold new functions
-- [ ] Issue 3: Configure function/data binding and generate preview text
-- [ ] Issue 4: Edit coefficient and data-option state with validation-gated `Do It`
+- [X] Issue 2: Discover `@hyde.fit_function` definitions and scaffold new functions
+- [X] Issue 3: Configure function/data binding and generate preview text
+- [X] Issue 4: Edit coefficient and data-option state with validation-gated `Do It`
 - [ ] Issue 5: Execute suppressed one-shot fits to create or recreate the result object
 - [ ] Issue 6: Add live rerun, failure retention, and result-target handoff behavior
 - [ ] Issue 7: Render and revert dialog-owned fit and residual traces on attached figures
@@ -162,6 +162,11 @@ dialog state.
 This slice is the first end-to-end scientific commit path and should remain result-only
 even in attached mode.
 
+Implementation note: if this slice needs more preview/status/footer shell code, prefer a
+tiny shared helper with `Modify Axis` for the modal preview pane plus status strip plus
+`Do It` / `To Clip` / `Cancel` footer rather than adding a new base class or duplicating
+the shell further.
+
 ### Acceptance criteria
 
 - [ ] When `Suppress Screen Updates` is enabled, ordinary control changes do not update real fit outputs.
@@ -193,6 +198,11 @@ restore the previous target's opening state before updating the new target. If a
 rerun fails, the last successful live outputs must remain in place and the dialog must
 stay open with an error shown.
 
+Implementation note: if this slice needs more preview/status/footer shell code, prefer a
+tiny shared helper with `Modify Axis` for the modal preview pane plus status strip plus
+`Do It` / `To Clip` / `Cancel` footer rather than adding a new base class or duplicating
+the shell further.
+
 ### Acceptance criteria
 
 - [ ] In live mode, relevant dialog changes rerun immediately and update the current real result target.
@@ -222,6 +232,14 @@ dialog-owned traces derived from the authoritative fit result object. In the fir
 pass, residuals stay on the existing figure axes rather than creating a second layout.
 The dialog must track ownership so that cancel removes traces it introduced and
 restores any existing displays it modified.
+
+Implementation note: if this slice needs more preview/status/footer shell code, prefer a
+tiny shared helper with `Modify Axis` for the modal preview pane plus status strip plus
+`Do It` / `To Clip` / `Cancel` footer rather than adding a new base class or duplicating
+the shell further.
+Implementation note: `Show Fit` and `Show Residuals` already exist in the dialog as live
+controls. This slice should wire those existing controls to real attached-figure
+behavior instead of introducing replacement toggles.
 
 This slice completes the first pass end-to-end attached figure workflow.
 

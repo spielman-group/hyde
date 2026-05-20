@@ -34,8 +34,8 @@ class CurveFitCatalogService(QtCore.QObject):
         if python_execution_service is None:
             return False
         self.command_state.set_callable_invocation(
-            "hyde.recreation_registry.publish_fit_function_registry",
-            [],
+            "hyde.recreation_registry.publish_registry",
+            ["'fit_function'"],
         )
         python_execution_service.execute_hidden(self.command_state.python_source())
         return True

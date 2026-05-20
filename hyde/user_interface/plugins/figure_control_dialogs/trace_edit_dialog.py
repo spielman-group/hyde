@@ -1,7 +1,10 @@
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.user_interface.hyde_interactive_widget import has_supported_traces
+from hyde.user_interface.hyde_interactive_widget import (
+    has_supported_traces,
+    supported_trace_records,
+)
 from hyde.user_interface.matplotlib_color_picker import (
     MatplotlibColorLineEdit,
     normalize_matplotlib_color_text,
@@ -67,16 +70,6 @@ def _normalize_color(value, fallback):
         return fallback
     normalized = normalize_matplotlib_color_text(value, allow_auto=True)
     return fallback if normalized in (None, "") else normalized
-
-
-def _trace_display_name(trace):
-    label = trace.get("kwargs", {}).get("label")
-    if label not in (None, "", "_nolegend_"):
-        return str(label)
-    y_source = trace.get("y_source", {})
-    if y_source.get("kind") == "name" and y_source.get("value"):
-        return str(y_source["value"])
-    return str(trace.get("id", "trace"))
 
 
 def _apply_style_values(style, values):
@@ -243,10 +236,9 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         if not subplots:
             return
         subplot = subplots[0]
-        for index, trace in enumerate(subplot.get("traces", [])):
-            if trace.get("kind") != "line":
-                continue
-            trace_id = str(trace.get("id"))
+        for index, supported_trace in enumerate(supported_trace_records(self.figure_window)):
+            trace = supported_trace["trace"]
+            trace_id = supported_trace["trace_id"]
             style = self._style_from_trace(
                 trace,
                 index,
@@ -256,9 +248,9 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
                 live_style=trace_styles.get(subplot["id"], {}).get(trace_id),
             )
             record = {
-                "subplot_id": subplot["id"],
+                "subplot_id": supported_trace["subplot_id"],
                 "trace_id": trace_id,
-                "label": _trace_display_name(trace),
+                "label": supported_trace["label"],
             }
             self._trace_records.append(record)
             self._trace_records_by_id[trace_id] = dict(record)

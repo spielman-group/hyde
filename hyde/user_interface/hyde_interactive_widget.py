@@ -35,16 +35,53 @@ def active_interactive_window(services, interactive_type=None):
     return widget
 
 
-def has_supported_traces(figure_window):
+def _trace_source_name(source):
+    if not isinstance(source, dict):
+        return None
+    if source.get("kind") != "name":
+        return None
+    value = str(source.get("value") or "").strip()
+    return value or None
+
+
+def _trace_display_name(trace):
+    label = trace.get("kwargs", {}).get("label")
+    if label not in (None, "", "_nolegend_"):
+        return str(label)
+    y_name = _trace_source_name(trace.get("y_source"))
+    if y_name:
+        return y_name
+    return str(trace.get("id", "trace"))
+
+
+def supported_trace_records(figure_window):
     if figure_window is None:
-        return False
+        return ()
     snapshot_state = getattr(figure_window, "snapshot_state", None)
     figure_ir = {} if snapshot_state is None else (snapshot_state.figure_ir() or {})
     subplots = figure_ir.get("layout", {}).get("subplots", [])
     if not subplots:
-        return False
+        return ()
     subplot = subplots[0]
-    return any(trace.get("kind") == "line" for trace in subplot.get("traces", []))
+    records = []
+    for trace in subplot.get("traces", []):
+        if trace.get("kind") != "line":
+            continue
+        records.append(
+            {
+                "subplot_id": str(subplot.get("id")),
+                "trace_id": str(trace.get("id")),
+                "label": _trace_display_name(trace),
+                "x_name": _trace_source_name(trace.get("x_source")),
+                "y_name": _trace_source_name(trace.get("y_source")),
+                "trace": dict(trace),
+            }
+        )
+    return tuple(records)
+
+
+def has_supported_traces(figure_window):
+    return bool(supported_trace_records(figure_window))
 
 
 def _freeze_namespace_tracking_value(value):

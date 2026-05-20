@@ -202,7 +202,7 @@ class FigureCodec(FeatureCodec):
         if command == "create":
             return "\n".join(cls.wrapped_creation_lines(normalized))
         if command == "publish_figure_macros":
-            return "hyde.recreation_registry.publish_figure_macro_registry()"
+            return "hyde.recreation_registry.publish_registry('figure')"
         if command == "close":
             return f"plt.close({normalized['settings']['figure_number']})"
         raise ValueError(f"Unsupported figure command: {command!r}.")
@@ -231,6 +231,14 @@ def is_eligible_for_plot(metadata):
     is_numeric = kind in "biuf"
 
     return is_array and is_numeric and ndim == 1
+
+
+def sorted_eligible_names(objects_metadata):
+    eligible = []
+    for name, metadata in dict(objects_metadata or {}).items():
+        if is_eligible_for_plot(dict(metadata or {})):
+            eligible.append(str(name))
+    return sorted(eligible)
 
 
 def apply_figure_state(figure, state, namespace):
