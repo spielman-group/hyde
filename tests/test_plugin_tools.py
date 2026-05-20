@@ -1520,5 +1520,34 @@ class TestPluginTools(unittest.TestCase):
             "Figure1",
         )
 
+    def test_resolve_requested_name_supports_omit_zero_suffixing(self):
+        self.assertEqual(
+            resolve_requested_name(
+                "fit_signal",
+                {"fit_signal", "fit_signal_1"},
+                requested_name=None,
+                omit_zero=True,
+            ),
+            "fit_signal_2",
+        )
+        self.assertEqual(
+            resolve_requested_name(
+                "fit_signal",
+                {"fit_signal", "fit_signal_1"},
+                requested_name="fit_signal_7",
+                omit_zero=True,
+            ),
+            "fit_signal_7",
+        )
+        self.assertEqual(
+            resolve_requested_name(
+                "fit_signal",
+                {"fit_signal", "fit_signal_1"},
+                requested_name="fit_signal",
+                omit_zero=True,
+            ),
+            "fit_signal_2",
+        )
+
 if __name__ == "__main__":
     unittest.main()

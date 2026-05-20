@@ -160,7 +160,7 @@ def _coerce_independent_vars(independent_vars):
 
 
 def _is_project_defined_fit_function(func):
-    return getattr(func, "__module__", None) == "procedures"
+    return getattr(func, "__module__", None) in {"procedures", "hyde"}
 
 
 def register_fit_function(func, *, independent_vars):

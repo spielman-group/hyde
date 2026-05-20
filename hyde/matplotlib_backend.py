@@ -632,6 +632,16 @@ def _resolve_ir_operand_value(operand, namespace, figure=None, use_bound_values=
         return operand.get("value")
     if kind == "array_literal":
         return np.array(operand.get("value", []))
+    if kind == "attribute_path":
+        value = _resolve_ir_operand_value(
+            operand.get("root"),
+            namespace,
+            figure=figure,
+            use_bound_values=use_bound_values,
+        )
+        for attribute in operand.get("path", []):
+            value = getattr(value, attribute)
+        return value
     raise ValueError(f"Unsupported figure IR operand kind: {kind!r}.")
 
 
@@ -1085,7 +1095,12 @@ def apply_figure_action(figure, action):
             axis.legend()
         figure.canvas.draw_idle()
         return figure
-    if action_type in {"set_axis_state", "set_axis_side_state", "set_subplot_margins"}:
+    if action_type in {
+        "set_axis_state",
+        "set_axis_side_state",
+        "set_subplot_margins",
+        "set_trace",
+    }:
         return regenerate_figure_from_ir(figure)
     raise ValueError(f"Unsupported figure action: {action_type!r}.")
 

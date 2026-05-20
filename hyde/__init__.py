@@ -627,6 +627,54 @@ def fit_function(_func=None, *, independent_vars):
     raise TypeError("hyde.fit_function currently supports decorator registration only.")
 
 
+def line(x, a, b):
+    return a * x + b
+
+
+def gaussian(x, a, x0, width, y0):
+    return a * np.exp(-((x - x0) ** 2) / (width**2)) + y0
+
+
+def lorentzian(x, a, x0, width, y0):
+    return a * (1.0 / (1.0 + ((x - x0) ** 2) / (width**2))) + y0
+
+
+def exp(x, a, width, y0):
+    return a * np.exp(-x / width) + y0
+
+
+def sin(x, a, k, phi, y0):
+    return a * np.sin(k * x + phi) + y0
+
+
+def power(x, a, alpha, y0):
+    return a * (x**alpha) + y0
+
+
+def log(x, a, y0):
+    return a * np.log(x) + y0
+
+
+_BUILTIN_FIT_FUNCTIONS = (
+    (line, ("x",)),
+    (gaussian, ("x",)),
+    (lorentzian, ("x",)),
+    (exp, ("x",)),
+    (sin, ("x",)),
+    (power, ("x",)),
+    (log, ("x",)),
+)
+
+
+def register_builtin_fit_functions():
+    for func, independent_vars in _BUILTIN_FIT_FUNCTIONS:
+        register_fit_function(func, independent_vars=independent_vars)
+    return tuple(func.__name__ for func, _ in _BUILTIN_FIT_FUNCTIONS)
+
+
+register_builtin_fit_functions()
+
+
 def _resolve_matplotlib_figure(figure):
     if hasattr(figure, "canvas"):
         return figure

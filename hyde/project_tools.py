@@ -110,6 +110,7 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
     configure_gui_matplotlib_backend()
     import hyde.recreation_registry
     hyde.recreation_registry.clear()
+    hyde.register_builtin_fit_functions()
 
     import procedures
     previous_exports = set(__main__.__dict__.get("__hyde_procedures_exports__", ()))

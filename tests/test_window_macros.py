@@ -393,6 +393,59 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
     def setUp(self):
         clear()
 
+    def test_register_builtin_fit_functions_registers_hyde_defaults(self):
+        names = hyde.register_builtin_fit_functions()
+
+        self.assertEqual(
+            names,
+            ("line", "gaussian", "lorentzian", "exp", "sin", "power", "log"),
+        )
+        entries = {
+            entry["name"]: entry for entry in serialize_registry("fit_function")["entries"]
+        }
+        self.assertEqual(entries["line"]["parameters"], ["a", "b"])
+        self.assertEqual(
+            entries["gaussian"]["parameters"],
+            ["a", "x0", "width", "y0"],
+        )
+        self.assertEqual(
+            entries["lorentzian"]["parameters"],
+            ["a", "x0", "width", "y0"],
+        )
+        self.assertEqual(entries["exp"]["parameters"], ["a", "width", "y0"])
+        self.assertEqual(entries["sin"]["parameters"], ["a", "k", "phi", "y0"])
+        self.assertEqual(entries["power"]["parameters"], ["a", "alpha", "y0"])
+        self.assertEqual(entries["log"]["parameters"], ["a", "y0"])
+
+    def test_hyde_builtin_fit_function_formulas(self):
+        x = np.array([1.0, 2.0, 4.0])
+
+        np.testing.assert_allclose(hyde.line(x, 2.0, 3.0), 2.0 * x + 3.0)
+        np.testing.assert_allclose(
+            hyde.gaussian(x, 5.0, 2.0, 4.0, 1.5),
+            5.0 * np.exp(-((x - 2.0) ** 2) / (4.0**2)) + 1.5,
+        )
+        np.testing.assert_allclose(
+            hyde.lorentzian(x, 5.0, 2.0, 4.0, 1.5),
+            5.0 * (1.0 / (1.0 + ((x - 2.0) ** 2) / (4.0**2))) + 1.5,
+        )
+        np.testing.assert_allclose(
+            hyde.exp(x, 5.0, 4.0, 1.5),
+            5.0 * np.exp(-x / 4.0) + 1.5,
+        )
+        np.testing.assert_allclose(
+            hyde.sin(x, 5.0, 0.5, 0.25, 1.5),
+            5.0 * np.sin(0.5 * x + 0.25) + 1.5,
+        )
+        np.testing.assert_allclose(
+            hyde.power(x, 5.0, 2.5, 1.5),
+            5.0 * (x**2.5) + 1.5,
+        )
+        np.testing.assert_allclose(
+            hyde.log(x, 5.0, 1.5),
+            5.0 * np.log(x) + 1.5,
+        )
+
     def test_fit_function_registry_is_isolated_from_window_macro_kinds(self):
         @hyde.table
         def Table0(a):

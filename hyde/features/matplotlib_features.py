@@ -34,6 +34,11 @@ def _operand_to_python(operand):
         return repr(operand["value"])
     if kind == "array_literal":
         return f"np.array({operand['value']!r})"
+    if kind == "attribute_path":
+        expression = _operand_to_python(operand["root"])
+        for attribute in operand["path"]:
+            expression = f"getattr({expression}, {attribute!r})"
+        return expression
     raise ValueError(f"Unsupported figure operand kind: {kind!r}.")
 
 
@@ -42,6 +47,8 @@ def _operand_names(operand):
         return []
     if operand.get("kind") == "name":
         return [operand["value"]]
+    if operand.get("kind") == "attribute_path":
+        return _operand_names(operand.get("root"))
     return []
 
 
@@ -797,6 +804,14 @@ class FigureIRCodec(FeatureCodec):
             return {"kind": "literal", "value": operand.get("value")}
         if kind == "array_literal":
             return {"kind": "array_literal", "value": list(operand.get("value", []))}
+        if kind == "attribute_path":
+            root = cls._normalize_operand(operand.get("root"))
+            if root is None:
+                raise ValueError("Figure attribute_path operands require a root operand.")
+            path = [str(part) for part in operand.get("path", []) if str(part)]
+            if not path:
+                raise ValueError("Figure attribute_path operands require a path.")
+            return {"kind": "attribute_path", "root": root, "path": path}
         raise ValueError(f"Unsupported figure operand kind: {kind!r}.")
 
     @classmethod
@@ -987,6 +1002,32 @@ class FigureIRCodec(FeatureCodec):
             ):
                 if key in style:
                     trace["kwargs"][key] = style[key]
+        elif action_type == "set_trace":
+            trace_id = str(action.get("trace_id") or "")
+            if not trace_id:
+                raise ValueError("Figure trace edits require trace_id.")
+            traces = subplot["traces"]
+            trace_index = next(
+                (
+                    index
+                    for index, trace in enumerate(traces)
+                    if trace["id"] == trace_id
+                ),
+                None,
+            )
+            trace_state = action.get("trace")
+            if trace_state is None:
+                if trace_index is not None:
+                    del traces[trace_index]
+            else:
+                normalized_trace = cls._normalize_trace(
+                    {**dict(trace_state), "id": trace_id},
+                    len(traces) if trace_index is None else trace_index,
+                )
+                if trace_index is None:
+                    traces.append(normalized_trace)
+                else:
+                    traces[trace_index] = normalized_trace
         else:
             raise ValueError(f"Unsupported figure IR action: {action_type!r}.")
 
