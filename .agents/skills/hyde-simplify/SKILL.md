@@ -45,7 +45,8 @@ Prefer Hyde's Markdown docs over inherited implementation shape. Existing code i
 Simplify aggressively when you see:
 
 - single-use private helpers
-- wrapper layers that only rename or forward behavior
+- wrapper layers that only rename or forward behavior when removing them actually makes the code smaller or clearer overall; keep small wrappers that preserve domain clarity or avoid expanding call sites
+- repeated call-site logic that would become shorter and clearer with one small domain wrapper
 - new abstractions without repeated call sites
 - broad refactors mixed into a narrow task
 - extra state variables, flags, or policy branches
@@ -62,6 +63,8 @@ Ask these questions explicitly:
 - Can an existing queue, thread, IPC path, or public command carry this behavior?
 - Is the GUI doing anything beyond collecting UI state, generating a command string, and reacting to kernel results?
 - Has the patch created two implementation paths where Hyde should have one?
+- If I remove this wrapper, does the total code actually get shorter or clearer, or am I just pushing the same lines outward into call sites?
+- Would one small wrapper make the total code shorter or clearer by collapsing repeated call-site logic?
 - Do the tests prove the contract with less structure and fewer incidental assertions?
 
 ## Boundaries

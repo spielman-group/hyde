@@ -60,8 +60,11 @@ class CurveFitDialog(QtWidgets.QDialog):
         self._catalog_service = self.services.get("curve_fit_catalog_service")
         self._catalog_status_text = ""
         self._loading_controls = False
-        self._current_command_preview = ""
         self._current_model = None
+        self._live_error_message = ""
+        self._live_result_target_name = None
+        self._live_restore_store_name = f"_hyde_curve_fit_live_restore_{id(self)}"
+        self._live_missing_sentinel_name = f"_hyde_curve_fit_missing_{id(self)}"
         self.setModal(True)
         self.setWindowTitle("Curve Fit")
         self.resize(720, 520)
@@ -264,7 +267,11 @@ class CurveFitDialog(QtWidgets.QDialog):
     def _update_status_label(self, binding_message=""):
         parts = [
             text
-            for text in [binding_message, self._catalog_status_text]
+            for text in [
+                binding_message,
+                self._live_error_message,
+                self._catalog_status_text,
+            ]
             if str(text or "").strip()
         ]
         self.status_label.setText(" | ".join(parts))
@@ -426,7 +433,6 @@ class CurveFitDialog(QtWidgets.QDialog):
     def _refresh_from_state(self):
         model = self.state.codec.present_state(self.state._state, context=self._context())
         self._current_model = dict(model)
-        self._current_command_preview = model["commands_preview"]
         self._loading_controls = True
         try:
             fit_function_name = model["fit_function_name"] or ""
@@ -462,11 +468,65 @@ class CurveFitDialog(QtWidgets.QDialog):
             if preview_mode == "Equation":
                 self.preview_text.setPlainText(model["equation_preview"])
             else:
-                self.preview_text.setPlainText(self._current_command_preview)
-            self.do_it_button.setEnabled(bool(model["valid"]))
+                self.preview_text.setPlainText(model["commands_preview"])
+            self.do_it_button.setEnabled(
+                bool(model["valid"]) and not self._live_error_message
+            )
             self._update_status_label(model["status_message"])
         finally:
             self._loading_controls = False
+
+    def _after_relevant_state_change(self):
+        self._refresh_from_state()
+        if self._current_model is None:
+            return
+        if self.execution_mode() != "live" or not self._current_model.get("valid"):
+            if self._live_error_message:
+                self._live_error_message = ""
+                self.do_it_button.setEnabled(bool(self._current_model.get("valid")))
+                self._update_status_label(
+                    self._current_model.get("status_message", "")
+                )
+            return
+        self._maybe_run_live_update()
+
+    def _execution_failure_message(self, python_execution_service):
+        detail = str(
+            getattr(python_execution_service, "last_error_message", "") or ""
+        ).strip()
+        if detail:
+            return f"Curve Fit execution failed: {detail}"
+        return "Curve Fit execution failed."
+
+    def _maybe_run_live_update(self):
+        if self._current_model is None or self.execution_mode() != "live":
+            return
+        if not self._current_model.get("valid"):
+            return
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            self._live_error_message = "Curve Fit requires python_execution_service."
+            self.do_it_button.setEnabled(False)
+            self._update_status_label(self._current_model.get("status_message", ""))
+            return
+        live_command = self.state.codec.state_to_live_python(
+            self.state._state,
+            context=self._context(),
+            previous_target_name=self._live_result_target_name,
+            restore_store_name=self._live_restore_store_name,
+            missing_sentinel_name=self._live_missing_sentinel_name,
+        )
+        if python_execution_service.execute_hidden(live_command):
+            self._live_error_message = ""
+            self._live_result_target_name = self._current_model.get("fit_result_name")
+        else:
+            self._live_error_message = self._execution_failure_message(
+                python_execution_service
+            )
+        self.do_it_button.setEnabled(
+            bool(self._current_model.get("valid")) and not self._live_error_message
+        )
+        self._update_status_label(self._current_model.get("status_message", ""))
 
     def _on_fit_function_changed(self, fit_function_name):
         if self._loading_controls:
@@ -483,7 +543,7 @@ class CurveFitDialog(QtWidgets.QDialog):
             self.state.apply_action(
                 {"type": "clear", "path": ("settings", "fit_function_name")}
             )
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_y_data_changed(self, y_name):
         if self._loading_controls:
@@ -494,13 +554,13 @@ class CurveFitDialog(QtWidgets.QDialog):
             )
         else:
             self.state.apply_action({"type": "clear", "path": ("settings", "y_name")})
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_x_data_changed(self, independent_var, x_name):
         if self._loading_controls:
             return
         self.state.set_x_name(independent_var, x_name)
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_from_target_toggled(self, checked):
         if self._loading_controls:
@@ -512,7 +572,7 @@ class CurveFitDialog(QtWidgets.QDialog):
                 "value": bool(checked),
             }
         )
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_preview_mode_changed(self, preview_mode):
         if self._loading_controls:
@@ -542,7 +602,7 @@ class CurveFitDialog(QtWidgets.QDialog):
             self.state.apply_action(
                 {"type": "clear", "path": ("settings", "weighting_name")}
             )
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_suppress_screen_updates_toggled(self, checked):
         if self._loading_controls:
@@ -554,25 +614,25 @@ class CurveFitDialog(QtWidgets.QDialog):
                 "value": bool(checked),
             }
         )
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_fit_result_target_changed(self, fit_result_name):
         if self._loading_controls:
             return
         self.state.set_fit_result_name(str(fit_result_name).strip(), locked=True)
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_coefficient_text_changed(self, parameter_name, field_name, value):
         if self._loading_controls:
             return
         self.state.set_coefficient_field(parameter_name, field_name, value)
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_coefficient_vary_changed(self, parameter_name, checked):
         if self._loading_controls:
             return
         self.state.set_coefficient_field(parameter_name, "vary", checked)
-        self._refresh_from_state()
+        self._after_relevant_state_change()
 
     def _on_do_it_clicked(self):
         if self._current_model is None or not self._current_model.get("valid"):
@@ -582,8 +642,12 @@ class CurveFitDialog(QtWidgets.QDialog):
             if python_execution_service is None:
                 self._update_status_label("Curve Fit requires python_execution_service.")
                 return
-            if not python_execution_service.execute_hidden(self._current_command_preview):
-                self._update_status_label("Curve Fit execution failed.")
+            if not python_execution_service.execute_hidden(
+                self._current_model.get("commands_preview", "")
+            ):
+                self._update_status_label(
+                    self._execution_failure_message(python_execution_service)
+                )
                 return
         self.accept()
 
@@ -596,4 +660,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         clipboard = QtWidgets.QApplication.clipboard()
         if clipboard is None:
             return
-        clipboard.setText(self._current_command_preview, QtGui.QClipboard.Clipboard)
+        clipboard.setText(
+            self._current_model.get("commands_preview", ""),
+            QtGui.QClipboard.Clipboard,
+        )
