@@ -400,10 +400,25 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             names,
             ("line", "gaussian", "lorentzian", "exp", "sin", "power", "log"),
         )
+        self.assertEqual(
+            tuple(
+                entry["name"]
+                for entry in serialize_registry("fit_function")["entries"]
+            ),
+            names,
+        )
         entries = {
             entry["name"]: entry for entry in serialize_registry("fit_function")["entries"]
         }
+        self.assertEqual(
+            {name: entries[name]["callable_ref"] for name in names},
+            {name: f"hyde.{name}" for name in names},
+        )
         self.assertEqual(entries["line"]["parameters"], ["a", "b"])
+        self.assertEqual(
+            entries["line"]["source_text"],
+            "def line(x, a, b):\n    return a * x + b",
+        )
         self.assertEqual(
             entries["gaussian"]["parameters"],
             ["a", "x0", "width", "y0"],
@@ -473,6 +488,8 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             (
                 {
                     "name": "line_fit",
+                    "callable_ref": "line_fit",
+                    "source_text": "def line_fit(x, slope):\n    return slope * x",
                     "independent_vars": ["x"],
                     "parameters": ["slope"],
                 },
@@ -491,6 +508,8 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             (
                 {
                     "name": "line_fit",
+                    "callable_ref": "line_fit",
+                    "source_text": "def line_fit(x, slope):\n    return slope * x",
                     "independent_vars": ["x"],
                     "parameters": ["slope"],
                 },
@@ -505,6 +524,25 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
         self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(tuple(serialize_registry("fit_function")["entries"]), ())
         self.assertEqual(tuple(serialize_registry("fit_function")["rejected"]), ())
+
+    def test_fit_function_registry_preserves_registration_order(self):
+        def second_fit(x, slope):
+            return slope * x
+
+        second_fit.__module__ = "procedures"
+
+        def first_fit(x, slope):
+            return slope * x
+
+        first_fit.__module__ = "procedures"
+
+        register_fit_function(second_fit, independent_vars=("x",))
+        register_fit_function(first_fit, independent_vars=("x",))
+
+        self.assertEqual(
+            tuple(entry["name"] for entry in serialize_registry("fit_function")["entries"]),
+            ("second_fit", "first_fit"),
+        )
 
     def test_clear_without_kind_resets_all_registries(self):
         @hyde.table

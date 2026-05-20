@@ -6,6 +6,8 @@ from hyde.features.base import FeatureCodec
 from hyde.features.matplotlib_features import sorted_eligible_names
 from hyde.user_interface.window_naming import resolve_requested_name
 
+CALCULATED_X_NAME = "_calculated_"
+
 
 def _set_path(target, path, value):
     cursor = target
@@ -35,6 +37,49 @@ def _normalize_optional_text(value):
     return None if not text else text
 
 
+def _x_options(eligible_names):
+    return [CALCULATED_X_NAME, *list(eligible_names)]
+
+
+def _fit_argument_expression(argument_name, y_name):
+    if argument_name == CALCULATED_X_NAME:
+        return f"np.arange(len({y_name}))"
+    return str(argument_name)
+
+
+def _command_symbol_names(fit_result_name):
+    normalized_name = _normalize_optional_text(fit_result_name)
+    if normalized_name is None:
+        return "_hyde_lmfit_model", "_hyde_lmfit_params"
+    base_name = (
+        normalized_name[: -len("_result")]
+        if normalized_name.endswith("_result")
+        else normalized_name
+    )
+    if not base_name or not base_name.isidentifier():
+        return "_hyde_lmfit_model", "_hyde_lmfit_params"
+    return f"{base_name}_model", f"{base_name}_params"
+
+
+def _fit_report_line(fit_result_name):
+    normalized_name = _normalize_optional_text(fit_result_name)
+    if normalized_name is None:
+        return ""
+    return f"print({normalized_name}.fit_report())"
+
+
+def _coefficient_argument_expression(row):
+    if row.get("expression_owned"):
+        return str(row.get("expr") or "").strip()
+    initial_value = _parse_optional_float(
+        row.get("initial_value"),
+        f"Parameter {row['name']} initial value",
+    )
+    if initial_value is None:
+        return ""
+    return repr(initial_value)
+
+
 def _parse_optional_float(text, field_name):
     stripped = str(text or "").strip()
     if not stripped:
@@ -58,25 +103,46 @@ def _fit_result_default_name(y_name, existing_names):
     return candidate
 
 
-def attached_display_trace(result_name, x_name, trace_id, component, label, style):
+def attached_display_trace(
+    result_name,
+    x_name,
+    trace_id,
+    component,
+    label,
+    style,
+    *,
+    root_name=None,
+):
     normalized_result_name = _normalize_optional_text(result_name)
     if normalized_result_name is None:
         raise ValueError("Curve Fit attached displays require a fit result name.")
+    normalized_root_name = _normalize_optional_text(root_name) or normalized_result_name
     return {
         "id": str(trace_id),
         "kind": "line",
         "x_source": (
             None
-            if x_name in (None, "")
+            if x_name in (None, "", CALCULATED_X_NAME)
             else {"kind": "name", "value": str(x_name)}
         ),
         "y_source": {
             "kind": "attribute_path",
-            "root": {"kind": "name", "value": normalized_result_name},
+            "root": {"kind": "name", "value": normalized_root_name},
             "path": [str(component)],
         },
         "kwargs": {"label": str(label), **dict(style or {})},
     }
+
+
+def attached_display_label(result_name, component):
+    normalized_result_name = _normalize_optional_text(result_name)
+    if normalized_result_name is None:
+        raise ValueError("Curve Fit attached displays require a fit result name.")
+    if component == "best_fit":
+        return normalized_result_name
+    if component == "residual":
+        return f"{normalized_result_name}_residuals"
+    raise ValueError(f"Unsupported attached display component: {component!r}.")
 
 
 def _attached_display_trace_prefix(result_name, component):
@@ -312,20 +378,29 @@ class LmfitCodec(FeatureCodec):
 
         for index, independent_var in enumerate(entry.get("independent_vars", [])):
             current_name = stored_x_names.get(independent_var)
-            options = list(eligible_names)
+            options = _x_options(eligible_names)
             if current_name in options and current_name not in used_names:
                 value = current_name
             else:
                 preferred = None
                 if from_target and trace_records and index == 0:
                     preferred = trace_records[0].get("x_name")
+                    if preferred is None:
+                        preferred = CALCULATED_X_NAME
                 if preferred in options and preferred not in used_names:
                     value = preferred
                 else:
                     remaining = [
                         name for name in options if name not in used_names
                     ]
-                    value = None if not remaining else remaining[0]
+                    value = next(
+                        (
+                            name
+                            for name in remaining
+                            if name != CALCULATED_X_NAME
+                        ),
+                        None if not remaining else remaining[0],
+                    )
                     if value is None and options:
                         value = options[0]
             if value:
@@ -500,6 +575,16 @@ class LmfitCodec(FeatureCodec):
         return lines
 
     @classmethod
+    def _preview_argument_lines(cls, coefficient_rows):
+        arguments = []
+        for row in coefficient_rows:
+            expression = _coefficient_argument_expression(row)
+            if not expression:
+                return []
+            arguments.append(f"{row['name']}={expression}")
+        return arguments
+
+    @classmethod
     def _command_preview(
         cls,
         entry,
@@ -508,17 +593,24 @@ class LmfitCodec(FeatureCodec):
         fit_result_name,
         coefficient_rows,
         weighting_name,
+        *,
+        include_report=True,
     ):
         if entry is None:
             return ""
+        callable_ref = str(entry.get("callable_ref") or entry["name"])
+        model_name, params_name = _command_symbol_names(fit_result_name)
         lines = [
-            f"_hyde_lmfit_model = lmfit.Model({entry['name']}, "
+            f"{model_name} = lmfit.Model({callable_ref}, "
             f"independent_vars={list(entry.get('independent_vars', []))!r})"
         ]
         parameter_lines = cls._parameter_add_lines(coefficient_rows)
         if parameter_lines:
-            lines.append("_hyde_lmfit_params = lmfit.Parameters()")
-            lines.extend(parameter_lines)
+            lines.append(f"{params_name} = lmfit.Parameters()")
+            lines.extend(
+                line.replace("_hyde_lmfit_params", params_name)
+                for line in parameter_lines
+            )
         if (
             y_name
             and fit_result_name
@@ -526,26 +618,78 @@ class LmfitCodec(FeatureCodec):
         ):
             fit_arguments = []
             if parameter_lines:
-                fit_arguments.append("params=_hyde_lmfit_params")
+                fit_arguments.append(f"params={params_name}")
             fit_arguments.extend(
-                f"{row['name']}={row['value']}" for row in x_rows
+                (
+                    f"{row['name']}="
+                    f"{_fit_argument_expression(row['value'], y_name)}"
+                )
+                for row in x_rows
             )
             if weighting_name:
                 fit_arguments.append(f"weights={weighting_name}")
             lines.append(
-                f"{fit_result_name} = _hyde_lmfit_model.fit("
+                f"{fit_result_name} = {model_name}.fit("
                 f"{y_name}, {', '.join(fit_arguments)})"
             )
+            if include_report:
+                lines.append(_fit_report_line(fit_result_name))
         return "\n".join(lines)
 
     @classmethod
     def _equation_preview(cls, entry):
         if entry is None:
             return ""
+        source_text = str(entry.get("source_text") or "").strip()
+        if source_text:
+            return source_text
         arguments = list(entry.get("independent_vars", [])) + list(
             entry.get("parameters", [])
         )
         return f"{entry['name']}({', '.join(arguments)})"
+
+    @classmethod
+    def _preview_command(
+        cls,
+        entry,
+        y_name,
+        x_rows,
+        fit_result_name,
+        coefficient_rows,
+        preview_target_name,
+    ):
+        if entry is None:
+            return ""
+        normalized_preview_target = _normalize_optional_text(preview_target_name)
+        if normalized_preview_target is None:
+            return ""
+        if (
+            not y_name
+            or not fit_result_name
+            or not all(row.get("value") for row in x_rows)
+        ):
+            return ""
+        callable_ref = str(entry.get("callable_ref") or entry["name"])
+        preview_arguments = cls._preview_argument_lines(coefficient_rows)
+        if not preview_arguments:
+            return ""
+        independent_arguments = [
+            f"{row['name']}={_fit_argument_expression(row['value'], y_name)}"
+            for row in x_rows
+        ]
+        return "\n".join(
+            [
+                f"{normalized_preview_target} = type('_HydeLmfitPreview', (), {{}})()",
+                (
+                    f"{normalized_preview_target}.best_fit = {callable_ref}("
+                    f"{', '.join(independent_arguments + preview_arguments)})"
+                ),
+                (
+                    f"{normalized_preview_target}.residual = {y_name} - "
+                    f"{normalized_preview_target}.best_fit"
+                ),
+            ]
+        )
 
     @classmethod
     def _live_command_preview(
@@ -659,6 +803,7 @@ class LmfitCodec(FeatureCodec):
                 fit_result_name,
                 coefficient_rows,
                 weighting_name,
+                include_report=True,
             ),
             "equation_preview": cls._equation_preview(entry),
             "valid": bool(validation["valid"]),
@@ -679,17 +824,44 @@ class LmfitCodec(FeatureCodec):
         state,
         context=None,
         *,
+        include_report=False,
         previous_target_name=None,
         restore_store_name="_hyde_lmfit_live_restore",
         missing_sentinel_name="_hyde_lmfit_missing",
     ):
         presented = cls.present_state(state, context=context)
         return cls._live_command_preview(
-            presented["commands_preview"],
+            cls._command_preview(
+                presented["fit_function_entry"],
+                presented["y_name"],
+                presented["x_rows"],
+                presented["fit_result_name"],
+                presented["coefficient_rows"],
+                presented["weighting_name"],
+                include_report=bool(include_report),
+            ),
             presented["fit_result_name"],
             previous_target_name=previous_target_name,
             restore_store_name=restore_store_name,
             missing_sentinel_name=missing_sentinel_name,
+        )
+
+    @classmethod
+    def state_to_preview_python(
+        cls,
+        state,
+        context=None,
+        *,
+        preview_target_name,
+    ):
+        presented = cls.present_state(state, context=context)
+        return cls._preview_command(
+            presented["fit_function_entry"],
+            presented["y_name"],
+            presented["x_rows"],
+            presented["fit_result_name"],
+            presented["coefficient_rows"],
+            preview_target_name,
         )
 
     @classmethod

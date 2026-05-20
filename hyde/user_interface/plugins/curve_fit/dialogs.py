@@ -2,6 +2,7 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.lmfit_features import (
     LmfitCodec,
+    attached_display_label,
     attached_display_trace,
     resolve_attached_display_trace_id,
 )
@@ -72,6 +73,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         self._live_result_target_name = None
         self._live_restore_store_name = f"_hyde_lmfit_live_restore_{id(self)}"
         self._live_missing_sentinel_name = f"_hyde_lmfit_missing_{id(self)}"
+        self._preview_target_name = f"_hyde_lmfit_preview_{id(self)}"
         self._attached_display_tracker = FigureControlDraftTracker()
         self.setModal(True)
         self.setWindowTitle("Curve Fit")
@@ -106,6 +108,12 @@ class CurveFitDialog(QtWidgets.QDialog):
             self.show_fit_checkbox.setEnabled(False)
             self.show_residuals_checkbox.setEnabled(False)
         else:
+            self._loading_controls = True
+            try:
+                self.show_fit_checkbox.setChecked(True)
+                self.show_residuals_checkbox.setChecked(False)
+            finally:
+                self._loading_controls = False
             self.state.apply_action(
                 {
                     "type": "set",
@@ -565,9 +573,13 @@ class CurveFitDialog(QtWidgets.QDialog):
         display_state = self._attached_display_figure_state()
         if display_state is None:
             return
+        default_show_fit = (
+            display_state["fit_trace"] is None
+            and display_state["residual_trace"] is None
+        )
         opening_state = {
             "subplot_id": display_state["subplot_id"],
-            "show_fit": display_state["fit_trace"] is not None,
+            "show_fit": default_show_fit or display_state["fit_trace"] is not None,
             "show_residuals": display_state["residual_trace"] is not None,
             "fit_trace_id": display_state["fit_trace_id"],
             "residual_trace_id": display_state["residual_trace_id"],
@@ -648,13 +660,19 @@ class CurveFitDialog(QtWidgets.QDialog):
             return False
         return True
 
-    def _run_hidden_command(self, command, *, success_target_name=None):
+    def _run_hidden_command(
+        self,
+        command,
+        *,
+        success_target_name=None,
+        display_root_name=None,
+    ):
         python_execution_service = self.services.get("python_execution_service")
         if python_execution_service is None:
             return False, "Curve Fit requires python_execution_service."
         if not python_execution_service.execute_hidden(command):
             return False, self._execution_failure_message(python_execution_service)
-        if not self._sync_attached_display(force=True):
+        if not self._sync_attached_display(force=True, root_name=display_root_name):
             rollback_command = self.state.codec.state_to_restore_target_python(
                 success_target_name,
                 restore_store_name=self._live_restore_store_name,
@@ -667,7 +685,29 @@ class CurveFitDialog(QtWidgets.QDialog):
             self._live_result_target_name = success_target_name
         return True, ""
 
-    def _sync_attached_display(self, *, force=False):
+    def _sync_preview_object(self):
+        if self.figure_window is None or self._current_model is None:
+            return True
+        current_state = self._attached_display_tracker.current_states.get(
+            "attached_display"
+        )
+        if current_state is None:
+            return True
+        if not (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()):
+            return True
+        preview_command = self.state.codec.state_to_preview_python(
+            self.state._state,
+            context=self._context(),
+            preview_target_name=self._preview_target_name,
+        )
+        if not preview_command:
+            return False
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return False
+        return bool(python_execution_service.execute_hidden(preview_command))
+
+    def _sync_attached_display(self, *, force=False, root_name=None):
         current_state = self._attached_display_tracker.current_states.get(
             "attached_display"
         )
@@ -686,6 +726,11 @@ class CurveFitDialog(QtWidgets.QDialog):
                 return False
             fit_result_name = str(desired_state.get("fit_result_name") or "").strip()
             if not fit_result_name:
+                return False
+            resolved_root_name = (
+                str(root_name).strip() if root_name is not None else self._preview_target_name
+            )
+            if resolved_root_name == self._preview_target_name and not self._sync_preview_object():
                 return False
             x_name = self._attached_plot_x_name()
             subplot_state = self._attached_display_subplot_state()
@@ -710,8 +755,9 @@ class CurveFitDialog(QtWidgets.QDialog):
                     x_name,
                     fit_trace_id,
                     "best_fit",
-                    "Fit",
+                    attached_display_label(fit_result_name, "best_fit"),
                     {"linestyle": "--"},
+                    root_name=resolved_root_name,
                 )
                 if desired_state["show_fit"]
                 else None
@@ -730,8 +776,9 @@ class CurveFitDialog(QtWidgets.QDialog):
                     x_name,
                     residual_trace_id,
                     "residual",
-                    "Residuals",
+                    attached_display_label(fit_result_name, "residual"),
                     {"linestyle": ":"},
+                    root_name=resolved_root_name,
                 )
                 if desired_state["show_residuals"]
                 else None
@@ -811,6 +858,12 @@ class CurveFitDialog(QtWidgets.QDialog):
                 self._update_status_label(
                     self._current_model.get("status_message", "")
                 )
+            if (
+                self.figure_window is not None
+                and self._current_model.get("valid")
+                and (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked())
+            ):
+                self._sync_attached_display(force=True)
             return
         self._maybe_run_live_update()
 
@@ -837,6 +890,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         success, message = self._run_hidden_command(
             live_command,
             success_target_name=self._current_model.get("fit_result_name"),
+            display_root_name=self._preview_target_name,
         )
         self._live_error_message = "" if success else message
         self.do_it_button.setEnabled(
@@ -934,13 +988,13 @@ class CurveFitDialog(QtWidgets.QDialog):
 
     def _on_show_fit_toggled(self, checked):
         del checked
-        if self._loading_controls or self.execution_mode() != "live":
+        if self._loading_controls:
             return
         self._sync_attached_display()
 
     def _on_show_residuals_toggled(self, checked):
         del checked
-        if self._loading_controls or self.execution_mode() != "live":
+        if self._loading_controls:
             return
         self._sync_attached_display()
 
@@ -974,10 +1028,29 @@ class CurveFitDialog(QtWidgets.QDialog):
                     missing_sentinel_name=self._live_missing_sentinel_name,
                 ),
                 success_target_name=self._current_model.get("fit_result_name"),
+                display_root_name=self._current_model.get("fit_result_name"),
             )
             if not success:
                 self._update_status_label(message)
                 return
+        elif not self._sync_attached_display(
+            force=True,
+            root_name=self._current_model.get("fit_result_name"),
+        ):
+            self._update_status_label(self._attached_display_failure_message())
+            return
+        python_execution_service = self.services.get("python_execution_service")
+        fit_result_name = str(
+            self._current_model.get("fit_result_name") if self._current_model else ""
+        ).strip()
+        if (
+            python_execution_service is not None
+            and fit_result_name
+            and hasattr(python_execution_service, "execute_visible")
+        ):
+            python_execution_service.execute_visible(
+                f"print({fit_result_name}.fit_report())"
+            )
         self.accept()
 
     def execution_mode(self):

@@ -14,7 +14,9 @@
 - [x] Support `@hyde.fit_function` discovery as the only fit-function catalog path.
 - [x] Support multivariate fits as a first-class capability.
 - [x] Make the `lmfit` result object the authoritative fit output.
-- [x] Derive plotted fit and residual displays from that authoritative result object.
+- [x] Keep accepted fit and residual displays rooted to that authoritative result
+  object while rendering in-dialog attached previews from the current coefficient
+  guesses.
 - [x] Support live reruns when screen updates are enabled.
 - [x] Support one-shot execution on `Do It` when screen updates are suppressed.
 - [ ] Finalize the exact first-pass validation rule for an explicit `nothing` choice in
@@ -38,17 +40,20 @@ The dialog owns only transient configuration state long enough to:
 
 The dialog does not become the authoritative owner of scientific results. The
 authoritative fit output is an `lmfit` result object stored in the kernel namespace.
-Any plotted fit curve or residual display is a rendering derived from that result
-object rather than a separate top-level scientific output channel.
+While the dialog is open, attached fit and residual previews render from the current
+coefficient guesses. After successful `Do It` / accept, any surviving attached display
+is re-rooted to that authoritative result object rather than becoming a separate
+top-level scientific output channel.
 
 ## Initial Deployment Scope
 
 The first implementation includes:
 
-- a modal dialog launched in figure context and patterned after the existing
+- a modal dialog launched from `Analysis`, auto-attaching to the active supported
+  figure when available, and patterned after the existing
   figure-control dialogs
 - one fit-function chooser populated only by discovered `@hyde.fit_function`
-  definitions
+  definitions, including Hyde-provided built-ins and project-defined procedures
 - `New Fit Function...` support that writes a minimal valid scaffold into
   `procedures/__init__.py`, triggers the normal procedures reload path, and updates the
   chooser
@@ -63,8 +68,9 @@ The first implementation includes:
 - an `lmfit`-native coefficient table
 - a fit-result target control whose default name is based on the selected Y object,
   typically `<y_name>_fit_result`
-- graph-display controls for fit-curve and residual rendering derived from the fit
-  result object
+- graph-display controls for fit-curve and residual rendering, with guessed previews
+  while the dialog is open and result-rooted displays after successful `Do It` /
+  accept
 - explicit Python preview
 - `To Clip`
 - live hidden reruns when screen updates are enabled
@@ -116,9 +122,11 @@ definitions.
 
 For the first implementation:
 
-- the chooser contains only user-defined functions
-- later bundled or imported function collections may be added, but they still enter the
-  chooser only through `@hyde.fit_function`
+- Hyde-provided built-in fit functions and project-defined procedures fit functions are
+  both allowed, but they still enter the chooser only through
+  `@hyde.fit_function` registration
+- chooser order follows registration/definition order rather than alphabetical sorting;
+  Hyde's built-ins register first, with `line` first
 - Hyde does not maintain a second fit-function registry outside the normal procedures
   environment
 
@@ -199,11 +207,13 @@ Weighting rules:
 - Hyde passes those weights through in the `lmfit`-native way
 - zero weights exclude points
 
-`Suppress Screen Updates` is a performance control, not merely a visual toggle.
+`Suppress Screen Updates` is a performance control on actual fit execution, not merely
+a visual toggle.
 
 When enabled:
 
-- no intermediate reruns occur while the user changes controls
+- no intermediate fit reruns occur while the user changes controls
+- attached guessed-function previews may still update as the user edits the dialog
 - the real outputs are updated only once, on `Do It`
 
 When disabled:
@@ -246,6 +256,9 @@ output channels. Instead, the Output Options tab centers on:
 - whether to display or update the fit curve on the graph
 - whether to display or update residuals on the graph
 
+In attached mode, `Show Fit` defaults on unless the figure already opens with an
+existing attached fit-display state that should be preserved.
+
 The fit-result object target:
 
 - defaults to a name derived from the selected Y object, typically
@@ -254,8 +267,10 @@ The fit-result object target:
 
 Graph-display behaviors:
 
-- the plotted fit curve is derived from the fit result object
-- the plotted residual display is derived from the fit result object
+- while the dialog is open, attached `Show Fit` and `Show Residuals` previews render
+  from the current coefficient guesses rather than from an already-computed fit result
+- on successful `Do It` / accept, any surviving attached fit or residual display is
+  re-rooted to the authoritative fit result object
 - neither is treated as a separate top-level scientific output
 
 Covariance information is part of the `lmfit` result path and does not require a
@@ -273,14 +288,16 @@ The dialog owns one GUI-side fit state object and one fit codec. The codec:
 - normalizes state
 - validates state
 - builds command preview source
-- builds equation preview content
+- builds equation preview content from the selected function definition body when
+  source is available
 
 Execution rules:
 
 - when screen updates are enabled, relevant changes rerun immediately through a hidden
   execution path
 - `Do It` in live mode accepts the current state and does not trigger an extra rerun
-- when screen updates are suppressed, intermediate reruns do not occur
+- when screen updates are suppressed, intermediate fit reruns do not occur, but
+  guessed attached previews may still update
 - `Do It` in suppressed mode performs the one hidden fit/update execution
 
 `To Clip` copies the current command preview.

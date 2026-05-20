@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import tempfile
 import textwrap
@@ -16,6 +18,7 @@ from qtutils.qt import QtWidgets
 
 import hyde
 from hyde import project_tools
+from hyde.features.lmfit_features import CALCULATED_X_NAME
 from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugin_tools import HydePluginManager
@@ -137,7 +140,7 @@ class ProcedureExecutionHarness:
             with patch("hyde.execution.ipc.put_parent_message", side_effect=self._route_parent_message), patch(
                 "hyde.recreation_registry.put_parent_message",
                 side_effect=self._route_parent_message,
-            ):
+            ), contextlib.redirect_stdout(io.StringIO()):
                 exec(code, self.namespace, self.namespace)
         except Exception as exc:
             self.last_error_message = str(exc)
@@ -164,6 +167,7 @@ class FakeExecutionService:
     def __init__(self, harness):
         self.harness = harness
         self.calls = []
+        self.visible_calls = []
         self.last_error_message = ""
 
     def execute_hidden(self, code, silent=True):
@@ -171,6 +175,10 @@ class FakeExecutionService:
         result = self.harness.execute_hidden(code, silent=silent)
         self.last_error_message = self.harness.last_error_message
         return result
+
+    def execute_visible(self, code):
+        self.visible_calls.append(str(code))
+        return True
 
 
 def configure_curve_fit_runtime(app, manager):
@@ -267,6 +275,27 @@ def figure_ir_with_named_trace(x_name, y_name):
                             "id": "trace0",
                             "kind": "line",
                             "x_source": {"kind": "name", "value": x_name},
+                            "y_source": {"kind": "name", "value": y_name},
+                            "kwargs": {"label": y_name},
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+
+
+def figure_ir_with_implicit_x_trace(y_name):
+    return {
+        "layout": {
+            "subplots": [
+                {
+                    "id": "subplot0",
+                    "traces": [
+                        {
+                            "id": "trace0",
+                            "kind": "line",
+                            "x_source": None,
                             "y_source": {"kind": "name", "value": y_name},
                             "kwargs": {"label": y_name},
                         }
@@ -552,8 +581,10 @@ class TestCurveFitPlugin(unittest.TestCase):
             show_output_options_tab(dialog)
             self.assertTrue(dialog.show_fit_checkbox.isVisible())
             self.assertTrue(dialog.show_fit_checkbox.isEnabled())
+            self.assertTrue(dialog.show_fit_checkbox.isChecked())
             self.assertTrue(dialog.show_residuals_checkbox.isVisible())
             self.assertTrue(dialog.show_residuals_checkbox.isEnabled())
+            self.assertFalse(dialog.show_residuals_checkbox.isChecked())
             dialog.close()
         finally:
             harness.close()
@@ -711,8 +742,16 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertTrue(
                 set(BUILTIN_FIT_FUNCTION_NAMES).issubset(discovered_names)
             )
+            self.assertEqual(
+                discovered_names[: len(BUILTIN_FIT_FUNCTION_NAMES)],
+                list(BUILTIN_FIT_FUNCTION_NAMES),
+            )
             self.assertIn("line_fit", discovered_names)
             self.assertIn("plane_fit", discovered_names)
+            self.assertLess(
+                discovered_names.index("line_fit"),
+                discovered_names.index("plane_fit"),
+            )
             plane_entry = dialog.fit_function_combo.itemData(
                 dialog.fit_function_combo.findText("plane_fit")
             )
@@ -783,7 +822,73 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertTrue(
                 set(BUILTIN_FIT_FUNCTION_NAMES).issubset(discovered_names)
             )
+            self.assertEqual(
+                discovered_names[: len(BUILTIN_FIT_FUNCTION_NAMES)],
+                list(BUILTIN_FIT_FUNCTION_NAMES),
+            )
+            self.assertEqual(discovered_names[0], "line")
             dialog.close()
+        finally:
+            harness.close()
+
+    def test_curve_fit_dialog_builtin_line_fit_executes_with_implicit_x(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+        harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
+
+        try:
+            dialog = create_curve_fit_dialog(
+                manager.plugins["curve_fit"],
+                app,
+                figure_window=make_figure_window(
+                    figure_ir_with_implicit_x_trace("signal")
+                ),
+            )
+            try:
+                dialog.fit_function_combo.setCurrentIndex(
+                    dialog.fit_function_combo.findText("line")
+                )
+                QtWidgets.QApplication.processEvents()
+
+                self.assertIn(
+                    "lmfit.Model(hyde.line, independent_vars=['x'])",
+                    dialog.preview_text.toPlainText(),
+                )
+                self.assertEqual(
+                    dialog.x_data_rows[0]["combo"].currentText(),
+                    CALCULATED_X_NAME,
+                )
+
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "a")["initial"],
+                    "2.0",
+                )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "b")["initial"],
+                    "1.0",
+                )
+
+                dialog.do_it_button.click()
+                QtWidgets.QApplication.processEvents()
+
+                self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+                self.assertIn("signal_fit_result", harness.namespace)
+                self.assertEqual(harness.execution_service.last_error_message, "")
+            finally:
+                dialog.close()
         finally:
             harness.close()
 
@@ -888,8 +993,12 @@ class TestCurveFitPlugin(unittest.TestCase):
                     dialog.preview_text.toPlainText(),
                 )
                 self.assertIn(
-                    "signal_fit_result = _hyde_lmfit_model.fit("
+                    "signal_fit_result = signal_fit_model.fit("
                     "signal, x=time, z=detuning)",
+                    dialog.preview_text.toPlainText(),
+                )
+                self.assertIn(
+                    "print(signal_fit_result.fit_report())",
                     dialog.preview_text.toPlainText(),
                 )
 
@@ -897,7 +1006,10 @@ class TestCurveFitPlugin(unittest.TestCase):
                 QtWidgets.QApplication.processEvents()
                 self.assertEqual(
                     dialog.preview_text.toPlainText().strip(),
-                    "plane_fit(x, z, amplitude, offset)",
+                    (
+                        "def plane_fit(x, z, amplitude, offset):\n"
+                        "    return amplitude * x + offset * z"
+                    ),
                 )
 
                 dialog.from_target_checkbox.setChecked(False)
@@ -908,7 +1020,75 @@ class TestCurveFitPlugin(unittest.TestCase):
                 )
                 self.assertEqual(
                     combo_items(dialog.x_data_rows[0]["combo"]),
-                    ["detuning", "signal", "time"],
+                    [CALCULATED_X_NAME, "detuning", "signal", "time"],
+                )
+            finally:
+                dialog.close()
+        finally:
+            harness.close()
+
+    def test_curve_fit_dialog_defaults_x_to_calculated_for_implicit_target_trace(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "time": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+
+        try:
+            harness.write_procedures(
+                """
+                @hyde.fit_function(independent_vars=("x",))
+                def line_fit(x, slope, offset):
+                    return slope * x + offset
+                """
+            )
+            harness.reload_procedures()
+
+            dialog = create_curve_fit_dialog(
+                manager.plugins["curve_fit"],
+                app,
+                figure_window=make_figure_window(
+                    figure_ir_with_implicit_x_trace("signal")
+                ),
+            )
+            try:
+                dialog.fit_function_combo.setCurrentIndex(
+                    dialog.fit_function_combo.findText("line_fit")
+                )
+                QtWidgets.QApplication.processEvents()
+
+                self.assertEqual(
+                    combo_items(dialog.x_data_rows[0]["combo"]),
+                    [CALCULATED_X_NAME, "signal", "time"],
+                )
+                self.assertEqual(
+                    dialog.x_data_rows[0]["combo"].currentText(),
+                    CALCULATED_X_NAME,
+                )
+                self.assertIn(
+                    "signal_fit_result = signal_fit_model.fit("
+                    "signal, x=np.arange(len(signal)))",
+                    dialog.preview_text.toPlainText(),
+                )
+                self.assertIn(
+                    "print(signal_fit_result.fit_report())",
+                    dialog.preview_text.toPlainText(),
                 )
             finally:
                 dialog.close()
@@ -1292,6 +1472,10 @@ class TestCurveFitPlugin(unittest.TestCase):
                 QtWidgets.QApplication.processEvents()
 
                 self.assertEqual(len(harness.execution_service.calls), 1)
+                self.assertEqual(
+                    harness.execution_service.visible_calls,
+                    ["print(signal_fit_result.fit_report())"],
+                )
                 self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
                 result = harness.namespace["signal_fit_result"]
                 self.assertEqual(type(result).__name__, "ModelResult")
@@ -1404,6 +1588,10 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             self.assertEqual(len(harness.execution_service.calls), 2)
+            self.assertEqual(
+                harness.execution_service.visible_calls,
+                ["print(signal_fit_result.fit_report())"],
+            )
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
         finally:
             dialog.close()
@@ -1510,13 +1698,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             figure_window=attached_figure.figure_window
         )
         try:
-            dialog.suppress_screen_updates_checkbox.setChecked(False)
-            QtWidgets.QApplication.processEvents()
-
-            attached_figure.action_log.clear()
-            dialog.show_fit_checkbox.setChecked(True)
-            QtWidgets.QApplication.processEvents()
-
+            self.assertTrue(dialog.show_fit_checkbox.isChecked())
             self.assertEqual(
                 [entry["action"]["type"] for entry in attached_figure.action_log],
                 ["set_trace"],
@@ -1526,7 +1708,126 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_curve_fit_dialog_attached_suppressed_show_fit_waits_for_do_it(self):
+    def test_curve_fit_dialog_attached_display_uses_implicit_x_for_calculated_selection(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            dialog.x_data_rows[0]["combo"].setCurrentText(CALCULATED_X_NAME)
+            QtWidgets.QApplication.processEvents()
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+            dialog.show_fit_checkbox.setChecked(True)
+            QtWidgets.QApplication.processEvents()
+
+            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+                "subplots"
+            ][0]
+            fit_trace = subplot["traces"][-1]
+            self.assertIsNone(fit_trace["x_source"])
+            self.assertEqual(fit_trace["kwargs"]["label"], "signal_fit_result")
+            np.testing.assert_allclose(
+                attached_figure.figure.axes[0].lines[-1].get_xdata(),
+                np.arange(len(harness.namespace["signal_fit_result"].best_fit)),
+            )
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_attached_show_fit_previews_function_guesses_not_fit_result(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0, 4.0]),
+            np.array([0.0, 1.0, 4.0, 9.0, 15.0]),
+        )
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "time": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+        harness.set_namespace_value("signal", np.array([0.0, 1.0, 4.0, 9.0, 15.0]))
+        harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0, 4.0]))
+        try:
+            dialog = create_curve_fit_dialog(
+                manager.plugins["curve_fit"],
+                app,
+                figure_window=attached_figure.figure_window,
+            )
+            try:
+                dialog.fit_function_combo.setCurrentIndex(
+                    dialog.fit_function_combo.findText("exp")
+                )
+                QtWidgets.QApplication.processEvents()
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "a")["initial"],
+                    "1.0",
+                )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "width")["initial"],
+                    "-1.0",
+                )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "y0")["initial"],
+                    "0.0",
+                )
+                dialog.suppress_screen_updates_checkbox.setChecked(False)
+                QtWidgets.QApplication.processEvents()
+                dialog.show_fit_checkbox.setChecked(True)
+                QtWidgets.QApplication.processEvents()
+
+                preview_line = attached_figure.figure.axes[0].lines[-1]
+                np.testing.assert_allclose(
+                    preview_line.get_ydata(),
+                    hyde.exp(harness.namespace["time"], 1.0, -1.0, 0.0),
+                )
+                self.assertFalse(
+                    np.allclose(
+                        preview_line.get_ydata(),
+                        harness.namespace["signal_fit_result"].best_fit,
+                    )
+                )
+
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "width")["initial"],
+                    "-0.5",
+                )
+                QtWidgets.QApplication.processEvents()
+
+                np.testing.assert_allclose(
+                    attached_figure.figure.axes[0].lines[-1].get_ydata(),
+                    hyde.exp(harness.namespace["time"], 1.0, -0.5, 0.0),
+                )
+            finally:
+                dialog.close()
+        finally:
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_attached_suppressed_parameter_edits_update_preview(self):
         attached_figure = AttachedFigureHarness(
             np.array([0.0, 1.0, 2.0, 3.0]),
             np.array([1.0, 3.0, 5.0, 7.0]),
@@ -1536,21 +1837,55 @@ class TestCurveFitPlugin(unittest.TestCase):
         )
         try:
             self.assertEqual(dialog.execution_mode(), "suppressed")
+            self.assertTrue(dialog.show_fit_checkbox.isChecked())
 
-            attached_figure.action_log.clear()
-            dialog.show_fit_checkbox.setChecked(True)
+            np.testing.assert_allclose(
+                attached_figure.figure.axes[0].lines[-1].get_ydata(),
+                2.0 * harness.namespace["time"] + 1.0,
+            )
+
+            finish_line_edit(
+                coefficient_row_widgets(dialog, "offset")["initial"],
+                "0.5",
+            )
             QtWidgets.QApplication.processEvents()
 
-            self.assertEqual(attached_figure.action_log, [])
-            self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
+            np.testing.assert_allclose(
+                attached_figure.figure.axes[0].lines[-1].get_ydata(),
+                2.0 * harness.namespace["time"] + 0.5,
+            )
+            self.assertNotIn("signal_fit_result", harness.namespace)
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
 
-            dialog.do_it_button.click()
-            QtWidgets.QApplication.processEvents()
+    def test_curve_fit_dialog_attached_suppressed_show_fit_previews_without_committing_result(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            self.assertEqual(dialog.execution_mode(), "suppressed")
+            self.assertTrue(dialog.show_fit_checkbox.isChecked())
 
             self.assertEqual(
                 [entry["action"]["type"] for entry in attached_figure.action_log],
                 ["set_trace"],
             )
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
+            self.assertNotIn("signal_fit_result", harness.namespace)
+
+            attached_figure.action_log.clear()
+            dialog.do_it_button.click()
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual([entry["action"]["type"] for entry in attached_figure.action_log], ["set_trace"])
             self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
             np.testing.assert_allclose(
                 attached_figure.figure.axes[0].lines[-1].get_ydata(),
@@ -1592,15 +1927,17 @@ class TestCurveFitPlugin(unittest.TestCase):
             subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
                 "subplots"
             ][0]
-            self.assertEqual(len(subplot["traces"]), 1)
-            self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
             self.assertEqual(
-                [entry["action"]["trace_id"] for entry in attached_figure.action_log],
-                [
-                    attached_display_trace_id("signal_fit_result", "fit"),
-                    attached_display_trace_id("signal_fit_result", "res"),
-                    attached_display_trace_id("signal_fit_result", "fit"),
-                ],
+                [trace["id"] for trace in subplot["traces"]],
+                ["trace0", attached_display_trace_id("signal_fit_result", "fit")],
+            )
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
+            self.assertTrue(
+                any(
+                    entry["action"]["trace_id"]
+                    == attached_display_trace_id("signal_fit_result", "res")
+                    for entry in attached_figure.action_log
+                )
             )
         finally:
             dialog.close()
@@ -1664,15 +2001,17 @@ class TestCurveFitPlugin(unittest.TestCase):
             ][0]
             self.assertEqual(
                 [trace["id"] for trace in subplot["traces"]],
-                ["trace0", colliding_fit_id, colliding_residual_id],
+                ["trace0", colliding_fit_id, colliding_residual_id, generated_fit_id],
             )
-            self.assertEqual(
-                [entry["action"]["trace_id"] for entry in attached_figure.action_log],
-                [
-                    generated_fit_id,
-                    generated_residual_id,
-                    generated_fit_id,
-                ],
+            self.assertNotIn(
+                generated_residual_id,
+                [trace["id"] for trace in subplot["traces"]],
+            )
+            self.assertTrue(
+                any(
+                    entry["action"]["trace_id"] == generated_residual_id
+                    for entry in attached_figure.action_log
+                )
             )
         finally:
             dialog.close()

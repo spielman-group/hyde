@@ -25,17 +25,20 @@ changed.
 
 The dialog configures one authoritative output: an `lmfit` result object in the kernel
 namespace. The result object is always created or recreated. Plotting is optional. Fit
-curve and residual displays are derived renderings of that result object, not separate
-top-level scientific outputs. When a supported figure is available, the dialog can
-attach to it and manage dialog-owned plotted displays. When no figure is available, the
-dialog still runs for result-object creation and update, while graph-display controls
-remain visible but disabled.
+curve and residual displays are not separate top-level scientific outputs. While the
+dialog is open, attached previews render from the current coefficient guesses; after
+successful `Do It` / accept, any surviving display is re-rooted to the authoritative
+result object. When a supported figure is available, the dialog can attach to it and
+manage dialog-owned plotted displays. When no figure is available, the dialog still
+runs for result-object creation and update, while graph-display controls remain visible
+but disabled.
 
-Fit-function discovery is limited to user-defined `@hyde.fit_function` definitions in
-the normal procedures environment. The decorator uses `independent_vars` to align with
-`lmfit` terminology. Multivariate fits are first-class. Supported function signatures
-are strict first-pass forms: declared independent variables first, followed by
-explicitly named coefficient parameters, with no supported `*args` or `**kwargs`.
+Fit-function discovery is limited to `@hyde.fit_function` definitions on the normal
+Hyde path. That includes Hyde-provided built-in fit functions plus project-defined
+procedures functions. The decorator uses `independent_vars` to align with `lmfit`
+terminology. Multivariate fits are first-class. Supported function signatures are
+strict first-pass forms: declared independent variables first, followed by explicitly
+named coefficient parameters, with no supported `*args` or `**kwargs`.
 
 ## User Stories
 
@@ -44,7 +47,7 @@ explicitly named coefficient parameters, with no supported `*args` or `**kwargs`
 3. As a Hyde user, I want Curve Fit to still open when no supported figure is active, so that I can create or update fit results even outside figure context.
 4. As a Hyde user, I want graph-display controls to remain present but disabled when no figure target is available, so that the dialog shape stays consistent while making the unavailable behavior explicit.
 5. As a Hyde user, I want the dialog to be modal, so that fit editing behaves like Hyde's existing figure-control dialogs.
-6. As a Hyde user, I want the fit-function chooser to show discovered `@hyde.fit_function` definitions only, so that function availability comes from the normal Hyde procedures environment.
+6. As a Hyde user, I want the fit-function chooser to show discovered `@hyde.fit_function` definitions only, so that function availability comes from Hyde's normal fit-function registration path rather than from an extra GUI-owned catalog.
 7. As a Hyde user, I want a `New Fit Function...` action in the dialog, so that I can scaffold a valid function without leaving the fit workflow entirely.
 8. As a Hyde user, I want the scaffolded fit function to be minimal and valid, so that Hyde creates only the required starting point and leaves real authoring to ordinary source editing.
 9. As a Hyde user, I want multivariate fit functions to be supported in the first pass, so that Hyde does not artificially restrict fitting to one independent variable.
@@ -62,10 +65,10 @@ explicitly named coefficient parameters, with no supported `*args` or `**kwargs`
 21. As a Hyde user, I want fit-curve display to be optional, so that I can keep the fit result without forcing a plotted overlay.
 22. As a Hyde user, I want residual display to be optional, so that I can inspect residual behavior only when it helps.
 23. As a Hyde user, I want first-pass residuals to appear on the existing figure axes, so that Hyde reuses the current figure-editing model instead of introducing a new residual layout system.
-24. As a Hyde user, I want a command preview and equation preview, so that I can understand both the executable action and the selected model form.
+24. As a Hyde user, I want a command preview and an equation/source preview, so that I can understand both the executable action and the selected model form.
 25. As a Hyde user, I want `To Clip`, so that I can export the current generated command text without committing to visible terminal execution.
 26. As a Hyde user, I want live updates to rerun immediately when screen updates are enabled, so that I can tune coefficient and output settings interactively.
-27. As a Hyde user, I want `Suppress Screen Updates` to prevent intermediate reruns, so that I can make larger edits without repeated expensive fit execution.
+27. As a Hyde user, I want `Suppress Screen Updates` to prevent intermediate fit reruns while still letting guessed previews update, so that I can make larger edits without repeated expensive fit execution.
 28. As a Hyde user, I want `Do It` in live mode to simply accept the current successful state, so that acceptance does not trigger a redundant extra fit.
 29. As a Hyde user, I want `Do It` in suppressed mode to execute the fit once, so that deferred editing still commits real outputs when I am ready.
 30. As a Hyde user, I want Curve Fit to mutate real targets instead of GUI-owned copies, so that the dialog behaves like Hyde's existing real-edit figure controls.
@@ -89,9 +92,10 @@ explicitly named coefficient parameters, with no supported `*args` or `**kwargs`
 - The kernel namespace remains authoritative for scientific objects, fit results, and any live plotted outputs.
 - The authoritative fit output is one `lmfit` result object stored in the kernel namespace.
 - The fit-result target control has no explicit `nothing` choice. A fit-result object is always created or recreated.
-- Fit-curve and residual displays are derived renderings of the fit result object, not separate top-level scientific output channels.
+- Fit-curve and residual displays are not separate top-level scientific output channels. While the dialog is open, their attached previews render from the current coefficient guesses; after successful `Do It` / accept, any surviving display is re-rooted to the authoritative fit result object.
 - First-pass residual display stays on the existing figure axes as a dialog-owned derived trace. The feature does not introduce a dedicated residual subplot, second axis layout, or broader multi-panel figure layout support.
-- Fit-function discovery is limited to user-defined `@hyde.fit_function` definitions in the normal procedures environment.
+- Fit-function discovery is limited to `@hyde.fit_function` definitions in the normal Hyde procedures path, including Hyde-provided built-ins plus project-defined procedures functions.
+- Fit-function chooser order follows registration/definition order rather than alphabetical sorting. Hyde's built-ins register first, with `line` first.
 - The decorator uses the `independent_vars` name to align with `lmfit.Model`.
 - No extra Hyde-specific decorator metadata is added in the first pass beyond `independent_vars`.
 - Supported fit-function signatures are strict first-pass forms: declared independent variables first, then explicitly named coefficient parameters. `*args` and `**kwargs` are not supported.
@@ -109,13 +113,16 @@ explicitly named coefficient parameters, with no supported `*args` or `**kwargs`
 - Required free parameters must have usable values before `Do It` is valid.
 - The output-options surface centers on the fit-result target plus fit-curve and residual display toggles.
 - `Show Fit` and `Show Residuals` already exist in the dialog as live controls before Issue 7. The plotting slice should wire those existing controls to real behavior rather than introducing replacement toggles.
+- In attached mode, `Show Fit` defaults on unless Hyde is preserving an existing attached fit-display state from the opening figure.
 - The result-object target defaults from the selected Y object name and falls forward to a unique indexed name when needed.
 - The dialog provides `Commands` and `Equation` preview modes plus a single status/error strip.
+- `Equation` shows the selected function definition body when source is available, rather than only a call signature.
 - `To Clip` copies the current command preview.
 - `To Cmd Line`, `Graph Now`, and `Help` are not part of the first pass.
 - Live execution uses the hidden kernel execution path.
 - When screen updates are enabled, relevant control changes rerun immediately and update current real targets.
-- When screen updates are suppressed, intermediate reruns do not occur and real outputs update only on `Do It`.
+- When screen updates are suppressed, intermediate fit reruns do not occur, but guessed attached previews may still update as the dialog changes.
+- In both modes, attached guessed-function preview updates are not themselves authoritative fit commits.
 - In live mode, `Do It` accepts the current valid state and does not trigger an extra rerun.
 - In suppressed mode, `Do It` performs the one actual hidden fit/update execution.
 - The dialog owns real live targets during the session. It does not create hidden duplicate scientific state.
@@ -129,8 +136,8 @@ explicitly named coefficient parameters, with no supported `*args` or `**kwargs`
 
 - Good tests must verify user-visible behavior or explicit architectural contracts, not helper wiring, incidental call order, or private implementation structure.
 - The core contract tests should cover state validation and lowering behavior for the curve-fit GUI state/codec, because that is the deterministic boundary between the dialog and kernel execution.
-- Fit-function discovery tests should verify accepted and rejected first-pass function signatures, `independent_vars` handling, coefficient-name inference, and unsupported signature forms.
-- Execution-flow tests should verify live-update behavior, suppressed-update behavior, `Do It` semantics in each mode, and failure handling that preserves the last successful live outputs.
+- Fit-function discovery tests should verify accepted and rejected first-pass function signatures, `independent_vars` handling, coefficient-name inference, built-in/project discovery behavior, and unsupported signature forms.
+- Execution-flow tests should verify live-update behavior, suppressed-update behavior, guessed-preview behavior, `Do It` semantics in each mode, and failure handling that preserves the last successful live outputs.
 - Ownership and revert tests should verify that result targets and dialog-owned plotted displays are restored or removed correctly on target changes and cancel.
 - Figure-integration tests should verify attached and unattached dialog behavior, including disabled plotting controls when no figure target is available and derived trace behavior when a figure target is attached.
 - Scaffold tests should verify that `New Fit Function...` produces a minimal valid function declaration, triggers the normal reload flow, and reselects the created function on success.

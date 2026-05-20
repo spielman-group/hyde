@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import threading
+import textwrap
 
 from .execution.ipc import put_parent_message
 
@@ -12,14 +13,20 @@ _REGISTRY_PROTOCOLS = {
     "table": {
         "task": "TABLE_MACROS_RESPONSE",
         "entry_fields": ("name", "args"),
+        "preserve_registration_order": False,
+        "supports_macro_registration": True,
     },
     "figure": {
         "task": "FIGURE_MACROS_RESPONSE",
         "entry_fields": ("name", "args"),
+        "preserve_registration_order": False,
+        "supports_macro_registration": True,
     },
     "fit_function": {
         "task": "FIT_FUNCTIONS_RESPONSE",
         "entry_fields": None,
+        "preserve_registration_order": True,
+        "supports_macro_registration": False,
     },
 }
 _REGISTRIES = {
@@ -76,7 +83,8 @@ def clear(kind=None):
 
 def _validate_recreation_function(kind, func):
     normalized_kind = _normalize_kind(kind)
-    if normalized_kind == "fit_function":
+    protocol = _REGISTRY_PROTOCOLS[normalized_kind]
+    if not protocol["supports_macro_registration"]:
         raise ValueError(f"Unsupported macro kind: {kind!r}.")
     if not callable(func):
         raise TypeError(
@@ -101,9 +109,15 @@ def _validate_recreation_function(kind, func):
 
 def _serialized_entries(kind, registry_key):
     normalized_kind = _normalize_kind(kind)
-    entry_fields = _REGISTRY_PROTOCOLS[normalized_kind]["entry_fields"]
+    protocol = _REGISTRY_PROTOCOLS[normalized_kind]
+    entry_fields = protocol["entry_fields"]
     with _REGISTRY_LOCK:
         stored_entries = _REGISTRIES[normalized_kind][registry_key]
+        ordered_items = (
+            stored_entries.items()
+            if protocol["preserve_registration_order"]
+            else sorted(stored_entries.items())
+        )
         return tuple(
             (
                 {
@@ -113,7 +127,7 @@ def _serialized_entries(kind, registry_key):
                 if entry_fields is not None
                 else dict(entry)
             )
-            for _, entry in sorted(stored_entries.items())
+            for _, entry in ordered_items
         )
 
 
@@ -163,6 +177,24 @@ def _is_project_defined_fit_function(func):
     return getattr(func, "__module__", None) in {"procedures", "hyde"}
 
 
+def _fit_function_callable_ref(func):
+    module_name = str(getattr(func, "__module__", "") or "")
+    if module_name == "hyde":
+        return f"hyde.{func.__name__}"
+    return func.__name__
+
+
+def _fit_function_source_text(func):
+    try:
+        source = inspect.getsource(func)
+    except (OSError, TypeError):
+        return ""
+    lines = textwrap.dedent(source).splitlines()
+    while lines and lines[0].lstrip().startswith("@"):
+        lines.pop(0)
+    return "\n".join(lines).strip()
+
+
 def register_fit_function(func, *, independent_vars):
     if not callable(func):
         raise TypeError("@hyde.fit_function must wrap a callable.")
@@ -201,6 +233,8 @@ def register_fit_function(func, *, independent_vars):
         )
     entry = {
         "name": func.__name__,
+        "callable_ref": _fit_function_callable_ref(func),
+        "source_text": _fit_function_source_text(func),
         "independent_vars": list(independent_var_names),
         "parameters": list(coefficients),
     }

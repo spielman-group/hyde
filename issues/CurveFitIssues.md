@@ -52,17 +52,19 @@ and no-figure fallback without yet requiring fit-function discovery or fit execu
 ### What to build
 
 Add the first complete fit-function workflow through the dialog: populate the chooser
-from discovered user-defined `@hyde.fit_function` definitions, enforce the strict
-first-pass signature contract, and support `New Fit Function...` by appending a minimal
-valid scaffold to the procedures environment, reloading procedures, keeping the dialog
-open, and selecting the newly created function.
+from discovered `@hyde.fit_function` definitions, including Hyde-provided built-ins and
+project-defined procedures functions, enforce the strict first-pass signature contract,
+and support `New Fit Function...` by appending a minimal valid scaffold to the
+procedures environment, reloading procedures, keeping the dialog open, and selecting
+the newly created function.
 
 This slice should cover discovery, validation, user feedback for unsupported signatures,
 and scaffold/reload behavior without yet requiring full data binding or fit execution.
 
 ### Acceptance criteria
 
-- [ ] The fit-function chooser shows discovered user-defined `@hyde.fit_function` definitions only.
+- [ ] The fit-function chooser shows discovered `@hyde.fit_function` definitions only, including Hyde-provided built-ins and project-defined procedures functions.
+- [ ] The fit-function chooser preserves registration/definition order rather than alphabetical sorting, with Hyde's built-in `line` appearing first.
 - [ ] Discovery accepts multivariate functions using `independent_vars` and explicitly named coefficient parameters.
 - [ ] Discovery rejects unsupported first-pass forms such as `*args` and `**kwargs`.
 - [ ] `New Fit Function...` creates a minimal valid scaffold in the procedures environment.
@@ -87,8 +89,10 @@ and scaffold/reload behavior without yet requiring full data binding or fit exec
 Implement the first complete `CurveFitState` / `CurveFitCodec` path for selecting a fit
 function, choosing Y data, choosing one X data object per declared independent variable,
 using `From Target` as a narrowing/defaulting convenience when a figure target exists,
-and generating both command preview and equation preview. The fit-result target must be
-part of this slice and must always resolve to a real object name rather than `nothing`.
+and generating both command preview and equation preview. `Equation` should show the
+selected function definition body when source is available. The fit-result target must
+be part of this slice and must always resolve to a real object name rather than
+`nothing`.
 
 This slice should make the dialog semantically meaningful end-to-end even before actual
 fit execution exists.
@@ -142,7 +146,7 @@ requiring hidden fit execution.
 
 - First failing behavior: leaving a required free parameter unusable disables `Do It` and shows a validation message.
 - Follow-up behavior: entering an `expr` changes the parameter's effective editing behavior while keeping it visible.
-- Final behavior in this slice: toggling `Suppress Screen Updates` changes the dialog's execution mode state without executing yet.
+- Final behavior in this slice: toggling `Suppress Screen Updates` changes the dialog's actual-fit execution policy without executing yet.
 
 ## Issue 5: Execute suppressed one-shot fits to create or recreate the result object
 
@@ -154,7 +158,7 @@ requiring hidden fit execution.
 ### What to build
 
 Add the first real hidden execution path for Curve Fit in suppressed mode. When screen
-updates are suppressed, editing the dialog must not mutate real outputs until `Do It`.
+updates are suppressed, editing the dialog must not mutate real fit outputs until `Do It`.
 Pressing `Do It` must execute one hidden fit/update path that creates or recreates the
 authoritative `lmfit` result object in the kernel namespace using the current valid
 dialog state.
@@ -169,7 +173,7 @@ the shell further.
 
 ### Acceptance criteria
 
-- [ ] When `Suppress Screen Updates` is enabled, ordinary control changes do not update real fit outputs.
+- [ ] When `Suppress Screen Updates` is enabled, ordinary control changes do not update real fit outputs before `Do It`.
 - [ ] Pressing `Do It` in suppressed mode runs one hidden fit/update execution.
 - [ ] The hidden execution creates or recreates the authoritative result object target in the kernel namespace.
 - [ ] `Do It` in suppressed mode leaves the dialog in an accepted state after a successful run.
@@ -177,7 +181,7 @@ the shell further.
 
 ### TDD focus
 
-- First failing behavior: editing a valid suppressed dialog does not mutate the result target before `Do It`.
+- First failing behavior: editing a valid suppressed dialog does not mutate the result target before `Do It`, even though guessed previews may still update.
 - Follow-up behavior: pressing `Do It` once creates or recreates the chosen fit-result object.
 - Tests should verify resulting namespace behavior rather than internal execution helper choreography.
 
@@ -228,7 +232,9 @@ the shell further.
 ### What to build
 
 Complete the attached-figure path by rendering fit-curve and residual displays as
-dialog-owned traces derived from the authoritative fit result object. In the first
+dialog-owned traces on attached figures. While the dialog is open, attached previews
+render from the current coefficient guesses. On successful `Do It` / accept, any
+surviving display is re-rooted to the authoritative fit result object. In the first
 pass, residuals stay on the existing figure axes rather than creating a second layout.
 The dialog must track ownership so that cancel removes traces it introduced and
 restores any existing displays it modified.
@@ -240,13 +246,17 @@ the shell further.
 Implementation note: `Show Fit` and `Show Residuals` already exist in the dialog as live
 controls. This slice should wire those existing controls to real attached-figure
 behavior instead of introducing replacement toggles.
+Implementation note: in attached mode, `Show Fit` defaults on unless Hyde is preserving
+an existing attached fit-display state from the opening figure.
 
 This slice completes the first pass end-to-end attached figure workflow.
 
 ### Acceptance criteria
 
-- [ ] In attached mode, enabling fit-curve display renders a dialog-owned derived trace from the current fit result object.
-- [ ] In attached mode, enabling residual display renders a dialog-owned derived trace on the existing figure axes.
+- [ ] In attached mode, enabling fit-curve display renders a dialog-owned preview trace from the current coefficient guesses.
+- [ ] In attached mode, enabling residual display renders a dialog-owned preview residual trace on the existing figure axes.
+- [ ] In attached mode, `Show Fit` defaults on unless Hyde is preserving an opening attached-display state that should survive the dialog session.
+- [ ] On successful `Do It` / accept, any surviving attached fit or residual display is re-rooted to the authoritative fit result object.
 - [ ] Plotting remains optional; the result-object workflow still succeeds when fit and residual displays are off.
 - [ ] Cancel removes dialog-owned fit or residual traces the dialog introduced.
 - [ ] Cancel restores the opening state of any fit or residual display the dialog modified.
@@ -254,9 +264,9 @@ This slice completes the first pass end-to-end attached figure workflow.
 
 ### TDD focus
 
-- First failing behavior: enabling fit display in attached mode adds a derived trace tied to the current fit result.
-- Follow-up behavior: enabling residual display adds a derived trace on the same axes rather than on a new subplot.
-- Final behavior in this slice: cancel removes introduced traces and restores modified ones.
+- First failing behavior: enabling fit display in attached mode adds a preview trace from the current coefficient guesses.
+- Follow-up behavior: enabling residual display adds a preview residual trace on the same axes rather than on a new subplot.
+- Final behavior in this slice: successful `Do It` / accept re-roots surviving displays to the authoritative fit result, while cancel removes introduced traces and restores modified ones.
 
 ## Notes
 
