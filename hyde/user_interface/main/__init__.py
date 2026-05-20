@@ -261,6 +261,7 @@ class HydeApp:
     def setup_plugins(self):
         self.menu_context = HydeMenuContext(logger=logging.getLogger("hyde"))
         self.menu_context.register_location("file", self.ui.menuFile)
+        self.menu_context.register_location("analysis", self.ui.menuAnalysis)
         self.menu_context.register_location("window", self.ui.menuWindow)
         self.menu_context.register_location("figure", self.ui.menuFigure)
         self.menu_context.register_location("table", self.ui.menuTable)

@@ -1,6 +1,7 @@
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtWidgets
 
+from hyde.user_interface.hyde_interactive_widget import has_supported_traces
 from hyde.user_interface.matplotlib_color_picker import (
     MatplotlibColorLineEdit,
     normalize_matplotlib_color_text,
@@ -274,9 +275,6 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         _apply_style_values(style, trace.get("kwargs", {}))
         _apply_style_values(style, live_style)
         return style
-
-    def has_supported_traces(self):
-        return bool(self._trace_records)
 
     def _current_record(self):
         row = self.trace_list.currentRow()

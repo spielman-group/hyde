@@ -9,6 +9,44 @@ from hyde.user_interface.plugin_tools import (
 )
 
 
+def active_interactive_window(services, interactive_type=None):
+    mdi_area = None if services is None else services.get("mdi_area")
+    if mdi_area is None:
+        return None
+    subwindow = mdi_area.activeSubWindow()
+    widget = None if subwindow is None else subwindow.widget()
+    if not isinstance(widget, HydeInteractiveWidget):
+        return None
+    if interactive_type is not None and not isinstance(widget, interactive_type):
+        return None
+    figure_window_class = None
+    try:
+        from hyde.user_interface.plugins.figure.window import FigureWindow
+
+        figure_window_class = FigureWindow
+    except Exception:
+        figure_window_class = None
+    if figure_window_class is not None and isinstance(widget, figure_window_class):
+        snapshot_state = getattr(widget, "snapshot_state", None)
+        if snapshot_state is None or snapshot_state.figure_ir() is None:
+            return None
+        if widget.services.get("send_figure_action") is None:
+            return None
+    return widget
+
+
+def has_supported_traces(figure_window):
+    if figure_window is None:
+        return False
+    snapshot_state = getattr(figure_window, "snapshot_state", None)
+    figure_ir = {} if snapshot_state is None else (snapshot_state.figure_ir() or {})
+    subplots = figure_ir.get("layout", {}).get("subplots", [])
+    if not subplots:
+        return False
+    subplot = subplots[0]
+    return any(trace.get("kind") == "line" for trace in subplot.get("traces", []))
+
+
 def _freeze_namespace_tracking_value(value):
     if isinstance(value, dict):
         return tuple(

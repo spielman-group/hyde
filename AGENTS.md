@@ -37,6 +37,12 @@ For command-emitting GUI surfaces or GUI-side lowering/state work, follow
 - Prefer the simplest working change in the existing path.
 - Do not overbuild, generalize early, or add speculative infrastructure.
 - Do not add compatibility shims or migration code unless explicitly requested.
+- Do not add optional production fallbacks solely to accommodate outdated tests,
+  fake UI hosts, or stale local fixtures. When the real product contract changes,
+  update the tests and fixtures to match the real contract.
+- Do not add trivial pass-through helpers or wrapper methods that only rename or
+  forward to a shared helper without adding real local policy. Prefer making the
+  shared helper the actual interface.
 - Check `PLAN.md` for active remaining work.
 - Use the local `$add-hyde-ui-feature` skill when creating or revising frontend specs.
 

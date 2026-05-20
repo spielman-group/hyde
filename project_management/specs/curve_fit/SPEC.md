@@ -1,21 +1,364 @@
-# Curve Fit Specification
+# Curve Fitting Specification
 
-## 09_curve_fit_function_and_data.png
-![Curve Fit Function and Data](09_curve_fit_function_and_data.png)
-- What it shows: the curve fitting dialog's function-and-data tab.
-- Igor features: lmfit-based fit dialog, function selection, and X/Y data selection.
+## Feature Checklist
+- [x] Add a Hyde-native Curve Fitting dialog shaped by the screenshot family in
+  `project_management/specs/curve_fit/`.
+- [x] Implement the dialog as a modal figure-control-style surface following the
+  interaction pattern used by `Modify Data Appearance` and `Modify Axis`.
+- [x] Keep the GUI authoritative only for transient dialog state and preview state.
+- [x] Reuse the existing namespace metadata path for object pickers.
+- [x] Reuse the existing first-class figure target-discovery path used by
+  `Modify Data Appearance`.
+- [x] Give the dialog one GUI-side fit state object and one fit codec under Hyde's
+  normal state/control pattern.
+- [x] Support `@hyde.fit_function` discovery as the only fit-function catalog path.
+- [x] Support multivariate fits as a first-class capability.
+- [x] Make the `lmfit` result object the authoritative fit output.
+- [x] Derive plotted fit and residual displays from that authoritative result object.
+- [x] Support live reruns when screen updates are enabled.
+- [x] Support one-shot execution on `Do It` when screen updates are suppressed.
+- [ ] Finalize the exact first-pass validation rule for an explicit `nothing` choice in
+  the fit-result target control.
+- [ ] Finalize the exact graph-layout behavior for residual display.
+- [ ] Finalize any non-figure launch paths beyond the figure-context workflow.
 
-## 10_curve_fit_data_options.png
-![Curve Fit Data Options](10_curve_fit_data_options.png)
-- What it shows: the curve fitting dialog's data-options tab.
-- Igor features: fit range, cursors, weighting, and data-mask controls.
+## Purpose
 
-## 11_curve_fit_coefficients.png
-![Curve Fit Coefficients](11_curve_fit_coefficients.png)
-- What it shows: the curve fitting dialog's coefficients tab.
-- Igor features: coefficient names, initial guesses, hold flags, and fit function storage.
+The Curve Fitting dialog is Hyde's modal GUI surface for configuring and running fits
+against live kernel data while following the same dialog family behavior used by the
+existing figure-control dialogs.
 
-## 12_curve_fit_output_options.png
-![Curve Fit Output Options](12_curve_fit_output_options.png)
-- What it shows: the curve fitting dialog's output-options tab.
-- Igor features: output destination, residuals, confidence/error analysis, and graph/text output controls.
+The dialog owns only transient configuration state long enough to:
+
+- select a discovered `@hyde.fit_function`
+- bind the selected function to live namespace objects
+- preview the generated Python
+- drive live hidden reruns when enabled
+- commit or revert the real kernel-side outputs owned by the dialog session
+
+The dialog does not become the authoritative owner of scientific results. The
+authoritative fit output is an `lmfit` result object stored in the kernel namespace.
+Any plotted fit curve or residual display is a rendering derived from that result
+object rather than a separate top-level scientific output channel.
+
+## Initial Deployment Scope
+
+The first implementation includes:
+
+- a modal dialog launched in figure context and patterned after the existing
+  figure-control dialogs
+- one fit-function chooser populated only by discovered `@hyde.fit_function`
+  definitions
+- `New Fit Function...` support that writes a minimal valid scaffold into
+  `procedures/__init__.py`, triggers the normal procedures reload path, and updates the
+  chooser
+- multivariate support from the start
+- one explicit X-data chooser per independent variable declared by the selected
+  `@hyde.fit_function`
+- Y-data and X-data selection from live namespace objects
+- a `From Target` checkbox that only narrows or defaults what is easily selectable
+  using the same supported-trace discovery path used by `Modify Data Appearance`
+- a weighting control that accepts one explicit weight object and passes it through in
+  the `lmfit`-native way
+- an `lmfit`-native coefficient table
+- a fit-result target control whose default name is based on the selected Y object,
+  typically `<y_name>_fit_result`
+- graph-display controls for fit-curve and residual rendering derived from the fit
+  result object
+- explicit Python preview
+- `To Clip`
+- live hidden reruns when screen updates are enabled
+- one-shot hidden execution on `Do It` when screen updates are suppressed
+- revert-on-cancel behavior for any real kernel-side targets and graph displays the
+  dialog session changed
+
+The first implementation does not include:
+
+- `To Cmd Line`
+- `Help`
+- `Graph Now`
+- `Edit Fit Function...`
+- range controls
+- cursor-driven range insertion
+- a separate data-mask control
+- auto-guess mode
+- separate top-level fit arrays such as `fit_<y_name>`
+- separate top-level residual arrays
+- separate covariance-matrix output controls
+- Igor-style coefficient waves, epsilon waves, or constraints waves
+
+## Window Layout
+
+The Curve Fitting dialog is a modal tabbed window that preserves the screenshot
+family's overall structure while using Hyde-native behavior behind those surfaces.
+
+It contains:
+
+- a `Function and Data` tab
+- a `Data Options` tab
+- a `Coefficients` tab
+- an `Output Options` tab
+- a preview mode switch for `Commands` and `Equation`
+- a large preview pane
+- a one-line status/error strip
+- footer buttons for `Do It`, `To Clip`, and `Cancel`
+
+The first implementation follows the existing figure-control-dialog family behavior:
+
+- live changes rerun immediately when screen updates are enabled
+- `Cancel` restores the opening state for any target the dialog changed
+- `Do It` accepts the current state rather than triggering an extra rerun in live mode
+
+## Fit Function Discovery
+
+The fit-function chooser is populated only from discovered `@hyde.fit_function`
+definitions.
+
+For the first implementation:
+
+- the chooser contains only user-defined functions
+- later bundled or imported function collections may be added, but they still enter the
+  chooser only through `@hyde.fit_function`
+- Hyde does not maintain a second fit-function registry outside the normal procedures
+  environment
+
+`@hyde.fit_function` must support explicit independent-variable declaration, for
+example:
+
+```python
+@hyde.fit_function(independent_vars=("x", "y"))
+def plane(x, y, a, b, c):
+    return a + b*x + c*y
+```
+
+The decorator metadata defines the independent-variable names and order. The remaining
+named function parameters are the fit coefficients.
+
+## New Fit Function
+
+`New Fit Function...` is part of the first implementation.
+
+Its job is narrow:
+
+- generate a minimal valid `@hyde.fit_function` scaffold
+- append that scaffold to `procedures/__init__.py`
+- trigger the normal procedures reload path
+- leave the Curve Fitting dialog open
+- select the newly created function in the fit-function chooser after reload succeeds
+
+The scaffold is intentionally minimal. It is not a full function editor or expression
+builder. Users finish the function by editing ordinary source outside the Curve Fitting
+dialog.
+
+`Edit Fit Function...` is not part of the first implementation and should not appear as
+an active control.
+
+## Function And Data Tab
+
+The `Function and Data` tab contains:
+
+- the fit-function chooser
+- `New Fit Function...`
+- Y-data selection
+- one X-data selector per declared independent variable
+- the `From Target` checkbox
+
+`From Target` is a selector-convenience control only.
+
+When checked:
+
+- the available selections are narrowed or defaulted using the same supported-trace
+  discovery mechanism used by `Modify Data Appearance`
+
+When unchecked:
+
+- all compatible namespace objects become available through the selectors
+
+`From Target` does not change the output model. Output defaults are driven by the
+currently selected data objects, especially the selected Y object.
+
+## Data Options Tab
+
+The first implementation keeps the Data Options surface narrow and `lmfit`-native.
+
+It contains:
+
+- one weighting-object selector
+- `Suppress Screen Updates`
+
+It does not include:
+
+- range controls
+- cursor controls
+- separate data-mask controls
+- weighting interpretation radios
+
+Weighting rules:
+
+- Hyde accepts one explicit weight object
+- Hyde passes those weights through in the `lmfit`-native way
+- zero weights exclude points
+
+`Suppress Screen Updates` is a performance control, not merely a visual toggle.
+
+When enabled:
+
+- no intermediate reruns occur while the user changes controls
+- the real outputs are updated only once, on `Do It`
+
+When disabled:
+
+- relevant control changes rerun immediately and update the current real targets
+
+## Coefficients Tab
+
+The Coefficients tab is designed around `lmfit.Parameter` options rather than Igor
+compatibility concepts.
+
+The coefficient table shows one row per coefficient and supports at least:
+
+- parameter name
+- initial value
+- `vary`
+- lower bound
+- upper bound
+- `expr`
+
+Parameter rules:
+
+- required free parameters start blank unless explicit defaults are supplied by the fit
+  function metadata
+- `Do It` is invalid until every required free parameter has a usable value
+- a non-empty `expr` makes that parameter expression-owned
+- expression-owned parameters remain visible, but ordinary manual controls become
+  subordinate to the expression
+
+There is no auto-guess mode in the first implementation.
+
+## Output Options Tab
+
+The fit result object is the authoritative output.
+
+The first implementation does not offer separate top-level fit-array or residual-array
+output channels. Instead, the Output Options tab centers on:
+
+- the fit-result object target
+- whether to display or update the fit curve on the graph
+- whether to display or update residuals on the graph
+
+The fit-result object target:
+
+- defaults to a name derived from the selected Y object, typically
+  `<y_name>_fit_result`
+- may be changed by choosing an existing name or typing a new one
+
+Graph-display behaviors:
+
+- the plotted fit curve is derived from the fit result object
+- the plotted residual display is derived from the fit result object
+- neither is treated as a separate top-level scientific output
+
+Covariance information is part of the `lmfit` result path and does not require a
+separate first-pass output control.
+
+## Preview And Execution
+
+The dialog has two preview modes:
+
+- `Commands`
+- `Equation`
+
+The dialog owns one GUI-side fit state object and one fit codec. The codec:
+
+- normalizes state
+- validates state
+- builds command preview source
+- builds equation preview content
+
+Execution rules:
+
+- when screen updates are enabled, relevant changes rerun immediately through a hidden
+  execution path
+- `Do It` in live mode accepts the current state and does not trigger an extra rerun
+- when screen updates are suppressed, intermediate reruns do not occur
+- `Do It` in suppressed mode performs the one hidden fit/update execution
+
+`To Clip` copies the current command preview.
+
+`To Cmd Line` is not part of the first implementation.
+
+## Real Targets, Live Ownership, And Revert Behavior
+
+The dialog mutates real kernel-side targets. It does not mutate hidden duplicates.
+
+When live updates are enabled:
+
+- the currently selected real targets are updated immediately
+- if the user changes the result-object target, the dialog restores the previous
+  target's opening state before it starts updating the new one
+- graph displays introduced or updated by the dialog are part of that owned live state
+
+When `Cancel` is pressed:
+
+- any result-object target changed by the dialog is restored to its opening state
+- any dialog-owned graph display introduced by the dialog is removed
+- any dialog-owned graph display updated by the dialog is restored to its opening state
+
+When a live rerun fails:
+
+- the last successful live outputs remain in place
+- the dialog stays open
+- the status area shows the error
+- `Do It` remains disabled until the configuration becomes valid again
+
+## Synchronization
+
+The synchronization contract is:
+
+- the kernel namespace remains authoritative
+- the fit result object is the authoritative fit output
+- graph displays are renderings derived from that fit result object
+- object pickers reuse the existing Python Variables metadata path
+- figure target discovery reuses the existing first-class figure snapshot path used by
+  `Modify Data Appearance`
+
+The dialog may cache only:
+
+- transient normalized fit configuration
+- preview text
+- opening-state snapshots needed for revert
+
+The dialog must not become the authoritative owner of:
+
+- fit results
+- plotted fit displays
+- coefficient values
+- live namespace data
+
+## Explicit Exclusions
+
+The first implementation explicitly excludes:
+
+- `To Cmd Line`
+- `Help`
+- `Graph Now`
+- `Edit Fit Function...`
+- range controls
+- cursor controls
+- separate data masks
+- auto guess
+- separate top-level fit arrays
+- separate top-level residual arrays
+- separate covariance-matrix output controls
+- Igor-style coefficient waves
+- Igor-style epsilon waves
+- Igor-style constraints waves
+
+## Future Work
+
+- shared `To Cmd Line` support across this dialog family
+- richer fit-function metadata beyond the initial decorator contract
+- bundled imported fit-function collections that still enter through
+  `@hyde.fit_function`
+- broader launch paths beyond the figure-context workflow
+- finalized residual-display layout and presentation rules

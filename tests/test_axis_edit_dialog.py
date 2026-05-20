@@ -25,6 +25,7 @@ def make_plugin_host(plugin_manager):
     main_window = QtWidgets.QMainWindow()
     main_window.setMenuBar(QtWidgets.QMenuBar())
     main_window.menuFile = main_window.menuBar().addMenu("File")
+    main_window.menuAnalysis = main_window.menuBar().addMenu("Analysis")
     main_window.menuWindow = main_window.menuBar().addMenu("Windows")
     main_window.menuFigure = QtWidgets.QMenu("Figure", main_window.menuBar())
     main_window.menuTable = QtWidgets.QMenu("Table", main_window.menuBar())

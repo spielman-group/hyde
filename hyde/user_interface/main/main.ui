@@ -34,6 +34,11 @@
      <string>File</string>
     </property>
    </widget>
+   <widget class="QMenu" name="menuAnalysis">
+    <property name="title">
+     <string>Analysis</string>
+    </property>
+   </widget>
    <widget class="QMenu" name="menuWindow">
     <property name="title">
      <string>Windows</string>
@@ -50,6 +55,7 @@
     </property>
    </widget>
    <addaction name="menuFile"/>
+   <addaction name="menuAnalysis"/>
    <addaction name="menuWindow"/>
    <addaction name="menuFigure"/>
    <addaction name="menuTable"/>

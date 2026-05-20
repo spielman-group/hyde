@@ -1,25 +1,14 @@
 from qtutils.qt import QtWidgets
 
+from hyde.user_interface.hyde_interactive_widget import (
+    active_interactive_window,
+    has_supported_traces,
+)
 from hyde.user_interface.plugins.figure.window import FigureWindow
 from hyde.user_interface.plugin_tools import HydePlugin
 
 from .axis_edit_dialog import AxisEditDialog
 from .trace_edit_dialog import TraceAppearanceDialog
-
-
-def _active_figure_window(services):
-    mdi_area = services.get("mdi_area")
-    if mdi_area is None:
-        return None
-    subwindow = mdi_area.activeSubWindow()
-    widget = None if subwindow is None else subwindow.widget()
-    if not isinstance(widget, FigureWindow):
-        return None
-    if widget.snapshot_state.figure_ir() is None:
-        return None
-    if widget.services.get("send_figure_action") is None:
-        return None
-    return widget
 
 
 class Plugin(HydePlugin):
@@ -43,21 +32,24 @@ class Plugin(HydePlugin):
 
     def show_trace_appearance_dialog(self, checked=False):
         del checked
-        return self._show_dialog(TraceAppearanceDialog, "has_supported_traces")
+        return self._show_dialog(
+            TraceAppearanceDialog,
+            lambda dialog: has_supported_traces(dialog.figure_window),
+        )
 
     def show_axis_edit_dialog(self, checked=False):
         del checked
-        return self._show_dialog(AxisEditDialog, "has_supported_axes")
+        return self._show_dialog(AxisEditDialog, lambda dialog: dialog.has_supported_axes())
 
-    def _show_dialog(self, dialog_class, support_method_name):
-        figure_window = _active_figure_window(self.services)
+    def _show_dialog(self, dialog_class, support_check):
+        figure_window = active_interactive_window(self.services, FigureWindow)
         if figure_window is None:
             return False
         dialog = dialog_class(
             figure_window,
             parent=self.services.get("ui"),
         )
-        if not getattr(dialog, support_method_name)():
+        if not support_check(dialog):
             dialog.deleteLater()
             return False
         return dialog.exec_() == QtWidgets.QDialog.Accepted

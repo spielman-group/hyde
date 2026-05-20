@@ -1,6 +1,7 @@
 from functools import partial
 
 from qtutils.qt import QtCore
+from hyde.user_interface.hyde_interactive_widget import active_interactive_window
 from hyde.user_interface.plugin_tools import (
     HydePlugin,
     apply_saveable_window_state,
@@ -237,12 +238,8 @@ class Plugin(HydePlugin):
 
     def delete_selected_data(self, checked=False):
         del checked
-        mdi_area = self.services.get("mdi_area")
-        if mdi_area is None:
-            return False
-        subwindow = mdi_area.activeSubWindow()
-        widget = None if subwindow is None else subwindow.widget()
-        if not isinstance(widget, TableWidget):
+        widget = active_interactive_window(self.services, TableWidget)
+        if widget is None:
             return False
         return widget.request_delete_selected_data()
 

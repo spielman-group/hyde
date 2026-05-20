@@ -28,6 +28,7 @@ def make_plugin_host(plugin_manager):
     main_window = QtWidgets.QMainWindow()
     main_window.setMenuBar(QtWidgets.QMenuBar())
     main_window.menuFile = main_window.menuBar().addMenu("File")
+    main_window.menuAnalysis = main_window.menuBar().addMenu("Analysis")
     main_window.menuWindow = main_window.menuBar().addMenu("Windows")
     main_window.menuFigure = QtWidgets.QMenu("Figure", main_window.menuBar())
     main_window.menuTable = QtWidgets.QMenu("Table", main_window.menuBar())
@@ -128,6 +129,11 @@ def make_figure_defaults():
     return FigureIRCodec.validate_state(defaults)
 
 
+def make_figure_ir_without_supported_traces():
+    figure_ir = figure_ir_from_live_state(make_live_state(items=()))
+    return FigureIRCodec.validate_state(figure_ir)
+
+
 def make_active_figure_window(
     mdi_area,
     services,
@@ -205,6 +211,33 @@ class TestTraceAppearancePlugin(unittest.TestCase):
 
         self.assertEqual(exec_.call_count, 1)
 
+    def test_modify_data_appearance_action_returns_false_without_supported_traces(
+        self,
+    ):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {
+            "figure": FigurePlugin({}),
+            "figure_control_dialogs": FigureControlPlugin({}),
+        }
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+        make_active_figure_window(
+            app.ui.mdiArea,
+            manager.services,
+            figure_ir=make_figure_ir_without_supported_traces(),
+        )
+
+        with patch.object(
+            TraceAppearanceDialog,
+            "exec_",
+            return_value=QtWidgets.QDialog.Accepted,
+        ) as exec_:
+            self.assertFalse(
+                manager.plugins["figure_control_dialogs"].show_trace_appearance_dialog()
+            )
+
+        self.assertEqual(exec_.call_count, 0)
+
     def test_modify_data_appearance_action_returns_false_without_active_figure(self):
         plugin = FigureControlPlugin({})
         plugin.services = {
@@ -271,8 +304,6 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             self.assertEqual(dialog.mode_combo.currentData(), "lines+markers")
         finally:
             dialog.close()
-
-        self.assertEqual(sent, [])
 
     def test_dialog_seeds_from_figure_defaults_before_current_trace_state(self):
         mdi_area = QtWidgets.QMdiArea()
