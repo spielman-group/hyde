@@ -2,7 +2,7 @@
 
 ## Checklist
 
-- [ ] Issue 1: Launch Curve Fit from `Analysis` with attach/unattach behavior
+- [X] Issue 1: Launch Curve Fit from `Analysis` with attach/unattach behavior
 - [ ] Issue 2: Discover `@hyde.fit_function` definitions and scaffold new functions
 - [ ] Issue 3: Configure function/data binding and generate preview text
 - [ ] Issue 4: Edit coefficient and data-option state with validation-gated `Do It`

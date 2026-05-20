@@ -307,15 +307,13 @@ class Plugin(HydePlugin):
         if task == "TABLE_DATA_RESPONSE":
             self.workspace.on_table_data(data)
             return
-        if task != "WINDOW_MACROS_RESPONSE":
-            return
-        if data.get("kind") != "table":
+        if task != "TABLE_MACROS_RESPONSE":
             return
         self.table_macros = [
             {
                 "name": macro["name"],
                 "args": list(macro.get("args", [])),
             }
-            for macro in data.get("macros", [])
+            for macro in data.get("entries", [])
         ]
         self.rebuild_configured_window_macros_menu()

@@ -230,24 +230,68 @@ GUI behavior:
 - on failure, keep the existing error/reporting path and skip deferred restore
   ordering/state application
 
-#### `['WINDOW_MACROS_RESPONSE', payload]`
-Sent when the kernel publishes a serialized window-macro registry snapshot.
+#### `['TABLE_MACROS_RESPONSE', payload]`
+Sent when the kernel publishes a serialized table-macro registry snapshot.
 
 Payload:
 ```python
 {
-    'kind': 'table' or 'figure',
-    'macros': [
+    'entries': [
         {'name': 'Table0', 'args': ['c', 'd']},
         {'name': 'Table1', 'args': ['array0']},
+    ],
+    'rejected': [],
+}
+```
+
+GUI behavior:
+- rebuild the `Windows -> Table Macros` submenu
+- selecting a macro generates a visible call such as `Table0(c, d)`
+- disable that submenu when `entries` is empty
+
+#### `['FIGURE_MACROS_RESPONSE', payload]`
+Sent when the kernel publishes a serialized figure-macro registry snapshot.
+
+Payload:
+```python
+{
+    'entries': [
+        {'name': 'Graph0', 'args': ['x', 'y']},
+    ],
+    'rejected': [],
+}
+```
+
+GUI behavior:
+- rebuild the `Windows -> Graph Macros` submenu
+- selecting a macro generates a visible call such as `Graph0(x, y)`
+- disable that submenu when `entries` is empty
+
+#### `['FIT_FUNCTIONS_RESPONSE', payload]`
+Sent when the kernel publishes a serialized Curve Fit function catalog snapshot.
+
+Payload:
+```python
+{
+    'entries': [
+        {
+            'name': 'line_fit',
+            'independent_vars': ['x'],
+            'parameters': ['slope', 'offset'],
+        },
+    ],
+    'rejected': [
+        {
+            'name': 'bad_fit',
+            'reason': '@hyde.fit_function does not support *args or **kwargs.',
+        },
     ],
 }
 ```
 
 GUI behavior:
-- rebuild the corresponding Windows submenu
-- selecting a macro generates a visible call such as `Table0(c, d)` or `Graph0(x, y)`
-- disable that submenu when `macros` is empty
+- rebuild the Curve Fit function chooser from `entries`
+- surface unsupported first-pass definitions from `rejected`
 
 ## Lane 2A: GUI -> Kernel (Visible Command Session)
 

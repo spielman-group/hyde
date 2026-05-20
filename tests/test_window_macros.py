@@ -14,10 +14,15 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.recreation_registry import (
+    clear_fit_functions,
     clear_figure_macros,
     clear_table_macros,
     figure_macro_entries,
     figure_macro_names,
+    fit_function_entries,
+    register_fit_function,
+    reject_fit_function,
+    rejected_fit_function_entries,
     table_macro_entries,
     table_macro_names,
 )
@@ -47,6 +52,7 @@ class TestTableDecorator(unittest.TestCase):
     def setUp(self):
         clear_table_macros()
         clear_figure_macros()
+        clear_fit_functions()
 
     def test_table_decorator_registers_parameterized_macro(self):
         @hyde.table
@@ -148,6 +154,7 @@ class TestFigureDecorator(unittest.TestCase):
     def setUp(self):
         clear_table_macros()
         clear_figure_macros()
+        clear_fit_functions()
 
     def tearDown(self):
         pyplot = getattr(matplotlib, "pyplot", None)
@@ -389,6 +396,73 @@ class TestFigureDecorator(unittest.TestCase):
             "must create exactly one figure",
         ):
             Graph0([0, 1, 2], [1, 4, 9])
+
+
+class TestDecoratedProcedureRegistries(unittest.TestCase):
+    def setUp(self):
+        clear_table_macros()
+        clear_figure_macros()
+        clear_fit_functions()
+
+    def test_fit_function_registry_is_isolated_from_window_macro_kinds(self):
+        @hyde.table
+        def Table0(a):
+            return a
+
+        @hyde.figure
+        def Graph0(x):
+            return x
+
+        def line_fit(x, slope):
+            return slope * x
+
+        line_fit.__module__ = "procedures"
+        register_fit_function(line_fit, independent_vars=("x",))
+
+        def bad_fit(x, *coeffs):
+            return x
+
+        reject_fit_function(bad_fit, reason="bad signature")
+
+        self.assertEqual(table_macro_names(), ("Table0",))
+        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(
+            fit_function_entries(),
+            (
+                {
+                    "name": "line_fit",
+                    "independent_vars": ["x"],
+                    "parameters": ["slope"],
+                },
+            ),
+        )
+        self.assertEqual(
+            rejected_fit_function_entries(),
+            ({"name": "bad_fit", "reason": "bad signature"},),
+        )
+
+        clear_table_macros()
+        self.assertEqual(table_macro_names(), ())
+        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(
+            fit_function_entries(),
+            (
+                {
+                    "name": "line_fit",
+                    "independent_vars": ["x"],
+                    "parameters": ["slope"],
+                },
+            ),
+        )
+        self.assertEqual(
+            rejected_fit_function_entries(),
+            ({"name": "bad_fit", "reason": "bad signature"},),
+        )
+
+        clear_fit_functions()
+        self.assertEqual(figure_macro_names(), ("Graph0",))
+        self.assertEqual(fit_function_entries(), ())
+        self.assertEqual(rejected_fit_function_entries(), ())
 
 
 class TestWindowMacroStore(unittest.TestCase):

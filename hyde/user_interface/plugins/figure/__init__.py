@@ -232,17 +232,15 @@ class Plugin(HydePlugin):
         self._register_comm_target()
 
     def on_kernel_message(self, payload):
-        if payload.get("task") != "WINDOW_MACROS_RESPONSE":
+        if payload.get("task") != "FIGURE_MACROS_RESPONSE":
             return
         data = payload.get("data", {})
-        if data.get("kind") != "figure":
-            return
         self.figure_macros = [
             {
                 "name": macro["name"],
                 "args": list(macro.get("args", [])),
             }
-            for macro in data.get("macros", [])
+            for macro in data.get("entries", [])
         ]
         self.rebuild_configured_window_macros_menu()
 

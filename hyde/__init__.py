@@ -19,10 +19,13 @@ import numpy as np
 from .paths import HYDE_DIR
 from . import project_tools
 from .recreation_registry import (
+    publish_fit_function_registry,
     publish_figure_macro_registry,
     publish_table_macro_registry,
+    register_fit_function,
     register_figure_macro,
     register_table_macro,
+    reject_fit_function,
 )
 from .execution.ipc import (
     signal_activate_project,
@@ -594,6 +597,37 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
         return decorator(_func)
 
     raise TypeError("hyde.figure currently supports decorator registration only.")
+
+
+def fit_function(_func=None, *, independent_vars):
+    """
+    Register a user-defined curve-fit function for Hyde Curve Fit discovery.
+
+    This public Hyde API currently supports decorator registration only:
+
+    ``@hyde.fit_function(independent_vars=("x",))``
+
+    Supported first-pass signatures must begin with the declared
+    ``independent_vars`` in order, followed by explicitly named coefficient
+    parameters. Unsupported forms are excluded from the Curve Fit chooser rather
+    than aborting the procedures reload path.
+    """
+
+    def decorator(func):
+        try:
+            register_fit_function(func, independent_vars=independent_vars)
+        except TypeError as exc:
+            reject_fit_function(func, reason=exc)
+        publish_fit_function_registry()
+        return func
+
+    if _func is None:
+        return decorator
+
+    if callable(_func):
+        return decorator(_func)
+
+    raise TypeError("hyde.fit_function currently supports decorator registration only.")
 
 
 def _resolve_matplotlib_figure(figure):
