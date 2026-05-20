@@ -9,22 +9,6 @@ from hyde.user_interface.window_macro_store import MacroStoreError
 class CurveFitState(HydeGuiState):
     codec = CurveFitCodec
 
-    def configure_defaults(self):
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "from_target"),
-                "value": False,
-            }
-        )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "preview_mode"),
-                "value": "Commands",
-            }
-        )
-
     def set_x_name(self, independent_var, x_name):
         path = ("settings", "x_names", str(independent_var))
         if x_name:
@@ -77,7 +61,6 @@ class CurveFitDialog(QtWidgets.QDialog):
         self._catalog_status_text = ""
         self._loading_controls = False
         self._current_command_preview = ""
-        self._current_equation_preview = ""
         self._current_model = None
         self.setModal(True)
         self.setWindowTitle("Curve Fit")
@@ -444,7 +427,6 @@ class CurveFitDialog(QtWidgets.QDialog):
         model = self.state.codec.present_state(self.state._state, context=self._context())
         self._current_model = dict(model)
         self._current_command_preview = model["commands_preview"]
-        self._current_equation_preview = model["equation_preview"]
         self._loading_controls = True
         try:
             fit_function_name = model["fit_function_name"] or ""
@@ -478,7 +460,7 @@ class CurveFitDialog(QtWidgets.QDialog):
             preview_index = self.preview_mode_combo.findText(preview_mode)
             self.preview_mode_combo.setCurrentIndex(preview_index)
             if preview_mode == "Equation":
-                self.preview_text.setPlainText(self._current_equation_preview)
+                self.preview_text.setPlainText(model["equation_preview"])
             else:
                 self.preview_text.setPlainText(self._current_command_preview)
             self.do_it_button.setEnabled(bool(model["valid"]))
@@ -595,12 +577,20 @@ class CurveFitDialog(QtWidgets.QDialog):
     def _on_do_it_clicked(self):
         if self._current_model is None or not self._current_model.get("valid"):
             return
+        if self.execution_mode() == "suppressed":
+            python_execution_service = self.services.get("python_execution_service")
+            if python_execution_service is None:
+                self._update_status_label("Curve Fit requires python_execution_service.")
+                return
+            if not python_execution_service.execute_hidden(self._current_command_preview):
+                self._update_status_label("Curve Fit execution failed.")
+                return
         self.accept()
 
     def execution_mode(self):
         if self._current_model is None:
-            return "live"
-        return str(self._current_model.get("execution_mode") or "live")
+            return "suppressed"
+        return str(self._current_model.get("execution_mode") or "suppressed")
 
     def _copy_command_preview_to_clipboard(self):
         clipboard = QtWidgets.QApplication.clipboard()

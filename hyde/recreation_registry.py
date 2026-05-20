@@ -11,12 +11,15 @@ from .execution.ipc import put_parent_message
 _REGISTRY_PROTOCOLS = {
     "table": {
         "task": "TABLE_MACROS_RESPONSE",
+        "entry_fields": ("name", "args"),
     },
     "figure": {
         "task": "FIGURE_MACROS_RESPONSE",
+        "entry_fields": ("name", "args"),
     },
     "fit_function": {
         "task": "FIT_FUNCTIONS_RESPONSE",
+        "entry_fields": None,
     },
 }
 _REGISTRIES = {
@@ -71,24 +74,6 @@ def clear(kind=None):
             _REGISTRIES[registry_kind]["rejected"].clear()
 
 
-def _registry_entries(kind):
-    normalized_kind = _normalize_kind(kind)
-    with _REGISTRY_LOCK:
-        return tuple(
-            dict(_REGISTRIES[normalized_kind]["entries"][name])
-            for name in sorted(_REGISTRIES[normalized_kind]["entries"])
-        )
-
-
-def _rejected_registry_entries(kind):
-    normalized_kind = _normalize_kind(kind)
-    with _REGISTRY_LOCK:
-        return tuple(
-            dict(_REGISTRIES[normalized_kind]["rejected"][name])
-            for name in sorted(_REGISTRIES[normalized_kind]["rejected"])
-        )
-
-
 def _validate_recreation_function(kind, func):
     normalized_kind = _normalize_kind(kind)
     if normalized_kind == "fit_function":
@@ -114,37 +99,33 @@ def _validate_recreation_function(kind, func):
     return normalized_kind, signature
 
 
-def _recreation_entries(kind):
+def _serialized_entries(kind, registry_key):
     normalized_kind = _normalize_kind(kind)
-    return tuple(
-        {
-            "name": entry["name"],
-            "args": list(entry["args"]),
-        }
-        for entry in _registry_entries(normalized_kind)
-    )
-
-
-def entries(kind):
-    normalized_kind = _normalize_kind(kind)
-    if normalized_kind in ("table", "figure"):
-        return _recreation_entries(normalized_kind)
-    return _registry_entries(normalized_kind)
+    entry_fields = _REGISTRY_PROTOCOLS[normalized_kind]["entry_fields"]
+    with _REGISTRY_LOCK:
+        stored_entries = _REGISTRIES[normalized_kind][registry_key]
+        return tuple(
+            (
+                {
+                    field: list(entry[field]) if field == "args" else entry[field]
+                    for field in entry_fields
+                }
+                if entry_fields is not None
+                else dict(entry)
+            )
+            for _, entry in sorted(stored_entries.items())
+        )
 
 
 def names(kind):
-    return tuple(entry["name"] for entry in entries(kind))
-
-
-def rejected_entries(kind):
-    return _rejected_registry_entries(kind)
+    return tuple(entry["name"] for entry in _serialized_entries(kind, "entries"))
 
 
 def serialize_registry(kind):
     normalized_kind = _normalize_kind(kind)
     return {
-        "entries": list(entries(normalized_kind)),
-        "rejected": list(rejected_entries(normalized_kind)),
+        "entries": list(_serialized_entries(normalized_kind, "entries")),
+        "rejected": list(_serialized_entries(normalized_kind, "rejected")),
     }
 
 
@@ -242,10 +223,10 @@ def reject_fit_function(func, *, reason):
     )
     return func
 
-def register_table_macro(func):
-    _, signature = _validate_recreation_function("table", func)
+def register_macro(kind, func):
+    normalized_kind, signature = _validate_recreation_function(kind, func)
     _set_registry_entry(
-        "table",
+        normalized_kind,
         func.__name__,
         {
             "name": func.__name__,
@@ -254,17 +235,3 @@ def register_table_macro(func):
         },
     )
     return func
-
-def register_figure_macro(func):
-    _, signature = _validate_recreation_function("figure", func)
-    _set_registry_entry(
-        "figure",
-        func.__name__,
-        {
-            "name": func.__name__,
-            "func": func,
-            "args": list(signature.parameters),
-        },
-    )
-    return func
-

@@ -21,8 +21,7 @@ from . import project_tools
 from .recreation_registry import (
     publish_registry,
     register_fit_function,
-    register_figure_macro,
-    register_table_macro,
+    register_macro,
     reject_fit_function,
 )
 from .execution.ipc import (
@@ -522,7 +521,7 @@ def table(_func=None, *, window_state=None, register=True):
         except (TypeError, ValueError):
             pass
         if register:
-            register_table_macro(wrapped)
+            register_macro("table", wrapped)
             publish_registry("table")
         return wrapped
 
@@ -584,7 +583,7 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
             pass
 
         if register:
-            register_figure_macro(wrapped)
+            register_macro("figure", wrapped)
             publish_registry("figure")
         return wrapped
 

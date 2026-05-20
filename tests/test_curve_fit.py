@@ -2,6 +2,7 @@ import os
 import tempfile
 import textwrap
 import unittest
+import numpy as np
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -101,6 +102,7 @@ class ProcedureExecutionHarness:
         self.procedures_dir = os.path.join(self.project_dir, "procedures")
         os.makedirs(self.procedures_dir, exist_ok=True)
         self.procedures_init = os.path.join(self.procedures_dir, "__init__.py")
+        self.namespace = {}
         self.write_procedures("")
 
     def close(self):
@@ -128,12 +130,11 @@ class ProcedureExecutionHarness:
 
     def execute_hidden(self, code, silent=True):
         del silent
-        namespace = {}
         with patch("hyde.execution.ipc.put_parent_message", side_effect=self._route_parent_message), patch(
             "hyde.recreation_registry.put_parent_message",
             side_effect=self._route_parent_message,
         ):
-            exec(code, namespace, namespace)
+            exec(code, self.namespace, self.namespace)
         return True
 
     def reload_procedures(self):
@@ -146,6 +147,10 @@ class ProcedureExecutionHarness:
                 os.path.dirname(hyde.HYDE_DIR),
                 reset_namespace=False,
             )
+        self.namespace = dict(__import__("__main__").__dict__)
+
+    def set_namespace_value(self, name, value):
+        self.namespace[str(name)] = value
 
 
 class FakeExecutionService:
@@ -1048,12 +1053,159 @@ class TestCurveFitPlugin(unittest.TestCase):
                 harness.execution_service.calls.clear()
                 dialog.weighting_combo.setCurrentText("weights")
                 QtWidgets.QApplication.processEvents()
-                dialog.suppress_screen_updates_checkbox.setChecked(True)
-                QtWidgets.QApplication.processEvents()
 
+                self.assertTrue(dialog.suppress_screen_updates_checkbox.isChecked())
                 self.assertEqual(dialog.execution_mode(), "suppressed")
                 self.assertIn("weights=weights", dialog.preview_text.toPlainText())
                 self.assertEqual(harness.execution_service.calls, [])
+            finally:
+                dialog.close()
+        finally:
+            harness.close()
+
+    def test_curve_fit_dialog_suppressed_do_it_runs_one_hidden_fit_and_creates_result_object(
+        self,
+    ):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "time": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+
+        try:
+            harness.write_procedures(
+                """
+                @hyde.fit_function(independent_vars=("x",))
+                def line_fit(x, slope, offset):
+                    return slope * x + offset
+                """
+            )
+            harness.reload_procedures()
+            harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
+            harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0]))
+
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            try:
+                dialog.fit_function_combo.setCurrentIndex(
+                    dialog.fit_function_combo.findText("line_fit")
+                )
+                QtWidgets.QApplication.processEvents()
+
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "slope")["initial"],
+                    "2.0",
+                )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "offset")["initial"],
+                    "1.0",
+                )
+                dialog.suppress_screen_updates_checkbox.setChecked(True)
+                QtWidgets.QApplication.processEvents()
+
+                harness.execution_service.calls.clear()
+                self.assertNotIn("signal_fit_result", harness.namespace)
+
+                dialog.do_it_button.click()
+                QtWidgets.QApplication.processEvents()
+
+                self.assertEqual(len(harness.execution_service.calls), 1)
+                self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+                result = harness.namespace["signal_fit_result"]
+                self.assertEqual(type(result).__name__, "ModelResult")
+                self.assertTrue(hasattr(result, "best_fit"))
+            finally:
+                dialog.close()
+        finally:
+            harness.close()
+
+    def test_curve_fit_dialog_suppressed_do_it_recreates_existing_result_target_once(
+        self,
+    ):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "time": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "signal_fit_result": {"python_type": "ModelResult"},
+            },
+        )
+
+        try:
+            harness.write_procedures(
+                """
+                @hyde.fit_function(independent_vars=("x",))
+                def line_fit(x, slope, offset):
+                    return slope * x + offset
+                """
+            )
+            harness.reload_procedures()
+            harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
+            harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0]))
+            previous_result = object()
+            harness.set_namespace_value("signal_fit_result", previous_result)
+
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            try:
+                dialog.fit_function_combo.setCurrentIndex(
+                    dialog.fit_function_combo.findText("line_fit")
+                )
+                QtWidgets.QApplication.processEvents()
+
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "slope")["initial"],
+                    "2.0",
+                )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "offset")["initial"],
+                    "1.0",
+                )
+                dialog.fit_result_target_combo.setEditText("signal_fit_result")
+                QtWidgets.QApplication.processEvents()
+                dialog.suppress_screen_updates_checkbox.setChecked(True)
+                QtWidgets.QApplication.processEvents()
+
+                harness.execution_service.calls.clear()
+                self.assertIs(harness.namespace["signal_fit_result"], previous_result)
+
+                dialog.do_it_button.click()
+                QtWidgets.QApplication.processEvents()
+
+                self.assertEqual(len(harness.execution_service.calls), 1)
+                self.assertIsNot(harness.namespace["signal_fit_result"], previous_result)
+                self.assertEqual(
+                    type(harness.namespace["signal_fit_result"]).__name__,
+                    "ModelResult",
+                )
             finally:
                 dialog.close()
         finally:

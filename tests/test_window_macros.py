@@ -15,12 +15,11 @@ except ModuleNotFoundError as exc:
 
 from hyde.recreation_registry import (
     clear,
-    entries,
     names,
     publish_registry,
-    rejected_entries,
     register_fit_function,
     reject_fit_function,
+    serialize_registry,
 )
 from hyde.user_interface.plugins.table.window_macro_store import (
     BEGIN_MARKER,
@@ -55,7 +54,7 @@ class TestTableDecorator(unittest.TestCase):
 
         self.assertEqual(names("table"), ("Table0",))
         self.assertEqual(
-            entries("table"),
+            tuple(serialize_registry("table")["entries"]),
             ({"name": "Table0", "args": ["a", "b"]},),
         )
 
@@ -166,7 +165,7 @@ class TestFigureDecorator(unittest.TestCase):
 
         self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            entries("figure"),
+            tuple(serialize_registry("figure")["entries"]),
             ({"name": "Graph0", "args": ["x", "y"]},),
         )
 
@@ -177,7 +176,7 @@ class TestFigureDecorator(unittest.TestCase):
 
         self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            entries("figure"),
+            tuple(serialize_registry("figure")["entries"]),
             ({"name": "Graph0", "args": ["x", "y"]},),
         )
 
@@ -190,7 +189,7 @@ class TestFigureDecorator(unittest.TestCase):
 
                 self.assertEqual(names("figure"), ("Graph0",))
                 self.assertEqual(
-                    entries("figure"),
+                    tuple(serialize_registry("figure")["entries"]),
                     ({"name": "Graph0", "args": ["x", "y"]},),
                 )
                 clear(kind="figure")
@@ -417,7 +416,7 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
         self.assertEqual(names("table"), ("Table0",))
         self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            entries("fit_function"),
+            tuple(serialize_registry("fit_function")["entries"]),
             (
                 {
                     "name": "line_fit",
@@ -427,7 +426,7 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            rejected_entries("fit_function"),
+            tuple(serialize_registry("fit_function")["rejected"]),
             ({"name": "bad_fit", "reason": "bad signature"},),
         )
 
@@ -435,7 +434,7 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
         self.assertEqual(names("table"), ())
         self.assertEqual(names("figure"), ("Graph0",))
         self.assertEqual(
-            entries("fit_function"),
+            tuple(serialize_registry("fit_function")["entries"]),
             (
                 {
                     "name": "line_fit",
@@ -445,14 +444,14 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            rejected_entries("fit_function"),
+            tuple(serialize_registry("fit_function")["rejected"]),
             ({"name": "bad_fit", "reason": "bad signature"},),
         )
 
         clear(kind="fit_function")
         self.assertEqual(names("figure"), ("Graph0",))
-        self.assertEqual(entries("fit_function"), ())
-        self.assertEqual(rejected_entries("fit_function"), ())
+        self.assertEqual(tuple(serialize_registry("fit_function")["entries"]), ())
+        self.assertEqual(tuple(serialize_registry("fit_function")["rejected"]), ())
 
     def test_clear_without_kind_resets_all_registries(self):
         @hyde.table
@@ -473,8 +472,8 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
 
         self.assertEqual(names("table"), ())
         self.assertEqual(names("figure"), ())
-        self.assertEqual(entries("fit_function"), ())
-        self.assertEqual(rejected_entries("fit_function"), ())
+        self.assertEqual(tuple(serialize_registry("fit_function")["entries"]), ())
+        self.assertEqual(tuple(serialize_registry("fit_function")["rejected"]), ())
 
     def test_publish_registry_without_kind_publishes_all_registry_payloads(self):
         @hyde.table

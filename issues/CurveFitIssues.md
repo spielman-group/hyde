@@ -6,7 +6,7 @@
 - [X] Issue 2: Discover `@hyde.fit_function` definitions and scaffold new functions
 - [X] Issue 3: Configure function/data binding and generate preview text
 - [X] Issue 4: Edit coefficient and data-option state with validation-gated `Do It`
-- [ ] Issue 5: Execute suppressed one-shot fits to create or recreate the result object
+- [X] Issue 5: Execute suppressed one-shot fits to create or recreate the result object
 - [ ] Issue 6: Add live rerun, failure retention, and result-target handoff behavior
 - [ ] Issue 7: Render and revert dialog-owned fit and residual traces on attached figures
 
