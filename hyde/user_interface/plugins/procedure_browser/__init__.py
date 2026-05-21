@@ -2,8 +2,8 @@ import os
 from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtWidgets import QWidget, QVBoxLayout, QTreeView, QFileSystemModel
 from qtutils.qt.QtGui import QDesktopServices
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import HydeToolWindowPlugin
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.shared.plugin import HydeToolWindowPlugin
 
 
 class ProcedureBrowser(HydeToolWidget):

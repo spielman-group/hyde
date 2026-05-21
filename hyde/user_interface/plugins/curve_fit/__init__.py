@@ -1,9 +1,7 @@
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.user_interface.hyde_interactive_widget import active_interactive_window
-from hyde.user_interface.plugin_tools import HydePlugin
-from hyde.user_interface.plugins.figure.window import FigureWindow
-from hyde.user_interface.window_naming import resolve_requested_name
+from hyde.user_interface.shared.plugin import HydePlugin
+from hyde.user_interface.shared.project import resolve_requested_name
 
 from .dialogs import CurveFitDialog
 from .fit_function_scaffolding import (
@@ -118,22 +116,17 @@ class Plugin(HydePlugin):
             data.get("rejected", []),
         )
 
-    def _active_curve_fit_figure_window(self):
-        figure_window = active_interactive_window(self.services, FigureWindow)
-        if figure_window is None:
+    def _active_curve_fit_figure_context(self):
+        figure_context_service = self.services.get("figure_context_service")
+        if figure_context_service is None:
             return None
-        snapshot_state = getattr(figure_window, "snapshot_state", None)
-        if snapshot_state is None or snapshot_state.figure_ir() is None:
-            return None
-        if figure_window.services.get("send_figure_action") is None:
-            return None
-        return figure_window
+        return figure_context_service.active_editable_figure()
 
     def show_curve_fit_dialog(self, checked=False):
         del checked
-        figure_window = self._active_curve_fit_figure_window()
+        figure_context = self._active_curve_fit_figure_context()
         dialog = CurveFitDialog(
-            figure_window=figure_window,
+            figure_context=figure_context,
             services=self.services,
             parent=self.services.get("ui"),
         )

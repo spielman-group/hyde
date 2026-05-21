@@ -27,8 +27,13 @@ from hyde.project_tools import (
     configure_gui_matplotlib_backend,
     is_excluded,
 )
-from hyde.user_interface.plugin_tools import HydePlugin
-from hyde.user_interface.plugins.figure import FigureFeatureService, FigureWorkspaceService, Plugin
+from hyde.user_interface.shared.plugin import HydePlugin
+from hyde.user_interface.plugins.figure import (
+    FigureContextService,
+    FigureFeatureService,
+    FigureWorkspaceService,
+    Plugin,
+)
 from hyde.user_interface.plugins.figure.dialogs import NewFigureDialog
 from hyde.user_interface.plugins.figure.window import (
     FigureState,
@@ -995,9 +1000,17 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent.append((figure_number, action)) or True
+                            )
+                        )
+                    },
+                )(),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -1029,9 +1042,17 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent.append((figure_number, action)) or True
+                            )
+                        )
+                    },
+                )(),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -1074,9 +1095,17 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent.append((figure_number, action)) or True
+                            )
+                        )
+                    },
+                )(),
                 "namespace_view_service": namespace_service,
             },
         )
@@ -1145,8 +1174,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             services={
                 "python_execution_service": FakeExecutionService(queued),
                 "save_window_dialog_service": save_window_dialog_service,
-                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-                "reload_procedures": lambda: None,
             },
         )
         subwindow = mdi_area.addSubWindow(widget)
@@ -1159,6 +1186,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.qapp.processEvents()
 
         self.assertEqual(len(save_window_dialog_service.calls), 1)
+        self.assertEqual(set(save_window_dialog_service.calls[0]), {"saveable"})
         self.assertEqual(queued, [])
         self.assertFalse(widget._closed)
         self.assertFalse(widget._kernel_close_in_progress)
@@ -1173,8 +1201,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             services={
                 "python_execution_service": FakeExecutionService(queued),
                 "save_window_dialog_service": self._FakeSaveWindowDialogService(),
-                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-                "reload_procedures": lambda: None,
             },
         )
         subwindow = mdi_area.addSubWindow(widget)
@@ -1204,8 +1230,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             services={
                 "python_execution_service": FakeExecutionService(queued),
                 "save_window_dialog_service": self._FakeSaveWindowDialogService(),
-                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-                "reload_procedures": lambda: None,
             },
         )
         subwindow = mdi_area.addSubWindow(widget)
@@ -1234,8 +1258,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             services={
                 "python_execution_service": FakeExecutionService(queued),
                 "save_window_dialog_service": self._FakeSaveWindowDialogService(),
-                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-                "reload_procedures": lambda: None,
                 "get_shutting_down": lambda: True,
             },
         )
@@ -1261,8 +1283,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             services={
                 "python_execution_service": FakeExecutionService(queued),
                 "save_window_dialog_service": self._FakeSaveWindowDialogService(),
-                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-                "reload_procedures": lambda: None,
             },
         )
         subwindow = mdi_area.addSubWindow(widget)
@@ -1339,9 +1359,17 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent.append((figure_number, action)) or True
+                            )
+                        )
+                    },
+                )(),
             },
         )
         try:
@@ -1874,6 +1902,158 @@ class TestMatplotlibPersistenceExclusion(unittest.TestCase):
 
         self.assertTrue(is_excluded("fig", figure))
         self.assertTrue(is_excluded("ax", axes))
+
+
+class TestFigureWindowBoundaries(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def _figure_ir(self, *, items=("trace_a", "trace_b")):
+        state = FigureState()
+        state.set_title("Figure0")
+        state.set_x_name("x")
+        state.set_items(list(items))
+        return figure_ir_from_live_state(state.normalized_state())
+
+    def test_figure_window_reports_supported_trace_records_from_snapshot_ir(self):
+        widget = FigureWindow(figure_number=1)
+        try:
+            widget.update_payload(
+                {
+                    "snapshot": {
+                        "figure_ir": self._figure_ir(),
+                    }
+                }
+            )
+
+            self.assertEqual(
+                widget.supported_trace_records(),
+                (
+                    {
+                        "subplot_id": "subplot0",
+                        "trace_id": "trace0",
+                        "label": "trace_a",
+                        "x_name": "x",
+                        "y_name": "trace_a",
+                        "trace": {
+                            "id": "trace0",
+                            "kind": "line",
+                            "kwargs": {"label": "trace_a"},
+                            "x_source": {"kind": "name", "value": "x"},
+                            "y_source": {"kind": "name", "value": "trace_a"},
+                        },
+                    },
+                    {
+                        "subplot_id": "subplot0",
+                        "trace_id": "trace1",
+                        "label": "trace_b",
+                        "x_name": "x",
+                        "y_name": "trace_b",
+                        "trace": {
+                            "id": "trace1",
+                            "kind": "line",
+                            "kwargs": {"label": "trace_b"},
+                            "x_source": {"kind": "name", "value": "x"},
+                            "y_source": {"kind": "name", "value": "trace_b"},
+                        },
+                    },
+                ),
+            )
+            self.assertTrue(widget.has_supported_traces())
+        finally:
+            widget.close()
+
+    def test_figure_window_reports_editable_readiness_from_ir_and_dispatch(self):
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: True
+                        )
+                    },
+                )(),
+            },
+        )
+        try:
+            self.assertFalse(widget.has_figure_ir())
+            self.assertTrue(widget.can_request_figure_actions())
+            self.assertFalse(widget.is_editable_figure_ready())
+
+            widget.update_payload(
+                {
+                    "snapshot": {
+                        "figure_ir": self._figure_ir(items=("trace_a",)),
+                    }
+                }
+            )
+
+            self.assertTrue(widget.has_figure_ir())
+            self.assertTrue(widget.can_request_figure_actions())
+            self.assertTrue(widget.is_editable_figure_ready())
+        finally:
+            widget.close()
+
+
+class TestFigureContextService(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def _figure_ir(self):
+        state = FigureState()
+        state.set_title("Figure0")
+        state.set_x_name("x")
+        state.set_items(["trace_a"])
+        return figure_ir_from_live_state(state.normalized_state())
+
+    def test_active_editable_figure_returns_boundary_context(self):
+        mdi_area = QtWidgets.QMdiArea()
+        sent = []
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent.append((int(figure_number), dict(action or {})))
+                                or True
+                            )
+                        )
+                    },
+                )(),
+            },
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.show()
+        mdi_area.setActiveSubWindow(subwindow)
+        widget.update_payload({"snapshot": {"figure_ir": self._figure_ir()}})
+
+        service = FigureContextService(type("Plugin", (), {"services": {"mdi_area": mdi_area}})())
+        try:
+            context = service.active_editable_figure()
+
+            self.assertIsNotNone(context)
+            self.assertEqual(context.figure_number, 1)
+            self.assertEqual(context.supported_trace_records(), widget.supported_trace_records())
+            self.assertTrue(context.request_figure_action({"type": "refresh_from_live_state"}))
+            self.assertEqual(
+                sent,
+                [(1, {"type": "refresh_from_live_state"})],
+            )
+        finally:
+            widget.close()
 
 
 class TestFigureRefreshHelpers(unittest.TestCase):

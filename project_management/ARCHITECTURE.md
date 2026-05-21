@@ -166,6 +166,11 @@ when a project is loaded.
   `active_interactive_window()` only resolves the active typed Hyde interactive widget;
   Curve Fit and figure-control plugins decide separately whether an active figure window
   is sufficiently ready for their own dialogs.
+- Cross-plugin code reuse through neutral mixins or shared helpers is allowed when it
+  is purely structural code sharing. Importing a mixin across plugin boundaries is not
+  itself a boundary violation if the mixin does not carry runtime authority, does not
+  reach through another plugin's widget internals, and does not substitute for a
+  declared service boundary.
 - **Strict Boundary Rule**: The core shell (`HydeApp`) must provide ZERO wrapper methods for plugin services (e.g. no `HydeApp.execute_command`). Plugins must consume registered services directly from the plugin manager. Providing shell wrappers over plugin logic is a boundary issue in disguise.
 
 ## Design Rule For New Work

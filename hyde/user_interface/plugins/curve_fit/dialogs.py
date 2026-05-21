@@ -1,3 +1,5 @@
+import copy
+
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.lmfit_features import (
@@ -7,9 +9,9 @@ from hyde.features.lmfit_features import (
     attached_display_trace_id,
     resolve_attached_display_trace_id,
 )
-from hyde.user_interface.base import HydeGuiState
-from hyde.user_interface.hyde_interactive_widget import supported_trace_records
-from hyde.user_interface.plugins.figure_control_dialogs.draft_helpers import (
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.core import HydeGuiState
+from hyde.user_interface.shared.figure import (
     FigureControlDraftTracker,
 )
 
@@ -60,11 +62,10 @@ class CurveFitState(HydeGuiState):
             self.apply_action({"type": "clear", "path": path})
 
 
-class CurveFitDialog(QtWidgets.QDialog):
-    def __init__(self, figure_window=None, services=None, parent=None):
-        super().__init__(parent)
-        self.figure_window = figure_window
-        self.services = dict(services or {})
+class CurveFitDialog(HydeDialogWidget):
+    def __init__(self, figure_context=None, services=None, parent=None):
+        super().__init__(parent=parent, services=dict(services or {}))
+        self.figure_context = figure_context
         self.state = CurveFitState()
         self._pending_fit_function_name = None
         self._catalog_service = self.services.get("curve_fit_catalog_service")
@@ -97,7 +98,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         self.show_fit_checkbox.toggled.connect(self._on_show_fit_toggled)
         self.show_residuals_checkbox.toggled.connect(self._on_show_residuals_toggled)
 
-        if self.figure_window is None:
+        if self.figure_context is None:
             self.state.apply_action(
                 {
                     "type": "set",
@@ -170,7 +171,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         layout.addRow("X Data", self.x_data_container)
 
         self.from_target_checkbox = QtWidgets.QCheckBox("From Target", tab)
-        self.from_target_checkbox.setChecked(self.figure_window is not None)
+        self.from_target_checkbox.setChecked(self.figure_context is not None)
         self.from_target_checkbox.toggled.connect(self._on_from_target_toggled)
         layout.addRow("", self.from_target_checkbox)
         return tab
@@ -279,10 +280,14 @@ class CurveFitDialog(QtWidgets.QDialog):
         if self._catalog_service is not None:
             fit_functions = self._catalog_service.fit_functions()
         return {
-            "attached": self.figure_window is not None,
+            "attached": self.figure_context is not None,
             "fit_functions": fit_functions,
             "namespace_view": self._namespace_view(),
-            "trace_records": supported_trace_records(self.figure_window),
+            "trace_records": (
+                ()
+                if self.figure_context is None
+                else self.figure_context.supported_trace_records()
+            ),
         }
 
     def _update_status_label(self, binding_message=""):
@@ -528,10 +533,9 @@ class CurveFitDialog(QtWidgets.QDialog):
         }
 
     def _attached_display_subplot_state(self):
-        if self.figure_window is None:
+        if self.figure_context is None:
             return None
-        snapshot_state = getattr(self.figure_window, "snapshot_state", None)
-        figure_ir = {} if snapshot_state is None else (snapshot_state.figure_ir() or {})
+        figure_ir = self.figure_context.figure_ir() or {}
         subplots = figure_ir.get("layout", {}).get("subplots", [])
         if not subplots:
             return None
@@ -641,28 +645,30 @@ class CurveFitDialog(QtWidgets.QDialog):
         return "Curve Fit attached display update failed."
 
     def _apply_attached_display_actions(self, subplot_id, trace_actions):
+        if self.figure_context is None:
+            return False
         rollback_state = self._attached_display_subplot_state()
         applied_trace_ids = []
         for trace_id, trace in trace_actions:
-            if self.figure_window.request_figure_action(
+            if self.figure_context.request_figure_action(
                 {
                     "type": "set_trace",
                     "subplot_id": subplot_id,
                     "trace_id": trace_id,
                     "trace": trace,
-                }
+                },
             ):
                 applied_trace_ids.append(trace_id)
                 continue
             if rollback_state is not None:
                 for applied_trace_id in reversed(applied_trace_ids):
-                    self.figure_window.request_figure_action(
+                    self.figure_context.request_figure_action(
                         {
                             "type": "set_trace",
                             "subplot_id": subplot_id,
                             "trace_id": applied_trace_id,
                             "trace": rollback_state["traces"].get(applied_trace_id),
-                        }
+                        },
                     )
             return False
         return True
@@ -756,6 +762,109 @@ class CurveFitDialog(QtWidgets.QDialog):
         }
         return self._attached_display_tracker.replace("attached_display", next_state)
 
+    def _capture_attached_display_collision_revert_state(
+        self,
+        *,
+        subplot_state,
+        current_state,
+        fit_trace_id,
+        residual_trace_id,
+    ):
+        if subplot_state is None or current_state is None:
+            return
+        revert_state = self._attached_display_tracker.revert_state("attached_display")
+        changed = False
+        if (
+            fit_trace_id is not None
+            and current_state.get("fit_trace_id") is None
+            and fit_trace_id in subplot_state.get("traces", {})
+        ):
+            revert_state["fit_trace_id"] = fit_trace_id
+            revert_state["fit_trace"] = copy.deepcopy(
+                subplot_state["traces"][fit_trace_id]
+            )
+            revert_state["trace_order"] = list(subplot_state.get("traces", {}))
+            changed = True
+        if (
+            residual_trace_id is not None
+            and current_state.get("residual_trace_id") is None
+            and residual_trace_id in subplot_state.get("traces", {})
+        ):
+            revert_state["residual_trace_id"] = residual_trace_id
+            revert_state["residual_trace"] = copy.deepcopy(
+                subplot_state["traces"][residual_trace_id]
+            )
+            revert_state["trace_order"] = list(subplot_state.get("traces", {}))
+            changed = True
+        if changed:
+            self._attached_display_tracker.replace_revert_state(
+                "attached_display",
+                revert_state,
+            )
+
+    def _restore_attached_display_revert_state(self):
+        if not self._attached_display_tracker.changed_keys():
+            return
+        revert_state = self._attached_display_tracker.revert_state("attached_display")
+        current_state = self._attached_display_tracker.current_states.get(
+            "attached_display",
+            {},
+        )
+        trace_actions = []
+        current_fit_trace_id = current_state.get("fit_trace_id")
+        revert_fit_trace_id = revert_state.get("fit_trace_id")
+        if current_fit_trace_id and current_fit_trace_id != revert_fit_trace_id:
+            trace_actions.append((current_fit_trace_id, None))
+        if revert_fit_trace_id is not None:
+            trace_actions.append((revert_fit_trace_id, revert_state["fit_trace"]))
+        current_residual_trace_id = current_state.get("residual_trace_id")
+        revert_residual_trace_id = revert_state.get("residual_trace_id")
+        trace_order = list(revert_state.get("trace_order") or [])
+        if trace_order:
+            for trace_id in filter(None, [current_fit_trace_id, current_residual_trace_id]):
+                trace_actions.append((trace_id, None))
+            for trace_id in reversed(trace_order):
+                if trace_id == revert_fit_trace_id and revert_fit_trace_id is not None:
+                    trace_actions.append((revert_fit_trace_id, revert_state["fit_trace"]))
+                elif (
+                    trace_id == revert_residual_trace_id
+                    and revert_residual_trace_id is not None
+                ):
+                    trace_actions.append(
+                        (
+                            revert_residual_trace_id,
+                            revert_state["residual_trace"],
+                        )
+                    )
+        else:
+            if (
+                current_residual_trace_id
+                and current_residual_trace_id != revert_residual_trace_id
+            ):
+                trace_actions.append((current_residual_trace_id, None))
+            if revert_residual_trace_id is not None:
+                trace_actions.append(
+                    (
+                        revert_residual_trace_id,
+                        revert_state["residual_trace"],
+                    )
+                )
+        self._apply_attached_display_actions(
+            revert_state["subplot_id"],
+            trace_actions,
+        )
+        self._attached_display_tracker.replace(
+            "attached_display",
+            {
+                "subplot_id": revert_state["subplot_id"],
+                "show_fit": revert_state["fit_trace"] is not None,
+                "show_residuals": revert_state["residual_trace"] is not None,
+                "fit_trace_id": revert_state["fit_trace_id"],
+                "residual_trace_id": revert_state["residual_trace_id"],
+                "fit_result_name": revert_state["fit_result_name"],
+            },
+        )
+
     def _run_commit_path(
         self,
         command=None,
@@ -769,7 +878,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         executes_command = bool(str(command or "").strip())
         needs_rollback_snapshot = (
             executes_command
-            and self.figure_window is not None
+            and self.figure_context is not None
             and success_target_name is not None
             and display_root_name is not None
         )
@@ -796,13 +905,14 @@ class CurveFitDialog(QtWidgets.QDialog):
             )
             if needs_rollback_snapshot and rollback_command:
                 python_execution_service.execute_hidden(rollback_command)
+            self._restore_attached_display_revert_state()
             return False, self._attached_display_failure_message()
         if success_target_name is not None:
             self._live_result_target_name = success_target_name
         return True, ""
 
     def _run_preview_path(self, *, force=False):
-        if self.figure_window is None or self._current_model is None:
+        if self.figure_context is None or self._current_model is None:
             return True
         wants_display = bool(
             self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()
@@ -818,7 +928,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         )
 
     def _has_active_attached_preview(self):
-        if self.figure_window is None:
+        if self.figure_context is None:
             return False
         current_state = self._attached_display_tracker.current_states.get(
             "attached_display",
@@ -829,7 +939,7 @@ class CurveFitDialog(QtWidgets.QDialog):
         )
 
     def _sync_preview_object(self):
-        if self.figure_window is None or self._current_model is None:
+        if self.figure_context is None or self._current_model is None:
             return True
         current_state = self._attached_display_tracker.current_states.get(
             "attached_display"
@@ -941,6 +1051,12 @@ class CurveFitDialog(QtWidgets.QDialog):
                 if desired_state["show_residuals"]
                 else None
             )
+            self._capture_attached_display_collision_revert_state(
+                subplot_state=subplot_state,
+                current_state=current_state,
+                fit_trace_id=fit_trace_id,
+                residual_trace_id=residual_trace_id,
+            )
         else:
             subplot_state = self._attached_display_subplot_state()
             owned_root_names = (
@@ -1019,7 +1135,7 @@ class CurveFitDialog(QtWidgets.QDialog):
             self.do_it_button.setEnabled(bool(self._current_model.get("valid")))
             self._update_status_label(self._current_model.get("status_message", ""))
         if (
-            self.figure_window is not None
+            self.figure_context is not None
             and (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked())
             and (
                 self._has_active_attached_preview()
@@ -1220,35 +1336,5 @@ class CurveFitDialog(QtWidgets.QDialog):
         )
 
     def reject(self):
-        if self._attached_display_tracker.changed_keys():
-            revert_state = self._attached_display_tracker.revert_state("attached_display")
-            current_state = self._attached_display_tracker.current_states.get(
-                "attached_display",
-                {},
-            )
-            trace_actions = []
-            current_fit_trace_id = current_state.get("fit_trace_id")
-            revert_fit_trace_id = revert_state.get("fit_trace_id")
-            if current_fit_trace_id and current_fit_trace_id != revert_fit_trace_id:
-                trace_actions.append((current_fit_trace_id, None))
-            if revert_fit_trace_id is not None:
-                trace_actions.append((revert_fit_trace_id, revert_state["fit_trace"]))
-            current_residual_trace_id = current_state.get("residual_trace_id")
-            revert_residual_trace_id = revert_state.get("residual_trace_id")
-            if (
-                current_residual_trace_id
-                and current_residual_trace_id != revert_residual_trace_id
-            ):
-                trace_actions.append((current_residual_trace_id, None))
-            if revert_residual_trace_id is not None:
-                trace_actions.append(
-                    (
-                        revert_residual_trace_id,
-                        revert_state["residual_trace"],
-                    )
-                )
-            self._apply_attached_display_actions(
-                revert_state["subplot_id"],
-                trace_actions,
-            )
+        self._restore_attached_display_revert_state()
         super().reject()

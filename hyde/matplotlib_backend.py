@@ -30,8 +30,8 @@ from hyde.features.matplotlib_features import (
     figure_ir_default_state,
     operand_from_runtime_value,
 )
-from hyde.user_interface.window_naming import resolve_requested_name
-from hyde.user_interface.figure_comm import COMM_TARGET
+from hyde.user_interface.shared.project import resolve_requested_name
+from hyde.user_interface.shared.figure import COMM_TARGET
 
 
 _BUILD_SESSION_LOCAL = threading.local()

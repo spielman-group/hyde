@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -13,9 +14,8 @@ try:
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
-from hyde.user_interface.base import MutationState
-from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
+from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget, HydeToolWidget
+from hyde.user_interface.shared.core import MutationState
 from hyde.user_interface.plugins.table import (
     Plugin,
     TableWorkspaceService,
@@ -165,6 +165,121 @@ class TestSaveWindowDialog(unittest.TestCase):
         self.assertIn("geometry=(5, 42, 510, 242)", macro)
         self.assertIn("column_widths={'fit_delay2': 262}", macro)
 
+    def test_save_window_dialog_service_saves_through_project_procedures_service(self):
+        from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialogService
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            procedures_dir = os.path.join(tmpdir, "procedures")
+            os.makedirs(procedures_dir)
+            procedures_init = os.path.join(procedures_dir, "__init__.py")
+            reload_calls = []
+
+            class FakeProjectProceduresService:
+                def procedures_init(self):
+                    return procedures_init
+
+                def reload_procedures(self):
+                    reload_calls.append("reloaded")
+
+            class FakeDialog:
+                SAVE = 1
+                NO_SAVE = 2
+
+                def __init__(self, saveable, parent=None):
+                    self.choice = self.SAVE
+                    self.parent = parent
+                    self.saveable = saveable
+
+                def exec_(self):
+                    return QtWidgets.QDialog.Accepted
+
+                def macro_name(self):
+                    return "SavedWindow"
+
+                def macro_source(self):
+                    return self.saveable.macro_source(self.macro_name())
+
+            widget = FakeInteractiveWidget(
+                services={
+                    "project_procedures_service": FakeProjectProceduresService(),
+                }
+            )
+            try:
+                with patch(
+                    "hyde.user_interface.plugins.save_window_dialog.SaveWindowDialog",
+                    FakeDialog,
+                ):
+                    result = SaveWindowDialogService().prompt_to_save_window_macro(
+                        saveable=widget
+                    )
+            finally:
+                widget.close()
+
+            self.assertTrue(result)
+            self.assertEqual(reload_calls, ["reloaded"])
+            with open(procedures_init, "r", encoding="utf-8") as handle:
+                saved_source = handle.read()
+            self.assertIn("def SavedWindow():", saved_source)
+            self.assertIn("@hyde.fake(window_pos=(3, 4), window_state='maximized')", saved_source)
+
+    def test_save_window_dialog_service_allows_no_save_without_procedures_service(self):
+        from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialogService
+
+        class FakeDialog:
+            SAVE = 1
+            NO_SAVE = 2
+
+            def __init__(self, saveable, parent=None):
+                self.choice = self.NO_SAVE
+                self.parent = parent
+                self.saveable = saveable
+
+            def exec_(self):
+                return QtWidgets.QDialog.Accepted
+
+        widget = FakeInteractiveWidget()
+        try:
+            with patch(
+                "hyde.user_interface.plugins.save_window_dialog.SaveWindowDialog",
+                FakeDialog,
+            ):
+                result = SaveWindowDialogService().prompt_to_save_window_macro(
+                    saveable=widget
+                )
+        finally:
+            widget.close()
+
+        self.assertTrue(result)
+
+    def test_save_window_dialog_service_cancel_keeps_window_open(self):
+        from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialogService
+
+        class FakeDialog:
+            SAVE = 1
+            NO_SAVE = 2
+
+            def __init__(self, saveable, parent=None):
+                self.choice = self.SAVE
+                self.parent = parent
+                self.saveable = saveable
+
+            def exec_(self):
+                return QtWidgets.QDialog.Rejected
+
+        widget = FakeInteractiveWidget()
+        try:
+            with patch(
+                "hyde.user_interface.plugins.save_window_dialog.SaveWindowDialog",
+                FakeDialog,
+            ):
+                result = SaveWindowDialogService().prompt_to_save_window_macro(
+                    saveable=widget
+                )
+        finally:
+            widget.close()
+
+        self.assertFalse(result)
+
 class FakeNamespaceViewService:
     def __init__(self, view=None):
         self._view = dict(view or {})
@@ -270,8 +385,6 @@ class FakeTablePlugin:
             "mdi_area": mdi_area,
             "python_execution_service": FakeExecutionService(),
             "ui": object(),
-            "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-            "reload_procedures": lambda: None,
             "save_window_dialog_service": self.save_window_dialog_service,
         }
 
@@ -555,8 +668,6 @@ class TestHydeInteractiveWidget(unittest.TestCase):
         widget = FakeInteractiveWidget(
             services={
                 "save_window_dialog_service": save_window_dialog_service,
-                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-                "reload_procedures": lambda: None,
             }
         )
 
@@ -568,14 +679,13 @@ class TestHydeInteractiveWidget(unittest.TestCase):
         self.assertTrue(event.isAccepted())
         self.assertEqual(len(save_window_dialog_service.calls), 1)
         self.assertIs(save_window_dialog_service.calls[0]["saveable"], widget)
+        self.assertEqual(set(save_window_dialog_service.calls[0]), {"saveable"})
 
     def test_close_event_shift_bypasses_prompt_and_uses_subclass_final_close(self):
         save_window_dialog_service = FakeSaveWindowDialogService(result=False)
         widget = FakeInteractiveWidget(
             services={
                 "save_window_dialog_service": save_window_dialog_service,
-                "get_procedures_init": lambda: "/tmp/project.hy/procedures/__init__.py",
-                "reload_procedures": lambda: None,
             }
         )
 

@@ -13,8 +13,8 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.figure_comm import (
+from hyde.user_interface.shared.core import RuntimeCommandState
+from hyde.user_interface.shared.figure import (
     COMM_TARGET,
     register_auxiliary_figure_comm_sink,
 )

@@ -1,23 +1,18 @@
-import os
-
-from qtutils import UiLoader
 from qtutils.qt import QtWidgets
 
 from hyde.features.hyde_features import is_eligible_for_table
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 
 from .window import TableState
 
 
-class NewTableDialog(QtWidgets.QDialog):
+class NewTableDialog(HydeDialogWidget):
     def __init__(self, objects_metadata, preselection=None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent=parent)
         self.objects_metadata = objects_metadata or {}
         self.preselection = preselection or []
         self.table_state = TableState()
-
-        loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "new_table_dialog.ui")
-        self.ui = loader.load(ui_path, self)
+        self.load_ui("new_table_dialog.ui")
 
         ok_button = self.ui.buttonBox.button(QtWidgets.QDialogButtonBox.Ok)
         if ok_button:

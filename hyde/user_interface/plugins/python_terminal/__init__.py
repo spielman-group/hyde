@@ -1,7 +1,7 @@
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
 
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import HydeToolWindowPlugin, HydeToolWindowService
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.shared.plugin import HydeToolWindowPlugin, HydeToolWindowService
 
 
 class PythonTerminal(RichJupyterWidget):

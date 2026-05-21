@@ -11,8 +11,8 @@ from labscript_utils.plugins import (
 )
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.shared.core import RuntimeCommandState
 
 
 LOGGER = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ SETUP_PRIORITY_RUNTIME_START = DEFAULT_SETUP_PRIORITY + 20
 _TOOL_WINDOW_STATES = frozenset({"hidden", "visible", "minimized", "maximized"})
 
 
-class _NullConfig:
+class NullConfig:
     def has_section(self, section):
         del section
         return True
@@ -51,7 +51,7 @@ class HydePluginManager(PluginManager):
         super().__init__(
             plugin_package=plugin_package,
             plugins_dir=plugins_dir,
-            config=_NullConfig(),
+            config=NullConfig(),
             config_section="hyde/user_interface",
             default_plugins=(),
             logger=logger or logging.getLogger(__name__),
@@ -679,39 +679,39 @@ def capture_subwindow_state(subwindow):
 
 
 def restore_subwindow_state(subwindow, info, *, session_key="tool window"):
-    normalized = _normalize_subwindow_restore_info(
+    normalized = normalize_subwindow_restore_info(
         subwindow,
         info,
         session_key=session_key,
     )
     if normalized is None:
         return False
-    _apply_staged_subwindow_restore(subwindow, normalized)
-    _apply_subwindow_presentation_state(subwindow, normalized)
+    apply_staged_subwindow_restore(subwindow, normalized)
+    apply_subwindow_presentation_state(subwindow, normalized)
     return True
 
 
 def stage_subwindow_state(subwindow, info, *, session_key="tool window"):
-    normalized = _normalize_subwindow_restore_info(
+    normalized = normalize_subwindow_restore_info(
         subwindow,
         info,
         session_key=session_key,
     )
     if normalized is None:
         return False
-    _apply_staged_subwindow_restore(subwindow, normalized)
+    apply_staged_subwindow_restore(subwindow, normalized)
     return True
 
 
 def finalize_subwindow_state(subwindow, info, *, session_key="tool window"):
-    normalized = _normalize_subwindow_restore_info(
+    normalized = normalize_subwindow_restore_info(
         subwindow,
         info,
         session_key=session_key,
     )
     if normalized is None:
         return False
-    _apply_subwindow_presentation_state(subwindow, normalized)
+    apply_subwindow_presentation_state(subwindow, normalized)
     return True
 
 
@@ -721,7 +721,7 @@ def capture_subwindow_geometry(subwindow):
     was_maximized = subwindow.isMaximized()
     if was_minimized or was_maximized:
         subwindow.showNormal()
-    geometry = _qrect_to_list(subwindow.geometry())
+    geometry = qrect_to_list(subwindow.geometry())
     if was_maximized:
         subwindow.showMaximized()
     elif was_minimized:
@@ -741,7 +741,7 @@ def capture_subwindow_window_state(subwindow):
     return "visible"
 
 
-def _coerce_geometry(geometry):
+def coerce_geometry(geometry):
     if not isinstance(geometry, (list, tuple)) or len(geometry) != 4:
         return None
     try:
@@ -753,27 +753,27 @@ def _coerce_geometry(geometry):
     return QtCore.QRect(x, y, width, height)
 
 
-def _hide_subwindow_with_warning(subwindow, session_key, detail):
+def hide_subwindow_with_warning(subwindow, session_key, detail):
     subwindow.hide()
     LOGGER.warning("%s: %s.", session_key, detail)
 
 
-def _normalize_subwindow_restore_info(subwindow, info, *, session_key):
+def normalize_subwindow_restore_info(subwindow, info, *, session_key):
     if not isinstance(info, dict):
         info = {}
 
     window_state = info.get("window_state")
     if window_state not in _TOOL_WINDOW_STATES:
-        _hide_subwindow_with_warning(
+        hide_subwindow_with_warning(
             subwindow,
             session_key,
             "invalid or missing tool-window window_state",
         )
         return None
 
-    geometry = _coerce_geometry(info.get("geometry"))
+    geometry = coerce_geometry(info.get("geometry"))
     if geometry is None:
-        _hide_subwindow_with_warning(
+        hide_subwindow_with_warning(
             subwindow,
             session_key,
             "invalid or missing tool-window geometry",
@@ -786,7 +786,7 @@ def _normalize_subwindow_restore_info(subwindow, info, *, session_key):
     }
 
 
-def _apply_staged_subwindow_restore(subwindow, info):
+def apply_staged_subwindow_restore(subwindow, info):
     if info["window_state"] == "hidden":
         subwindow.hide()
         subwindow.setGeometry(info["geometry"])
@@ -795,7 +795,7 @@ def _apply_staged_subwindow_restore(subwindow, info):
     subwindow.setGeometry(info["geometry"])
 
 
-def _apply_subwindow_presentation_state(subwindow, info):
+def apply_subwindow_presentation_state(subwindow, info):
     window_state = info["window_state"]
     if window_state == "hidden":
         subwindow.hide()
@@ -807,7 +807,7 @@ def _apply_subwindow_presentation_state(subwindow, info):
         subwindow.showMinimized()
 
 
-def _qrect_to_list(rect):
+def qrect_to_list(rect):
     return [rect.x(), rect.y(), rect.width(), rect.height()]
 
 

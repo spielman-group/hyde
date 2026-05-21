@@ -1,4 +1,6 @@
 import ast
+import copy
+import logging
 
 from matplotlib import colors as mcolors
 from qtutils.qt import QtCore, QtGui, QtWidgets
@@ -25,7 +27,7 @@ _COMMON_COLOR_NAMES = [
 ]
 
 
-def _rgba_from_matplotlib_color(value):
+def rgba_from_matplotlib_color(value):
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -45,7 +47,7 @@ def normalize_matplotlib_color_text(value, *, allow_auto=False, allow_empty=True
     if allow_auto and text.lower() == "auto":
         return "auto"
     try:
-        rgba = _rgba_from_matplotlib_color(text)
+        rgba = rgba_from_matplotlib_color(text)
     except Exception:
         return None
     keep_alpha = abs(float(rgba[3]) - 1.0) > 1e-9
@@ -60,7 +62,7 @@ def qcolor_from_matplotlib_color_text(value, *, allow_auto=False):
     )
     if normalized in (None, "", "auto"):
         return None
-    rgba = _rgba_from_matplotlib_color(normalized)
+    rgba = rgba_from_matplotlib_color(normalized)
     qcolor = QtGui.QColor()
     qcolor.setRgbF(*rgba)
     return qcolor if qcolor.isValid() else None
@@ -79,7 +81,7 @@ def color_text_from_qcolor(color):
     return mcolors.to_hex(rgba, keep_alpha=keep_alpha)
 
 
-def _named_matplotlib_colors():
+def named_matplotlib_colors():
     names = dict(mcolors.CSS4_COLORS)
     ordered = []
     seen = set()
@@ -215,7 +217,7 @@ class MatplotlibColorDialog(QtWidgets.QColorDialog):
         )
         self._named_colors_label.setBuddy(self._named_colors_list)
 
-        for name, value in _named_matplotlib_colors():
+        for name, value in named_matplotlib_colors():
             qcolor = qcolor_from_matplotlib_color_text(value)
             if qcolor is None:
                 continue
@@ -479,3 +481,150 @@ class MatplotlibColorLineEdit(QtWidgets.QLineEdit):
             "padding: 0px;"
             "}"
         )
+
+
+COMM_TARGET = "hyde_figure"
+LOGGER = logging.getLogger("hyde")
+
+
+def register_auxiliary_figure_comm_sink(kernel_client, label):
+    comm_manager = getattr(kernel_client, "comm_manager", None)
+    if comm_manager is None:
+        return False
+
+    def _on_open(comm, msg):
+        payload = msg.get("content", {}).get("data", {})
+        LOGGER.debug(
+            "Auxiliary kernel client %s absorbed figure comm %s for figure %s.",
+            label,
+            getattr(comm, "comm_id", None),
+            payload.get("figure_number"),
+        )
+        comm.on_msg(lambda _message: None)
+        comm.on_close(
+            lambda _message, current_comm=comm: LOGGER.debug(
+                "Auxiliary kernel client %s observed figure comm %s close.",
+                label,
+                getattr(current_comm, "comm_id", None),
+            )
+        )
+
+    comm_manager.register_target(COMM_TARGET, _on_open)
+    return True
+
+def normalize_empty_choice(value):
+    if value in (None, "", "none", "None", " "):
+        return "None"
+    return str(value)
+
+
+def trace_source_name(source):
+    if not isinstance(source, dict):
+        return None
+    if source.get("kind") != "name":
+        return None
+    value = str(source.get("value") or "").strip()
+    return value or None
+
+
+def trace_display_name(trace):
+    label = trace.get("kwargs", {}).get("label")
+    if label not in (None, "", "_nolegend_"):
+        return str(label)
+    y_name = trace_source_name(trace.get("y_source"))
+    if y_name:
+        return y_name
+    return str(trace.get("id", "trace"))
+
+
+def supported_trace_records_from_figure_ir(figure_ir):
+    figure_ir = dict(figure_ir or {})
+    subplots = figure_ir.get("layout", {}).get("subplots", [])
+    if not subplots:
+        return ()
+    subplot = subplots[0]
+    records = []
+    for trace in subplot.get("traces", []):
+        if trace.get("kind") != "line":
+            continue
+        records.append(
+            {
+                "subplot_id": str(subplot.get("id")),
+                "trace_id": str(trace.get("id")),
+                "label": trace_display_name(trace),
+                "x_name": trace_source_name(trace.get("x_source")),
+                "y_name": trace_source_name(trace.get("y_source")),
+                "trace": dict(trace),
+            }
+        )
+    return tuple(records)
+
+
+class EditableFigureContext:
+    def __init__(self, figure_window):
+        self.figure_number = int(figure_window.figure_number)
+        self._figure_window = figure_window
+
+    def figure_ir(self):
+        return self._figure_window.figure_ir()
+
+    def figure_defaults(self):
+        return self._figure_window.figure_defaults()
+
+    def resolved_axis_limits(self):
+        return self._figure_window.resolved_axis_limits()
+
+    def trace_styles(self):
+        return self._figure_window.trace_styles()
+
+    def supported_trace_records(self):
+        return supported_trace_records_from_figure_ir(self.figure_ir())
+
+    def has_supported_traces(self):
+        return bool(self.supported_trace_records())
+
+    def request_figure_action(self, action):
+        return bool(self._figure_window.request_figure_action(action))
+
+
+class FigureControlDraftTracker:
+    def __init__(self):
+        self.current_states = {}
+        self._opening_states = {}
+        self._revert_states = {}
+
+    def seed(self, key, opening_state, revert_state=None):
+        key = str(key)
+        opening_copy = copy.deepcopy(opening_state)
+        self._opening_states[key] = opening_copy
+        self._revert_states[key] = copy.deepcopy(
+            opening_state if revert_state is None else revert_state
+        )
+        self.current_states[key] = copy.deepcopy(opening_state)
+        return self.current_states[key]
+
+    def replace(self, key, state):
+        key = str(key)
+        self.current_states[key] = copy.deepcopy(state)
+        return self.current_states[key]
+
+    def update(self, key, patch):
+        key = str(key)
+        self.current_states[key].update(copy.deepcopy(patch))
+        return self.current_states[key]
+
+    def has_changes(self, key):
+        key = str(key)
+        return self.current_states[key] != self._opening_states[key]
+
+    def changed_keys(self):
+        return sorted(key for key in self.current_states if self.has_changes(key))
+
+    def revert_state(self, key):
+        key = str(key)
+        return copy.deepcopy(self._revert_states[key])
+
+    def replace_revert_state(self, key, state):
+        key = str(key)
+        self._revert_states[key] = copy.deepcopy(state)
+        return copy.deepcopy(self._revert_states[key])

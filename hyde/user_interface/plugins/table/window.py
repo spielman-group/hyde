@@ -6,8 +6,8 @@ from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_features import TableCodec
-from hyde.user_interface.base import HydeGuiState, MutationState
-from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
+from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
+from hyde.user_interface.shared.core import HydeGuiState, MutationState
 
 
 class TableState(HydeGuiState):

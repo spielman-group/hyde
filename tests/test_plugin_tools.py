@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import tempfile
@@ -13,10 +14,11 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
+from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 
-from hyde.user_interface.main import HydeApp
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import (
+from hyde.user_interface.main import HydeApp, connect_logger_to_output_sink
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.shared.plugin import (
     HydeMDIContext,
     HydeMenuContext,
     HydePlugin,
@@ -33,7 +35,7 @@ from hyde.user_interface.plugins.python_variables import Plugin as PythonVariabl
 from hyde.user_interface.plugins.python_terminal import Plugin as PythonTerminalPlugin
 from hyde.user_interface.plugins.table import Plugin as TablePlugin
 from hyde.user_interface.plugins.table.window import TableWidget
-from hyde.user_interface.window_naming import resolve_requested_name
+from hyde.user_interface.shared.project import resolve_requested_name
 
 
 class RecordingMenu(QtWidgets.QMenu):
@@ -66,7 +68,6 @@ def make_plugin_host(plugin_manager):
     app.emit_plugin_event = lambda name, data=None: (name, data)
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
-    app.on_visible_command_executed = lambda message: message
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
     app.lookup_menu_action = lambda location, name, path=(): (
         None if getattr(app, "menu_context", None) is None
@@ -88,7 +89,6 @@ def make_plugin_host(plugin_manager):
     app.confirm_overwrite_project = lambda path: False
     app.begin_shutdown_from_close_event = lambda: None
     app.finalize_quit = lambda: None
-    app.reload_procedures = lambda: None
     app.on_kernel_ready = lambda: None
     app.on_kernel_crashed = lambda: None
     app.enter_no_project_state = lambda: None
@@ -599,11 +599,7 @@ class TestPluginTools(unittest.TestCase):
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
         visible_command_service = RecordingVisibleCommandService()
         app.build_plugin_services = lambda: {
-            **{
-                key: value
-                for key, value in HydeApp.build_plugin_services(app).items()
-                if key != "on_visible_command_executed"
-            },
+            **HydeApp.build_plugin_services(app),
             "kernel_runtime_service": FakeKernelRuntimeService(),
             "visible_command_notification_service": visible_command_service,
         }
@@ -708,6 +704,101 @@ class TestPluginTools(unittest.TestCase):
         self.assertEqual(widget.session_key, "python_variables")
         self.assertEqual(subwindow.objectName(), "python_variables")
         self.assertEqual(subwindow.windowTitle(), "Python Variables")
+
+    def test_python_variables_service_stays_lazy_until_window_is_opened(self):
+        class FakeChannel(QtCore.QObject):
+            message_received = QtCore.Signal(object)
+
+        class FakeKernelClient:
+            def __init__(self):
+                self.iopub_channel = FakeChannel()
+
+        class FakeSpyderComm:
+            def __init__(self, kernel_client):
+                self.kernel_client = kernel_client
+
+            def open(self):
+                return None
+
+            def wait_until_ready(self, timeout=5):
+                del timeout
+                return None
+
+            def configure_namespace_view(self, settings):
+                self.settings = dict(settings)
+
+            def request_namespace_view(self, callback):
+                callback(
+                    {
+                        "scalar": {
+                            "type": "int",
+                            "python_type": "int",
+                            "view": "7",
+                        }
+                    }
+                )
+
+            def close(self):
+                return None
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"python_variables": PythonVariablesPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+        shared_client = FakeKernelClient()
+        kernel_runtime_service = type(
+            "KernelRuntimeService",
+            (),
+            {"kernel_client": lambda _self: shared_client},
+        )()
+        app.build_plugin_services = lambda: {
+            **HydeApp.build_plugin_services(app),
+            "kernel_runtime_service": kernel_runtime_service,
+        }
+
+        with patch(
+            "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+            FakeSpyderComm,
+        ):
+            HydeApp.setup_plugins(app)
+            plugin = manager.plugins["python_variables"]
+            service = plugin.python_variables_service
+            callback_payloads = []
+
+            self.assertTrue(service.connect_namespace_view_updated(callback_payloads.append))
+            self.assertEqual(service.namespace_view(), {})
+            self.assertIsNone(plugin.mdi_widget("python_variables"))
+
+            action = manager.services["lookup_menu_action"](
+                "window",
+                "Python Variables",
+            )
+            action.trigger()
+            self.qapp.processEvents()
+
+        self.assertEqual(
+            callback_payloads,
+            [
+                {
+                    "scalar": {
+                        "type": "int",
+                        "python_type": "int",
+                        "view": "7",
+                    }
+                }
+            ],
+        )
+        self.assertIsNotNone(plugin.mdi_widget("python_variables"))
+        self.assertEqual(
+            service.namespace_view(),
+            {
+                "scalar": {
+                    "type": "int",
+                    "python_type": "int",
+                    "view": "7",
+                }
+            },
+        )
 
     def test_python_terminal_service_restores_and_captures_history_through_container(self):
         class FakeTerminalWidget(QtWidgets.QWidget):
@@ -1084,7 +1175,7 @@ class TestPluginTools(unittest.TestCase):
                 self.qapp.processEvents()
 
                 with self.assertLogs(
-                    "hyde.user_interface.plugin_tools",
+                    "hyde.user_interface.shared.plugin",
                     level="WARNING",
                 ) as logs:
                     restored = plugin.restore_tool_window(
@@ -1242,7 +1333,11 @@ class TestPluginTools(unittest.TestCase):
         class FakeOutputBox:
             def __init__(self, layout):
                 self.port = 43210
+                self.writes = []
                 layout.addWidget(QtWidgets.QLabel("fake output"))
+
+            def write(self, text, color=None):
+                self.writes.append((text, color))
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"logging_window": LoggingPlugin({})}
@@ -1273,8 +1368,6 @@ class TestPluginTools(unittest.TestCase):
         self.assertEqual(service.port(), widget.output_box.port)
         self.assertEqual(widget.window_identifier(), "logging")
         self.assertEqual(widget.session_key, "logging")
-        self.assertTrue(hasattr(widget.ui, "content_widget"))
-        self.assertEqual(widget.ui.content_layout.count(), 1)
         self.assertFalse(subwindow.isVisible())
 
         action.trigger()
@@ -1286,6 +1379,91 @@ class TestPluginTools(unittest.TestCase):
         self.qapp.processEvents()
         self.assertTrue(subwindow.isHidden())
         self.assertIs(service.widget(), widget)
+
+    def test_logging_window_runtime_output_service_writes_through_sink_boundary(self):
+        class FakeOutputBox:
+            def __init__(self, layout):
+                self.port = 43210
+                self.writes = []
+                layout.addWidget(QtWidgets.QLabel("fake output"))
+
+            def write(self, text, color=None):
+                self.writes.append((text, color))
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"logging_window": LoggingPlugin({})}
+        app = make_plugin_host(manager)
+
+        with patch(
+            "hyde.user_interface.plugins.logging_window.OutputBox",
+            FakeOutputBox,
+        ):
+            HydeApp.setup_plugins(app)
+        app.ui.show()
+        self.qapp.processEvents()
+
+        service = manager.services["runtime_output_service"]
+
+        service.write("runtime line\n", color="amber")
+
+        self.assertEqual(service.port(), 43210)
+        self.assertEqual(
+            service.widget().output_box.writes,
+            [("runtime line\n", "amber")],
+        )
+
+    def test_connect_logger_to_output_sink_formats_messages_through_sink_boundary(self):
+        class RecordingSink:
+            def __init__(self):
+                self.writes = []
+
+            def write(self, text, color=None):
+                self.writes.append((text, color))
+
+        logger_name = "hyde.tests.logging_sink"
+        sink = RecordingSink()
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        logger.handlers = []
+        self.addCleanup(setattr, logger, "handlers", [])
+
+        handler = connect_logger_to_output_sink(logger_name, sink)
+        self.addCleanup(logger.removeHandler, handler)
+
+        logger.info("plain line")
+        logger.warning("warn line")
+        logger.info("[Hyde state] Demo\nstate:\n{'a': 1}\npython:\nprint('x')")
+
+        self.assertEqual(
+            sink.writes[0][1],
+            WHITE,
+        )
+        self.assertTrue(
+            sink.writes[0][0].endswith("INFO hyde.tests.logging_sink: plain line\n")
+        )
+        self.assertEqual(sink.writes[1][1], RED)
+        self.assertTrue(
+            sink.writes[1][0].endswith("WARNING hyde.tests.logging_sink: warn line\n")
+        )
+        self.assertEqual(
+            [color for _, color in sink.writes[2:7]],
+            [ORANGE, ORANGE, GREEN, ORANGE, BLUE],
+        )
+        self.assertTrue(
+            sink.writes[2][0].endswith(
+                "INFO hyde.tests.logging_sink: [Hyde state] Demo\n"
+            )
+        )
+        self.assertEqual(
+            [text for text, _ in sink.writes[3:7]],
+            [
+                "state:\n",
+                "{'a': 1}\n",
+                "python:\n",
+                "print('x')\n",
+            ],
+        )
 
     def test_setup_plugins_registers_contextual_menu_locations_and_visibility_services(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")

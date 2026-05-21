@@ -5,12 +5,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.plugin_tools import HydeMDIContext
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
+from hyde.user_interface.shared.plugin import HydeMDIContext
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget, HydeToolWidget
 from hyde.user_interface.main import HydeApp
 
 
 class DemoToolWidget(HydeToolWidget):
+    pass
+
+
+class DemoDialogWidget(HydeDialogWidget):
     pass
 
 
@@ -68,6 +72,14 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertIs(widget.service("demo_service"), service)
         self.assertEqual(widget.service("missing", "fallback"), "fallback")
         self.assertIsNotNone(widget.ui)
+
+    def test_dialog_base_stores_services(self):
+        service = object()
+
+        dialog = DemoDialogWidget(services={"demo_service": service})
+
+        self.assertIs(dialog.service("demo_service"), service)
+        self.assertEqual(dialog.service("missing", "fallback"), "fallback")
 
     def test_bind_subwindow_uses_window_identifier_as_default_object_name(self):
         mdi_area = QtWidgets.QMdiArea()

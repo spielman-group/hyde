@@ -1,12 +1,157 @@
+import os
+import sys
+
+from qtutils import UiLoader
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import (
-    build_window_function_source,
-    build_window_restore_source,
-    capture_saveable_window_state,
-    capture_subwindow_geometry,
-)
+
+def load_ui_for_owner(owner, ui_filename, *, module_name=None):
+    resolved_module_name = module_name or type(owner).__module__
+    module_file = sys.modules[resolved_module_name].__file__
+    ui_path = os.path.join(os.path.dirname(module_file), ui_filename)
+    loader = UiLoader()
+    return loader.load(ui_path, owner)
+
+
+class PersistentToolWindowFilter(QtCore.QObject):
+    def __init__(self, widget):
+        super().__init__(widget)
+        self.widget = widget
+
+    def eventFilter(self, watched, event):
+        if event.type() != QtCore.QEvent.Close:
+            return super().eventFilter(watched, event)
+        if self.widget.allows_subwindow_close():
+            return super().eventFilter(watched, event)
+        watched.hide()
+        event.ignore()
+        return True
+
+
+class HydeToolWidget(QtWidgets.QWidget):
+    ui_filename = "hyde_window_widget.ui"
+
+    def __init__(
+        self,
+        services=None,
+        session_key=None,
+        window_identifier=None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.services = dict(services or {})
+        self._window_identifier = self._normalize_window_identifier(
+            window_identifier if window_identifier is not None else session_key
+        )
+        self.session_key = self._window_identifier
+        self.mounted_child = None
+        self._subwindow = None
+        self._shutdown_requested = False
+        self._persistent_close_filter = PersistentToolWindowFilter(self)
+        self.ui = load_ui_for_owner(
+            self,
+            self.ui_filename,
+            module_name="hyde.user_interface",
+        )
+
+    def _normalize_window_identifier(self, value):
+        if value is None:
+            return None
+        return str(value)
+
+    def set_window_identifier(self, value):
+        self._window_identifier = self._normalize_window_identifier(value)
+        self.session_key = self._window_identifier
+        return self._window_identifier
+
+    @staticmethod
+    def read_subwindow_identifier(subwindow, fallback=None):
+        if subwindow is None:
+            return None if fallback is None else str(fallback)
+        object_name = str(subwindow.objectName() or "").strip()
+        if object_name:
+            return object_name
+        return None if fallback is None else str(fallback)
+
+    @staticmethod
+    def bind_subwindow_identifier(subwindow, identifier):
+        bound_identifier = str(identifier)
+        subwindow.setObjectName(bound_identifier)
+        return bound_identifier
+
+    def window_identifier(self):
+        return self.read_subwindow_identifier(
+            self._subwindow,
+            fallback=self._window_identifier,
+        )
+
+    def service(self, key, default=None):
+        return self.services.get(key, default)
+
+    def close_policy(self):
+        return "hide"
+
+    def allows_subwindow_close(self):
+        if self._shutdown_requested:
+            return True
+        get_shutting_down = self.service("get_shutting_down")
+        if callable(get_shutting_down) and get_shutting_down():
+            self.shutdown()
+            return True
+        return self.close_policy() == "close"
+
+    def mount_child_widget(self, child):
+        if self.mounted_child is child:
+            return child
+        if self.mounted_child is not None:
+            self.ui.content_layout.removeWidget(self.mounted_child)
+            self.mounted_child.setParent(None)
+        self.ui.content_layout.addWidget(child)
+        self.mounted_child = child
+        return child
+
+    def bind_subwindow(self, subwindow, *, window_identifier=None):
+        if self._subwindow is subwindow:
+            return subwindow
+        if self._subwindow is not None:
+            self._subwindow.removeEventFilter(self._persistent_close_filter)
+        if window_identifier is not None:
+            self.set_window_identifier(window_identifier)
+        self._subwindow = subwindow
+        if self._subwindow is not None:
+            bound_identifier = self.window_identifier()
+            if bound_identifier is not None:
+                bound_identifier = self.bind_subwindow_identifier(
+                    self._subwindow,
+                    bound_identifier,
+                )
+                self.set_window_identifier(bound_identifier)
+            self._subwindow.installEventFilter(self._persistent_close_filter)
+        return subwindow
+
+    def shutdown(self):
+        self._shutdown_requested = True
+        child = self.mounted_child
+        if child is not None and hasattr(child, "shutdown"):
+            child.shutdown()
+        if self._subwindow is not None:
+            self._subwindow.removeEventFilter(self._persistent_close_filter)
+
+
+class HydeDialogWidget(QtWidgets.QDialog):
+    def __init__(self, *args, services=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.services = dict(services or {})
+        self.ui = None
+        self.setModal(True)
+
+    def service(self, key, default=None):
+        return self.services.get(key, default)
+
+    def load_ui(self, ui_filename):
+        self.ui = load_ui_for_owner(self, ui_filename)
+        return self.ui
 
 
 def active_interactive_window(services, interactive_type=None):
@@ -22,74 +167,25 @@ def active_interactive_window(services, interactive_type=None):
     return widget
 
 
-def _trace_source_name(source):
-    if not isinstance(source, dict):
-        return None
-    if source.get("kind") != "name":
-        return None
-    value = str(source.get("value") or "").strip()
-    return value or None
-
-
-def _trace_display_name(trace):
-    label = trace.get("kwargs", {}).get("label")
-    if label not in (None, "", "_nolegend_"):
-        return str(label)
-    y_name = _trace_source_name(trace.get("y_source"))
-    if y_name:
-        return y_name
-    return str(trace.get("id", "trace"))
-
-
-def supported_trace_records(figure_window):
-    if figure_window is None:
-        return ()
-    snapshot_state = getattr(figure_window, "snapshot_state", None)
-    figure_ir = {} if snapshot_state is None else (snapshot_state.figure_ir() or {})
-    subplots = figure_ir.get("layout", {}).get("subplots", [])
-    if not subplots:
-        return ()
-    subplot = subplots[0]
-    records = []
-    for trace in subplot.get("traces", []):
-        if trace.get("kind") != "line":
-            continue
-        records.append(
-            {
-                "subplot_id": str(subplot.get("id")),
-                "trace_id": str(trace.get("id")),
-                "label": _trace_display_name(trace),
-                "x_name": _trace_source_name(trace.get("x_source")),
-                "y_name": _trace_source_name(trace.get("y_source")),
-                "trace": dict(trace),
-            }
-        )
-    return tuple(records)
-
-
-def has_supported_traces(figure_window):
-    return bool(supported_trace_records(figure_window))
-
-
-def _freeze_namespace_tracking_value(value):
+def freeze_namespace_tracking_value(value):
     if isinstance(value, dict):
         return tuple(
-            (str(key), _freeze_namespace_tracking_value(item))
+            (str(key), freeze_namespace_tracking_value(item))
             for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
         )
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze_namespace_tracking_value(item) for item in value)
+        return tuple(freeze_namespace_tracking_value(item) for item in value)
     if isinstance(value, set):
-        return tuple(sorted(_freeze_namespace_tracking_value(item) for item in value))
+        return tuple(sorted(freeze_namespace_tracking_value(item) for item in value))
     return value
 
 
-def _tracked_namespace_signature(view, names):
+def tracked_namespace_signature(view, names):
     tracked = []
     view = dict(view or {})
     for name in names:
         metadata = dict(view.get(name, {}) or {})
-        tracked.append((name, _freeze_namespace_tracking_value(metadata)))
+        tracked.append((name, freeze_namespace_tracking_value(metadata)))
     return tuple(tracked)
 
 
@@ -140,11 +236,15 @@ class HydeInteractiveWidget(HydeToolWidget):
     def _remember_subwindow_geometry(self):
         if self._subwindow is None or self._subwindow.isMinimized():
             return
+        from hyde.user_interface.shared.plugin import capture_subwindow_geometry
+
         self._last_normal_geometry = tuple(capture_subwindow_geometry(self._subwindow))
 
     def capture_geometry(self):
         if self._subwindow is None:
             return None
+        from hyde.user_interface.shared.plugin import capture_subwindow_geometry
+
         if self._subwindow.isMinimized() and self._last_normal_geometry is not None:
             return list(self._last_normal_geometry)
         return capture_subwindow_geometry(self._subwindow)
@@ -160,6 +260,8 @@ class HydeInteractiveWidget(HydeToolWidget):
         return True
 
     def window_state(self):
+        from hyde.user_interface.shared.plugin import capture_saveable_window_state
+
         return capture_saveable_window_state(self._subwindow)
 
     def window_handle(self):
@@ -167,11 +269,7 @@ class HydeInteractiveWidget(HydeToolWidget):
 
     def formatted_window_title(self, title_suffix=None, warning_text=None):
         stable_name = str(self.window_handle())
-        suffix_text = (
-            str(title_suffix).strip()
-            if title_suffix is not None
-            else ""
-        )
+        suffix_text = str(title_suffix).strip() if title_suffix is not None else ""
         base_title = stable_name if not suffix_text else f"{stable_name}: {suffix_text}"
         warning = str(warning_text).strip() if warning_text is not None else ""
         if warning:
@@ -187,7 +285,7 @@ class HydeInteractiveWidget(HydeToolWidget):
         return ()
 
     def tracked_namespace_state_from_view(self, view):
-        return _tracked_namespace_signature(
+        return tracked_namespace_signature(
             view,
             self.tracked_namespace_names(),
         )
@@ -245,6 +343,8 @@ class HydeInteractiveWidget(HydeToolWidget):
         return self.window_identifier() or self.saveable_default_macro_name()
 
     def macro_source(self, macro_name):
+        from hyde.user_interface.shared.plugin import build_window_function_source
+
         self.prepare_saveable_state()
         return build_window_function_source(
             self.macro_definition_source(
@@ -259,6 +359,8 @@ class HydeInteractiveWidget(HydeToolWidget):
         )
 
     def session_restore_source(self):
+        from hyde.user_interface.shared.plugin import build_window_restore_source
+
         self.prepare_saveable_state()
         handle = self.window_handle()
         if handle is None:
@@ -281,55 +383,31 @@ class HydeInteractiveWidget(HydeToolWidget):
         return False
 
     def complete_interactive_close(self, event):
-        return QtWidgets.QWidget.closeEvent(self, event)
+        return super().closeEvent(event)
 
     def finalize_interactive_close(self, event):
-        raise NotImplementedError
-
-    def _prompt_to_save_on_close(self):
-        save_window_dialog_service = self.service("save_window_dialog_service")
-        get_procedures_init = self.service("get_procedures_init")
-        reload_procedures = self.service("reload_procedures")
-        if (
-            save_window_dialog_service is None
-            or get_procedures_init is None
-            or reload_procedures is None
-        ):
-            return True
-        procedures_init = get_procedures_init()
-        if not procedures_init:
-            return True
-        self.prepare_saveable_state()
-        return bool(
-            save_window_dialog_service.prompt_to_save_window_macro(
-                saveable=self,
-                parent=self.service("ui", self),
-                procedures_init=procedures_init,
-                reload_procedures=reload_procedures,
-            )
-        )
-
-    def eventFilter(self, watched, event):
-        subwindow = getattr(self, "_subwindow", None)
-        if (
-            watched is subwindow
-            and event.type() in (QtCore.QEvent.Move, QtCore.QEvent.Resize)
-        ):
-            self._remember_subwindow_geometry()
-        return super().eventFilter(watched, event)
+        return self.complete_interactive_close(event)
 
     def closeEvent(self, event):
         if self.is_close_complete():
-            self.complete_interactive_close(event)
-            return
-        get_shutting_down = self.service("get_shutting_down")
-        if get_shutting_down is not None and get_shutting_down():
-            self.finalize_interactive_close(event)
-            return
-        if QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.ShiftModifier:
-            self.finalize_interactive_close(event)
-            return
-        if not self._prompt_to_save_on_close():
-            event.ignore()
-            return
-        self.finalize_interactive_close(event)
+            return self.complete_interactive_close(event)
+        if QtWidgets.QApplication.keyboardModifiers() == QtCore.Qt.ShiftModifier:
+            return self.finalize_interactive_close(event)
+        save_window_dialog_service = self.service("save_window_dialog_service")
+        if save_window_dialog_service is not None:
+            self.prepare_saveable_state()
+            should_close = save_window_dialog_service.prompt_to_save_window_macro(
+                saveable=self
+            )
+            if not should_close:
+                event.ignore()
+                return
+        return self.finalize_interactive_close(event)
+
+    def eventFilter(self, watched, event):
+        subwindow = getattr(self, "_subwindow", None)
+        if watched is not subwindow or event.type() != QtCore.QEvent.Move:
+            return super().eventFilter(watched, event)
+        if subwindow is not None and not subwindow.isMinimized():
+            self._remember_subwindow_geometry()
+        return super().eventFilter(watched, event)

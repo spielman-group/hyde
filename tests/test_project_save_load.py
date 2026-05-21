@@ -26,13 +26,13 @@ import hyde
 import hyde.project_tools
 from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.base import RuntimeCommandState
+from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.main.project_state import (
     capture_session,
     write_session,
 )
-from hyde.user_interface.plugin_tools import HydeMDIContext, HydePlugin
+from hyde.user_interface.shared.plugin import HydeMDIContext, HydePlugin
 from hyde.user_interface.plugins.figure import FigureWorkspaceService
 from hyde.user_interface.plugins.figure.window import FigureState
 from hyde.user_interface.plugins.table import TableWorkspaceService

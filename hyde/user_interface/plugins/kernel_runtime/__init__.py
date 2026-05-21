@@ -8,7 +8,7 @@ from qtutils import inmain_decorator
 from qtutils.qt import QtCore
 
 from hyde.paths import CONNECTION_FILE, KERNEL_LAUNCHER
-from hyde.user_interface.plugin_tools import (
+from hyde.user_interface.shared.plugin import (
     HydePlugin,
     SETUP_PRIORITY_RUNTIME_START,
 )

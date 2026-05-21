@@ -41,8 +41,6 @@ class HydeGuiState:
 
     def macro_source(self, macro_name):
         normalized = self.validate_state()
-        # Keep the shared macro hook in the base API so feature states can expose
-        # recreation-source generation through the same interface as python_source().
         source = self.codec.state_to_macro_source(self._state, macro_name)
         if hyde.HYDE_DEBUG:
             logging.getLogger("hyde").debug(
@@ -55,8 +53,6 @@ class HydeGuiState:
 
 
 class MutationState(HydeGuiState):
-    # Keep MutationState in the shared base module because it is a reusable
-    # cross-feature GUI state, not a table-owned specialization.
     codec = MutationCodec
 
     def set_command(self, command):
@@ -97,9 +93,7 @@ class MutationState(HydeGuiState):
 
     def set_delete_name(self, var_name):
         self.set_command("delete_name")
-        self.apply_action(
-            {"type": "set", "path": ("settings", "var_name"), "value": var_name}
-        )
+        self.apply_action({"type": "set", "path": ("settings", "var_name"), "value": var_name})
         self.apply_action({"type": "clear", "path": ("settings", "index")})
         self.apply_action({"type": "clear", "path": ("settings", "indices")})
         self.apply_action({"type": "clear", "path": ("settings", "value_text")})
@@ -111,67 +105,33 @@ class RuntimeCommandState(HydeGuiState):
     def set_command(self, command):
         self.apply_action({"type": "set_command", "command": command})
 
-    def set_reload_procedures(
-        self,
-        project_dir,
-        hyde_source_root,
-        *,
-        reset_namespace=False,
-    ):
+    def set_reload_procedures(self, project_dir, hyde_source_root, *, reset_namespace=False):
         self.set_command("reload_procedures")
+        self.apply_action({"type": "set", "path": ("settings", "project_dir"), "value": project_dir})
         self.apply_action(
-            {"type": "set", "path": ("settings", "project_dir"), "value": project_dir}
+            {"type": "set", "path": ("settings", "hyde_source_root"), "value": hyde_source_root}
         )
         self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "hyde_source_root"),
-                "value": hyde_source_root,
-            }
-        )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "reset_namespace"),
-                "value": bool(reset_namespace),
-            }
+            {"type": "set", "path": ("settings", "reset_namespace"), "value": bool(reset_namespace)}
         )
         self.apply_action({"type": "clear", "path": ("settings", "request_filepath")})
 
     def set_remote_request(self, request_filepath):
         self.set_command("remote_request")
         self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "request_filepath"),
-                "value": request_filepath,
-            }
+            {"type": "set", "path": ("settings", "request_filepath"), "value": request_filepath}
         )
         self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
-        self.apply_action(
-            {"type": "clear", "path": ("settings", "hyde_source_root")}
-        )
+        self.apply_action({"type": "clear", "path": ("settings", "hyde_source_root")})
 
     def set_callable_invocation(self, callable_name, args):
         self.set_command("callable_invocation")
         self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "callable_name"),
-                "value": callable_name,
-            }
+            {"type": "set", "path": ("settings", "callable_name"), "value": callable_name}
         )
         self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "callable_args"),
-                "value": list(args or []),
-            }
+            {"type": "set", "path": ("settings", "callable_args"), "value": list(args or [])}
         )
         self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
-        self.apply_action(
-            {"type": "clear", "path": ("settings", "hyde_source_root")}
-        )
-        self.apply_action(
-            {"type": "clear", "path": ("settings", "request_filepath")}
-        )
+        self.apply_action({"type": "clear", "path": ("settings", "hyde_source_root")})
+        self.apply_action({"type": "clear", "path": ("settings", "request_filepath")})

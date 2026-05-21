@@ -5,6 +5,12 @@
 - Use normal scientific aliases like `np`, `plt`, and `pd`.
 - Route Qt imports through `qtutils`, not raw Qt bindings.
 
+## Naming
+- In classes, leading `_name` members indicate private implementation details.
+- At module scope, do not use leading `_` for private functions or private classes.
+- At module scope, leading `_NAME` or `_name` is reserved for private module-global
+  constants or variables.
+
 ## UI Boundary
 - If non-UI callbacks touch Qt widgets, route them onto the main thread.
 - GUI code may hold only transient state needed to generate commands or render UI.

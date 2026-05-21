@@ -1,23 +1,18 @@
-import os
-
-from qtutils import UiLoader
 from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import sorted_eligible_names
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 
 from .window import FigureState
 
 
-class NewFigureDialog(QtWidgets.QDialog):
+class NewFigureDialog(HydeDialogWidget):
     def __init__(self, objects_metadata, preselection=None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent=parent)
         self.objects_metadata = objects_metadata or {}
         self.preselection = list(preselection or [])
         self.figure_state = FigureState()
-
-        loader = UiLoader()
-        ui_path = os.path.join(os.path.dirname(__file__), "new_figure_dialog.ui")
-        self.ui = loader.load(ui_path, self)
+        self.load_ui("new_figure_dialog.ui")
 
         ok_button = self.ui.buttonBox.button(QtWidgets.QDialogButtonBox.Ok)
         if ok_button:

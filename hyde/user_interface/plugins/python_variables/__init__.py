@@ -6,9 +6,9 @@ from qtutils import inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.hyde_features import is_eligible_for_table
-from hyde.user_interface.base import MutationState
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import HydeToolWindowPlugin, HydeToolWindowService
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.shared.core import MutationState
+from hyde.user_interface.shared.plugin import HydeToolWindowPlugin, HydeToolWindowService
 
 NAMESPACE_VIEW_SETTINGS = {
     "check_all": False,
@@ -420,22 +420,53 @@ class NamespaceFilterProxyModel(QtCore.QSortFilterProxyModel):
 
 
 class PythonVariablesService(HydeToolWindowService):
+    def __init__(self, plugin, window_key=None):
+        super().__init__(plugin, window_key=window_key)
+        self._namespace_view = {}
+        self._callbacks = []
+        self._observed_widget = None
+
+    def observe_widget(self, widget):
+        if widget is self._observed_widget:
+            return widget
+        if self._observed_widget is not None:
+            try:
+                self._observed_widget.namespace_view_updated.disconnect(
+                    self.publish_namespace_view
+                )
+            except Exception:
+                pass
+        self._observed_widget = widget
+        if widget is None:
+            return None
+        widget.namespace_view_updated.connect(self.publish_namespace_view)
+        self.publish_namespace_view(widget.namespace_view())
+        return widget
+
+    def publish_namespace_view(self, view):
+        self._namespace_view = copy.deepcopy(dict(view or {}))
+        payload = copy.deepcopy(self._namespace_view)
+        for callback in list(self._callbacks):
+            callback(copy.deepcopy(payload))
+
     def namespace_view(self):
-        widget = self.ensure_widget()
-        return {} if widget is None else widget.namespace_view()
+        widget = self.widget()
+        if widget is not None and widget is not self._observed_widget:
+            self.observe_widget(widget)
+        return copy.deepcopy(self._namespace_view)
 
     def connect_namespace_view_updated(self, callback):
-        widget = self.ensure_widget()
-        if widget is None:
-            return False
-        widget.namespace_view_updated.connect(callback)
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+        widget = self.widget()
+        if widget is not None and widget is not self._observed_widget:
+            self.observe_widget(widget)
         return True
 
     def disconnect_namespace_view_updated(self, callback):
-        widget = self.widget()
-        if widget is None:
+        if callback not in self._callbacks:
             return False
-        widget.namespace_view_updated.disconnect(callback)
+        self._callbacks.remove(callback)
         return True
 
 
@@ -460,8 +491,10 @@ class Plugin(HydeToolWindowPlugin):
         }
 
     def create_tool_window_widget(self, parent=None):
-        return PythonVariables(
+        widget = PythonVariables(
             services=self.services,
             session_key=self.session_key,
             parent=parent,
         )
+        self.python_variables_service.observe_widget(widget)
+        return widget

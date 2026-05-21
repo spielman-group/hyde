@@ -3,8 +3,9 @@ import copy
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec
-from hyde.user_interface.matplotlib_color_picker import MatplotlibColorLineEdit
-from hyde.user_interface.plugins.figure_control_dialogs.draft_helpers import (
+from hyde.user_interface.shared.figure import MatplotlibColorLineEdit
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.figure import (
     FigureControlDraftTracker,
 )
 
@@ -213,21 +214,20 @@ def _merge_figure_ir_with_defaults(figure_ir, figure_defaults):
     return merged
 
 
-class AxisEditDialog(QtWidgets.QDialog):
-    def __init__(self, figure_window, parent=None):
-        super().__init__(parent)
-        self.setModal(True)
+class AxisEditDialog(HydeDialogWidget):
+    def __init__(self, figure_context, services=None, parent=None):
+        super().__init__(parent=parent, services=dict(services or {}))
         self.setWindowTitle("Modify Axis")
-        self.figure_window = figure_window
+        self.figure_context = figure_context
         self._loading_controls = False
         self._live_updates_sent = False
-        self._original_figure_ir = self.figure_window.snapshot_state.figure_ir()
+        self._original_figure_ir = self.figure_context.figure_ir()
         self._draft_tracker = FigureControlDraftTracker()
         self._draft_figure_ir = self._draft_tracker.seed(
             "figure",
             _merge_figure_ir_with_defaults(
                 self._original_figure_ir,
-                self.figure_window.snapshot_state.figure_defaults(),
+                self.figure_context.figure_defaults(),
             ),
             revert_state=self._original_figure_ir,
         )
@@ -677,10 +677,7 @@ class AxisEditDialog(QtWidgets.QDialog):
         self.tab_widget.addTab(range_tab, AXIS_TAB_TITLES[6])
 
     def has_supported_axes(self):
-        return (
-            self.figure_window.services.get("send_figure_action") is not None
-            and self._current_subplot() is not None
-        )
+        return self._current_subplot() is not None
 
     def _load_initial_axis(self):
         if not self.has_supported_axes():
@@ -1116,7 +1113,7 @@ class AxisEditDialog(QtWidgets.QDialog):
             "state": dict(context["axis_state"]),
             "replace": True,
         }
-        sent = self.figure_window.request_figure_action(axis_action) or sent
+        sent = self.figure_context.request_figure_action(axis_action) or sent
         side_action = {
             "type": "set_axis_side_state",
             "subplot_id": context["subplot_id"],
@@ -1124,14 +1121,14 @@ class AxisEditDialog(QtWidgets.QDialog):
             "state": dict(context["side_state"]),
             "replace": True,
         }
-        sent = self.figure_window.request_figure_action(side_action) or sent
+        sent = self.figure_context.request_figure_action(side_action) or sent
         layout_action = {
             "type": "set_subplot_margins",
             "subplot_id": context["subplot_id"],
             "state": dict(context["subplot"].get("margins", {}) or {}),
             "replace": True,
         }
-        sent = self.figure_window.request_figure_action(layout_action) or sent
+        sent = self.figure_context.request_figure_action(layout_action) or sent
         if sent:
             self._live_updates_sent = True
         return sent
@@ -1152,7 +1149,7 @@ class AxisEditDialog(QtWidgets.QDialog):
                 "state": dict(subplot["axes"][axis_name]),
                 "replace": True,
             }
-            sent = self.figure_window.request_figure_action(action) or sent
+            sent = self.figure_context.request_figure_action(action) or sent
         for side in ("bottom", "top", "left", "right"):
             action = {
                 "type": "set_axis_side_state",
@@ -1161,14 +1158,14 @@ class AxisEditDialog(QtWidgets.QDialog):
                 "state": dict(subplot["axis_sides"][side]),
                 "replace": True,
             }
-            sent = self.figure_window.request_figure_action(action) or sent
+            sent = self.figure_context.request_figure_action(action) or sent
         action = {
             "type": "set_subplot_margins",
             "subplot_id": subplot["id"],
             "state": dict(subplot.get("margins", {}) or {}),
             "replace": True,
         }
-        sent = self.figure_window.request_figure_action(action) or sent
+        sent = self.figure_context.request_figure_action(action) or sent
         if sent:
             self._live_updates_sent = True
         return sent
@@ -1185,7 +1182,7 @@ class AxisEditDialog(QtWidgets.QDialog):
                 FigureIRCodec.state_to_python(
                     self._draft_figure_ir,
                     context={
-                        "figure_defaults": self.figure_window.snapshot_state.figure_defaults()
+                        "figure_defaults": self.figure_context.figure_defaults()
                     },
                 )
             )
@@ -1259,7 +1256,7 @@ class AxisEditDialog(QtWidgets.QDialog):
         if context is None:
             return
         resolved_limits = (
-            self.figure_window.snapshot_state.resolved_axis_limits()
+            self.figure_context.resolved_axis_limits()
             .get(context["subplot_id"], {})
             .get(context["axis_name"])
         )

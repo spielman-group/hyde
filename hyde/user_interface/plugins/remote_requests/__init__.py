@@ -5,8 +5,8 @@ from labscript_utils.labconfig import LabConfig
 from labscript_utils.ls_zprocess import ZMQServer
 from zmq.error import ZMQError
 
-from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.plugin_tools import HydePlugin
+from hyde.user_interface.shared.core import RuntimeCommandState
+from hyde.user_interface.shared.plugin import HydePlugin
 
 
 def _remote_port():

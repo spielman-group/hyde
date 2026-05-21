@@ -1,15 +1,12 @@
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.user_interface.hyde_interactive_widget import (
-    has_supported_traces,
-    supported_trace_records,
-)
-from hyde.user_interface.matplotlib_color_picker import (
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.figure import (
     MatplotlibColorLineEdit,
     normalize_matplotlib_color_text,
 )
-from hyde.user_interface.plugins.figure_control_dialogs.draft_helpers import (
+from hyde.user_interface.shared.figure import (
     FigureControlDraftTracker,
     normalize_empty_choice,
 )
@@ -95,12 +92,11 @@ def _apply_style_values(style, values):
             style[key] = value
 
 
-class TraceAppearanceDialog(QtWidgets.QDialog):
-    def __init__(self, figure_window, parent=None):
-        super().__init__(parent)
-        self.setModal(True)
+class TraceAppearanceDialog(HydeDialogWidget):
+    def __init__(self, figure_context, services=None, parent=None):
+        super().__init__(parent=parent, services=dict(services or {}))
         self.setWindowTitle("Modify Data Appearance")
-        self.figure_window = figure_window
+        self.figure_context = figure_context
         self._loading_controls = False
         self._trace_records = []
         self._trace_records_by_id = {}
@@ -213,9 +209,9 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         layout.addWidget(self.button_box)
 
     def _load_traces(self):
-        figure_ir = self.figure_window.snapshot_state.figure_ir() or {}
-        trace_styles = self.figure_window.snapshot_state.trace_styles()
-        figure_defaults = self.figure_window.snapshot_state.figure_defaults() or {}
+        figure_ir = self.figure_context.figure_ir() or {}
+        trace_styles = self.figure_context.trace_styles() or {}
+        figure_defaults = self.figure_context.figure_defaults() or {}
         default_traces_by_subplot = {}
         for subplot in figure_defaults.get("layout", {}).get("subplots", []):
             subplot_id = str(subplot.get("id"))
@@ -236,7 +232,9 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         if not subplots:
             return
         subplot = subplots[0]
-        for index, supported_trace in enumerate(supported_trace_records(self.figure_window)):
+        for index, supported_trace in enumerate(
+            self.figure_context.supported_trace_records()
+        ):
             trace = supported_trace["trace"]
             trace_id = supported_trace["trace_id"]
             style = self._style_from_trace(
@@ -340,7 +338,7 @@ class TraceAppearanceDialog(QtWidgets.QDialog):
         }
         if replace:
             action["replace"] = True
-        if not self.figure_window.request_figure_action(action):
+        if not self.figure_context.request_figure_action(action):
             return False
         if replace:
             self._draft_tracker.replace(trace_id, patch)

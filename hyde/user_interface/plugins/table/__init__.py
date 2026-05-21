@@ -1,13 +1,13 @@
 from functools import partial
 
 from qtutils.qt import QtCore
-from hyde.user_interface.hyde_interactive_widget import active_interactive_window
-from hyde.user_interface.plugin_tools import (
+from hyde.user_interface.base_hyde_widgets import active_interactive_window
+from hyde.user_interface.shared.plugin import (
     HydePlugin,
     apply_saveable_window_state,
     blank_window_icon,
 )
-from hyde.user_interface.window_naming import resolve_requested_name
+from hyde.user_interface.shared.project import resolve_requested_name
 
 from .window import (
     TableState,

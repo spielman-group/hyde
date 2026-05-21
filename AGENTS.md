@@ -43,6 +43,9 @@ For command-emitting GUI surfaces or GUI-side lowering/state work, follow
 - Do not add trivial pass-through helpers or wrapper methods that only rename or
   forward to a shared helper without adding real local policy. Prefer making the
   shared helper the actual interface.
+- Neutral shared mixins are allowed across plugin boundaries when they only share code
+  shape. Do not flag a mixin import as a boundary violation unless it carries runtime
+  authority or causes plugin interaction to bypass declared services.
 - Check `PLAN.md` for active remaining work.
 - Use the local `$add-hyde-ui-feature` skill when creating or revising frontend specs.
 

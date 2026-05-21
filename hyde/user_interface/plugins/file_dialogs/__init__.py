@@ -1,4 +1,4 @@
-from hyde.user_interface.plugin_tools import HydePlugin
+from hyde.user_interface.shared.plugin import HydePlugin
 
 from .dialogs import (
     HealProjectDialog,

@@ -20,13 +20,35 @@ from qtconsole.client import QtKernelClient
 from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.base import RuntimeCommandState
-from hyde.user_interface.plugin_tools import HydeMDIContext
+from hyde.user_interface.shared.core import RuntimeCommandState
+from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.plugins.python_variables import (
     Plugin as PythonVariablesPlugin,
     PythonVariables,
     PythonVariablesService,
 )
+
+
+class RecordingTableFeature:
+    def __init__(self, *, has_active_table):
+        self._has_active_table = bool(has_active_table)
+        self.new_table_calls = []
+        self.append_calls = []
+
+    def has_active_table(self):
+        return self._has_active_table
+
+    def show_new_table_dialog(self, namespace_view, *, preselection=None, parent=None):
+        self.new_table_calls.append(
+            {
+                "namespace_view": namespace_view,
+                "preselection": list(preselection or []),
+                "parent": parent,
+            }
+        )
+
+    def append_to_active_table(self, names):
+        self.append_calls.append(list(names))
 
 
 def process_events(duration=0.05):
@@ -318,8 +340,7 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         browser._candidate_selection_indexes = lambda: list(indexes)
 
     def test_table_dispatch_requires_entire_selection_to_be_eligible(self):
-        table_feature = Mock()
-        table_feature.has_active_table.return_value = True
+        table_feature = RecordingTableFeature(has_active_table=True)
         browser = self._make_browser(
             {
                 "arr": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "f"},
@@ -334,12 +355,11 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         browser._edit_selected()
         browser._append_to_table_selected()
 
-        table_feature.show_new_table_dialog.assert_not_called()
-        table_feature.append_to_active_table.assert_not_called()
+        self.assertEqual(table_feature.new_table_calls, [])
+        self.assertEqual(table_feature.append_calls, [])
 
     def test_table_dispatch_uses_all_selected_eligible_names(self):
-        table_feature = Mock()
-        table_feature.has_active_table.return_value = True
+        table_feature = RecordingTableFeature(has_active_table=True)
         browser = self._make_browser(
             {
                 "arr": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "f"},
@@ -354,12 +374,17 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         browser._edit_selected()
         browser._append_to_table_selected()
 
-        table_feature.show_new_table_dialog.assert_called_once_with(
-            browser.namespace_view(),
-            preselection=["arr", "arr2"],
-            parent=browser,
+        self.assertEqual(
+            table_feature.new_table_calls,
+            [
+                {
+                    "namespace_view": browser.namespace_view(),
+                    "preselection": ["arr", "arr2"],
+                    "parent": browser,
+                }
+            ],
         )
-        table_feature.append_to_active_table.assert_called_once_with(["arr", "arr2"])
+        self.assertEqual(table_feature.append_calls, [["arr", "arr2"]])
 
 class TestPythonVariablesRefreshTracking(unittest.TestCase):
     @classmethod
@@ -528,34 +553,78 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
 
 
 class TestPythonVariablesService(unittest.TestCase):
-    def test_connect_namespace_view_updated_ensures_widget_exists(self):
-        connected = []
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication(sys.argv)
 
-        class FakeSignal:
-            def connect(self, callback):
-                connected.append(callback)
-
-        class FakeWidget:
-            namespace_view_updated = FakeSignal()
-
+    def test_namespace_service_reads_cached_view_without_creating_widget(self):
         class FakePlugin:
             def __init__(self):
                 self.widget_instance = None
+                self.ensure_calls = 0
 
             def ensure_mdi_widget(self, key):
                 del key
-                self.widget_instance = FakeWidget()
+                self.ensure_calls += 1
                 return self.widget_instance
 
             def mdi_widget(self, key):
                 del key
                 return self.widget_instance
 
-        callback = object()
-        service = PythonVariablesService(FakePlugin())
+        plugin = FakePlugin()
+        service = PythonVariablesService(plugin)
+        published_view = {"arr": {"type": "ndarray", "view": "[1 2 3]"}}
+
+        service.publish_namespace_view(published_view)
+        snapshot = service.namespace_view()
+        published_view["arr"]["view"] = "[1 9 3]"
+
+        self.assertEqual(
+            snapshot,
+            {"arr": {"type": "ndarray", "view": "[1 2 3]"}},
+        )
+        self.assertEqual(plugin.ensure_calls, 0)
+        self.assertIsNone(plugin.widget_instance)
+
+    def test_namespace_service_subscribes_without_creating_widget(self):
+        class FakePlugin:
+            def __init__(self):
+                self.widget_instance = None
+                self.ensure_calls = 0
+
+            def ensure_mdi_widget(self, key):
+                del key
+                self.ensure_calls += 1
+                return self.widget_instance
+
+            def mdi_widget(self, key):
+                del key
+                return self.widget_instance
+
+        plugin = FakePlugin()
+        service = PythonVariablesService(plugin)
+        callback_payloads = []
+
+        def callback(view):
+            callback_payloads.append(view)
 
         self.assertTrue(service.connect_namespace_view_updated(callback))
-        self.assertEqual(connected, [callback])
+        self.assertEqual(plugin.ensure_calls, 0)
+        self.assertIsNone(plugin.widget_instance)
+
+        service.publish_namespace_view(
+            {"scalar": {"type": "int", "python_type": "int", "view": "7"}}
+        )
+
+        self.assertEqual(
+            callback_payloads,
+            [{"scalar": {"type": "int", "python_type": "int", "view": "7"}}],
+        )
+        self.assertEqual(plugin.ensure_calls, 0)
+        self.assertTrue(service.disconnect_namespace_view_updated(callback))
 
     def test_namespace_view_isolated_from_nested_metadata_mutation(self):
         browser = PythonVariables.__new__(PythonVariables)

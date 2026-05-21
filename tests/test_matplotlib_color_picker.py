@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.matplotlib_color_picker import (
+from hyde.user_interface.shared.figure import (
     MatplotlibColorDialog,
     MatplotlibColorLineEdit,
     normalize_matplotlib_color_text,
@@ -91,15 +91,21 @@ class TestMatplotlibColorHelpers(unittest.TestCase):
                 seen["parent"] = parent
                 original_init(dialog_self, parent, **kwargs)
 
+            launched = []
+
+            def record_exec(dialog_self):
+                launched.append(dialog_self)
+                return QtWidgets.QDialog.Rejected
+
             with patch.object(MatplotlibColorDialog, "__init__", new=wrapped_init):
                 with patch.object(
                     MatplotlibColorDialog,
                     "exec_",
-                    return_value=QtWidgets.QDialog.Rejected,
-                ) as exec_:
+                    new=record_exec,
+                ):
                     swatch.click()
 
-            self.assertEqual(exec_.call_count, 1)
+            self.assertEqual(len(launched), 1)
             self.assertIs(seen["parent"], window)
         finally:
             window.close()

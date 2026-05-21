@@ -4,8 +4,9 @@ from functools import partial
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore
 
-from hyde.user_interface.figure_comm import COMM_TARGET
-from hyde.user_interface.plugin_tools import HydePlugin, blank_window_icon
+from hyde.user_interface.base_hyde_widgets import active_interactive_window
+from hyde.user_interface.shared.figure import COMM_TARGET, EditableFigureContext
+from hyde.user_interface.shared.plugin import HydePlugin, blank_window_icon
 
 from .dialogs import NewFigureDialog
 from .window import FigureState, FigureWindow
@@ -36,8 +37,6 @@ class FigureWorkspaceService:
             services["save_window_dialog_service"] = self.plugin.services[
                 "save_window_dialog_service"
             ]
-            if hasattr(self.plugin, "send_figure_action"):
-                services["send_figure_action"] = self.plugin.send_figure_action
             figure = FigureWindow(
                 figure_number=figure_number,
                 services=services,
@@ -113,6 +112,25 @@ class FigureFeatureService:
         return True
 
 
+class FigureActionService:
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def request_figure_action(self, figure_number, action):
+        return self.plugin.send_figure_action(figure_number, action)
+
+
+class FigureContextService:
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def active_editable_figure(self):
+        figure_window = active_interactive_window(self.plugin.services, FigureWindow)
+        if figure_window is None or not figure_window.is_editable_figure_ready():
+            return None
+        return EditableFigureContext(figure_window)
+
+
 class Plugin(HydePlugin):
     window_macros_menu_title = "Graph Macros"
     window_macros_empty_label = "No Saved Graph Macros"
@@ -124,6 +142,8 @@ class Plugin(HydePlugin):
         super().__init__(initial_settings)
         self.workspace = FigureWorkspaceService(self)
         self.figure_feature = FigureFeatureService(self)
+        self.figure_action_service = FigureActionService(self)
+        self.figure_context_service = FigureContextService(self)
         self.figure_macros = []
         self._signals_connected = False
         self._new_figure_action = None
@@ -141,7 +161,11 @@ class Plugin(HydePlugin):
         self._signals_connected = True
 
     def get_services(self):
-        return {"figure_feature": self.figure_feature}
+        return {
+            "figure_feature": self.figure_feature,
+            "figure_action_service": self.figure_action_service,
+            "figure_context_service": self.figure_context_service,
+        }
 
     def get_menu_contributions(self):
         return [

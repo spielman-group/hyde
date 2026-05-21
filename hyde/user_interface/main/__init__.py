@@ -9,7 +9,7 @@ from hyde.paths import (
     HYDE_DIR,
     get_project_paths,
 )
-from hyde.user_interface.base import RuntimeCommandState
+from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.main.project_state import (
     apply_mdi_window_order,
     build_session_restore_wrapper,
@@ -20,7 +20,7 @@ from hyde.user_interface.main.project_state import (
     write_history,
     write_session,
 )
-from hyde.user_interface.plugin_tools import (
+from hyde.user_interface.shared.plugin import (
     HydeMDIContext,
     HydeMenuContext,
     HydePluginManager,
@@ -43,32 +43,31 @@ class PersistentSubwindowFilter(QtCore.QObject):
         return super().eventFilter(watched, event)
 
 
-def connect_logger_to_output_box(logger_name, output_box):
-    class OutputBoxLogHandler(logging.Handler):
+def connect_logger_to_output_sink(logger_name, sink):
+    class OutputSinkLogHandler(logging.Handler):
         def emit(self, record):
             message = self.format(record)
             raw_message = record.getMessage()
-            # OutputBox.write() is the thread-safe entry point here: it pushes
-            # text through OutputBox's internal socket/queue path and its
-            # add_text() method is already marshalled onto the Qt main thread.
+            # The runtime output sink owns the thread-safe transport to the
+            # logging window, including the OutputBox queue path.
             if raw_message.startswith("[Hyde state] "):
                 prefix, _, _ = message.partition(raw_message)
                 header, rest = raw_message.split("\nstate:\n", 1)
                 header = f"{prefix}{header}" if prefix else header
                 state_text, python_text = rest.split("\npython:\n", 1)
-                output_box.write(f"{header}\n", color=ORANGE)
-                output_box.write("state:\n", color=ORANGE)
-                output_box.write(f"{state_text}\n", color=GREEN)
-                output_box.write("python:\n", color=ORANGE)
-                output_box.write(f"{python_text}\n", color=BLUE)
+                sink.write(f"{header}\n", color=ORANGE)
+                sink.write("state:\n", color=ORANGE)
+                sink.write(f"{state_text}\n", color=GREEN)
+                sink.write("python:\n", color=ORANGE)
+                sink.write(f"{python_text}\n", color=BLUE)
             else:
-                output_box.write(
+                sink.write(
                     f"{message}\n",
                     color=RED if record.levelno >= logging.WARNING else WHITE,
                 )
 
     logger = logging.getLogger(logger_name)
-    handler = OutputBoxLogHandler()
+    handler = OutputSinkLogHandler()
     handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
     logger.addHandler(handler)
     return handler
@@ -162,9 +161,9 @@ class HydeApp:
         logging_service = self.plugin_service("runtime_output_service")
         if logging_service is not None:
             try:
-                self.logging_handler = connect_logger_to_output_box(
+                self.logging_handler = connect_logger_to_output_sink(
                     "hyde",
-                    logging_service.output_box(),
+                    logging_service,
                 )
             except Exception as exc:
                 print(
@@ -199,7 +198,6 @@ class HydeApp:
                 VisibleCommandNotificationService(self)
             ),
             "get_current_project_dir": self.get_current_project_dir,
-            "get_procedures_init": self.get_procedures_init,
             "get_shutting_down": self.get_shutting_down,
             "set_shutting_down": self.set_shutting_down,
             "get_quit_command_sent": self.get_quit_command_sent,
@@ -208,9 +206,7 @@ class HydeApp:
             "project_target_needs_confirmation": self.project_target_needs_confirmation,
             "confirm_overwrite_project": self.confirm_overwrite_project,
             "finalize_quit": self.finalize_quit,
-            "reload_procedures": self.reload_procedures,
             "show_window": self.show_plugin_window,
-            "on_visible_command_executed": self.on_visible_command_executed,
             "on_kernel_ready": self.on_kernel_ready,
             "on_kernel_crashed": self.on_kernel_crashed,
             "enter_no_project_state": self.enter_no_project_state,

@@ -1,6 +1,6 @@
 from labscript_utils.qtwidgets.outputbox import OutputBox
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
-from hyde.user_interface.plugin_tools import HydeToolWindowPlugin, HydeToolWindowService
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.shared.plugin import HydeToolWindowPlugin, HydeToolWindowService
 
 class LoggingWindow(HydeToolWidget):
     def __init__(self, *args, **kwargs):
@@ -10,9 +10,9 @@ class LoggingWindow(HydeToolWidget):
 
 
 class LoggingWindowService(HydeToolWindowService):
-    def output_box(self):
+    def write(self, text, color=None):
         widget = self.ensure_widget()
-        return widget.output_box
+        widget.output_box.write(text, color=color)
 
     def port(self):
         widget = self.ensure_widget()

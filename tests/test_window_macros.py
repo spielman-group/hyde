@@ -21,7 +21,7 @@ from hyde.recreation_registry import (
     reject_fit_function,
     serialize_registry,
 )
-from hyde.user_interface.window_macro_store import (
+from hyde.user_interface.shared.project import (
     BEGIN_MARKER,
     END_MARKER,
     inspect_macro_conflict,

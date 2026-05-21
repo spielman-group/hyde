@@ -4,7 +4,7 @@ from qtutils.qt import QtWidgets
 
 from hyde.features.hyde_features import SimpleHydeCommandCodec
 from hyde.paths import DEFAULT_PROJECTS_DIR
-from hyde.user_interface.base import HydeGuiState
+from hyde.user_interface.shared.core import HydeGuiState
 
 
 class SimpleCommandState(HydeGuiState):

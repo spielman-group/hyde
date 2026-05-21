@@ -3,7 +3,7 @@ import unittest
 from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import figure_ir_from_live_state
-from hyde.user_interface.hyde_tool_widget import HydeToolWidget
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget
 from hyde.user_interface.plugins.figure.window import (
     FigureSnapshotState,
     FigureState,

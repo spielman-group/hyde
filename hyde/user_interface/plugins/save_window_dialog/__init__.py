@@ -1,34 +1,26 @@
 from __future__ import annotations
 
-import os
-
-from qtutils import UiLoader
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.plugin_tools import HydePlugin
-from hyde.user_interface.window_macro_store import (
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.plugin import HydePlugin
+from hyde.user_interface.shared.project import (
     MacroStoreError,
     inspect_macro_conflict,
     write_macro_source,
 )
 
 
-class SaveWindowDialog(QtWidgets.QDialog):
+class SaveWindowDialog(HydeDialogWidget):
     SAVE = 1
     NO_SAVE = 2
     CANCEL = 0
 
     def __init__(self, saveable, parent=None):
-        super().__init__(parent)
+        super().__init__(parent=parent)
         self.choice = self.CANCEL
         self.saveable = saveable
-
-        loader = UiLoader()
-        ui_path = os.path.join(
-            os.path.dirname(__file__),
-            "save_window_dialog.ui",
-        )
-        self.ui = loader.load(ui_path, self)
+        self.load_ui("save_window_dialog.ui")
 
         self.ui.nameEdit.setText(self.saveable.default_macro_name())
         self.ui.nameEdit.selectAll()
@@ -62,14 +54,14 @@ class SaveWindowDialog(QtWidgets.QDialog):
 
 
 class SaveWindowDialogService:
-    def prompt_to_save_window_macro(
-        self,
-        *,
-        saveable,
-        parent,
-        procedures_init,
-        reload_procedures,
-    ):
+    def prompt_to_save_window_macro(self, *, saveable):
+        parent = saveable if isinstance(saveable, QtWidgets.QWidget) else None
+        saveable_service = getattr(saveable, "service", None)
+        procedures_service = (
+            None
+            if not callable(saveable_service)
+            else saveable_service("project_procedures_service")
+        )
         while True:
             dialog = SaveWindowDialog(saveable=saveable, parent=parent)
             if dialog.exec_() != QtWidgets.QDialog.Accepted:
@@ -84,6 +76,19 @@ class SaveWindowDialogService:
                 macro_source = dialog.macro_source()
             except MacroStoreError as exc:
                 QtWidgets.QMessageBox.warning(parent, "Invalid Macro Name", str(exc))
+                continue
+
+            procedures_init = (
+                None
+                if procedures_service is None
+                else procedures_service.procedures_init()
+            )
+            if not procedures_init:
+                QtWidgets.QMessageBox.warning(
+                    parent,
+                    "Unable To Save Macro",
+                    "Window recreation macros require an active project procedures/__init__.py path.",
+                )
                 continue
 
             conflict = inspect_macro_conflict(procedures_init, macro_name)
@@ -112,7 +117,7 @@ class SaveWindowDialogService:
             except MacroStoreError as exc:
                 QtWidgets.QMessageBox.warning(parent, "Unable To Save Macro", str(exc))
                 continue
-            reload_procedures()
+            procedures_service.reload_procedures()
             return True
 
 

@@ -1,11 +1,6 @@
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.hyde_interactive_widget import (
-    active_interactive_window,
-    has_supported_traces,
-)
-from hyde.user_interface.plugins.figure.window import FigureWindow
-from hyde.user_interface.plugin_tools import HydePlugin
+from hyde.user_interface.shared.plugin import HydePlugin
 
 from .axis_edit_dialog import AxisEditDialog
 from .trace_edit_dialog import TraceAppearanceDialog
@@ -34,30 +29,29 @@ class Plugin(HydePlugin):
         del checked
         return self._show_dialog(
             TraceAppearanceDialog,
-            lambda dialog: has_supported_traces(dialog.figure_window),
+            lambda dialog: dialog.figure_context.has_supported_traces(),
         )
 
     def show_axis_edit_dialog(self, checked=False):
         del checked
-        return self._show_dialog(AxisEditDialog, lambda dialog: dialog.has_supported_axes())
+        return self._show_dialog(
+            AxisEditDialog,
+            lambda dialog: dialog.has_supported_axes(),
+        )
 
-    def _active_editable_figure_window(self):
-        figure_window = active_interactive_window(self.services, FigureWindow)
-        if figure_window is None:
+    def _active_editable_figure(self):
+        figure_context_service = self.services.get("figure_context_service")
+        if figure_context_service is None:
             return None
-        snapshot_state = getattr(figure_window, "snapshot_state", None)
-        if snapshot_state is None or snapshot_state.figure_ir() is None:
-            return None
-        if figure_window.services.get("send_figure_action") is None:
-            return None
-        return figure_window
+        return figure_context_service.active_editable_figure()
 
     def _show_dialog(self, dialog_class, support_check):
-        figure_window = self._active_editable_figure_window()
-        if figure_window is None:
+        figure_context = self._active_editable_figure()
+        if figure_context is None:
             return False
         dialog = dialog_class(
-            figure_window,
+            figure_context,
+            services=self.services,
             parent=self.services.get("ui"),
         )
         if not support_check(dialog):

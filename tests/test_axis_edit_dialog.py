@@ -8,7 +8,7 @@ from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugin_tools import HydePluginManager
+from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure.window import FigureState, FigureWindow
 from hyde.user_interface.plugins.figure_control_dialogs import Plugin as FigureControlPlugin
@@ -19,6 +19,52 @@ from hyde.user_interface.plugins.figure_control_dialogs.axis_edit_dialog import 
 
 
 _DEFAULT_FIGURE_IR = object()
+
+
+class FakeFigureActionService:
+    def __init__(self, callback=None):
+        self._callback = callback or (lambda figure_number, action: True)
+
+    def request_figure_action(self, figure_number, action):
+        return bool(self._callback(figure_number, action))
+
+
+class FakeEditableFigureContext:
+    def __init__(
+        self,
+        *,
+        figure_number=7,
+        figure_ir=_DEFAULT_FIGURE_IR,
+        figure_defaults=None,
+        resolved_axis_limits=None,
+        request_action=None,
+    ):
+        self.figure_number = int(figure_number)
+        self._figure_ir = (
+            make_figure_ir() if figure_ir is _DEFAULT_FIGURE_IR else figure_ir
+        )
+        self._figure_defaults = figure_defaults
+        self._resolved_axis_limits = resolved_axis_limits
+        self._request_action = request_action or (lambda action: True)
+
+    def figure_ir(self):
+        return self._figure_ir
+
+    def figure_defaults(self):
+        return self._figure_defaults
+
+    def resolved_axis_limits(self):
+        return self._resolved_axis_limits
+
+    def can_request_figure_actions(self):
+        return True
+
+    def request_figure_action(self, action):
+        return bool(self._request_action(dict(action or {})))
+
+
+def make_figure_action_service(callback=None):
+    return FakeFigureActionService(callback)
 
 
 def make_plugin_host(plugin_manager):
@@ -41,7 +87,6 @@ def make_plugin_host(plugin_manager):
     app.emit_plugin_event = lambda name, data=None: (name, data)
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
-    app.on_visible_command_executed = lambda message: message
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
     app.lookup_menu_action = lambda location, name, path=(): (
         None
@@ -54,7 +99,6 @@ def make_plugin_host(plugin_manager):
         app, location, global_pos
     )
     app.get_current_project_dir = lambda: None
-    app.get_procedures_init = lambda: None
     app.get_shutting_down = lambda: False
     app.set_shutting_down = lambda value: value
     app.get_quit_command_sent = lambda: False
@@ -64,7 +108,6 @@ def make_plugin_host(plugin_manager):
     app.confirm_overwrite_project = lambda path: False
     app.begin_shutdown_from_close_event = lambda: None
     app.finalize_quit = lambda: None
-    app.reload_procedures = lambda: None
     app.on_kernel_ready = lambda: None
     app.on_kernel_crashed = lambda: None
     app.enter_no_project_state = lambda: None
@@ -259,7 +302,11 @@ def make_active_figure_window(
     resolved_axis_limits=None,
 ):
     services = dict(services)
-    services.setdefault("send_figure_action", lambda figure_number, action: True)
+    if "figure_action_service" not in services:
+        send_figure_action = services.pop("send_figure_action", None)
+        services["figure_action_service"] = make_figure_action_service(
+            send_figure_action
+        )
     figure = FigureWindow(figure_number=7, services=services)
     subwindow = mdi_area.addSubWindow(figure)
     figure.bind_subwindow(subwindow)
@@ -317,14 +364,17 @@ class TestAxisEditPlugin(unittest.TestCase):
         HydeApp.setup_plugins(app)
         make_active_figure_window(app.ui.mdiArea, manager.services)
 
-        with patch.object(
-            AxisEditDialog,
-            "exec_",
-            return_value=QtWidgets.QDialog.Accepted,
-        ) as exec_:
+        launched = {}
+
+        def record_exec(dialog):
+            launched["dialog"] = dialog
+            return QtWidgets.QDialog.Accepted
+
+        with patch.object(AxisEditDialog, "exec_", new=record_exec):
             manager.services["lookup_menu_action"]("figure", "Modify Axis...").trigger()
 
-        self.assertEqual(exec_.call_count, 1)
+        self.assertIsInstance(launched["dialog"], AxisEditDialog)
+        self.assertIsNotNone(launched["dialog"].figure_context)
 
     def test_modify_axis_action_returns_false_without_active_figure(self):
         plugin = FigureControlPlugin({})
@@ -341,7 +391,7 @@ class TestAxisEditPlugin(unittest.TestCase):
             mdi_area,
             {
                 "mdi_area": mdi_area,
-                "send_figure_action": None,
+                "figure_action_service": None,
             },
         )
         plugin = FigureControlPlugin({})
@@ -350,10 +400,27 @@ class TestAxisEditPlugin(unittest.TestCase):
             "ui": QtWidgets.QMainWindow(),
         }
 
-        with patch.object(AxisEditDialog, "exec_") as exec_:
-            self.assertFalse(plugin.show_axis_edit_dialog())
+        self.assertFalse(plugin.show_axis_edit_dialog())
 
-        self.assertEqual(exec_.call_count, 0)
+    def test_axis_dialog_dispatches_live_updates_through_figure_context_boundary(self):
+        sent = []
+        mdi_area = QtWidgets.QMdiArea()
+        figure_context = FakeEditableFigureContext(
+            request_action=lambda action: sent.append(dict(action or {})) or True
+        )
+
+        dialog = AxisEditDialog(figure_context, parent=mdi_area)
+        try:
+            sent.clear()
+            dialog.axis_mode_combo.setCurrentIndex(
+                dialog.axis_mode_combo.findData("linear")
+            )
+            QtWidgets.QApplication.processEvents()
+
+            self.assertTrue(sent)
+            self.assertEqual(sent[0]["type"], "set_axis_state")
+        finally:
+            dialog.close()
 
 
 class TestAxisEditDialog(unittest.TestCase):
@@ -754,11 +821,11 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertIsNotNone(swatch)
 
             with patch(
-                "hyde.user_interface.matplotlib_color_picker.MatplotlibColorDialog.exec_",
+                "hyde.user_interface.shared.figure.MatplotlibColorDialog.exec_",
                 autospec=True,
                 return_value=QtWidgets.QDialog.Accepted,
             ), patch(
-                "hyde.user_interface.matplotlib_color_picker.MatplotlibColorDialog.selected_color_text",
+                "hyde.user_interface.shared.figure.MatplotlibColorDialog.selected_color_text",
                 autospec=True,
                 return_value="#112233",
             ):
@@ -818,9 +885,6 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            self.assertFalse(hasattr(dialog, "check_both_button"))
-            self.assertFalse(hasattr(dialog, "uncheck_both_button"))
-
             dialog.set_autoscale_values_button.click()
 
             self.assertEqual(dialog.minimum_edit.text(), "1.25")

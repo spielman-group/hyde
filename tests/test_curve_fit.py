@@ -20,9 +20,10 @@ import hyde
 from hyde import project_tools
 from hyde.features.lmfit_features import CALCULATED_X_NAME, LmfitCodec
 from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
-from hyde.user_interface.hyde_interactive_widget import active_interactive_window
+from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugin_tools import HydePluginManager
+from hyde.user_interface.shared.figure import supported_trace_records_from_figure_ir
+from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.plugins.curve_fit import Plugin as CurveFitPlugin
 from hyde.user_interface.plugins.curve_fit.dialogs import CurveFitDialog
 from hyde.user_interface.plugins.figure.window import FigureWindow
@@ -66,7 +67,6 @@ def make_plugin_host(plugin_manager):
     )
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
-    app.on_visible_command_executed = lambda message: message
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
     app.lookup_menu_action = lambda location, name, path=(): (
         None
@@ -79,7 +79,6 @@ def make_plugin_host(plugin_manager):
         app, location, global_pos
     )
     app.get_current_project_dir = lambda: None
-    app.get_procedures_init = lambda: None
     app.get_shutting_down = lambda: False
     app.set_shutting_down = lambda value: value
     app.get_quit_command_sent = lambda: False
@@ -89,7 +88,6 @@ def make_plugin_host(plugin_manager):
     app.confirm_overwrite_project = lambda path: False
     app.begin_shutdown_from_close_event = lambda: None
     app.finalize_quit = lambda: None
-    app.reload_procedures = lambda: None
     app.on_kernel_ready = lambda: None
     app.on_kernel_crashed = lambda: None
     app.enter_no_project_state = lambda: None
@@ -208,11 +206,7 @@ def configure_curve_fit_runtime(app, manager):
     )
     app.get_current_project_dir = lambda: harness.project_dir
     app.build_plugin_services = lambda: {
-        **{
-            key: value
-            for key, value in HydeApp.build_plugin_services(app).items()
-            if key not in {"get_procedures_init", "reload_procedures"}
-        },
+        **HydeApp.build_plugin_services(app),
         "project_procedures_service": procedures_service,
     }
 
@@ -355,8 +349,71 @@ def attach_namespace_view_service(manager, view):
     return service
 
 
+class FakeFigureActionService:
+    def __init__(self, callback=None):
+        self._callback = callback or (lambda figure_number, action: True)
+
+    def request_figure_action(self, figure_number, action):
+        return bool(self._callback(figure_number, action))
+
+
+def make_figure_action_service(callback=None):
+    return FakeFigureActionService(callback)
+
+
+class FakeEditableFigureContext:
+    def __init__(self, *, figure_number=7, figure_ir=None, request_action=None):
+        self.figure_number = int(figure_number)
+        self._figure_ir = (
+            figure_ir_without_traces() if figure_ir is None else figure_ir
+        )
+        self._request_action = request_action or (lambda action: True)
+
+    def figure_ir(self):
+        return self._figure_ir
+
+    def supported_trace_records(self):
+        return supported_trace_records_from_figure_ir(self.figure_ir())
+
+    def request_figure_action(self, action):
+        return bool(self._request_action(dict(action or {})))
+
+
+class LiveEditableFigureContext:
+    def __init__(self, *, figure_number, figure_ir, request_action):
+        self.figure_number = int(figure_number)
+        self._figure_ir = figure_ir
+        self._request_action = request_action
+
+    def figure_ir(self):
+        return self._figure_ir()
+
+    def supported_trace_records(self):
+        return supported_trace_records_from_figure_ir(self.figure_ir())
+
+    def request_figure_action(self, action):
+        return bool(self._request_action(dict(action or {})))
+
+
+def attach_figure_context_service(manager, figure_context):
+    figure_context_service = type(
+        "FigureContextService",
+        (),
+        {"active_editable_figure": (lambda _self: figure_context)},
+    )()
+    manager.services["figure_context_service"] = figure_context_service
+    manager.plugins["curve_fit"].services["figure_context_service"] = (
+        figure_context_service
+    )
+    return figure_context_service
+
+
 def make_figure_window(figure_ir):
-    services = {"send_figure_action": lambda figure_number, action: True}
+    services = {
+        "figure_action_service": make_figure_action_service(
+            lambda figure_number, action: True
+        )
+    }
     figure_window = FigureWindow(figure_number=7, services=services)
 
     class MockSnapshotState:
@@ -367,9 +424,15 @@ def make_figure_window(figure_ir):
     return figure_window
 
 
-def create_curve_fit_dialog(plugin, app, *, figure_window=None):
+def create_curve_fit_dialog(plugin, app, *, figure_context=None, figure_window=None):
+    if figure_context is None and figure_window is not None:
+        figure_context = LiveEditableFigureContext(
+            figure_number=figure_window.figure_number,
+            figure_ir=figure_window.figure_ir,
+            request_action=figure_window.request_figure_action,
+        )
     dialog = CurveFitDialog(
-        figure_window=figure_window,
+        figure_context=figure_context,
         services=plugin.services,
         parent=app.ui,
     )
@@ -426,7 +489,11 @@ class AttachedFigureHarness:
         )
         self.figure_window = FigureWindow(
             figure_number=self.figure.number,
-            services={"send_figure_action": self._send_figure_action},
+            services={
+                "figure_action_service": make_figure_action_service(
+                    self._send_figure_action
+                )
+            },
         )
         self.refresh_snapshot()
 
@@ -458,7 +525,12 @@ class AttachedFigureHarness:
         self._pyplot.close(self.figure)
 
 
-def create_configured_line_fit_dialog(*, include_weights=False, figure_window=None):
+def create_configured_line_fit_dialog(
+    *,
+    include_weights=False,
+    figure_context=None,
+    figure_window=None,
+):
     manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
     manager.plugins = {"curve_fit": CurveFitPlugin({})}
     app = make_plugin_host(manager)
@@ -501,6 +573,7 @@ def create_configured_line_fit_dialog(*, include_weights=False, figure_window=No
     dialog = create_curve_fit_dialog(
         manager.plugins["curve_fit"],
         app,
+        figure_context=figure_context,
         figure_window=figure_window,
     )
     configure_line_fit_dialog(dialog)
@@ -550,7 +623,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         try:
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
 
-            self.assertIsNone(dialog.figure_window)
+            self.assertIsNone(dialog.figure_context)
             self.assertTrue(dialog.isModal())
             self.assertEqual(
                 tab_titles(dialog),
@@ -582,29 +655,19 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_action_with_active_figure_opens_attached_dialog(self):
+    def test_curve_fit_action_with_active_figure_context_opens_attached_dialog(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
         try:
-            services = {"send_figure_action": lambda figure_number, action: True}
-            figure_window = FigureWindow(figure_number=7, services=services)
-
-            class MockSnapshotState:
-                def figure_ir(self):
-                    return {"some": "data"}
-
-            figure_window.snapshot_state = MockSnapshotState()
-
-            subwindow = app.ui.mdiArea.addSubWindow(figure_window)
-            subwindow.show()
-            app.ui.mdiArea.setActiveSubWindow(subwindow)
+            figure_context = FakeEditableFigureContext(figure_ir={"some": "data"})
+            attach_figure_context_service(manager, figure_context)
 
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
 
-            self.assertIs(dialog.figure_window, figure_window)
+            self.assertIs(dialog.figure_context, figure_context)
             self.assertTrue(dialog.isModal())
             self.assertEqual(
                 tab_titles(dialog),
@@ -626,7 +689,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_action_with_active_figure_and_no_traces_still_opens_attached_dialog(
+    def test_curve_fit_action_with_active_figure_context_and_no_traces_still_opens_attached_dialog(
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
@@ -635,22 +698,14 @@ class TestCurveFitPlugin(unittest.TestCase):
         harness = configure_curve_fit_runtime(app, manager)
 
         try:
-            services = {"send_figure_action": lambda figure_number, action: True}
-            figure_window = FigureWindow(figure_number=7, services=services)
-
-            class MockSnapshotState:
-                def figure_ir(self):
-                    return figure_ir_without_traces()
-
-            figure_window.snapshot_state = MockSnapshotState()
-
-            subwindow = app.ui.mdiArea.addSubWindow(figure_window)
-            subwindow.show()
-            app.ui.mdiArea.setActiveSubWindow(subwindow)
+            figure_context = FakeEditableFigureContext(
+                figure_ir=figure_ir_without_traces()
+            )
+            attach_figure_context_service(manager, figure_context)
 
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
 
-            self.assertIs(dialog.figure_window, figure_window)
+            self.assertIs(dialog.figure_context, figure_context)
             show_output_options_tab(dialog)
             self.assertTrue(dialog.show_fit_checkbox.isEnabled())
             self.assertTrue(dialog.show_residuals_checkbox.isEnabled())
@@ -658,83 +713,19 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_action_with_unsupported_active_window_opens_unattached_dialog(
+    def test_curve_fit_action_without_editable_figure_context_opens_unattached_dialog(
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
+        attach_figure_context_service(manager, None)
 
         try:
-            widget = QtWidgets.QWidget()
-            subwindow = app.ui.mdiArea.addSubWindow(widget)
-            subwindow.show()
-            app.ui.mdiArea.setActiveSubWindow(subwindow)
-
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
 
-            self.assertIsNone(dialog.figure_window)
-            self.assertFalse(dialog.show_fit_checkbox.isEnabled())
-            self.assertFalse(dialog.show_residuals_checkbox.isEnabled())
-            dialog.close()
-        finally:
-            harness.close()
-
-    def test_curve_fit_action_with_figure_window_no_ir_opens_unattached_dialog(self):
-        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
-        app = make_plugin_host(manager)
-        harness = configure_curve_fit_runtime(app, manager)
-
-        try:
-            services = {"send_figure_action": lambda figure_number, action: True}
-            figure_window = FigureWindow(figure_number=7, services=services)
-
-            class MockSnapshotState:
-                def figure_ir(self):
-                    return None
-
-            figure_window.snapshot_state = MockSnapshotState()
-
-            subwindow = app.ui.mdiArea.addSubWindow(figure_window)
-            subwindow.show()
-            app.ui.mdiArea.setActiveSubWindow(subwindow)
-
-            dialog = trigger_curve_fit_action_and_capture_dialog(manager)
-
-            self.assertIsNone(dialog.figure_window)
-            self.assertFalse(dialog.show_fit_checkbox.isEnabled())
-            self.assertFalse(dialog.show_residuals_checkbox.isEnabled())
-            dialog.close()
-        finally:
-            harness.close()
-
-    def test_curve_fit_action_with_figure_window_without_dispatch_opens_unattached_dialog(
-        self,
-    ):
-        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
-        app = make_plugin_host(manager)
-        harness = configure_curve_fit_runtime(app, manager)
-
-        try:
-            figure_window = FigureWindow(figure_number=7, services={})
-
-            class MockSnapshotState:
-                def figure_ir(self):
-                    return {"some": "data"}
-
-            figure_window.snapshot_state = MockSnapshotState()
-
-            subwindow = app.ui.mdiArea.addSubWindow(figure_window)
-            subwindow.show()
-            app.ui.mdiArea.setActiveSubWindow(subwindow)
-
-            dialog = trigger_curve_fit_action_and_capture_dialog(manager)
-
-            self.assertIsNone(dialog.figure_window)
-            show_output_options_tab(dialog)
+            self.assertIsNone(dialog.figure_context)
             self.assertFalse(dialog.show_fit_checkbox.isEnabled())
             self.assertFalse(dialog.show_residuals_checkbox.isEnabled())
             dialog.close()
@@ -1022,11 +1013,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         )
         app.get_current_project_dir = lambda: harness.project_dir
         app.build_plugin_services = lambda: {
-            **{
-                key: value
-                for key, value in HydeApp.build_plugin_services(app).items()
-                if key not in {"get_procedures_init", "reload_procedures"}
-            },
+            **HydeApp.build_plugin_services(app),
             "project_procedures_service": procedures_service,
         }
 
@@ -2224,8 +2211,8 @@ class TestCurveFitPlugin(unittest.TestCase):
                 "subplots"
             ][0]
             self.assertEqual(
-                [trace["id"] for trace in subplot["traces"]],
-                ["trace0", colliding_fit_id, colliding_residual_id],
+                sorted(trace["id"] for trace in subplot["traces"]),
+                sorted(["trace0", colliding_fit_id, colliding_residual_id]),
             )
             self.assertTrue(
                 any(

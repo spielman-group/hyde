@@ -11,12 +11,13 @@ from hyde.features.matplotlib_features import (
     FigureIRCodec,
     figure_ir_apply_title,
 )
-from hyde.user_interface.base import HydeGuiState
-from hyde.user_interface.hyde_interactive_widget import HydeInteractiveWidget
-from hyde.user_interface.plugin_tools import (
+from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
+from hyde.user_interface.shared.core import HydeGuiState
+from hyde.user_interface.shared.figure import supported_trace_records_from_figure_ir
+from hyde.user_interface.shared.plugin import (
     apply_saveable_window_state,
 )
-from hyde.user_interface.window_macro_store import MacroStoreError
+from hyde.user_interface.shared.project import MacroStoreError
 
 LOGGER = logging.getLogger("hyde")
 _DEFAULT_FIGURE_LABEL_RE = re.compile(r"^Figure\s+(\d+)$")
@@ -443,13 +444,45 @@ class FigureWindow(HydeInteractiveWidget):
         )
 
     def request_figure_action(self, action):
-        send_figure_action = self.services.get("send_figure_action")
-        if send_figure_action is None:
+        figure_action_service = self.services.get("figure_action_service")
+        if figure_action_service is None:
             return False
-        return bool(send_figure_action(self.figure_number, dict(action or {})))
+        return bool(
+            figure_action_service.request_figure_action(
+                self.figure_number,
+                dict(action or {}),
+            )
+        )
+
+    def figure_ir(self):
+        return self.snapshot_state.figure_ir()
+
+    def figure_defaults(self):
+        return self.snapshot_state.figure_defaults()
+
+    def resolved_axis_limits(self):
+        return self.snapshot_state.resolved_axis_limits()
+
+    def trace_styles(self):
+        return self.snapshot_state.trace_styles()
+
+    def has_figure_ir(self):
+        return self.figure_ir() is not None
+
+    def can_request_figure_actions(self):
+        return self.services.get("figure_action_service") is not None
+
+    def is_editable_figure_ready(self):
+        return self.has_figure_ir() and self.can_request_figure_actions()
+
+    def supported_trace_records(self):
+        return supported_trace_records_from_figure_ir(self.figure_ir())
+
+    def has_supported_traces(self):
+        return bool(self.supported_trace_records())
 
     def request_regenerate_from_ir(self):
-        if self.snapshot_state.figure_ir() is None:
+        if not self.has_figure_ir():
             return False
         return self.request_figure_action({"type": "regenerate_from_ir"})
 
@@ -479,7 +512,7 @@ class FigureWindow(HydeInteractiveWidget):
             return False
         self._refresh_in_flight = True
         self._refresh_requested = False
-        if self.snapshot_state.figure_ir() is not None:
+        if self.has_figure_ir():
             requested = self.request_figure_action(
                 {"type": "regenerate_from_ir", "use_bound_values": False}
             )
