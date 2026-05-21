@@ -1,3 +1,4 @@
+import copy
 import contextlib
 import io
 import os
@@ -18,6 +19,7 @@ from qtutils.qt import QtWidgets
 
 import hyde
 from hyde import project_tools
+from hyde.features.matplotlib_features import FigureIRCodec
 from hyde.features.lmfit_features import CALCULATED_X_NAME, LmfitCodec
 from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
@@ -396,6 +398,32 @@ class LiveEditableFigureContext:
         return bool(self._request_action(dict(action or {})))
 
 
+class DeferredFigureContext:
+    def __init__(self, *, figure_number=7, figure_ir=None):
+        self.figure_number = int(figure_number)
+        self._figure_ir = (
+            figure_ir_without_traces() if figure_ir is None else copy.deepcopy(figure_ir)
+        )
+        self.pending_actions = []
+
+    def figure_ir(self):
+        return copy.deepcopy(self._figure_ir)
+
+    def supported_trace_records(self):
+        return supported_trace_records_from_figure_ir(self.figure_ir())
+
+    def request_figure_action(self, action):
+        self.pending_actions.append(dict(action or {}))
+        return True
+
+    def flush_actions(self):
+        while self.pending_actions:
+            self._figure_ir = FigureIRCodec.update_state(
+                self._figure_ir,
+                self.pending_actions.pop(0),
+            )
+
+
 def attach_figure_context_service(manager, figure_context):
     figure_context_service = type(
         "FigureContextService",
@@ -463,7 +491,15 @@ def attached_display_trace_id(result_name, kind, suffix=None):
 
 
 class AttachedFigureHarness:
-    def __init__(self, x_values, y_values, *, y_label="signal", fail_trace_ids=None):
+    def __init__(
+        self,
+        x_values,
+        y_values,
+        *,
+        y_label="signal",
+        fail_trace_ids=None,
+        implicit_x=False,
+    ):
         import matplotlib
 
         matplotlib.use("module://hyde.matplotlib_backend", force=True)
@@ -481,7 +517,10 @@ class AttachedFigureHarness:
         def CurveFitAttachedFigure(time, signal):
             fig = plt.figure("CurveFitAttachedFigure")
             ax = fig.add_subplot(111)
-            ax.plot(time, signal, label=y_label)
+            if implicit_x:
+                ax.plot(signal, label=y_label)
+            else:
+                ax.plot(time, signal, label=y_label)
             return fig
 
         self.figure = CurveFitAttachedFigure(
@@ -635,6 +674,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                     "Output Options",
                 ],
             )
+            self.assertTrue(dialog.lower_text_edit.isReadOnly())
             self.assertEqual(
                 [
                     dialog.preview_mode_combo.itemText(index)
@@ -642,9 +682,16 @@ class TestCurveFitPlugin(unittest.TestCase):
                 ],
                 ["Commands", "Equation"],
             )
-            self.assertTrue(dialog.preview_text.isReadOnly())
+            self.assertEqual(dialog.preview_mode_combo.currentText(), "Commands")
             self.assertEqual(dialog.status_label.text(), "Select Y data.")
+            self.assertEqual(
+                dialog.status_strip.layout().itemAt(0).widget().text(),
+                "Status",
+            )
             self.assertEqual(dialog.do_it_button.text(), "Do It")
+            self.assertEqual(dialog.to_cmd_line_button.text(), "To Cmd Line")
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
             self.assertEqual(dialog.to_clip_button.text(), "To Clip")
             self.assertEqual(dialog.cancel_button.text(), "Cancel")
             show_output_options_tab(dialog)
@@ -865,7 +912,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
                 self.assertIn(
                     "lmfit.Model(hyde.line, independent_vars=['x'])",
-                    dialog.preview_text.toPlainText(),
+                    dialog.lower_text_edit.toPlainText(),
                 )
                 self.assertEqual(
                     dialog.x_data_rows[0]["combo"].currentText(),
@@ -1116,24 +1163,31 @@ class TestCurveFitPlugin(unittest.TestCase):
                     dialog.x_data_rows[1]["combo"].currentText(),
                     "detuning",
                 )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "amplitude")["initial"],
+                    "1",
+                )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "offset")["initial"],
+                    "0",
+                )
                 self.assertIn(
                     "lmfit.Model(plane_fit, independent_vars=['x', 'z'])",
-                    dialog.preview_text.toPlainText(),
+                    dialog.lower_text_edit.toPlainText(),
                 )
                 self.assertIn(
                     "signal_fit_result = signal_fit_model.fit("
-                    "signal, x=time, z=detuning)",
-                    dialog.preview_text.toPlainText(),
+                    "signal, params=signal_fit_params, x=time, z=detuning)",
+                    dialog.lower_text_edit.toPlainText(),
                 )
                 self.assertIn(
                     "print(signal_fit_result.fit_report())",
-                    dialog.preview_text.toPlainText(),
+                    dialog.lower_text_edit.toPlainText(),
                 )
-
                 dialog.preview_mode_combo.setCurrentText("Equation")
                 QtWidgets.QApplication.processEvents()
                 self.assertEqual(
-                    dialog.preview_text.toPlainText().strip(),
+                    dialog.lower_text_edit.toPlainText().strip(),
                     (
                         "def plane_fit(x, z, amplitude, offset):\n"
                         "    return amplitude * x + offset * z"
@@ -1179,6 +1233,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         )
 
         try:
+            clipboard = QtWidgets.QApplication.clipboard()
             harness.write_procedures(
                 """
                 @hyde.fit_function(independent_vars=("x",))
@@ -1209,14 +1264,23 @@ class TestCurveFitPlugin(unittest.TestCase):
                     dialog.x_data_rows[0]["combo"].currentText(),
                     CALCULATED_X_NAME,
                 )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "slope")["initial"],
+                    "1",
+                )
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "offset")["initial"],
+                    "0",
+                )
                 self.assertIn(
                     "signal_fit_result = signal_fit_model.fit("
-                    "signal, x=np.arange(len(signal)))",
-                    dialog.preview_text.toPlainText(),
+                    "signal, params=signal_fit_params, "
+                    "x=np.arange(len(signal)))",
+                    dialog.lower_text_edit.toPlainText(),
                 )
                 self.assertIn(
                     "print(signal_fit_result.fit_report())",
-                    dialog.preview_text.toPlainText(),
+                    dialog.lower_text_edit.toPlainText(),
                 )
             finally:
                 dialog.close()
@@ -1250,6 +1314,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         )
 
         try:
+            clipboard = QtWidgets.QApplication.clipboard()
             harness.write_procedures(
                 """
                 @hyde.fit_function(independent_vars=("x",))
@@ -1283,7 +1348,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_to_clip_copies_command_preview_even_in_equation_mode(self):
+    def test_curve_fit_to_clip_copies_canonical_lower_text(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit": CurveFitPlugin({})}
         app = make_plugin_host(manager)
@@ -1307,6 +1372,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         )
 
         try:
+            clipboard = QtWidgets.QApplication.clipboard()
             harness.write_procedures(
                 """
                 @hyde.fit_function(independent_vars=("x",))
@@ -1323,27 +1389,23 @@ class TestCurveFitPlugin(unittest.TestCase):
                 )
                 QtWidgets.QApplication.processEvents()
 
-                dialog.preview_mode_combo.setCurrentText("Commands")
-                QtWidgets.QApplication.processEvents()
-                expected_commands = dialog.preview_text.toPlainText()
-
-                dialog.preview_mode_combo.setCurrentText("Equation")
-                QtWidgets.QApplication.processEvents()
-                self.assertNotEqual(dialog.preview_text.toPlainText(), expected_commands)
-                expected_equation = dialog.preview_text.toPlainText()
-
                 dialog.weighting_combo.setCurrentIndex(
                     dialog.weighting_combo.findText("time")
                 )
                 QtWidgets.QApplication.processEvents()
-                self.assertEqual(dialog.preview_mode_combo.currentText(), "Equation")
-                self.assertEqual(dialog.preview_text.toPlainText(), expected_equation)
+                self.assertIn(
+                    "signal_fit_model = lmfit.Model(",
+                    dialog.lower_text_edit.toPlainText(),
+                )
+                dialog.preview_mode_combo.setCurrentText("Equation")
+                QtWidgets.QApplication.processEvents()
+                self.assertIn(
+                    "def line_fit(x, slope, offset):",
+                    dialog.lower_text_edit.toPlainText(),
+                )
 
                 dialog.to_clip_button.click()
-                clipboard = QtWidgets.QApplication.clipboard()
-                dialog.preview_mode_combo.setCurrentText("Commands")
-                QtWidgets.QApplication.processEvents()
-                self.assertEqual(clipboard.text(), dialog.preview_text.toPlainText())
+                self.assertEqual(clipboard.text(), dialog.lower_text_edit.toPlainText())
             finally:
                 dialog.close()
         finally:
@@ -1514,7 +1576,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
                 self.assertFalse(dialog.do_it_button.isEnabled())
                 self.assertIn("offset", dialog.status_label.text())
-                self.assertNotIn(".fit(", dialog.preview_text.toPlainText())
+                self.assertNotIn(".fit(", dialog.lower_text_edit.toPlainText())
             finally:
                 dialog.close()
         finally:
@@ -1533,12 +1595,12 @@ class TestCurveFitPlugin(unittest.TestCase):
                 "valid Python identifier",
                 dialog.status_label.text(),
             )
-            self.assertNotIn("bad-name =", dialog.preview_text.toPlainText())
-            self.assertNotIn(".fit(", dialog.preview_text.toPlainText())
+            self.assertNotIn("bad-name =", dialog.lower_text_edit.toPlainText())
+            self.assertNotIn(".fit(", dialog.lower_text_edit.toPlainText())
 
             dialog.to_clip_button.click()
             clipboard = QtWidgets.QApplication.clipboard()
-            self.assertEqual(clipboard.text(), dialog.preview_text.toPlainText())
+            self.assertEqual(clipboard.text(), dialog.lower_text_edit.toPlainText())
             self.assertNotIn("bad-name =", clipboard.text())
         finally:
             dialog.close()
@@ -1556,11 +1618,37 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(dialog.status_label.text(), "")
             self.assertIn(
                 "custom_fit_result = custom_fit_model.fit(",
-                dialog.preview_text.toPlainText(),
+                dialog.lower_text_edit.toPlainText(),
             )
             self.assertIn(
                 "print(custom_fit_result.fit_report())",
-                dialog.preview_text.toPlainText(),
+                dialog.lower_text_edit.toPlainText(),
+            )
+        finally:
+            dialog.close()
+            harness.close()
+
+    def test_curve_fit_dialog_uses_shared_shell_for_canonical_text(self):
+        _, _, harness, dialog = create_configured_line_fit_dialog()
+        try:
+            clipboard = QtWidgets.QApplication.clipboard()
+
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
+            self.assertIn(
+                "signal_fit_result = signal_fit_model.fit(",
+                dialog.lower_text_edit.toPlainText(),
+            )
+
+            dialog.to_clip_button.click()
+
+            self.assertEqual(
+                clipboard.text(),
+                dialog.lower_text_edit.toPlainText(),
+            )
+            self.assertIn(
+                "signal_fit_result = signal_fit_model.fit(",
+                dialog.lower_text_edit.toPlainText(),
             )
         finally:
             dialog.close()
@@ -1685,7 +1773,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
                 self.assertTrue(dialog.suppress_screen_updates_checkbox.isChecked())
                 self.assertEqual(dialog.execution_mode(), "suppressed")
-                self.assertIn("weights=weights", dialog.preview_text.toPlainText())
+                self.assertIn("weights=weights", dialog.lower_text_edit.toPlainText())
                 self.assertEqual(harness.execution_service.calls, [])
             finally:
                 dialog.close()
@@ -1748,7 +1836,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 QtWidgets.QApplication.processEvents()
 
                 harness.execution_service.calls.clear()
-                preview_command = dialog.preview_text.toPlainText()
+                preview_command = dialog.lower_text_edit.toPlainText()
                 self.assertNotIn("signal_fit_result", harness.namespace)
 
                 dialog.do_it_button.click()
@@ -1890,7 +1978,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(type(harness.namespace["signal_fit_result"]).__name__, "ModelResult")
             self.assertIsNot(harness.namespace["signal_fit_result"], previous_result)
 
-            dialog.reject()
+            dialog.cancel_button.click()
             QtWidgets.QApplication.processEvents()
 
             self.assertIs(harness.namespace["signal_fit_result"], previous_result)
@@ -1934,7 +2022,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 previous_alternate_result,
             )
 
-            dialog.reject()
+            dialog.cancel_button.click()
             QtWidgets.QApplication.processEvents()
 
             self.assertIs(
@@ -2457,6 +2545,137 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
+    def test_curve_fit_dialog_cancel_from_blank_opening_state_removes_introduced_attached_display_for_implicit_x(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+            implicit_x=True,
+        )
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "time": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+        harness.write_procedures(
+            """
+            @hyde.fit_function(independent_vars=("x",))
+            def line_fit(x, slope, offset):
+                return slope * x + offset
+            """
+        )
+        harness.reload_procedures()
+        harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
+        harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0]))
+        dialog = create_curve_fit_dialog(
+            manager.plugins["curve_fit"],
+            app,
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            opening_subplot = attached_figure.figure_window.snapshot_state.figure_ir()[
+                "layout"
+            ]["subplots"][0]
+            self.assertEqual(len(opening_subplot["traces"]), 1)
+            self.assertIsNone(opening_subplot["traces"][0]["x_source"])
+
+            configure_line_fit_dialog(dialog)
+            self.assertEqual(
+                dialog.x_data_rows[0]["combo"].currentText(),
+                CALCULATED_X_NAME,
+            )
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
+
+            dialog.cancel_button.click()
+            QtWidgets.QApplication.processEvents()
+
+            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+                "subplots"
+            ][0]
+            self.assertEqual(len(subplot["traces"]), 1)
+            self.assertIsNone(subplot["traces"][0]["x_source"])
+            self.assertEqual(len(attached_figure.figure.axes), 1)
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_cancel_removes_preview_when_figure_snapshot_lags_behind_actions(
+        self,
+    ):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+        harness.write_procedures(
+            """
+            @hyde.fit_function(independent_vars=("x",))
+            def line_fit(x, slope, offset):
+                return slope * x + offset
+            """
+        )
+        harness.reload_procedures()
+        harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
+        figure_context = DeferredFigureContext(
+            figure_ir=figure_ir_with_implicit_x_trace("signal")
+        )
+        dialog = create_curve_fit_dialog(
+            manager.plugins["curve_fit"],
+            app,
+            figure_context=figure_context,
+        )
+        try:
+            configure_line_fit_dialog(dialog)
+
+            self.assertEqual(len(figure_context.pending_actions), 1)
+            figure_context.flush_actions()
+            self.assertEqual(
+                len(figure_context.figure_ir()["layout"]["subplots"][0]["traces"]),
+                2,
+            )
+
+            dialog.cancel_button.click()
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(len(figure_context.pending_actions), 1)
+            figure_context.flush_actions()
+            self.assertEqual(
+                len(figure_context.figure_ir()["layout"]["subplots"][0]["traces"]),
+                1,
+            )
+        finally:
+            dialog.close()
+            harness.close()
+
     def test_curve_fit_dialog_cancel_restores_opening_attached_display_state(self):
         attached_figure = AttachedFigureHarness(
             np.array([0.0, 1.0, 2.0, 3.0]),
@@ -2492,7 +2711,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 harness.namespace["signal_fit_result"].residual,
             )
 
-            reopening_dialog.reject()
+            reopening_dialog.cancel_button.click()
             QtWidgets.QApplication.processEvents()
 
             subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][

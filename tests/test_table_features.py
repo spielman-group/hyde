@@ -20,6 +20,7 @@ from hyde.user_interface.plugins.table import (
     Plugin,
     TableWorkspaceService,
 )
+from hyde.user_interface.plugins.table.dialogs import NewTableDialog
 from hyde.user_interface.plugins.table.window import (
     TableState,
     TableWidget,
@@ -164,6 +165,26 @@ class TestSaveWindowDialog(unittest.TestCase):
         self.assertIn("def Table_Save(delay2, fit_delay2):", macro)
         self.assertIn("geometry=(5, 42, 510, 242)", macro)
         self.assertIn("column_widths={'fit_delay2': 262}", macro)
+
+    def test_save_window_dialog_uses_prompt_buttons_without_tool_shell_footer(self):
+        from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialog
+
+        state = TableState()
+        state.set_items(["delay2"])
+
+        dialog = SaveWindowDialog(saveable=state)
+        try:
+            button_texts = sorted(
+                button.text()
+                for button in dialog.findChildren(QtWidgets.QPushButton)
+                if button.text()
+            )
+            self.assertFalse(hasattr(dialog, "shell_ui"))
+            self.assertFalse(hasattr(dialog, "lower_text_edit"))
+        finally:
+            dialog.close()
+
+        self.assertEqual(button_texts, ["Cancel", "Help", "No Save", "Save"])
 
     def test_save_window_dialog_service_saves_through_project_procedures_service(self):
         from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialogService
@@ -387,6 +408,58 @@ class FakeTablePlugin:
             "ui": object(),
             "save_window_dialog_service": self.save_window_dialog_service,
         }
+
+
+class TestNewTableDialog(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def test_new_table_dialog_uses_shared_shell_for_canonical_command_text(self):
+        dialog = NewTableDialog(
+            {
+                "alpha": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "numpy_kind": "f",
+                    "ndim": 1,
+                },
+                "beta": {
+                    "python_type": "int",
+                    "numpy_type": "Scalar",
+                    "numpy_kind": "i",
+                    "ndim": 0,
+                },
+            },
+            preselection=["alpha"],
+        )
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertFalse(hasattr(dialog.ui, "buttonBox"))
+            self.assertEqual(
+                dialog.lower_text_edit.toPlainText(),
+                "hyde.create_table(alpha)",
+            )
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_clip_button.isEnabled())
+
+            dialog.ui.titleEdit.setText("My Table")
+            self.qapp.processEvents()
+
+            self.assertEqual(
+                dialog.lower_text_edit.toPlainText(),
+                "hyde.create_table(alpha, name='My Table')",
+            )
+            self.assertEqual(
+                dialog.get_command(),
+                "hyde.create_table(alpha, name='My Table')",
+            )
+        finally:
+            dialog.close()
 
 
 class TestTableWidget(unittest.TestCase):

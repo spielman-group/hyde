@@ -249,6 +249,41 @@ class TestFigurePluginDispatch(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_new_figure_dialog_uses_shared_shell_for_canonical_command_text(self):
+        dialog = NewFigureDialog(
+            {
+                "arr": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                }
+            },
+            preselection=["arr"],
+        )
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertFalse(hasattr(dialog.ui, "buttonBox"))
+            self.assertEqual(
+                dialog.lower_text_edit.toPlainText(),
+                dialog.get_command(),
+            )
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_clip_button.isEnabled())
+
+            dialog.ui.titleEdit.setText("Delay Graph")
+            self.qapp.processEvents()
+
+            self.assertEqual(
+                dialog.lower_text_edit.toPlainText(),
+                dialog.get_command(),
+            )
+            self.assertIn("fig = plt.figure('Delay Graph'", dialog.get_command())
+        finally:
+            dialog.close()
+
     def test_new_figure_dialog_dispatches_empty_figure_when_no_data_selected(self):
         executed = []
 

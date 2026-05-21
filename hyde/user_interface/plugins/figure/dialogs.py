@@ -7,27 +7,22 @@ from .window import FigureState
 
 
 class NewFigureDialog(HydeDialogWidget):
-    def __init__(self, objects_metadata, preselection=None, parent=None):
-        super().__init__(parent=parent)
+    def __init__(self, objects_metadata, preselection=None, services=None, parent=None):
+        self.figure_state = FigureState()
+        super().__init__(parent=parent, services=dict(services or {}))
         self.objects_metadata = objects_metadata or {}
         self.preselection = list(preselection or [])
-        self.figure_state = FigureState()
-        self.load_ui("new_figure_dialog.ui")
-
-        ok_button = self.ui.buttonBox.button(QtWidgets.QDialogButtonBox.Ok)
-        if ok_button:
-            ok_button.setText("Do It")
+        self.setWindowTitle("New Figure")
+        self.load_ui("new_figure_dialog.ui", module_name=__name__)
 
         self._populate_widgets()
-        self._sync_state_from_widgets()
+        self._refresh_from_widgets()
 
-        self.ui.xComboBox.currentIndexChanged.connect(self._sync_state_from_widgets)
-        self.ui.yListWidget.itemSelectionChanged.connect(self._sync_state_from_widgets)
-        self.ui.titleEdit.textChanged.connect(self._sync_state_from_widgets)
-        self.ui.widthSpinBox.valueChanged.connect(self._sync_state_from_widgets)
-        self.ui.heightSpinBox.valueChanged.connect(self._sync_state_from_widgets)
-        self.ui.buttonBox.accepted.connect(self.accept)
-        self.ui.buttonBox.rejected.connect(self.reject)
+        self.ui.xComboBox.currentIndexChanged.connect(self._refresh_from_widgets)
+        self.ui.yListWidget.itemSelectionChanged.connect(self._refresh_from_widgets)
+        self.ui.titleEdit.textChanged.connect(self._refresh_from_widgets)
+        self.ui.widthSpinBox.valueChanged.connect(self._refresh_from_widgets)
+        self.ui.heightSpinBox.valueChanged.connect(self._refresh_from_widgets)
 
     def _populate_widgets(self):
         eligible_names = sorted_eligible_names(self.objects_metadata)
@@ -45,6 +40,8 @@ class NewFigureDialog(HydeDialogWidget):
                 self.ui.xComboBox.setCurrentIndex(index)
 
     def _sync_state_from_widgets(self):
+        if self.ui is None:
+            return
         y_names = [item.text() for item in self.ui.yListWidget.selectedItems()]
         self.figure_state.set_items(y_names)
         self.figure_state.set_x_name(self.ui.xComboBox.currentData())
@@ -55,9 +52,22 @@ class NewFigureDialog(HydeDialogWidget):
             self.ui.heightSpinBox.value(),
         )
 
-    def get_command(self):
+    def _refresh_from_widgets(self):
+        self._sync_state_from_widgets()
+        self.refresh_shell()
+
+    def canonical_text_payload(self):
         self._sync_state_from_widgets()
         return self.figure_state.source_for_command("create")
+
+    def can_send_to_cmd_line(self):
+        return True
+
+    def handle_do_it(self):
+        self.accept()
+
+    def get_command(self):
+        return self.canonical_text_payload()
 
     def normalized_state(self):
         self._sync_state_from_widgets()

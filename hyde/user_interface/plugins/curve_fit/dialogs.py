@@ -1,6 +1,6 @@
 import copy
 
-from qtutils.qt import QtCore, QtGui, QtWidgets
+from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.lmfit_features import (
     LmfitCodec,
@@ -64,15 +64,15 @@ class CurveFitState(HydeGuiState):
 
 class CurveFitDialog(HydeDialogWidget):
     def __init__(self, figure_context=None, services=None, parent=None):
-        super().__init__(parent=parent, services=dict(services or {}))
         self.figure_context = figure_context
         self.state = CurveFitState()
-        self._pending_fit_function_name = None
-        self._catalog_service = self.services.get("curve_fit_catalog_service")
-        self._catalog_status_text = ""
         self._loading_controls = False
         self._current_model = None
         self._live_error_message = ""
+        super().__init__(parent=parent, services=dict(services or {}))
+        self._pending_fit_function_name = None
+        self._catalog_service = self.services.get("curve_fit_catalog_service")
+        self._catalog_status_text = ""
         self._live_result_target_name = None
         self._live_restore_store_name = f"_hyde_lmfit_live_restore_{id(self)}"
         self._live_missing_sentinel_name = f"_hyde_lmfit_missing_{id(self)}"
@@ -82,15 +82,19 @@ class CurveFitDialog(HydeDialogWidget):
         self.setWindowTitle("Curve Fit")
         self.resize(720, 520)
 
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(self._build_tab_widget())
-        layout.addWidget(self._build_preview_controls())
-        layout.addWidget(self._build_status_strip())
-        layout.addWidget(self._build_footer())
+        self.tab_widget = self._build_tab_widget()
+        self.preview_controls = self._build_preview_controls()
+        self.status_strip = self._build_status_strip()
+        upper_content = QtWidgets.QWidget(self)
+        upper_layout = QtWidgets.QVBoxLayout(upper_content)
+        upper_layout.setContentsMargins(0, 0, 0, 0)
+        upper_layout.addWidget(self.tab_widget)
+        upper_layout.addWidget(self.preview_controls)
+        upper_layout.addWidget(self.status_strip)
+        self.mount_content_widget(upper_content)
 
         self.new_fit_function_button.clicked.connect(self._on_new_fit_function_clicked)
         self.preview_mode_combo.currentTextChanged.connect(self._on_preview_mode_changed)
-        self.to_clip_button.clicked.connect(self._copy_command_preview_to_clipboard)
         self.weighting_combo.currentTextChanged.connect(self._on_weighting_changed)
         self.suppress_screen_updates_checkbox.toggled.connect(
             self._on_suppress_screen_updates_toggled
@@ -134,6 +138,42 @@ class CurveFitDialog(HydeDialogWidget):
             self._populate_fit_function_combo()
             self._catalog_service.refresh()
         self._refresh_from_state()
+
+    def canonical_text_payload(self):
+        model = self._current_model or {}
+        if str(model.get("preview_mode") or "Commands") == "Equation":
+            return str(model.get("equation_preview") or "")
+        return str(model.get("commands_preview") or "")
+
+    def can_do_it(self):
+        model = self._current_model or {}
+        return bool(model.get("valid")) and not bool(self._live_error_message)
+
+    def handle_do_it(self):
+        if self._current_model is None or not self._current_model.get("valid"):
+            return
+        if self.execution_mode() == "suppressed":
+            commit_command = self.state.codec.state_to_commit_python(
+                self.state._state,
+                context=self._context(),
+            )
+            success, message = self._run_commit_path(
+                commit_command,
+                success_target_name=self._current_model.get("fit_result_name"),
+                display_root_name=self._current_model.get("fit_result_name"),
+            )
+            if not success:
+                self._update_status_label(message)
+                return
+        else:
+            success, message = self._run_commit_path(
+                success_target_name=self._current_model.get("fit_result_name"),
+                display_root_name=self._current_model.get("fit_result_name"),
+            )
+            if not success:
+                self._update_status_label(message)
+                return
+        self.accept()
 
     def _build_tab_widget(self):
         self.tab_widget = QtWidgets.QTabWidget(self)
@@ -228,45 +268,25 @@ class CurveFitDialog(HydeDialogWidget):
 
     def _build_preview_controls(self):
         container = QtWidgets.QWidget(self)
-        layout = QtWidgets.QVBoxLayout(container)
-
-        header_layout = QtWidgets.QHBoxLayout()
-        preview_label = QtWidgets.QLabel("Preview", container)
-        header_layout.addWidget(preview_label)
-        header_layout.addStretch(1)
-
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QtWidgets.QLabel("Preview", container))
+        layout.addStretch(1)
         self.preview_mode_combo = QtWidgets.QComboBox(container)
         self.preview_mode_combo.addItems(["Commands", "Equation"])
-        header_layout.addWidget(self.preview_mode_combo)
-        layout.addLayout(header_layout)
-
-        self.preview_text = QtWidgets.QPlainTextEdit(container)
-        self.preview_text.setReadOnly(True)
-        layout.addWidget(self.preview_text)
+        layout.addWidget(self.preview_mode_combo)
         return container
 
     def _build_status_strip(self):
-        self.status_label = QtWidgets.QLabel("", self)
-        self.status_label.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.status_label.setMinimumHeight(24)
-        return self.status_label
-
-    def _build_footer(self):
         container = QtWidgets.QWidget(self)
         layout = QtWidgets.QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addStretch(1)
-
-        self.do_it_button = QtWidgets.QPushButton("Do It", container)
-        self.do_it_button.clicked.connect(self._on_do_it_clicked)
-        layout.addWidget(self.do_it_button)
-
-        self.to_clip_button = QtWidgets.QPushButton("To Clip", container)
-        layout.addWidget(self.to_clip_button)
-
-        self.cancel_button = QtWidgets.QPushButton("Cancel", container)
-        self.cancel_button.clicked.connect(self.reject)
-        layout.addWidget(self.cancel_button)
+        layout.addWidget(QtWidgets.QLabel("Status", container))
+        self.status_label = QtWidgets.QLabel("", container)
+        self.status_label.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.status_label.setMinimumHeight(24)
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label, 1)
         return container
 
     def _namespace_view(self):
@@ -487,18 +507,13 @@ class CurveFitDialog(HydeDialogWidget):
             for option in model["fit_result_options"]:
                 self.fit_result_target_combo.addItem(option)
             self.fit_result_target_combo.setEditText(model["fit_result_name"])
-
-            preview_mode = str(model.get("preview_mode") or "Commands")
-            preview_index = self.preview_mode_combo.findText(preview_mode)
-            self.preview_mode_combo.setCurrentIndex(preview_index)
-            if preview_mode == "Equation":
-                self.preview_text.setPlainText(model["equation_preview"])
-            else:
-                self.preview_text.setPlainText(model["commands_preview"])
-            self.do_it_button.setEnabled(
-                bool(model["valid"]) and not self._live_error_message
+            preview_index = self.preview_mode_combo.findText(
+                str(model.get("preview_mode") or "Commands")
             )
+            self.preview_mode_combo.setCurrentIndex(preview_index)
+
             self._update_status_label(model["status_message"])
+            self.refresh_shell()
         finally:
             self._loading_controls = False
 
@@ -725,29 +740,18 @@ class CurveFitDialog(HydeDialogWidget):
                 return str(candidate_id)
         return None
 
-    def _record_attached_display_state(self, desired_state):
+    def _record_attached_display_state(
+        self,
+        desired_state,
+        *,
+        fit_trace_id,
+        residual_trace_id,
+    ):
         current_state = self._attached_display_tracker.current_states.get(
             "attached_display"
         )
         if current_state is None or desired_state is None:
             return None
-        subplot_state = self._attached_display_subplot_state()
-        owned_root_names = (
-            self._preview_target_name,
-            desired_state.get("fit_result_name"),
-        )
-        fit_trace_id = self._owned_attached_trace_id(
-            subplot_state,
-            current_state.get("fit_trace_id"),
-            component="best_fit",
-            root_names=owned_root_names,
-        )
-        residual_trace_id = self._owned_attached_trace_id(
-            subplot_state,
-            current_state.get("residual_trace_id"),
-            component="residual",
-            root_names=owned_root_names,
-        )
         next_state = {
             "subplot_id": desired_state["subplot_id"],
             "show_fit": fit_trace_id is not None,
@@ -1120,7 +1124,11 @@ class CurveFitDialog(HydeDialogWidget):
         )
         if not success:
             return False
-        self._record_attached_display_state(desired_state)
+        self._record_attached_display_state(
+            desired_state,
+            fit_trace_id=fit_trace_id,
+            residual_trace_id=residual_trace_id,
+        )
         return True
 
     def _after_relevant_state_change(self):
@@ -1132,8 +1140,8 @@ class CurveFitDialog(HydeDialogWidget):
             return
         if self._live_error_message:
             self._live_error_message = ""
-            self.do_it_button.setEnabled(bool(self._current_model.get("valid")))
             self._update_status_label(self._current_model.get("status_message", ""))
+            self.refresh_shell()
         if (
             self.figure_context is not None
             and (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked())
@@ -1172,10 +1180,8 @@ class CurveFitDialog(HydeDialogWidget):
             success = self._run_preview_path(force=True)
             message = "" if success else self._attached_display_failure_message()
         self._live_error_message = "" if success else message
-        self.do_it_button.setEnabled(
-            bool(self._current_model.get("valid")) and not self._live_error_message
-        )
         self._update_status_label(self._current_model.get("status_message", ""))
+        self.refresh_shell()
 
     def _on_fit_function_changed(self, fit_function_name):
         if self._loading_controls:
@@ -1222,18 +1228,6 @@ class CurveFitDialog(HydeDialogWidget):
             }
         )
         self._after_relevant_state_change()
-
-    def _on_preview_mode_changed(self, preview_mode):
-        if self._loading_controls:
-            return
-        self.state.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "preview_mode"),
-                "value": preview_mode,
-            }
-        )
-        self._refresh_from_state()
 
     def _on_weighting_changed(self, weighting_name):
         if self._loading_controls:
@@ -1283,6 +1277,18 @@ class CurveFitDialog(HydeDialogWidget):
         self.state.set_fit_result_name(str(fit_result_name).strip(), locked=True)
         self._after_relevant_state_change()
 
+    def _on_preview_mode_changed(self, preview_mode):
+        if self._loading_controls:
+            return
+        self.state.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "preview_mode"),
+                "value": str(preview_mode),
+            }
+        )
+        self._refresh_from_state()
+
     def _on_coefficient_text_changed(self, parameter_name, field_name, value):
         if self._loading_controls:
             return
@@ -1295,45 +1301,10 @@ class CurveFitDialog(HydeDialogWidget):
         self.state.set_coefficient_field(parameter_name, "vary", checked)
         self._after_relevant_state_change()
 
-    def _on_do_it_clicked(self):
-        if self._current_model is None or not self._current_model.get("valid"):
-            return
-        if self.execution_mode() == "suppressed":
-            commit_command = self.state.codec.state_to_commit_python(
-                self.state._state,
-                context=self._context(),
-            )
-            success, message = self._run_commit_path(
-                commit_command,
-                success_target_name=self._current_model.get("fit_result_name"),
-                display_root_name=self._current_model.get("fit_result_name"),
-            )
-            if not success:
-                self._update_status_label(message)
-                return
-        else:
-            success, message = self._run_commit_path(
-                success_target_name=self._current_model.get("fit_result_name"),
-                display_root_name=self._current_model.get("fit_result_name"),
-            )
-            if not success:
-                self._update_status_label(message)
-                return
-        self.accept()
-
     def execution_mode(self):
         if self._current_model is None:
             return "suppressed"
         return str(self._current_model.get("execution_mode") or "suppressed")
-
-    def _copy_command_preview_to_clipboard(self):
-        clipboard = QtWidgets.QApplication.clipboard()
-        if clipboard is None:
-            return
-        clipboard.setText(
-            self._current_model.get("commands_preview", ""),
-            QtGui.QClipboard.Clipboard,
-        )
 
     def reject(self):
         python_execution_service = self.services.get("python_execution_service")

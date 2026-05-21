@@ -1,11 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>NewFigureDialog</class>
- <widget class="QDialog" name="NewFigureDialog">
-  <property name="windowTitle">
-   <string>New Figure</string>
-  </property>
+ <widget class="QWidget" name="NewFigureDialog">
   <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>12</number>
+   </property>
+   <property name="leftMargin">
+    <number>18</number>
+   </property>
+   <property name="topMargin">
+    <number>18</number>
+   </property>
+   <property name="rightMargin">
+    <number>18</number>
+   </property>
+   <property name="bottomMargin">
+    <number>18</number>
+   </property>
    <item>
     <layout class="QFormLayout" name="formLayout">
      <item row="0" column="0">
@@ -109,13 +121,6 @@
       </layout>
      </item>
     </layout>
-   </item>
-   <item>
-    <widget class="QDialogButtonBox" name="buttonBox">
-     <property name="standardButtons">
-      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
-     </property>
-    </widget>
    </item>
   </layout>
  </widget>

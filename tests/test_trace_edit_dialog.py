@@ -374,6 +374,42 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_dialog_uses_shared_shell_for_preview_and_footer_actions(self):
+        clipboard = QtWidgets.QApplication.clipboard()
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: True,
+            },
+        )
+
+        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertFalse(hasattr(dialog, "button_box"))
+            self.assertEqual(
+                dialog.lower_text_edit.toPlainText(),
+                dialog.canonical_text_payload(),
+            )
+            self.assertIn("fig = plt.figure(", dialog.lower_text_edit.toPlainText())
+            self.assertIn("ax.plot(", dialog.lower_text_edit.toPlainText())
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
+            self.assertTrue(dialog.to_clip_button.isEnabled())
+
+            dialog.to_clip_button.click()
+
+            self.assertEqual(
+                clipboard.text(),
+                dialog.lower_text_edit.toPlainText(),
+            )
+        finally:
+            dialog.close()
+
     def test_dialog_seeds_from_figure_defaults_before_current_trace_state(self):
         mdi_area = QtWidgets.QMdiArea()
         figure_ir = figure_ir_from_live_state(make_live_state())

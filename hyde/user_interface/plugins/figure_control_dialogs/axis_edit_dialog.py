@@ -1,6 +1,6 @@
 import copy
 
-from qtutils.qt import QtCore, QtGui, QtWidgets
+from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec
 from hyde.user_interface.shared.figure import MatplotlibColorLineEdit
@@ -216,9 +216,11 @@ def _merge_figure_ir_with_defaults(figure_ir, figure_defaults):
 
 class AxisEditDialog(HydeDialogWidget):
     def __init__(self, figure_context, services=None, parent=None):
+        self.figure_context = figure_context
+        self._preview_error_message = ""
+        self._draft_figure_ir = None
         super().__init__(parent=parent, services=dict(services or {}))
         self.setWindowTitle("Modify Axis")
-        self.figure_context = figure_context
         self._loading_controls = False
         self._live_updates_sent = False
         self._original_figure_ir = self.figure_context.figure_ir()
@@ -232,10 +234,12 @@ class AxisEditDialog(HydeDialogWidget):
             revert_state=self._original_figure_ir,
         )
         self._build_ui()
+        self._apply_initial_dialog_size()
         self._load_initial_axis()
 
     def _build_ui(self):
-        layout = QtWidgets.QVBoxLayout(self)
+        content = QtWidgets.QWidget(self)
+        layout = QtWidgets.QVBoxLayout(content)
 
         header_layout = QtWidgets.QHBoxLayout()
         layout.addLayout(header_layout)
@@ -263,32 +267,13 @@ class AxisEditDialog(HydeDialogWidget):
         self._build_axis_label_tab()
         self._build_label_options_tab()
         self._build_range_tab()
+        self.mount_content_widget(content)
 
-        self.preview_pane = QtWidgets.QTextEdit(self)
-        self.preview_pane.setReadOnly(True)
-        self.preview_pane.setMinimumHeight(140)
-        layout.addWidget(self.preview_pane)
-
-        footer_layout = QtWidgets.QHBoxLayout()
-        footer_layout.addStretch(1)
-
-        self.do_it_button = QtWidgets.QPushButton("Do It", self)
-        self.do_it_button.clicked.connect(self._on_do_it_clicked)
-        footer_layout.addWidget(self.do_it_button)
-
-        self.to_clip_button = QtWidgets.QPushButton("To Clip", self)
-        self.to_clip_button.clicked.connect(self._copy_preview_to_clipboard)
-        footer_layout.addWidget(self.to_clip_button)
-
-        self.help_button = QtWidgets.QPushButton("Help", self)
-        self.help_button.setEnabled(False)
-        footer_layout.addWidget(self.help_button)
-
-        self.cancel_button = QtWidgets.QPushButton("Cancel", self)
-        self.cancel_button.clicked.connect(self.reject)
-        footer_layout.addWidget(self.cancel_button)
-
-        layout.addLayout(footer_layout)
+    def _apply_initial_dialog_size(self):
+        tab_bar_width = self.tab_widget.tabBar().sizeHint().width()
+        target_width = max(self.sizeHint().width(), tab_bar_width + 48)
+        self.setMinimumWidth(target_width)
+        self.resize(target_width, max(self.height(), self.sizeHint().height()))
 
     def _build_axis_tab(self):
         axis_tab = QtWidgets.QWidget(self)
@@ -1171,23 +1156,21 @@ class AxisEditDialog(HydeDialogWidget):
         return sent
 
     def _update_preview(self, error_message=""):
-        if error_message:
-            self.preview_pane.setPlainText(error_message)
-            return
+        self._preview_error_message = str(error_message or "")
+        self.refresh_shell()
+
+    def canonical_text_payload(self):
+        if self._preview_error_message:
+            return self._preview_error_message
         if self._draft_figure_ir is None:
-            self.preview_pane.clear()
-            return
+            return ""
         try:
-            self.preview_pane.setPlainText(
-                FigureIRCodec.state_to_python(
-                    self._draft_figure_ir,
-                    context={
-                        "figure_defaults": self.figure_context.figure_defaults()
-                    },
-                )
+            return FigureIRCodec.state_to_python(
+                self._draft_figure_ir,
+                context={"figure_defaults": self.figure_context.figure_defaults()},
             )
         except Exception as exc:
-            self.preview_pane.setPlainText(str(exc))
+            return str(exc)
 
     def _on_controls_changed(self, *args):
         del args
@@ -1209,13 +1192,7 @@ class AxisEditDialog(HydeDialogWidget):
         if result["valid"]:
             self._dispatch_all_state(self._draft_figure_ir)
 
-    def _copy_preview_to_clipboard(self):
-        clipboard = QtWidgets.QApplication.clipboard()
-        if clipboard is None:
-            return
-        clipboard.setText(self.preview_pane.toPlainText(), QtGui.QClipboard.Clipboard)
-
-    def _on_do_it_clicked(self):
+    def handle_do_it(self):
         result = self._apply_current_controls_to_draft()
         self._update_preview(result["message"])
         if not result["valid"]:

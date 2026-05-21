@@ -1,6 +1,7 @@
 from matplotlib import rcParams
-from qtutils.qt import QtCore, QtWidgets
+from qtutils.qt import QtWidgets
 
+from hyde.features.matplotlib_features import FigureIRCodec
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 from hyde.user_interface.shared.figure import (
     MatplotlibColorLineEdit,
@@ -94,19 +95,20 @@ def _apply_style_values(style, values):
 
 class TraceAppearanceDialog(HydeDialogWidget):
     def __init__(self, figure_context, services=None, parent=None):
-        super().__init__(parent=parent, services=dict(services or {}))
-        self.setWindowTitle("Modify Data Appearance")
         self.figure_context = figure_context
         self._loading_controls = False
         self._trace_records = []
         self._trace_records_by_id = {}
         self._draft_tracker = FigureControlDraftTracker()
         self._current_styles = self._draft_tracker.current_states
+        super().__init__(parent=parent, services=dict(services or {}))
+        self.setWindowTitle("Modify Data Appearance")
         self._build_ui()
         self._load_traces()
 
     def _build_ui(self):
-        layout = QtWidgets.QVBoxLayout(self)
+        content = QtWidgets.QWidget(self)
+        layout = QtWidgets.QVBoxLayout(content)
 
         content_layout = QtWidgets.QHBoxLayout()
         layout.addLayout(content_layout)
@@ -196,17 +198,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
             self._on_marker_edge_width_changed
         )
         form_layout.addRow("Marker edge width", self.marker_edge_width_spin)
-
-        self.button_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Apply | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
-            self,
-        )
-        self.button_box.button(QtWidgets.QDialogButtonBox.Apply).clicked.connect(
-            self.accept
-        )
-        self.button_box.rejected.connect(self.reject)
-        layout.addWidget(self.button_box)
+        self.mount_content_widget(content)
 
     def _load_traces(self):
         figure_ir = self.figure_context.figure_ir() or {}
@@ -256,6 +248,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
             self.trace_list.addItem(record["label"])
         if self.trace_list.count():
             self.trace_list.setCurrentRow(0)
+        self.refresh_shell()
 
     def _style_from_trace(self, trace, index, default_trace=None, live_style=None):
         style = dict(SUPPORTED_STYLE_DEFAULTS)
@@ -348,7 +341,38 @@ class TraceAppearanceDialog(HydeDialogWidget):
             self._update_color_field_previews(trace_id)
         if reload_controls and trace_id == self._current_trace_id():
             self._load_controls_for_trace(trace_id)
+        self.refresh_shell()
         return True
+
+    def _draft_figure_ir(self):
+        figure_ir = self.figure_context.figure_ir()
+        if figure_ir is None:
+            return None
+        draft = figure_ir
+        for trace_id in self._draft_tracker.current_states:
+            record = self._record_for_trace(trace_id)
+            if record is None:
+                continue
+            draft = FigureIRCodec.update_state(
+                draft,
+                {
+                    "type": "set_trace_style",
+                    "subplot_id": record["subplot_id"],
+                    "trace_id": record["trace_id"],
+                    "style": self._current_styles[trace_id],
+                    "replace": True,
+                },
+            )
+        return draft
+
+    def canonical_text_payload(self):
+        draft = self._draft_figure_ir()
+        if draft is None:
+            return ""
+        return FigureIRCodec.state_to_python(
+            draft,
+            context={"figure_defaults": self.figure_context.figure_defaults()},
+        )
 
     def _on_trace_changed(self, row):
         if row < 0 or row >= len(self._trace_records):

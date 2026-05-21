@@ -6,7 +6,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from qtutils.qt import QtWidgets
 
 from hyde.user_interface.shared.plugin import HydeMDIContext
-from hyde.user_interface.base_hyde_widgets import HydeDialogWidget, HydeToolWidget
+from hyde.user_interface.base_hyde_widgets import (
+    HydeDialogWidget,
+    HydePromptDialog,
+    HydeToolWidget,
+)
 from hyde.user_interface.main import HydeApp
 
 
@@ -16,6 +20,35 @@ class DemoToolWidget(HydeToolWidget):
 
 class DemoDialogWidget(HydeDialogWidget):
     pass
+
+
+class DemoPromptDialog(HydePromptDialog):
+    pass
+
+
+class HookedDialogWidget(HydeDialogWidget):
+    def __init__(self, *args, **kwargs):
+        self.do_it_calls = 0
+        self.help_calls = 0
+        self.payload = "print('dialog payload')"
+        super().__init__(*args, **kwargs)
+        self.mount_content_widget(QtWidgets.QLabel("Upper content"))
+        self.refresh_shell()
+
+    def canonical_text_payload(self):
+        return self.payload
+
+    def can_send_to_cmd_line(self):
+        return True
+
+    def can_show_help(self):
+        return True
+
+    def handle_do_it(self):
+        self.do_it_calls += 1
+
+    def handle_help(self):
+        self.help_calls += 1
 
 
 class ShutdownAwareToolWidget(HydeToolWidget):
@@ -52,6 +85,14 @@ class ShutdownAwareChild(QtWidgets.QWidget):
         self.shutdown_calls += 1
 
 
+class RecordingVisibleTerminalService:
+    def __init__(self):
+        self.executed = []
+
+    def execute_visible(self, code):
+        self.executed.append(code)
+
+
 class TestHydeToolWidget(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -80,6 +121,68 @@ class TestHydeToolWidget(unittest.TestCase):
 
         self.assertIs(dialog.service("demo_service"), service)
         self.assertEqual(dialog.service("missing", "fallback"), "fallback")
+
+    def test_prompt_dialog_base_stores_services_without_tool_shell(self):
+        service = object()
+        import hyde.user_interface.plugins.save_window_dialog  # noqa: F401
+
+        dialog = DemoPromptDialog(services={"demo_service": service})
+        dialog.load_ui(
+            "save_window_dialog.ui",
+            module_name="hyde.user_interface.plugins.save_window_dialog",
+        )
+
+        self.assertIs(dialog.service("demo_service"), service)
+        self.assertEqual(dialog.service("missing", "fallback"), "fallback")
+        self.assertFalse(hasattr(dialog, "shell_ui"))
+        self.assertIsNotNone(dialog.ui.saveButton)
+
+    def test_tool_dialog_shell_exposes_content_mount_preview_and_fixed_footer(self):
+        dialog = DemoDialogWidget()
+        content = QtWidgets.QLabel("Upper content")
+
+        dialog.mount_content_widget(content)
+        dialog.refresh_shell()
+        dialog.show()
+        self.qapp.processEvents()
+
+        self.assertIs(content.parentWidget(), dialog.shell_ui.content_widget)
+        self.assertEqual(dialog.shell_ui.content_layout.count(), 1)
+        self.assertTrue(dialog.lower_text_edit.isReadOnly())
+        self.assertEqual(dialog.do_it_button.text(), "Do It")
+        self.assertEqual(dialog.to_cmd_line_button.text(), "To Cmd Line")
+        self.assertEqual(dialog.to_clip_button.text(), "To Clip")
+        self.assertEqual(dialog.help_button.text(), "Help")
+        self.assertEqual(dialog.cancel_button.text(), "Cancel")
+        self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+        self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
+        self.assertFalse(dialog.help_button.isEnabled())
+        self.assertTrue(dialog.help_button.isVisibleTo(dialog))
+        self.assertGreater(dialog.shell_ui.left_button_layout.count(), 0)
+        self.assertGreater(dialog.shell_ui.right_button_layout.count(), 0)
+
+    def test_tool_dialog_shell_uses_hooks_for_canonical_text_actions(self):
+        clipboard = QtWidgets.QApplication.clipboard()
+        terminal_service = RecordingVisibleTerminalService()
+        dialog = HookedDialogWidget(
+            services={"visible_terminal_service": terminal_service}
+        )
+
+        dialog.show()
+        self.qapp.processEvents()
+        dialog.do_it_button.click()
+        dialog.to_clip_button.click()
+        dialog.to_cmd_line_button.click()
+        dialog.help_button.click()
+
+        self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.payload)
+        self.assertEqual(clipboard.text(), dialog.payload)
+        self.assertEqual(terminal_service.executed, [dialog.payload])
+        self.assertEqual(dialog.do_it_calls, 1)
+        self.assertEqual(dialog.help_calls, 1)
+        self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+        self.assertTrue(dialog.to_clip_button.isEnabled())
+        self.assertTrue(dialog.help_button.isEnabled())
 
     def test_bind_subwindow_uses_window_identifier_as_default_object_name(self):
         mdi_area = QtWidgets.QMdiArea()

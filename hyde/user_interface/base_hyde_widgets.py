@@ -7,7 +7,8 @@ from qtutils.qt import QtCore, QtWidgets
 
 def load_ui_for_owner(owner, ui_filename, *, module_name=None):
     resolved_module_name = module_name or type(owner).__module__
-    module_file = sys.modules[resolved_module_name].__file__
+    module = sys.modules[resolved_module_name]
+    module_file = module.__file__
     ui_path = os.path.join(os.path.dirname(module_file), ui_filename)
     loader = UiLoader()
     return loader.load(ui_path, owner)
@@ -139,7 +140,7 @@ class HydeToolWidget(QtWidgets.QWidget):
             self._subwindow.removeEventFilter(self._persistent_close_filter)
 
 
-class HydeDialogWidget(QtWidgets.QDialog):
+class HydePromptDialog(QtWidgets.QDialog):
     def __init__(self, *args, services=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.services = dict(services or {})
@@ -149,9 +150,93 @@ class HydeDialogWidget(QtWidgets.QDialog):
     def service(self, key, default=None):
         return self.services.get(key, default)
 
-    def load_ui(self, ui_filename):
-        self.ui = load_ui_for_owner(self, ui_filename)
+    def load_ui(self, ui_filename, *, module_name=None):
+        self.ui = load_ui_for_owner(self, ui_filename, module_name=module_name)
         return self.ui
+
+
+class HydeDialogWidget(HydePromptDialog):
+    ui_filename = "hyde_dialog_widget.ui"
+
+    def __init__(self, *args, services=None, **kwargs):
+        super().__init__(*args, services=services, **kwargs)
+        self.shell_ui = load_ui_for_owner(
+            self,
+            self.ui_filename,
+            module_name="hyde.user_interface",
+        )
+        self.mounted_child = None
+        self.lower_text_edit.setReadOnly(True)
+        self.do_it_button.clicked.connect(self.handle_do_it)
+        self.to_cmd_line_button.clicked.connect(self.send_to_cmd_line)
+        self.to_clip_button.clicked.connect(self.copy_to_clip)
+        self.help_button.clicked.connect(self.handle_help)
+        self.cancel_button.clicked.connect(self.reject)
+        self.refresh_shell()
+
+    def mount_content_widget(self, child):
+        if self.mounted_child is child:
+            return child
+        if self.mounted_child is not None:
+            self.content_layout.removeWidget(self.mounted_child)
+            self.mounted_child.setParent(None)
+        self.content_layout.addWidget(child)
+        self.mounted_child = child
+        return child
+
+    def load_ui(self, ui_filename, *, module_name=None):
+        content = load_ui_for_owner(
+            QtWidgets.QWidget(self),
+            ui_filename,
+            module_name=module_name,
+        )
+        self.ui = content
+        self.mount_content_widget(content)
+        return content
+
+    def canonical_text_payload(self):
+        return ""
+
+    def can_do_it(self):
+        return True
+
+    def can_send_to_cmd_line(self):
+        return False
+
+    def can_show_help(self):
+        return False
+
+    def handle_do_it(self):
+        self.accept()
+
+    def handle_help(self):
+        return None
+
+    def copy_to_clip(self):
+        payload = self.canonical_text_payload() or ""
+        if not payload:
+            return
+        clipboard = QtWidgets.QApplication.clipboard()
+        if clipboard is None:
+            return
+        clipboard.setText(payload)
+
+    def send_to_cmd_line(self):
+        payload = self.canonical_text_payload() or ""
+        if not payload:
+            return
+        visible_terminal_service = self.service("visible_terminal_service")
+        if visible_terminal_service is None:
+            return
+        visible_terminal_service.execute_visible(payload)
+
+    def refresh_shell(self):
+        payload = self.canonical_text_payload() or ""
+        self.lower_text_edit.setPlainText(payload)
+        self.do_it_button.setEnabled(self.can_do_it())
+        self.to_cmd_line_button.setEnabled(bool(payload) and self.can_send_to_cmd_line())
+        self.to_clip_button.setEnabled(bool(payload))
+        self.help_button.setEnabled(self.can_show_help())
 
 
 def active_interactive_window(services, interactive_type=None):

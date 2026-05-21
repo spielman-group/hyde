@@ -501,15 +501,61 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(dialog.zero_line_style_combo.currentData(), ":")
             self.assertEqual(dialog.zero_line_width_spin.value(), 1.75)
             self.assertEqual(dialog.zero_line_color_edit.text(), "#335577")
-            self.assertTrue(dialog.preview_pane.toPlainText())
+            self.assertTrue(dialog.lower_text_edit.toPlainText())
             self.assertIn(
                 "fig.subplots_adjust(left=0.12, bottom=0.2, right=0.97, top=0.98)",
-                dialog.preview_pane.toPlainText(),
+                dialog.lower_text_edit.toPlainText(),
             )
             self.assertIn(
                 "ax.spines['bottom'].set_position(('outward', 12.0))",
-                dialog.preview_pane.toPlainText(),
+                dialog.lower_text_edit.toPlainText(),
             )
+        finally:
+            dialog.close()
+
+    def test_dialog_uses_shared_shell_preview_and_footer_contract(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: True,
+            },
+        )
+
+        dialog = AxisEditDialog(figure, parent=mdi_area)
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertTrue(dialog.lower_text_edit.isReadOnly())
+            self.assertIn("fig = plt.figure", dialog.lower_text_edit.toPlainText())
+            self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_clip_button.isEnabled())
+        finally:
+            dialog.close()
+
+    def test_dialog_starts_wide_enough_to_show_all_tabs(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "send_figure_action": lambda figure_number, action: True,
+            },
+        )
+
+        dialog = AxisEditDialog(figure, parent=mdi_area)
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            tab_bar = dialog.tab_widget.tabBar()
+            last_tab_rect = tab_bar.tabRect(tab_bar.count() - 1)
+
+            self.assertGreaterEqual(dialog.width(), tab_bar.sizeHint().width())
+            self.assertLessEqual(last_tab_rect.right(), tab_bar.width())
         finally:
             dialog.close()
 
@@ -602,14 +648,14 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertTrue(dialog.label_visible_checkbox.isChecked())
             self.assertNotIn(
                 "ax.xaxis.label.set_visible(False)",
-                dialog.preview_pane.toPlainText(),
+                dialog.lower_text_edit.toPlainText(),
             )
 
             dialog.label_visible_checkbox.setChecked(False)
 
             self.assertIn(
                 "ax.xaxis.label.set_visible(False)",
-                dialog.preview_pane.toPlainText(),
+                dialog.lower_text_edit.toPlainText(),
             )
         finally:
             dialog.close()
@@ -646,7 +692,7 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.side_ticks_checkbox.setChecked(False)
             dialog.side_tick_labels_checkbox.setChecked(False)
 
-            preview = dialog.preview_pane.toPlainText()
+            preview = dialog.lower_text_edit.toPlainText()
             self.assertIn("ax.set_xlabel('asdf')", preview)
             self.assertIn("ax.spines['bottom'].set_visible(False)", preview)
             self.assertIn("bottom=False", preview)
@@ -686,7 +732,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(dialog.tick_label_offset_spin.value(), 4.5)
             self.assertEqual(dialog.side_color_edit.text(), "#ff00ff")
             self.assertEqual(dialog.tick_label_color_edit.text(), "#00aa00")
-            self.assertIn("fig = plt.figure", dialog.preview_pane.toPlainText())
+            self.assertIn("fig = plt.figure", dialog.lower_text_edit.toPlainText())
         finally:
             dialog.close()
 
@@ -858,8 +904,8 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.maximum_auto_checkbox.setChecked(True)
             dialog.minimum_edit.setText("0.5")
             dialog.minimum_edit.editingFinished.emit()
-            self.assertIn("ax.autoscale(enable=True, axis='x')", dialog.preview_pane.toPlainText())
-            self.assertIn("ax.set_xlim(left=0.5)", dialog.preview_pane.toPlainText())
+            self.assertIn("ax.autoscale(enable=True, axis='x')", dialog.lower_text_edit.toPlainText())
+            self.assertIn("ax.set_xlim(left=0.5)", dialog.lower_text_edit.toPlainText())
         finally:
             dialog.close()
 
@@ -891,7 +937,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(dialog.maximum_edit.text(), "9.75")
             self.assertFalse(dialog.minimum_auto_checkbox.isChecked())
             self.assertFalse(dialog.maximum_auto_checkbox.isChecked())
-            self.assertIn("ax.set_xlim(1.25, 9.75)", dialog.preview_pane.toPlainText())
+            self.assertIn("ax.set_xlim(1.25, 9.75)", dialog.lower_text_edit.toPlainText())
         finally:
             dialog.close()
 
@@ -1032,6 +1078,6 @@ class TestAxisEditDialog(unittest.TestCase):
         try:
             dialog.to_clip_button.click()
             clipboard = QtWidgets.QApplication.clipboard()
-            self.assertIn("fig = plt.figure", clipboard.text())
+            self.assertEqual(clipboard.text(), dialog.lower_text_edit.toPlainText())
         finally:
             dialog.close()
