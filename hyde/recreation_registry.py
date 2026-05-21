@@ -173,7 +173,10 @@ def _coerce_independent_vars(independent_vars):
 
 
 def _is_project_defined_fit_function(func):
-    return getattr(func, "__module__", None) in {"procedures", "hyde"}
+    module_name = str(getattr(func, "__module__", "") or "")
+    return module_name == "hyde" or module_name == "procedures" or module_name.startswith(
+        "procedures."
+    )
 
 
 def _fit_function_callable_ref(func):

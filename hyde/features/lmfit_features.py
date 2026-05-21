@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import keyword
 
 from hyde.features.base import FeatureCodec
 from hyde.features.matplotlib_features import sorted_eligible_names
@@ -35,6 +36,13 @@ def _normalize_optional_text(value):
     return None if not text else text
 
 
+def valid_python_identifier(text):
+    normalized_text = _normalize_optional_text(text)
+    if normalized_text is None:
+        return False
+    return normalized_text.isidentifier() and not keyword.iskeyword(normalized_text)
+
+
 def _x_options(eligible_names):
     return [CALCULATED_X_NAME, *list(eligible_names)]
 
@@ -54,14 +62,14 @@ def _command_symbol_names(fit_result_name):
         if normalized_name.endswith("_result")
         else normalized_name
     )
-    if not base_name or not base_name.isidentifier():
+    if not valid_python_identifier(base_name):
         return "_hyde_lmfit_model", "_hyde_lmfit_params"
     return f"{base_name}_model", f"{base_name}_params"
 
 
 def _fit_report_line(fit_result_name):
     normalized_name = _normalize_optional_text(fit_result_name)
-    if normalized_name is None:
+    if not valid_python_identifier(normalized_name):
         return ""
     return f"print({normalized_name}.fit_report())"
 
@@ -484,6 +492,11 @@ class LmfitCodec(FeatureCodec):
             }
         if not str(fit_result_name or "").strip():
             return {"valid": False, "message": "Select a fit-result target."}
+        if not valid_python_identifier(fit_result_name):
+            return {
+                "valid": False,
+                "message": "Fit-result target must be a valid Python identifier.",
+            }
         if not lowered_coefficients["valid"]:
             return {"valid": False, "message": lowered_coefficients["message"]}
         return {"valid": True, "message": ""}
@@ -639,6 +652,7 @@ class LmfitCodec(FeatureCodec):
         if (
             y_name
             and fit_result_name
+            and valid_python_identifier(fit_result_name)
             and all(row.get("value") for row in x_rows)
             and lowered_coefficients
         ):
@@ -727,7 +741,7 @@ class LmfitCodec(FeatureCodec):
         restore_store_name="_hyde_lmfit_live_restore",
         missing_sentinel_name="_hyde_lmfit_missing",
     ):
-        if not command_preview or not fit_result_name:
+        if not command_preview or not valid_python_identifier(fit_result_name):
             return command_preview
         lines = [
             f"{missing_sentinel_name} = globals().get({missing_sentinel_name!r}, object())",

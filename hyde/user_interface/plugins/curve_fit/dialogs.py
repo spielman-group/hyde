@@ -1336,5 +1336,18 @@ class CurveFitDialog(HydeDialogWidget):
         )
 
     def reject(self):
+        python_execution_service = self.services.get("python_execution_service")
+        if (
+            python_execution_service is not None
+            and self._live_result_target_name is not None
+        ):
+            rollback_command = self.state.codec.state_to_restore_target_python(
+                self._live_result_target_name,
+                restore_store_name=self._live_restore_store_name,
+                missing_sentinel_name=self._live_missing_sentinel_name,
+            )
+            if rollback_command:
+                python_execution_service.execute_hidden(rollback_command)
+        self._live_result_target_name = None
         self._restore_attached_display_revert_state()
         super().reject()

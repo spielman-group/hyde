@@ -1,5 +1,6 @@
 from qtutils.qt import QtCore, QtWidgets
 
+from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.shared.plugin import HydePlugin
 from hyde.user_interface.shared.project import resolve_requested_name
 
@@ -30,9 +31,12 @@ class CurveFitCatalogService(QtCore.QObject):
         python_execution_service = self.plugin.services.get("python_execution_service")
         if python_execution_service is None:
             return False
-        python_execution_service.execute_hidden(
-            "hyde.recreation_registry.publish_registry('fit_function')"
+        state = RuntimeCommandState()
+        state.set_callable_invocation(
+            "hyde.recreation_registry.publish_registry",
+            [repr("fit_function")],
         )
+        python_execution_service.execute_hidden(state.python_source())
         return True
 
     def default_new_fit_function_name(self):

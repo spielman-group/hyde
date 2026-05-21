@@ -544,6 +544,29 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             ("second_fit", "first_fit"),
         )
 
+    def test_fit_function_registry_accepts_procedures_helper_modules_only(self):
+        def helper_fit(x, slope):
+            return slope * x
+
+        helper_fit.__module__ = "procedures.fit_helpers"
+
+        def external_fit(x, slope):
+            return slope * x
+
+        external_fit.__module__ = "third_party.fit_helpers"
+
+        register_fit_function(helper_fit, independent_vars=("x",))
+        register_fit_function(external_fit, independent_vars=("x",))
+
+        self.assertEqual(
+            tuple(entry["name"] for entry in serialize_registry("fit_function")["entries"]),
+            ("helper_fit",),
+        )
+        self.assertEqual(
+            serialize_registry("fit_function")["entries"][0]["callable_ref"],
+            "helper_fit",
+        )
+
     def test_clear_without_kind_resets_all_registries(self):
         @hyde.table
         def Table0(a):

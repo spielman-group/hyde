@@ -22,6 +22,7 @@ from hyde.features.lmfit_features import CALCULATED_X_NAME, LmfitCodec
 from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.shared.figure import supported_trace_records_from_figure_ir
 from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.plugins.curve_fit import Plugin as CurveFitPlugin
@@ -778,7 +779,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_dialog_excludes_imported_helper_fit_functions(self):
+    def test_curve_fit_dialog_includes_imported_helper_fit_functions(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit": CurveFitPlugin({})}
         app = make_plugin_host(manager)
@@ -810,8 +811,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
             discovered_names = combo_items(dialog.fit_function_combo)
             self.assertIn("local_fit", discovered_names)
-            self.assertNotIn("helper_fit", discovered_names)
-            self.assertNotIn("helper_fit", dialog.status_label.text())
+            self.assertIn("helper_fit", discovered_names)
             dialog.close()
         finally:
             harness.close()
@@ -982,6 +982,16 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             harness.reload_procedures()
             catalog_service = manager.services["curve_fit_catalog_service"]
+            execution_service = manager.services["python_execution_service"]
+            expected_refresh_state = RuntimeCommandState()
+            expected_refresh_state.set_callable_invocation(
+                "hyde.recreation_registry.publish_registry",
+                [repr("fit_function")],
+            )
+            expected_refresh_command = expected_refresh_state.python_source()
+
+            catalog_service.replace_catalog([], [])
+            self.assertTrue(catalog_service.refresh())
 
             self.assertIn(
                 "FitFunction0",
@@ -994,6 +1004,10 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(
                 catalog_service.default_new_fit_function_name(),
                 "FitFunction2",
+            )
+            self.assertEqual(
+                execution_service.calls[-1]["code"],
+                expected_refresh_command,
             )
         finally:
             harness.close()
@@ -1506,6 +1520,52 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
+    def test_curve_fit_dialog_invalid_result_target_name_disables_commit_and_omits_invalid_assignment(
+        self,
+    ):
+        _, _, harness, dialog = create_configured_line_fit_dialog()
+        try:
+            dialog.fit_result_target_combo.setEditText("bad-name")
+            QtWidgets.QApplication.processEvents()
+
+            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertIn(
+                "valid Python identifier",
+                dialog.status_label.text(),
+            )
+            self.assertNotIn("bad-name =", dialog.preview_text.toPlainText())
+            self.assertNotIn(".fit(", dialog.preview_text.toPlainText())
+
+            dialog.to_clip_button.click()
+            clipboard = QtWidgets.QApplication.clipboard()
+            self.assertEqual(clipboard.text(), dialog.preview_text.toPlainText())
+            self.assertNotIn("bad-name =", clipboard.text())
+        finally:
+            dialog.close()
+            harness.close()
+
+    def test_curve_fit_dialog_valid_custom_result_target_name_stays_enabled_and_lowers_normally(
+        self,
+    ):
+        _, _, harness, dialog = create_configured_line_fit_dialog()
+        try:
+            dialog.fit_result_target_combo.setEditText("custom_fit_result")
+            QtWidgets.QApplication.processEvents()
+
+            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertEqual(dialog.status_label.text(), "")
+            self.assertIn(
+                "custom_fit_result = custom_fit_model.fit(",
+                dialog.preview_text.toPlainText(),
+            )
+            self.assertIn(
+                "print(custom_fit_result.fit_report())",
+                dialog.preview_text.toPlainText(),
+            )
+        finally:
+            dialog.close()
+            harness.close()
+
     def test_lmfit_codec_expression_owned_coefficients_feed_preview_and_commit_lowering(self):
         array_metadata = {
             "python_type": "ndarray",
@@ -1814,6 +1874,77 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(len(harness.execution_service.calls), 2)
             self.assertEqual(harness.execution_service.visible_calls, [])
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+        finally:
+            dialog.close()
+            harness.close()
+
+    def test_curve_fit_dialog_cancel_restores_live_edited_result_target(self):
+        _, _, harness, dialog = create_configured_line_fit_dialog()
+        try:
+            previous_result = object()
+            harness.set_namespace_value("signal_fit_result", previous_result)
+
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(type(harness.namespace["signal_fit_result"]).__name__, "ModelResult")
+            self.assertIsNot(harness.namespace["signal_fit_result"], previous_result)
+
+            dialog.reject()
+            QtWidgets.QApplication.processEvents()
+
+            self.assertIs(harness.namespace["signal_fit_result"], previous_result)
+        finally:
+            dialog.close()
+            harness.close()
+
+    def test_curve_fit_dialog_cancel_restores_all_live_touched_result_targets(self):
+        _, _, harness, dialog = create_configured_line_fit_dialog()
+        try:
+            previous_signal_result = object()
+            previous_alternate_result = object()
+            harness.set_namespace_value("signal_fit_result", previous_signal_result)
+            harness.set_namespace_value(
+                "alternate_fit_result",
+                previous_alternate_result,
+            )
+
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(type(harness.namespace["signal_fit_result"]).__name__, "ModelResult")
+            self.assertIs(
+                harness.namespace["alternate_fit_result"],
+                previous_alternate_result,
+            )
+
+            dialog.fit_result_target_combo.setEditText("alternate_fit_result")
+            QtWidgets.QApplication.processEvents()
+
+            self.assertIs(
+                harness.namespace["signal_fit_result"],
+                previous_signal_result,
+            )
+            self.assertEqual(
+                type(harness.namespace["alternate_fit_result"]).__name__,
+                "ModelResult",
+            )
+            self.assertIsNot(
+                harness.namespace["alternate_fit_result"],
+                previous_alternate_result,
+            )
+
+            dialog.reject()
+            QtWidgets.QApplication.processEvents()
+
+            self.assertIs(
+                harness.namespace["signal_fit_result"],
+                previous_signal_result,
+            )
+            self.assertIs(
+                harness.namespace["alternate_fit_result"],
+                previous_alternate_result,
+            )
         finally:
             dialog.close()
             harness.close()
