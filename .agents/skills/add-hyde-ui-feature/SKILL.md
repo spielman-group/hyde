@@ -16,18 +16,20 @@ For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md
 1. Inspect the feature spec folder first.
    Look for image assets, `SPEC.md`, and `IGOR.md`.
 2. Infer the UI behavior shown by the screenshots before relying on prose.
-   Note visible controls, panes, menus, selections, states, and user actions.
-3. Read `SPEC.md` if present.
+   Note visible controls, panes, menus, selections, states, user actions, and relative layout.
+3. Sketch the visible layout in ASCII before drafting prose whenever the surface is more than a trivial single-column form.
+   Capture top-to-bottom and left-to-right placement, grouped controls, major spans, and footer actions. If the UI uses tabs, stacked pages, or other mutually exclusive views, make a separate ASCII sketch for each one.
+4. Read `SPEC.md` if present.
    Preserve Hyde-specific decisions already made unless they conflict with project architecture or newer user direction.
-4. Read `IGOR.md` critically.
+5. Read `IGOR.md` critically.
    Extract user intent and useful UX patterns, not literal Igor implementation details.
-5. Classify every meaningful visible control as one of:
+6. Classify every meaningful visible control as one of:
    - `active`
    - `inert-but-visible`
    - `excluded`
-6. Ask the user concise clarifying questions whenever that classification is not already clear.
+7. Ask the user concise clarifying questions whenever that classification is not already clear.
    Ask when artifacts conflict, when a screenshot implies behavior missing from prose, when an Igor concept has no clear Hyde/Python equivalent, or when a visible control might be kept, disabled, or removed.
-7. Write or revise `SPEC.md` in present-tense specification language.
+8. Write or revise `SPEC.md` in present-tense specification language.
    Describe the intended Hyde behavior, not project history.
 
 ## Interpretation Rules
@@ -35,6 +37,8 @@ For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md
 - Do not copy Igor concepts directly when they do not map to Hyde.
   Translate them into Hyde-native or Python-native concepts and confirm the translation with the user when it materially affects the spec.
 - Common examples of Igor-specific concepts that need translation or rejection include data folders, waves, command-line insertion behavior, and other non-Python object models.
+- Do not flatten the UI into a control inventory only.
+  Preserve layout evidence such as tab shells, split panes, preview areas, button rows, grouped controls, and which widgets span multiple rows or columns.
 - Keep the output frontend-focused, but include backend guardrails whenever the UI contract depends on kernel behavior.
   Define UI structure, interactions, visible states, commands or strings the GUI must generate, and architectural boundaries that affect the UI contract.
 - Do not misread Hyde's dumb-viewport rule as "the GUI cannot support editing."
@@ -49,6 +53,8 @@ For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md
 - Use nearby Hyde spec folders for format and granularity when helpful, especially `project_management/specs/data_browser/`.
 - Keep `SPEC.md` free of implementation history, migrations, or discarded alternatives.
 - Separate initial deployment behavior from future work whenever the artifacts imply a larger eventual feature.
+- In `Window Layout`, include ASCII layout sketches whenever layout fidelity matters.
+  For tabbed interfaces, include a separate sketch for each tab. For multi-mode or multi-page interfaces, include a separate sketch for each materially different visible arrangement.
 - Explicitly list visible controls and classify them as `active`, `inert-but-visible`, or `excluded`.
 - Add architecture guardrails whenever the UI depends on backend behavior, live kernel state, or synchronization.
 - For mutable widgets, include explicit sections covering:

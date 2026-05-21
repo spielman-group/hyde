@@ -32,6 +32,29 @@ For most Hyde frontend features, prefer these sections when they apply:
 
 Do not include every section mechanically. Include the sections needed to make the feature implementation decision complete.
 
+## Window Layout Sketches
+
+When layout fidelity matters, `Window Layout` should include one or more ASCII sketches.
+
+Use the sketches to preserve:
+
+- the overall shell shape
+- left/right and top/bottom placement
+- grouped controls
+- major row or column spans
+- preview panes, lists, tables, canvases, and footer button rows
+
+If the UI has tabs, stacked pages, wizard steps, or mode switches that materially change
+placement, include a separate ASCII sketch for each visible arrangement. Do not collapse
+all tabs into one blended diagram.
+
+Optimize the sketch for Qt Designer and `.ui` grid thinking: another agent should be able
+to infer which controls share a row, which groups stack vertically, and which widgets
+need to span multiple columns.
+
+The sketch does not need pixel precision. It should be structurally precise enough to
+prevent a correct-widget / wrong-layout outcome.
+
 ## Mutable Widget Requirements
 
 If the feature allows the user to mutate scientific state, the spec must make that explicit.
