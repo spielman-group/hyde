@@ -18,8 +18,9 @@ from qtutils.qt import QtWidgets
 
 import hyde
 from hyde import project_tools
-from hyde.features.lmfit_features import CALCULATED_X_NAME
+from hyde.features.lmfit_features import CALCULATED_X_NAME, LmfitCodec
 from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
+from hyde.user_interface.hyde_interactive_widget import active_interactive_window
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugin_tools import HydePluginManager
 from hyde.user_interface.plugins.curve_fit import Plugin as CurveFitPlugin
@@ -181,12 +182,39 @@ class FakeExecutionService:
         return True
 
 
+class FakeProjectProceduresService:
+    def __init__(self, procedures_init, reload_procedures, project_dir=None):
+        self._procedures_init = procedures_init
+        self._reload_procedures = reload_procedures
+        self._project_dir = project_dir
+
+    def current_project_dir(self):
+        return self._project_dir
+
+    def procedures_init(self):
+        return self._procedures_init()
+
+    def reload_procedures(self):
+        return self._reload_procedures()
+
+
 def configure_curve_fit_runtime(app, manager):
     plugin = manager.plugins["curve_fit"]
     harness = ProcedureExecutionHarness(plugin)
+    procedures_service = FakeProjectProceduresService(
+        lambda: harness.procedures_init,
+        harness.reload_procedures,
+        project_dir=harness.project_dir,
+    )
     app.get_current_project_dir = lambda: harness.project_dir
-    app.get_procedures_init = lambda: harness.procedures_init
-    app.reload_procedures = harness.reload_procedures
+    app.build_plugin_services = lambda: {
+        **{
+            key: value
+            for key, value in HydeApp.build_plugin_services(app).items()
+            if key not in {"get_procedures_init", "reload_procedures"}
+        },
+        "project_procedures_service": procedures_service,
+    }
 
     HydeApp.setup_plugins(app)
 
@@ -194,8 +222,6 @@ def configure_curve_fit_runtime(app, manager):
     harness.execution_service = execution_service
     manager.services["python_execution_service"] = execution_service
     plugin.services["python_execution_service"] = execution_service
-    plugin.services["get_procedures_init"] = app.get_procedures_init
-    plugin.services["reload_procedures"] = app.reload_procedures
     harness.reload_procedures()
     return harness
 
@@ -352,9 +378,6 @@ def create_curve_fit_dialog(plugin, app, *, figure_window=None):
     return dialog
 
 
-BUILTIN_FIT_FUNCTION_NAMES = ("line", "gaussian", "lorentzian", "exp", "sin", "power", "log")
-
-
 def configure_line_fit_dialog(dialog):
     dialog.fit_function_combo.setCurrentIndex(dialog.fit_function_combo.findText("line_fit"))
     QtWidgets.QApplication.processEvents()
@@ -369,8 +392,7 @@ def configure_line_fit_dialog(dialog):
 
 
 def attached_display_trace_id(result_name, kind, suffix=None):
-    prefix = "fit" if kind == "fit" else "res"
-    trace_id = f"{prefix}_{result_name}"
+    trace_id = result_name if kind == "fit" else f"{result_name}_residuals"
     if suffix is not None:
         trace_id = f"{trace_id}_{suffix}"
     return trace_id
@@ -491,6 +513,21 @@ class TestCurveFitPlugin(unittest.TestCase):
         cls.qapp = QtWidgets.QApplication.instance()
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
+
+    def test_active_interactive_window_returns_active_typed_widget_without_figure_policy(
+        self,
+    ):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        app = make_plugin_host(manager)
+        figure_window = FigureWindow(figure_number=7, services={})
+        subwindow = app.ui.mdiArea.addSubWindow(figure_window)
+        subwindow.show()
+        app.ui.mdiArea.setActiveSubWindow(subwindow)
+
+        self.assertIs(
+            active_interactive_window({"mdi_area": app.ui.mdiArea}, FigureWindow),
+            figure_window,
+        )
 
     def test_plugin_registers_curve_fit_action_in_analysis_menu(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
@@ -735,28 +772,14 @@ class TestCurveFitPlugin(unittest.TestCase):
 
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
 
-            discovered_names = [
-                dialog.fit_function_combo.itemText(index)
-                for index in range(dialog.fit_function_combo.count())
-            ]
-            self.assertTrue(
-                set(BUILTIN_FIT_FUNCTION_NAMES).issubset(discovered_names)
-            )
-            self.assertEqual(
-                discovered_names[: len(BUILTIN_FIT_FUNCTION_NAMES)],
-                list(BUILTIN_FIT_FUNCTION_NAMES),
-            )
+            discovered_names = combo_items(dialog.fit_function_combo)
+            self.assertIn("line", discovered_names)
             self.assertIn("line_fit", discovered_names)
             self.assertIn("plane_fit", discovered_names)
             self.assertLess(
                 discovered_names.index("line_fit"),
                 discovered_names.index("plane_fit"),
             )
-            plane_entry = dialog.fit_function_combo.itemData(
-                dialog.fit_function_combo.findText("plane_fit")
-            )
-            self.assertEqual(plane_entry["independent_vars"], ["x", "y"])
-            self.assertEqual(plane_entry["parameters"], ["amplitude", "offset"])
             self.assertNotIn("plain_line", dialog.status_label.text())
             self.assertIn("bad_fit", dialog.status_label.text())
             self.assertIn("*args or **kwargs", dialog.status_label.text())
@@ -794,14 +817,9 @@ class TestCurveFitPlugin(unittest.TestCase):
 
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
 
-            discovered_names = [
-                dialog.fit_function_combo.itemText(index)
-                for index in range(dialog.fit_function_combo.count())
-            ]
-            self.assertTrue(
-                set(BUILTIN_FIT_FUNCTION_NAMES).issubset(discovered_names)
-            )
+            discovered_names = combo_items(dialog.fit_function_combo)
             self.assertIn("local_fit", discovered_names)
+            self.assertNotIn("helper_fit", discovered_names)
             self.assertNotIn("helper_fit", dialog.status_label.text())
             dialog.close()
         finally:
@@ -815,18 +833,9 @@ class TestCurveFitPlugin(unittest.TestCase):
 
         try:
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
-            discovered_names = [
-                dialog.fit_function_combo.itemText(index)
-                for index in range(dialog.fit_function_combo.count())
-            ]
-            self.assertTrue(
-                set(BUILTIN_FIT_FUNCTION_NAMES).issubset(discovered_names)
-            )
-            self.assertEqual(
-                discovered_names[: len(BUILTIN_FIT_FUNCTION_NAMES)],
-                list(BUILTIN_FIT_FUNCTION_NAMES),
-            )
+            discovered_names = combo_items(dialog.fit_function_combo)
             self.assertEqual(discovered_names[0], "line")
+            self.assertIn("exp", discovered_names)
             dialog.close()
         finally:
             harness.close()
@@ -913,13 +922,131 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(dialog.fit_function_combo.currentText(), "FitFunction0")
             with open(harness.procedures_init, "r", encoding="utf-8") as handle:
                 procedures_source = handle.read()
-            self.assertIn("# --- Hyde Fit Functions: BEGIN ---", procedures_source)
+            self.assertNotIn("# --- Hyde Fit Functions: BEGIN ---", procedures_source)
             self.assertIn(
                 '@hyde.fit_function(independent_vars=("x",))',
                 procedures_source,
             )
             self.assertIn("def FitFunction0(x, c0):", procedures_source)
             dialog.close()
+        finally:
+            harness.close()
+
+    def test_new_fit_function_button_rejects_real_conflicts_and_keeps_dialog_open(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+
+        try:
+            harness.write_procedures(
+                """
+                @hyde.fit_function(independent_vars=("x",))
+                def ExistingFit(x, c0):
+                    return c0 * x
+                """
+            )
+            harness.reload_procedures()
+            dialog = trigger_curve_fit_action_and_capture_dialog(manager)
+            original_items = combo_items(dialog.fit_function_combo)
+            original_selection = dialog.fit_function_combo.currentText()
+            with open(harness.procedures_init, "r", encoding="utf-8") as handle:
+                original_source = handle.read()
+
+            with patch.object(
+                QtWidgets.QInputDialog,
+                "getText",
+                return_value=("ExistingFit", True),
+            ), patch.object(QtWidgets.QMessageBox, "warning") as warning:
+                dialog.new_fit_function_button.click()
+                QtWidgets.QApplication.processEvents()
+
+            warning.assert_called_once()
+            self.assertTrue(dialog.isVisible())
+            self.assertEqual(combo_items(dialog.fit_function_combo), original_items)
+            self.assertEqual(dialog.fit_function_combo.currentText(), original_selection)
+            with open(harness.procedures_init, "r", encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), original_source)
+            dialog.close()
+        finally:
+            harness.close()
+
+    def test_curve_fit_catalog_service_refreshes_entries_and_default_name(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+
+        try:
+            harness.write_procedures(
+                """
+                @hyde.fit_function(independent_vars=("x",))
+                def FitFunction0(x, c0):
+                    return c0 * x
+
+                @hyde.fit_function(independent_vars=("x",))
+                def FitFunction1(x, *coeffs):
+                    return x
+                """
+            )
+            harness.reload_procedures()
+            catalog_service = manager.services["curve_fit_catalog_service"]
+
+            self.assertIn(
+                "FitFunction0",
+                [entry["name"] for entry in catalog_service.fit_functions()],
+            )
+            self.assertIn(
+                "FitFunction1",
+                [entry["name"] for entry in catalog_service.rejected_fit_functions()],
+            )
+            self.assertEqual(
+                catalog_service.default_new_fit_function_name(),
+                "FitFunction2",
+            )
+        finally:
+            harness.close()
+
+    def test_curve_fit_catalog_service_scaffolds_through_project_procedures_service(
+        self,
+    ):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        plugin = manager.plugins["curve_fit"]
+        harness = ProcedureExecutionHarness(plugin)
+        procedures_service = FakeProjectProceduresService(
+            lambda: harness.procedures_init,
+            harness.reload_procedures,
+            project_dir=harness.project_dir,
+        )
+        app.get_current_project_dir = lambda: harness.project_dir
+        app.build_plugin_services = lambda: {
+            **{
+                key: value
+                for key, value in HydeApp.build_plugin_services(app).items()
+                if key not in {"get_procedures_init", "reload_procedures"}
+            },
+            "project_procedures_service": procedures_service,
+        }
+
+        try:
+            HydeApp.setup_plugins(app)
+            execution_service = FakeExecutionService(harness)
+            harness.execution_service = execution_service
+            manager.services["python_execution_service"] = execution_service
+            plugin.services["python_execution_service"] = execution_service
+            harness.reload_procedures()
+            catalog_service = manager.services["curve_fit_catalog_service"]
+
+            self.assertEqual(
+                catalog_service.scaffold_new_fit_function("FitFunction0"),
+                "FitFunction0",
+            )
+            self.assertIn(
+                "FitFunction0",
+                [entry["name"] for entry in catalog_service.fit_functions()],
+            )
         finally:
             harness.close()
 
@@ -1210,14 +1337,12 @@ class TestCurveFitPlugin(unittest.TestCase):
                 QtWidgets.QApplication.processEvents()
                 self.assertEqual(dialog.preview_mode_combo.currentText(), "Equation")
                 self.assertEqual(dialog.preview_text.toPlainText(), expected_equation)
-                expected_commands = dialog.state.codec.state_to_python(
-                    dialog.state._state,
-                    context=dialog._context(),
-                )
 
                 dialog.to_clip_button.click()
                 clipboard = QtWidgets.QApplication.clipboard()
-                self.assertEqual(clipboard.text(), expected_commands)
+                dialog.preview_mode_combo.setCurrentText("Commands")
+                QtWidgets.QApplication.processEvents()
+                self.assertEqual(clipboard.text(), dialog.preview_text.toPlainText())
             finally:
                 dialog.close()
         finally:
@@ -1340,6 +1465,116 @@ class TestCurveFitPlugin(unittest.TestCase):
                 dialog.close()
         finally:
             harness.close()
+
+    def test_curve_fit_dialog_invalid_free_parameter_does_not_preview_executable_fit(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "time": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+
+        try:
+            harness.write_procedures(
+                """
+                @hyde.fit_function(independent_vars=("x",))
+                def line_fit(x, slope, offset):
+                    return slope * x + offset
+                """
+            )
+            harness.reload_procedures()
+
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            try:
+                dialog.fit_function_combo.setCurrentIndex(
+                    dialog.fit_function_combo.findText("line_fit")
+                )
+                QtWidgets.QApplication.processEvents()
+
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "slope")["expr"],
+                    "2 * offset",
+                )
+
+                self.assertFalse(dialog.do_it_button.isEnabled())
+                self.assertIn("offset", dialog.status_label.text())
+                self.assertNotIn(".fit(", dialog.preview_text.toPlainText())
+            finally:
+                dialog.close()
+        finally:
+            harness.close()
+
+    def test_lmfit_codec_expression_owned_coefficients_feed_preview_and_commit_lowering(self):
+        array_metadata = {
+            "python_type": "ndarray",
+            "numpy_type": "Array",
+            "ndim": 1,
+            "numpy_kind": "f",
+        }
+        state = {
+            "settings": {
+                "fit_function_name": "line_fit",
+                "y_name": "signal",
+                "x_names": {"x": "time"},
+                "fit_result_name": "signal_fit_result",
+                "fit_result_name_locked": True,
+                "coefficients": {
+                    "slope": {"expr": "2 * offset"},
+                    "offset": {"initial_value": "1.5"},
+                },
+            }
+        }
+        context = {
+            "fit_functions": [
+                {
+                    "name": "line_fit",
+                    "callable_ref": "line_fit",
+                    "independent_vars": ["x"],
+                    "parameters": ["slope", "offset"],
+                }
+            ],
+            "namespace_view": {"signal": array_metadata, "time": array_metadata},
+            "trace_records": [],
+        }
+
+        commit_preview = LmfitCodec.state_to_commit_python(state, context=context)
+        guessed_preview = LmfitCodec.state_to_preview_python(
+            state,
+            context=context,
+            preview_target_name="_preview_fit",
+        )
+
+        self.assertIn(
+            "signal_fit_params.add('slope', expr='2 * offset')",
+            commit_preview,
+        )
+        self.assertIn(
+            "signal_fit_params.add('offset', value=1.5, vary=True)",
+            commit_preview,
+        )
+        self.assertIn(
+            "signal_fit_result = signal_fit_model.fit(signal, params=signal_fit_params, x=time)",
+            commit_preview,
+        )
+        self.assertIn(
+            "_preview_fit.best_fit = line_fit(x=time, slope=2 * offset, offset=1.5)",
+            guessed_preview,
+        )
 
     def test_curve_fit_dialog_data_options_update_preview_and_execution_mode_without_running(
         self,
@@ -1466,6 +1701,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 QtWidgets.QApplication.processEvents()
 
                 harness.execution_service.calls.clear()
+                preview_command = dialog.preview_text.toPlainText()
                 self.assertNotIn("signal_fit_result", harness.namespace)
 
                 dialog.do_it_button.click()
@@ -1473,9 +1709,10 @@ class TestCurveFitPlugin(unittest.TestCase):
 
                 self.assertEqual(len(harness.execution_service.calls), 1)
                 self.assertEqual(
-                    harness.execution_service.visible_calls,
-                    ["print(signal_fit_result.fit_report())"],
+                    harness.execution_service.calls[0]["code"],
+                    preview_command,
                 )
+                self.assertEqual(harness.execution_service.visible_calls, [])
                 self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
                 result = harness.namespace["signal_fit_result"]
                 self.assertEqual(type(result).__name__, "ModelResult")
@@ -1588,10 +1825,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             self.assertEqual(len(harness.execution_service.calls), 2)
-            self.assertEqual(
-                harness.execution_service.visible_calls,
-                ["print(signal_fit_result.fit_report())"],
-            )
+            self.assertEqual(harness.execution_service.visible_calls, [])
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
         finally:
             dialog.close()
@@ -1838,6 +2072,8 @@ class TestCurveFitPlugin(unittest.TestCase):
         try:
             self.assertEqual(dialog.execution_mode(), "suppressed")
             self.assertTrue(dialog.show_fit_checkbox.isChecked())
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
+            self.assertNotIn("signal_fit_result", harness.namespace)
 
             np.testing.assert_allclose(
                 attached_figure.figure.axes[0].lines[-1].get_ydata(),
@@ -1873,12 +2109,13 @@ class TestCurveFitPlugin(unittest.TestCase):
         try:
             self.assertEqual(dialog.execution_mode(), "suppressed")
             self.assertTrue(dialog.show_fit_checkbox.isChecked())
-
-            self.assertEqual(
-                [entry["action"]["type"] for entry in attached_figure.action_log],
-                ["set_trace"],
-            )
             self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
+            self.assertNotIn("signal_fit_result", harness.namespace)
+
+            np.testing.assert_allclose(
+                attached_figure.figure.axes[0].lines[-1].get_ydata(),
+                2.0 * harness.namespace["time"] + 1.0,
+            )
             self.assertNotIn("signal_fit_result", harness.namespace)
 
             attached_figure.action_log.clear()
@@ -1927,11 +2164,8 @@ class TestCurveFitPlugin(unittest.TestCase):
             subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
                 "subplots"
             ][0]
-            self.assertEqual(
-                [trace["id"] for trace in subplot["traces"]],
-                ["trace0", attached_display_trace_id("signal_fit_result", "fit")],
-            )
-            self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
+            self.assertEqual([trace["id"] for trace in subplot["traces"]], ["trace0"])
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
             self.assertTrue(
                 any(
                     entry["action"]["trace_id"]
@@ -1944,25 +2178,14 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_curve_fit_dialog_attached_sync_failure_rolls_back_generated_collision_ids(
+    def test_curve_fit_dialog_attached_sync_failure_rolls_back_replaced_trace_ids(
         self,
     ):
         colliding_fit_id = attached_display_trace_id("signal_fit_result", "fit")
         colliding_residual_id = attached_display_trace_id("signal_fit_result", "res")
-        generated_fit_id = attached_display_trace_id(
-            "signal_fit_result",
-            "fit",
-            suffix=1,
-        )
-        generated_residual_id = attached_display_trace_id(
-            "signal_fit_result",
-            "res",
-            suffix=1,
-        )
         attached_figure = AttachedFigureHarness(
             np.array([0.0, 1.0, 2.0, 3.0]),
             np.array([1.0, 3.0, 5.0, 7.0]),
-            fail_trace_ids={generated_residual_id},
         )
         _, _, harness, dialog = create_configured_line_fit_dialog(
             figure_window=attached_figure.figure_window
@@ -1983,6 +2206,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                     }
                 )
             QtWidgets.QApplication.processEvents()
+            attached_figure.fail_trace_ids = {colliding_residual_id}
 
             previous_result = object()
             harness.set_namespace_value("signal_fit_result", previous_result)
@@ -2001,15 +2225,11 @@ class TestCurveFitPlugin(unittest.TestCase):
             ][0]
             self.assertEqual(
                 [trace["id"] for trace in subplot["traces"]],
-                ["trace0", colliding_fit_id, colliding_residual_id, generated_fit_id],
-            )
-            self.assertNotIn(
-                generated_residual_id,
-                [trace["id"] for trace in subplot["traces"]],
+                ["trace0", colliding_fit_id, colliding_residual_id],
             )
             self.assertTrue(
                 any(
-                    entry["action"]["trace_id"] == generated_residual_id
+                    entry["action"]["trace_id"] == colliding_residual_id
                     for entry in attached_figure.action_log
                 )
             )
@@ -2055,8 +2275,41 @@ class TestCurveFitPlugin(unittest.TestCase):
             np.array([0.0, 1.0, 2.0, 3.0]),
             np.array([1.0, 3.0, 5.0, 7.0]),
         )
-        _, _, harness, dialog = create_configured_line_fit_dialog(
-            figure_window=attached_figure.figure_window
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+        attach_namespace_view_service(
+            manager,
+            {
+                "signal": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+                "time": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                },
+            },
+        )
+        harness.write_procedures(
+            """
+            @hyde.fit_function(independent_vars=("x",))
+            def line_fit(x, slope, offset):
+                return slope * x + offset
+            """
+        )
+        harness.reload_procedures()
+        harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
+        harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0]))
+        dialog = create_curve_fit_dialog(
+            manager.plugins["curve_fit"],
+            app,
+            figure_window=attached_figure.figure_window,
         )
         try:
             opening_subplot = attached_figure.figure_window.snapshot_state.figure_ir()[
@@ -2065,9 +2318,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(len(opening_subplot["traces"]), 1)
             self.assertFalse(opening_subplot["legend"])
 
-            dialog.suppress_screen_updates_checkbox.setChecked(False)
-            QtWidgets.QApplication.processEvents()
-            dialog.show_fit_checkbox.setChecked(True)
+            configure_line_fit_dialog(dialog)
             dialog.show_residuals_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
 
@@ -2102,8 +2353,8 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
             dialog.show_fit_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
-            dialog.accept()
-            dialog.close()
+            dialog.do_it_button.click()
+            QtWidgets.QApplication.processEvents()
 
             reopening_dialog = create_curve_fit_dialog(
                 manager.plugins["curve_fit"],

@@ -28,10 +28,10 @@ namespace. The result object is always created or recreated. Plotting is optiona
 curve and residual displays are not separate top-level scientific outputs. While the
 dialog is open, attached previews render from the current coefficient guesses; after
 successful `Do It` / accept, any surviving display is re-rooted to the authoritative
-result object. When a supported figure is available, the dialog can attach to it and
-manage dialog-owned plotted displays. When no figure is available, the dialog still
-runs for result-object creation and update, while graph-display controls remain visible
-but disabled.
+result object. When a first-class figure is active, the dialog can attach to that
+active figure context and manage dialog-owned plotted displays. When no attachable
+figure context is active, the dialog still runs for result-object creation and update,
+while graph-display controls remain visible but disabled.
 
 Fit-function discovery is limited to `@hyde.fit_function` definitions on the normal
 Hyde path. That includes Hyde-provided built-in fit functions plus project-defined
@@ -43,8 +43,8 @@ named coefficient parameters, with no supported `*args` or `**kwargs`.
 ## User Stories
 
 1. As a Hyde user, I want to open Curve Fit from the `Analysis` menu, so that fitting is exposed as a normal first-class analysis workflow.
-2. As a Hyde user, I want Curve Fit to auto-attach to the active supported figure when one is available, so that data-target narrowing and graph output are immediately useful.
-3. As a Hyde user, I want Curve Fit to still open when no supported figure is active, so that I can create or update fit results even outside figure context.
+2. As a Hyde user, I want Curve Fit to auto-attach to the active first-class figure context when one is available, so that data-target narrowing and graph output are immediately useful.
+3. As a Hyde user, I want Curve Fit to still open when no active first-class figure context is available, so that I can create or update fit results even outside figure context.
 4. As a Hyde user, I want graph-display controls to remain present but disabled when no figure target is available, so that the dialog shape stays consistent while making the unavailable behavior explicit.
 5. As a Hyde user, I want the dialog to be modal, so that fit editing behaves like Hyde's existing figure-control dialogs.
 6. As a Hyde user, I want the fit-function chooser to show discovered `@hyde.fit_function` definitions only, so that function availability comes from Hyde's normal fit-function registration path rather than from an extra GUI-owned catalog.
@@ -83,8 +83,8 @@ named coefficient parameters, with no supported `*args` or `**kwargs`.
 
 - Curve Fit is a modal figure-control-style dialog, not a persistent MDI tool window.
 - The feature launches from the `Analysis` menu.
-- The dialog may run attached to a supported figure or unattached.
-- On `Analysis` launch, Hyde auto-attaches to the active supported figure when one is available; otherwise the dialog opens unattached.
+- The dialog may run attached to an active first-class figure context or unattached.
+- On `Analysis` launch, Hyde auto-attaches to the active first-class figure context when one is available; otherwise the dialog opens unattached.
 - In unattached mode, result-object creation and update remain available, while fit-curve and residual display controls remain visible but disabled.
 - The dialog reuses the existing figure-control interaction model for live preview, explicit accept, explicit revert, and clipboard export.
 - The dialog owns one dedicated GUI state object and one dedicated codec for curve-fit state. That path owns normalization, validation, command preview generation, and equation preview generation.

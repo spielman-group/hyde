@@ -21,7 +21,7 @@ from hyde.recreation_registry import (
     reject_fit_function,
     serialize_registry,
 )
-from hyde.user_interface.plugins.table.window_macro_store import (
+from hyde.user_interface.window_macro_store import (
     BEGIN_MARKER,
     END_MARKER,
     inspect_macro_conflict,
@@ -591,6 +591,66 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
                 "FIGURE_MACROS_RESPONSE",
                 "FIT_FUNCTIONS_RESPONSE",
             ],
+        )
+
+    def test_publish_registry_for_fit_functions_only_publishes_catalog_payload(self):
+        @hyde.table
+        def Table0(a):
+            return a
+
+        @hyde.figure
+        def Graph0(x):
+            return x
+
+        def line_fit(x, slope):
+            return slope * x
+
+        line_fit.__module__ = "procedures"
+        register_fit_function(line_fit, independent_vars=("x",))
+
+        with patch("hyde.recreation_registry.put_parent_message") as put_parent_message:
+            publish_registry("fit_function")
+
+        put_parent_message.assert_called_once_with(
+            [
+                "FIT_FUNCTIONS_RESPONSE",
+                {
+                    "entries": [
+                        {
+                            "name": "line_fit",
+                            "callable_ref": "line_fit",
+                            "source_text": "def line_fit(x, slope):\n    return slope * x",
+                            "independent_vars": ["x"],
+                            "parameters": ["slope"],
+                        }
+                    ],
+                    "rejected": [],
+                },
+            ]
+        )
+
+    def test_table_and_figure_registry_rejected_payloads_remain_empty(self):
+        @hyde.table
+        def Table0(a):
+            return a
+
+        @hyde.figure
+        def Graph0(x):
+            return x
+
+        self.assertEqual(
+            serialize_registry("table"),
+            {
+                "entries": [{"name": "Table0", "args": ["a"]}],
+                "rejected": [],
+            },
+        )
+        self.assertEqual(
+            serialize_registry("figure"),
+            {
+                "entries": [{"name": "Graph0", "args": ["x"]}],
+                "rejected": [],
+            },
         )
 
 

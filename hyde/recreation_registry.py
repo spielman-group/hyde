@@ -9,83 +9,84 @@ import textwrap
 from .execution.ipc import put_parent_message
 
 
-_REGISTRY_PROTOCOLS = {
-    "table": {
-        "task": "TABLE_MACROS_RESPONSE",
-        "entry_fields": ("name", "args"),
-        "preserve_registration_order": False,
-        "supports_macro_registration": True,
-    },
-    "figure": {
-        "task": "FIGURE_MACROS_RESPONSE",
-        "entry_fields": ("name", "args"),
-        "preserve_registration_order": False,
-        "supports_macro_registration": True,
-    },
-    "fit_function": {
-        "task": "FIT_FUNCTIONS_RESPONSE",
-        "entry_fields": None,
-        "preserve_registration_order": True,
-        "supports_macro_registration": False,
-    },
+_PUBLIC_KINDS = ("table", "figure", "fit_function")
+_MACRO_TASKS = {
+    "table": "TABLE_MACROS_RESPONSE",
+    "figure": "FIGURE_MACROS_RESPONSE",
 }
-_REGISTRIES = {
-    kind: {
-        "entries": {},
-        "rejected": {},
-    }
-    for kind in _REGISTRY_PROTOCOLS
+_FIT_FUNCTION_TASK = "FIT_FUNCTIONS_RESPONSE"
+_MACRO_REGISTRIES = {kind: {} for kind in _MACRO_TASKS}
+_FIT_FUNCTION_CATALOG = {
+    "entries": {},
+    "rejected": {},
 }
 _REGISTRY_LOCK = threading.RLock()
 
 
 def _normalize_kind(kind):
     candidate = str(kind or "").strip().lower()
-    if candidate not in _REGISTRY_PROTOCOLS:
+    if candidate not in _PUBLIC_KINDS:
         raise ValueError(f"Unsupported registry kind: {kind!r}.")
     return candidate
 
 
-def _set_registry_entry(kind, name, entry):
+def _normalize_macro_kind(kind):
     normalized_kind = _normalize_kind(kind)
+    if normalized_kind not in _MACRO_TASKS:
+        raise ValueError(f"Unsupported macro kind: {kind!r}.")
+    return normalized_kind
+
+
+def _registry_kinds(kind=None):
+    if kind is None:
+        return _PUBLIC_KINDS
+    return (_normalize_kind(kind),)
+
+
+def _registry_task(kind):
+    if kind == "fit_function":
+        return _FIT_FUNCTION_TASK
+    return _MACRO_TASKS[kind]
+
+
+def _set_macro_entry(kind, name, entry):
+    normalized_kind = _normalize_macro_kind(kind)
     with _REGISTRY_LOCK:
-        _REGISTRIES[normalized_kind]["entries"][str(name)] = dict(entry)
+        _MACRO_REGISTRIES[normalized_kind][str(name)] = dict(entry)
 
 
-def _remove_registry_entry(kind, name):
-    normalized_kind = _normalize_kind(kind)
+def _set_fit_function_entry(name, entry):
     with _REGISTRY_LOCK:
-        _REGISTRIES[normalized_kind]["entries"].pop(str(name), None)
+        _FIT_FUNCTION_CATALOG["entries"][str(name)] = dict(entry)
 
 
-def _set_registry_rejection(kind, name, entry):
-    normalized_kind = _normalize_kind(kind)
+def _remove_fit_function_entry(name):
     with _REGISTRY_LOCK:
-        _REGISTRIES[normalized_kind]["rejected"][str(name)] = dict(entry)
+        _FIT_FUNCTION_CATALOG["entries"].pop(str(name), None)
 
 
-def _remove_registry_rejection(kind, name):
-    normalized_kind = _normalize_kind(kind)
+def _set_fit_function_rejection(name, entry):
     with _REGISTRY_LOCK:
-        _REGISTRIES[normalized_kind]["rejected"].pop(str(name), None)
+        _FIT_FUNCTION_CATALOG["rejected"][str(name)] = dict(entry)
+
+
+def _remove_fit_function_rejection(name):
+    with _REGISTRY_LOCK:
+        _FIT_FUNCTION_CATALOG["rejected"].pop(str(name), None)
 
 
 def clear(kind=None):
     with _REGISTRY_LOCK:
-        if kind is None:
-            kinds = tuple(_REGISTRY_PROTOCOLS)
-        else:
-            kinds = (_normalize_kind(kind),)
-        for registry_kind in kinds:
-            _REGISTRIES[registry_kind]["entries"].clear()
-            _REGISTRIES[registry_kind]["rejected"].clear()
+        for registry_kind in _registry_kinds(kind):
+            if registry_kind == "fit_function":
+                _FIT_FUNCTION_CATALOG["entries"].clear()
+                _FIT_FUNCTION_CATALOG["rejected"].clear()
+            else:
+                _MACRO_REGISTRIES[registry_kind].clear()
 
 
 def _validate_recreation_function(kind, func):
-    normalized_kind = _normalize_kind(kind)
-    protocol = _REGISTRY_PROTOCOLS[normalized_kind]
-    if not protocol["supports_macro_registration"]:
-        raise ValueError(f"Unsupported macro kind: {kind!r}.")
+    normalized_kind = _normalize_macro_kind(kind)
     if not callable(func):
         raise TypeError(
             f"{normalized_kind.title()} recreation decorators must wrap a callable."
@@ -107,28 +108,31 @@ def _validate_recreation_function(kind, func):
     return normalized_kind, signature
 
 
+def _serialized_macro_entries(kind, registry_key):
+    if registry_key != "entries":
+        return ()
+    with _REGISTRY_LOCK:
+        stored_entries = _MACRO_REGISTRIES[kind]
+        return tuple(
+            {
+                "name": entry["name"],
+                "args": list(entry["args"]),
+            }
+            for _, entry in sorted(stored_entries.items())
+        )
+
+
+def _serialized_fit_function_entries(registry_key):
+    with _REGISTRY_LOCK:
+        stored_entries = _FIT_FUNCTION_CATALOG[registry_key]
+        return tuple(dict(entry) for _, entry in stored_entries.items())
+
+
 def _serialized_entries(kind, registry_key):
     normalized_kind = _normalize_kind(kind)
-    protocol = _REGISTRY_PROTOCOLS[normalized_kind]
-    entry_fields = protocol["entry_fields"]
-    with _REGISTRY_LOCK:
-        stored_entries = _REGISTRIES[normalized_kind][registry_key]
-        ordered_items = (
-            stored_entries.items()
-            if protocol["preserve_registration_order"]
-            else sorted(stored_entries.items())
-        )
-        return tuple(
-            (
-                {
-                    field: list(entry[field]) if field == "args" else entry[field]
-                    for field in entry_fields
-                }
-                if entry_fields is not None
-                else dict(entry)
-            )
-            for _, entry in ordered_items
-        )
+    if normalized_kind == "fit_function":
+        return _serialized_fit_function_entries(registry_key)
+    return _serialized_macro_entries(normalized_kind, registry_key)
 
 
 def names(kind):
@@ -144,15 +148,10 @@ def serialize_registry(kind):
 
 
 def publish_registry(kind=None):
-    if kind is None:
-        kinds = tuple(_REGISTRY_PROTOCOLS)
-    else:
-        kinds = (_normalize_kind(kind),)
-    for registry_kind in kinds:
-        protocol = _REGISTRY_PROTOCOLS[registry_kind]
+    for registry_kind in _registry_kinds(kind):
         try:
             put_parent_message([
-                protocol["task"],
+                _registry_task(registry_kind),
                 serialize_registry(registry_kind),
             ])
         except Exception:
@@ -238,17 +237,16 @@ def register_fit_function(func, *, independent_vars):
         "independent_vars": list(independent_var_names),
         "parameters": list(coefficients),
     }
-    _set_registry_entry("fit_function", func.__name__, entry)
-    _remove_registry_rejection("fit_function", func.__name__)
+    _set_fit_function_entry(func.__name__, entry)
+    _remove_fit_function_rejection(func.__name__)
     return func
 
 
 def reject_fit_function(func, *, reason):
     if not callable(func):
         return func
-    _remove_registry_entry("fit_function", func.__name__)
-    _set_registry_rejection(
-        "fit_function",
+    _remove_fit_function_entry(func.__name__)
+    _set_fit_function_rejection(
         func.__name__,
         {
             "name": func.__name__,
@@ -257,9 +255,10 @@ def reject_fit_function(func, *, reason):
     )
     return func
 
+
 def register_macro(kind, func):
     normalized_kind, signature = _validate_recreation_function(kind, func)
-    _set_registry_entry(
+    _set_macro_entry(
         normalized_kind,
         func.__name__,
         {

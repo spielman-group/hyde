@@ -1,18 +1,16 @@
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.user_interface.base import RuntimeCommandState
 from hyde.user_interface.hyde_interactive_widget import active_interactive_window
 from hyde.user_interface.plugin_tools import HydePlugin
 from hyde.user_interface.plugins.figure.window import FigureWindow
-from hyde.user_interface.window_macro_store import (
-    MacroStoreError,
-    inspect_fit_function_conflict,
-    validate_macro_name,
-    write_fit_function_source,
-)
 from hyde.user_interface.window_naming import resolve_requested_name
 
 from .dialogs import CurveFitDialog
+from .fit_function_scaffolding import (
+    CurveFitCatalogError,
+    validate_fit_function_name,
+    write_fit_function_scaffold,
+)
 
 
 class CurveFitCatalogService(QtCore.QObject):
@@ -21,60 +19,46 @@ class CurveFitCatalogService(QtCore.QObject):
     def __init__(self, plugin):
         super().__init__()
         self.plugin = plugin
-        self.command_state = RuntimeCommandState()
+        self._fit_functions = []
+        self._rejected_fit_functions = []
 
     def fit_functions(self):
-        return tuple(dict(entry) for entry in self.plugin.fit_functions)
+        return tuple(dict(entry) for entry in self._fit_functions)
 
     def rejected_fit_functions(self):
-        return tuple(dict(entry) for entry in self.plugin.rejected_fit_functions)
+        return tuple(dict(entry) for entry in self._rejected_fit_functions)
 
     def refresh(self):
         python_execution_service = self.plugin.services.get("python_execution_service")
         if python_execution_service is None:
             return False
-        self.command_state.set_callable_invocation(
-            "hyde.recreation_registry.publish_registry",
-            ["'fit_function'"],
+        python_execution_service.execute_hidden(
+            "hyde.recreation_registry.publish_registry('fit_function')"
         )
-        python_execution_service.execute_hidden(self.command_state.python_source())
         return True
 
     def default_new_fit_function_name(self):
         existing_names = [
-            entry["name"] for entry in self.plugin.fit_functions
+            entry["name"] for entry in self._fit_functions
         ] + [
-            entry["name"] for entry in self.plugin.rejected_fit_functions
+            entry["name"] for entry in self._rejected_fit_functions
         ]
         return resolve_requested_name("FitFunction", existing_names)
 
     def scaffold_new_fit_function(self, function_name):
-        validated_name = validate_macro_name(function_name)
-        procedures_init_getter = self.plugin.services.get("get_procedures_init")
-        reload_procedures = self.plugin.services.get("reload_procedures")
-        if procedures_init_getter is None or reload_procedures is None:
-            raise MacroStoreError(
+        validated_name = validate_fit_function_name(function_name)
+        procedures_service = self.plugin.services.get("project_procedures_service")
+        if procedures_service is None:
+            raise CurveFitCatalogError(
                 "Curve Fit requires an active project procedures/__init__.py path."
             )
-        procedures_init = procedures_init_getter()
+        procedures_init = procedures_service.procedures_init()
         if not procedures_init:
-            raise MacroStoreError(
+            raise CurveFitCatalogError(
                 "Curve Fit requires an active project procedures/__init__.py path."
             )
-        if inspect_fit_function_conflict(procedures_init, validated_name) is not None:
-            raise MacroStoreError(
-                f"{validated_name} already exists in procedures/__init__.py."
-            )
-        write_fit_function_source(
-            procedures_init,
-            validated_name,
-            (
-                '@hyde.fit_function(independent_vars=("x",))\n'
-                f"def {validated_name}(x, c0):\n"
-                "    return c0 * x\n"
-            ),
-        )
-        reload_procedures()
+        write_fit_function_scaffold(procedures_init, validated_name)
+        procedures_service.reload_procedures()
         self.refresh()
         return validated_name
 
@@ -82,20 +66,18 @@ class CurveFitCatalogService(QtCore.QObject):
         next_fit_functions = [dict(entry) for entry in fit_functions]
         next_rejected = [dict(entry) for entry in rejected_fit_functions]
         if (
-            next_fit_functions == self.plugin.fit_functions
-            and next_rejected == self.plugin.rejected_fit_functions
+            next_fit_functions == self._fit_functions
+            and next_rejected == self._rejected_fit_functions
         ):
             return
-        self.plugin.fit_functions = next_fit_functions
-        self.plugin.rejected_fit_functions = next_rejected
+        self._fit_functions = next_fit_functions
+        self._rejected_fit_functions = next_rejected
         self.catalog_changed.emit()
 
 
 class Plugin(HydePlugin):
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self.fit_functions = []
-        self.rejected_fit_functions = []
         self.catalog_service = CurveFitCatalogService(self)
 
     def get_services(self):
@@ -136,9 +118,20 @@ class Plugin(HydePlugin):
             data.get("rejected", []),
         )
 
+    def _active_curve_fit_figure_window(self):
+        figure_window = active_interactive_window(self.services, FigureWindow)
+        if figure_window is None:
+            return None
+        snapshot_state = getattr(figure_window, "snapshot_state", None)
+        if snapshot_state is None or snapshot_state.figure_ir() is None:
+            return None
+        if figure_window.services.get("send_figure_action") is None:
+            return None
+        return figure_window
+
     def show_curve_fit_dialog(self, checked=False):
         del checked
-        figure_window = active_interactive_window(self.services, FigureWindow)
+        figure_window = self._active_curve_fit_figure_window()
         dialog = CurveFitDialog(
             figure_window=figure_window,
             services=self.services,

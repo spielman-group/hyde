@@ -73,6 +73,37 @@ def connect_logger_to_output_box(logger_name, output_box):
     logger.addHandler(handler)
     return handler
 
+
+class VisibleCommandNotificationService:
+    def __init__(self, app):
+        self._app = app
+
+    def on_command_executed(self, message):
+        handler = getattr(self._app, "on_visible_command_executed", None)
+        return None if handler is None else handler(message)
+
+
+class ProjectProceduresService:
+    def __init__(self, app):
+        self._app = app
+
+    def current_project_dir(self):
+        getter = getattr(self._app, "get_current_project_dir", None)
+        if callable(getter):
+            return getter()
+        return getattr(self._app, "current_project_dir", None)
+
+    def procedures_init(self):
+        getter = getattr(self._app, "get_procedures_init", None)
+        if callable(getter):
+            return getter()
+        return getattr(self._app, "procedures_init", None)
+
+    def reload_procedures(self):
+        reloader = getattr(self._app, "reload_procedures", None)
+        return None if reloader is None else reloader()
+
+
 class HydeMainWindow(QtWidgets.QMainWindow):
     def __init__(self, app, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -163,6 +194,10 @@ class HydeApp:
             "configure_persistent_subwindow": self.configure_persistent_subwindow,
             "emit_plugin_event": self.emit_plugin_event,
             "process_tree": self.process_tree,
+            "project_procedures_service": ProjectProceduresService(self),
+            "visible_command_notification_service": (
+                VisibleCommandNotificationService(self)
+            ),
             "get_current_project_dir": self.get_current_project_dir,
             "get_procedures_init": self.get_procedures_init,
             "get_shutting_down": self.get_shutting_down,

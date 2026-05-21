@@ -19,19 +19,6 @@ def active_interactive_window(services, interactive_type=None):
         return None
     if interactive_type is not None and not isinstance(widget, interactive_type):
         return None
-    figure_window_class = None
-    try:
-        from hyde.user_interface.plugins.figure.window import FigureWindow
-
-        figure_window_class = FigureWindow
-    except Exception:
-        figure_window_class = None
-    if figure_window_class is not None and isinstance(widget, figure_window_class):
-        snapshot_state = getattr(widget, "snapshot_state", None)
-        if snapshot_state is None or snapshot_state.figure_ir() is None:
-            return None
-        if widget.services.get("send_figure_action") is None:
-            return None
     return widget
 
 

@@ -1,280 +1,203 @@
-# Curve Fit Issues
+# Curve Fit Follow-Up Issues
 
 ## Checklist
 
-- [X] Issue 1: Launch Curve Fit from `Analysis` with attach/unattach behavior
-- [X] Issue 2: Discover `@hyde.fit_function` definitions and scaffold new functions
-- [X] Issue 3: Configure function/data binding and generate preview text
-- [X] Issue 4: Edit coefficient and data-option state with validation-gated `Do It`
-- [X] Issue 5: Execute suppressed one-shot fits to create or recreate the result object
-- [X] Issue 6: Add live rerun, failure retention, and result-target handoff behavior
-- [X] Issue 7: Render and revert dialog-owned fit and residual traces on attached figures
+- [X] Issue 1: Unify Curve Fit command preview, clipboard export, and `Do It` execution
+- [X] Issue 2: Collapse Curve Fit dialog execution and attached-display ownership
+- [X] Issue 3: Split fit-function catalog flow from macro-registry flow
+- [X] Issue 4: Simplify `New Fit Function...` scaffolding and Curve Fit catalog ownership
+- [X] Issue 5: Merge duplicated coefficient lowering and trim repeated test structure
+- [X] Issue 6: Align top-level Hyde docs and shared helper boundaries with the implemented system
 
-## Issue 1: Launch Curve Fit from `Analysis` with attach/unattach behavior
+## Issue 1: Unify Curve Fit command preview, clipboard export, and `Do It` execution
 
-- **Title**: Launch Curve Fit from `Analysis`
+- **Title**: Make one authoritative Curve Fit command path
 - **Type**: AFK
 - **Blocked by**: None - can start immediately
-- **User stories covered**: 1, 2, 3, 4, 5
+- **User stories covered**: 24, 25, 28, 29
 
 ### What to build
 
-Add the first thin end-to-end Curve Fit path: a modal Curve Fit dialog reachable from
-the `Analysis` menu that auto-attaches to the active supported figure when one exists
-and otherwise opens unattached. In unattached mode, the dialog still opens with the
-same overall layout, but graph-display controls are visibly disabled.
+Collapse the current split between the command shown in the dialog and the command
+actually executed on `Do It`. The command preview, `To Clip`, and explicit `Do It`
+execution should describe one authoritative commit action rather than two different
+paths. Fit-report emission should be part of that one contract rather than being bolted
+on through a second visible command path.
 
-This slice should prove the launch contract, modal behavior, active-figure resolution,
-and no-figure fallback without yet requiring fit-function discovery or fit execution.
+This slice is about command truthfulness and execution clarity, not broader dialog
+orchestration.
 
 ### Acceptance criteria
 
-- [ ] The `Analysis` menu exposes `Curve Fit...` as a first-pass launch surface.
-- [ ] Launching from `Analysis` opens one modal Curve Fit dialog.
-- [ ] If a supported figure is active, the dialog starts attached to that figure context.
-- [ ] If no supported figure is active, the dialog still opens and remains usable as an unattached dialog shell.
-- [ ] In unattached mode, fit-curve and residual display controls remain visible but disabled.
-- [ ] Behavior tests cover attached and unattached launch behavior through public UI/service entry points.
+- [ ] The command shown in `Commands` preview matches the authoritative explicit commit action.
+- [ ] `To Clip` exports that same authoritative explicit commit action.
+- [ ] `Do It` uses the same command contract rather than a different hidden command plus a second visible follow-up.
+- [ ] Fit-report emission is handled through the same explicit commit contract.
+- [ ] Behavior tests prove the preview/clipboard/`Do It` agreement through observable outputs rather than helper call order.
 
 ### TDD focus
 
-- First failing behavior: launching `Curve Fit...` from `Analysis` with no active figure opens the modal dialog and disables plotting controls.
-- Follow-up behavior: launching with an active supported figure opens the same dialog in attached mode.
-- Tests should assert observable dialog state and launch results, not menu wiring internals or helper call order.
+- First failing behavior: the preview text and the explicit `Do It` behavior describe the same command contract.
+- Follow-up behavior: `To Clip` exports the same explicit command the dialog will commit.
+- Final behavior in this slice: successful explicit execution and fit-report emission still work without a second ad hoc command path.
 
-## Issue 2: Discover `@hyde.fit_function` definitions and scaffold new functions
+## Issue 2: Collapse Curve Fit dialog execution and attached-display ownership
 
-- **Title**: Discover and scaffold fit functions
+- **Title**: Reduce Curve Fit to one preview path and one commit path
 - **Type**: AFK
 - **Blocked by**: Issue 1
-- **User stories covered**: 6, 7, 8, 9, 36
+- **User stories covered**: 21, 22, 23, 26, 27, 28, 29, 31, 32, 33, 34, 35
 
 ### What to build
 
-Add the first complete fit-function workflow through the dialog: populate the chooser
-from discovered `@hyde.fit_function` definitions, including Hyde-provided built-ins and
-project-defined procedures functions, enforce the strict first-pass signature contract,
-and support `New Fit Function...` by appending a minimal valid scaffold to the
-procedures environment, reloading procedures, keeping the dialog open, and selecting
-the newly created function.
+Simplify the Curve Fit dialog so it has one clear preview-only path and one clear
+commit path. Today, hidden execution, preview-object sync, attached-display sync,
+rollback, live rerun, and suppressed `Do It` behavior are spread across too many
+partially-overlapping methods. Collapse that to the smallest clear orchestration that
+still preserves guessed preview behavior while the dialog is open, authoritative result
+ownership after `Do It`, and revert-on-cancel behavior.
 
-This slice should cover discovery, validation, user feedback for unsupported signatures,
-and scaffold/reload behavior without yet requiring full data binding or fit execution.
+This slice should not change the settled user-facing behavior. It should only make the
+ownership model smaller and clearer.
 
 ### Acceptance criteria
 
-- [ ] The fit-function chooser shows discovered `@hyde.fit_function` definitions only, including Hyde-provided built-ins and project-defined procedures functions.
-- [ ] The fit-function chooser preserves registration/definition order rather than alphabetical sorting, with Hyde's built-in `line` appearing first.
-- [ ] Discovery accepts multivariate functions using `independent_vars` and explicitly named coefficient parameters.
-- [ ] Discovery rejects unsupported first-pass forms such as `*args` and `**kwargs`.
-- [ ] `New Fit Function...` creates a minimal valid scaffold in the procedures environment.
-- [ ] After reload succeeds, the dialog remains open and the new function is selected in the chooser.
-- [ ] Behavior tests cover accepted discovery cases, rejected signature forms, and scaffold/reload selection behavior.
+- [ ] The dialog has one clear preview-only path for guessed-function preview updates.
+- [ ] The dialog has one clear commit path for real fit execution and accepted display re-rooting.
+- [ ] Live rerun, suppressed `Do It`, failure retention, and cancel/revert behavior still match the current settled contract.
+- [ ] Attached fit/residual preview and accepted result-rooted displays still behave the same from the user's perspective.
+- [ ] Behavior tests cover the user-visible contract without mirroring internal helper choreography.
 
 ### TDD focus
 
-- First failing behavior: a valid `@hyde.fit_function` appears in the chooser after discovery.
-- Follow-up behavior: an unsupported signature is excluded or rejected with clear surfaced behavior.
-- Final behavior in this slice: `New Fit Function...` creates a new selectable fit function without closing the dialog.
+- First failing behavior: attached guessed preview still updates while editing, but explicit commit still produces the real fit result and accepted display.
+- Follow-up behavior: live failure and cancel/revert still preserve the last successful outputs and opening display state.
+- Final behavior in this slice: the same public behavior survives after collapsing the internal execution/display split.
 
-## Issue 3: Configure function/data binding and generate preview text
+## Issue 3: Split fit-function catalog flow from macro-registry flow
 
-- **Title**: Bind function and data into previewable fit state
+- **Title**: Give fit functions a dedicated catalog path
 - **Type**: AFK
-- **Blocked by**: Issue 2
-- **User stories covered**: 10, 11, 12, 13, 19, 20, 24, 25
+- **Blocked by**: None - can start immediately
+- **User stories covered**: 6, 9, 36
 
 ### What to build
 
-Implement the first complete `CurveFitState` / `CurveFitCodec` path for selecting a fit
-function, choosing Y data, choosing one X data object per declared independent variable,
-using `From Target` as a narrowing/defaulting convenience when a figure target exists,
-and generating both command preview and equation preview. `Equation` should show the
-selected function definition body when source is available. The fit-result target must
-be part of this slice and must always resolve to a real object name rather than
-`nothing`.
+Stop treating fit functions as just another macro-registry kind. Keep a small shared
+registry path for table and figure recreation macros, and give fit functions their own
+explicit catalog path in the same module. The fit-function path should directly own the
+behavior that is unique to it: callable references, source text, rejected entries, and
+registration-order preservation.
 
-This slice should make the dialog semantically meaningful end-to-end even before actual
-fit execution exists.
+This slice is about clarifying the architecture, not changing chooser contents or
+signature rules.
 
 ### Acceptance criteria
 
-- [ ] Selecting a fit function updates the required X-data selectors to match declared independent variables.
-- [ ] Y and X selectors are populated from live namespace metadata.
-- [ ] In attached mode, `From Target` narrows or defaults selections using the supported-trace discovery path.
-- [ ] In unattached mode or when `From Target` is off, selectors expose all compatible namespace objects.
-- [ ] The fit-result target always resolves to a real object name and defaults from the selected Y object with unique-name fall-forward.
-- [ ] The dialog shows generated `Commands` and `Equation` preview modes derived from one state/codec path.
-- [ ] `To Clip` copies the current command preview.
-- [ ] Behavior tests cover selector shaping, target-name defaults, `From Target` behavior, and preview generation through public state or dialog interfaces.
+- [ ] Table/figure recreation macros continue to use one small macro-registry path.
+- [ ] Fit functions use a dedicated catalog path rather than protocol flags that emulate a special registry kind.
+- [ ] Fit-function discovery, rejection, ordering, callable references, and source-text behavior remain unchanged.
+- [ ] Publishing and clearing still work for all three public surfaces without broad regression.
+- [ ] Behavior tests verify the preserved catalog behavior through the public API.
 
 ### TDD focus
 
-- First failing behavior: choosing a multivariate fit function reshapes the X-data controls and preview deterministically.
-- Follow-up behavior: selecting Y data produces a default result-object target name with unique fall-forward.
-- Final behavior in this slice: `To Clip` exports the same command preview the dialog shows.
+- First failing behavior: fit-function catalog behavior is preserved after the registry split.
+- Follow-up behavior: table and figure macro behavior is unchanged.
+- Final behavior in this slice: the module no longer needs generic flags just to make fit functions fit the macro framework.
 
-## Issue 4: Edit coefficient and data-option state with validation-gated `Do It`
+## Issue 4: Simplify `New Fit Function...` scaffolding and Curve Fit catalog ownership
 
-- **Title**: Validate coefficients and data options
+- **Title**: Decouple fit-function scaffolding from window-macro storage
 - **Type**: AFK
 - **Blocked by**: Issue 3
-- **User stories covered**: 14, 15, 16, 17, 18, 27, 35
+- **User stories covered**: 6, 7, 8
 
 ### What to build
 
-Add the coefficient table and narrow data-options behavior to the same state/codec path.
-The dialog must support `lmfit.Parameter`-style controls for initial value, `vary`,
-lower bound, upper bound, and `expr`, plus one weighting-object selector and `Suppress
-Screen Updates`. Required free parameters must keep `Do It` disabled until the current
-configuration is valid, and the status area must surface validation failures in-context.
+Simplify the `New Fit Function...` path so it no longer depends on window-macro store
+machinery that exists for table/figure persistence. The narrow behavior needed here is:
+validate the name, reject real conflicts, append one minimal scaffold to
+`procedures/__init__.py`, reload, refresh the fit-function catalog, and select the new
+function. While doing that, collapse the extra state split between `Plugin` and
+`CurveFitCatalogService` so catalog ownership is clearer.
 
-This slice should complete the first pass of dialog configuration behavior without yet
-requiring hidden fit execution.
+This slice should leave the user-facing scaffold behavior intact while removing
+unrelated storage machinery from the path.
 
 ### Acceptance criteria
 
-- [ ] The coefficient surface exposes one row per coefficient with first-pass `lmfit.Parameter` controls.
-- [ ] A non-empty `expr` makes the parameter expression-owned while keeping the row visible.
-- [ ] Required free parameters with unusable values keep `Do It` disabled.
-- [ ] The data-options tab supports one weighting-object selector and `Suppress Screen Updates`.
-- [ ] Zero weights are treated as point exclusion on the intended fit path.
-- [ ] Validation failures appear in the dialog status area without closing the dialog.
-- [ ] Behavior tests cover validation-gated `Do It`, expression-owned parameters, and weighting/data-option state through public dialog behavior.
+- [ ] `New Fit Function...` still appends one minimal valid scaffold to `procedures/__init__.py`.
+- [ ] Real name conflicts are still rejected with clear user-facing feedback.
+- [ ] Reload still keeps the dialog open and selects the new fit function.
+- [ ] The Curve Fit catalog state has one clearer owner rather than being copied between service and plugin.
+- [ ] Behavior tests cover scaffold/reload/select behavior through the dialog and catalog service surfaces.
 
 ### TDD focus
 
-- First failing behavior: leaving a required free parameter unusable disables `Do It` and shows a validation message.
-- Follow-up behavior: entering an `expr` changes the parameter's effective editing behavior while keeping it visible.
-- Final behavior in this slice: toggling `Suppress Screen Updates` changes the dialog's actual-fit execution policy without executing yet.
+- First failing behavior: creating a new fit function still yields one new selectable function after reload.
+- Follow-up behavior: name conflicts still fail cleanly.
+- Final behavior in this slice: the same scaffold workflow survives without window-macro storage machinery and plugin/service state copying.
 
-## Issue 5: Execute suppressed one-shot fits to create or recreate the result object
+## Issue 5: Merge duplicated coefficient lowering and trim repeated test structure
 
-- **Title**: Commit suppressed one-shot fit execution
+- **Title**: Keep coefficient lowering and tests on one authoritative path
 - **Type**: AFK
-- **Blocked by**: Issue 4
-- **User stories covered**: 20, 27, 29, 30
+- **Blocked by**: Issue 2
+- **User stories covered**: 16, 17, 18, 24, 26, 27
 
 ### What to build
 
-Add the first real hidden execution path for Curve Fit in suppressed mode. When screen
-updates are suppressed, editing the dialog must not mutate real fit outputs until `Do It`.
-Pressing `Do It` must execute one hidden fit/update path that creates or recreates the
-authoritative `lmfit` result object in the kernel namespace using the current valid
-dialog state.
+Reduce duplication between guessed-preview coefficient lowering and real-fit lowering.
+Today those paths parse and lower parameter state separately, which risks drift on
+expression-owned rows and validation semantics. Move to one coefficient-lowering model
+that feeds both preview and real-fit generation. While doing that, trim repeated test
+structure so registry-level facts stay in registry tests and dialog tests focus on
+dialog-visible behavior.
 
-This slice is the first end-to-end scientific commit path and should remain result-only
-even in attached mode.
-
-Implementation note: if this slice needs more preview/status/footer shell code, prefer a
-tiny shared helper with `Modify Axis` for the modal preview pane plus status strip plus
-`Do It` / `To Clip` / `Cancel` footer rather than adding a new base class or duplicating
-the shell further.
+This slice should preserve behavior while removing drift risk and reducing test noise.
 
 ### Acceptance criteria
 
-- [ ] When `Suppress Screen Updates` is enabled, ordinary control changes do not update real fit outputs before `Do It`.
-- [ ] Pressing `Do It` in suppressed mode runs one hidden fit/update execution.
-- [ ] The hidden execution creates or recreates the authoritative result object target in the kernel namespace.
-- [ ] `Do It` in suppressed mode leaves the dialog in an accepted state after a successful run.
-- [ ] Behavior tests verify the no-intermediate-update contract and the one-shot result-object commit path through public execution interfaces.
+- [ ] One coefficient-lowering representation feeds both guessed preview and real-fit command generation.
+- [ ] Expression-owned parameters and missing/invalid-value rules behave the same in preview and real-fit paths.
+- [ ] Repeated registry/content assertions are removed from dialog tests when those facts are already proven at the registry layer.
+- [ ] Dialog tests still prove user-visible behavior, especially preview generation and execution semantics.
+- [ ] The targeted test suite becomes smaller or clearer overall rather than merely shifting assertions around.
 
 ### TDD focus
 
-- First failing behavior: editing a valid suppressed dialog does not mutate the result target before `Do It`, even though guessed previews may still update.
-- Follow-up behavior: pressing `Do It` once creates or recreates the chosen fit-result object.
-- Tests should verify resulting namespace behavior rather than internal execution helper choreography.
+- First failing behavior: one coefficient edit changes preview and real-fit lowering consistently.
+- Follow-up behavior: expression-owned rows behave identically across preview and commit paths.
+- Final behavior in this slice: tests still prove the contract with less duplicated structure.
 
-## Issue 6: Add live rerun, failure retention, and result-target handoff behavior
+## Issue 6: Align top-level Hyde docs and shared helper boundaries with the implemented system
 
-- **Title**: Run live fits with safe target ownership
+- **Title**: Reconcile architecture docs and shared helper ownership
 - **Type**: AFK
-- **Blocked by**: Issue 5
-- **User stories covered**: 26, 28, 30, 31, 34, 35
+- **Blocked by**: Issue 2, Issue 3
+- **User stories covered**: None directly - architectural/documentation cleanup
 
 ### What to build
 
-Extend the hidden execution path for live mode. When screen updates are enabled,
-relevant control changes should rerun immediately and update the current real result
-target. `Do It` in live mode must accept the current state without triggering a second
-rerun. If the user changes the active result target during the session, Hyde must
-restore the previous target's opening state before updating the new target. If a live
-rerun fails, the last successful live outputs must remain in place and the dialog must
-stay open with an error shown.
+Update Hyde's top-level architecture/status docs so they describe the present-tense
+system after the Curve Fit branch work. At the same time, revisit shared helper
+boundaries that are now muddier because of the branch, especially
+`active_interactive_window()`, and move those helpers back toward their smallest clear
+responsibility.
 
-Implementation note: if this slice needs more preview/status/footer shell code, prefer a
-tiny shared helper with `Modify Axis` for the modal preview pane plus status strip plus
-`Do It` / `To Clip` / `Cancel` footer rather than adding a new base class or duplicating
-the shell further.
+This slice is intentionally late because it should document and clean up the final
+architecture after the more substantive simplifications land.
 
 ### Acceptance criteria
 
-- [ ] In live mode, relevant dialog changes rerun immediately and update the current real result target.
-- [ ] `Do It` in live mode accepts the current successful state without triggering an extra rerun.
-- [ ] Changing the active result target restores the previous target's opening state before updating the new target.
-- [ ] On live rerun failure, the last successful live outputs remain in place.
-- [ ] On live rerun failure, the dialog stays open, shows the error, and keeps `Do It` disabled until the configuration is valid again.
-- [ ] Behavior tests cover live rerun, target handoff, and failure retention through observable namespace and dialog behavior.
+- [ ] `ARCHITECTURE.md`, `PLAN.md`, and `STATUS.md` no longer lag the implemented Curve Fit and `@hyde.fit_function` behavior.
+- [ ] Shared helper responsibilities are documented and simplified where they now carry feature-specific policy.
+- [ ] Curve Fit docs, top-level Hyde docs, and code-level helper boundaries no longer point future agents in conflicting directions.
+- [ ] Any resulting tests or doc checks remain narrow and behavior-focused.
 
 ### TDD focus
 
-- First failing behavior: changing a live-fit control mutates the current real result target immediately.
-- Follow-up behavior: changing the chosen result target restores the old target before updating the new one.
-- Final behavior in this slice: a failing rerun preserves the last successful live result and leaves the dialog open with an error.
-
-## Issue 7: Render and revert dialog-owned fit and residual traces on attached figures
-
-- **Title**: Plot and revert fit-derived traces on figures
-- **Type**: AFK
-- **Blocked by**: Issue 6
-- **User stories covered**: 21, 22, 23, 30, 32, 33
-
-### What to build
-
-Complete the attached-figure path by rendering fit-curve and residual displays as
-dialog-owned traces on attached figures. While the dialog is open, attached previews
-render from the current coefficient guesses. On successful `Do It` / accept, any
-surviving display is re-rooted to the authoritative fit result object. In the first
-pass, residuals stay on the existing figure axes rather than creating a second layout.
-The dialog must track ownership so that cancel removes traces it introduced and
-restores any existing displays it modified.
-
-Implementation note: if this slice needs more preview/status/footer shell code, prefer a
-tiny shared helper with `Modify Axis` for the modal preview pane plus status strip plus
-`Do It` / `To Clip` / `Cancel` footer rather than adding a new base class or duplicating
-the shell further.
-Implementation note: `Show Fit` and `Show Residuals` already exist in the dialog as live
-controls. This slice should wire those existing controls to real attached-figure
-behavior instead of introducing replacement toggles.
-Implementation note: in attached mode, `Show Fit` defaults on unless Hyde is preserving
-an existing attached fit-display state from the opening figure.
-
-This slice completes the first pass end-to-end attached figure workflow.
-
-### Acceptance criteria
-
-- [ ] In attached mode, enabling fit-curve display renders a dialog-owned preview trace from the current coefficient guesses.
-- [ ] In attached mode, enabling residual display renders a dialog-owned preview residual trace on the existing figure axes.
-- [ ] In attached mode, `Show Fit` defaults on unless Hyde is preserving an opening attached-display state that should survive the dialog session.
-- [ ] On successful `Do It` / accept, any surviving attached fit or residual display is re-rooted to the authoritative fit result object.
-- [ ] Plotting remains optional; the result-object workflow still succeeds when fit and residual displays are off.
-- [ ] Cancel removes dialog-owned fit or residual traces the dialog introduced.
-- [ ] Cancel restores the opening state of any fit or residual display the dialog modified.
-- [ ] Behavior tests cover attached plotting, residual-on-existing-axes behavior, and cancel-driven revert through public figure state behavior.
-
-### TDD focus
-
-- First failing behavior: enabling fit display in attached mode adds a preview trace from the current coefficient guesses.
-- Follow-up behavior: enabling residual display adds a preview residual trace on the same axes rather than on a new subplot.
-- Final behavior in this slice: successful `Do It` / accept re-roots surviving displays to the authoritative fit result, while cancel removes introduced traces and restores modified ones.
-
-## Notes
-
-- These slices are intentionally tracer bullets, not horizontal layer splits. Each issue
-  should land as a narrow end-to-end behavior path through menu/service entry,
-  dialog/state/codec behavior, hidden execution or figure integration where needed, and
-  behavior-focused tests.
-- All slices are marked `AFK` on the current shared understanding. No remaining design
-  questions require a HITL issue before implementation.
-- Each issue should be implemented with red-green-refactor discipline: one behavior
-  test, minimal implementation to green, then the next behavior in the same slice.
+- First failing behavior: a fresh reader of the top-level docs reaches the same present-tense understanding as the implemented system.
+- Follow-up behavior: shared helper boundaries are simpler and less policy-laden.
+- Final behavior in this slice: top-level Hyde docs and helper ownership no longer conflict with the settled Curve Fit implementation.

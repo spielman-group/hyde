@@ -10,6 +10,7 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Python Variables via Spyder namespace comms
 - kernel-backed editable tables
 - first-class `@hyde.figure` figure windows
+- Curve Fit with built-in and project-defined `@hyde.fit_function` discovery
 - project save/load with `manifest.toml`, `session.toml`, `session.py`, and
   `terminal/history.py`
 
@@ -42,6 +43,16 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Figures that cannot yet lower complete recreation source are marked
   `[Macro Incomplete]`.
 
+### Curve Fit
+- `@hyde.fit_function` is the public project-facing registration path for Curve Fit
+  discovery.
+- Hyde ships built-in fit functions and merges them with project-defined procedures
+  discovered after `procedures/__init__.py` reload.
+- `New Fit Function...` appends a minimal valid scaffold to `procedures/__init__.py`,
+  reloads procedures, refreshes the catalog, and keeps the dialog open on success.
+- Curve Fit preview and commit commands lower from one GUI-side coefficient model, while
+  authoritative fit results and attached figure traces remain kernel/runtime-owned.
+
 ### Project persistence
 - Kernel objects save to `manifest.toml` + `data/`.
 - Declarative GUI state saves to `session.toml`.
@@ -54,6 +65,7 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - define the final Python Terminal output policy for silent kernel-runtime execution
 - expand broader table interaction coverage
 - continue figure-edit surface growth from the existing first-class figure model
+- broaden Curve Fit beyond the implemented first pass
 
 ## Notes For Agents
 - Specs and architecture docs describe the intended present-tense system.

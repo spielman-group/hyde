@@ -19,10 +19,6 @@
   guesses.
 - [x] Support live reruns when screen updates are enabled.
 - [x] Support one-shot execution on `Do It` when screen updates are suppressed.
-- [ ] Finalize the exact first-pass validation rule for an explicit `nothing` choice in
-  the fit-result target control.
-- [ ] Finalize the exact graph-layout behavior for residual display.
-- [ ] Finalize any non-figure launch paths beyond the figure-context workflow.
 
 ## Purpose
 

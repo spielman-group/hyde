@@ -4,8 +4,6 @@ import copy
 
 from hyde.features.base import FeatureCodec
 from hyde.features.matplotlib_features import sorted_eligible_names
-from hyde.user_interface.window_naming import resolve_requested_name
-
 CALCULATED_X_NAME = "_calculated_"
 
 
@@ -69,12 +67,10 @@ def _fit_report_line(fit_result_name):
 
 
 def _coefficient_argument_expression(row):
-    if row.get("expression_owned"):
-        return str(row.get("expr") or "").strip()
-    initial_value = _parse_optional_float(
-        row.get("initial_value"),
-        f"Parameter {row['name']} initial value",
-    )
+    expression = _normalize_optional_text(row.get("expr"))
+    if expression is not None:
+        return expression
+    initial_value = row.get("value")
     if initial_value is None:
         return ""
     return repr(initial_value)
@@ -145,17 +141,15 @@ def attached_display_label(result_name, component):
     raise ValueError(f"Unsupported attached display component: {component!r}.")
 
 
-def _attached_display_trace_prefix(result_name, component):
+def attached_display_trace_id(result_name, component):
     normalized_result_name = _normalize_optional_text(result_name)
     if normalized_result_name is None:
         raise ValueError("Curve Fit attached displays require a fit result name.")
-    component_prefix = {
-        "best_fit": "fit",
-        "residual": "res",
-    }.get(str(component))
-    if component_prefix is None:
-        raise ValueError(f"Unsupported attached display component: {component!r}.")
-    return f"{component_prefix}_{normalized_result_name}"
+    if component == "best_fit":
+        return normalized_result_name
+    if component == "residual":
+        return f"{normalized_result_name}_residuals"
+    raise ValueError(f"Unsupported attached display component: {component!r}.")
 
 
 def resolve_attached_display_trace_id(
@@ -165,19 +159,8 @@ def resolve_attached_display_trace_id(
     *,
     requested_trace_id=None,
 ):
-    prefix = _attached_display_trace_prefix(result_name, component)
-    requested_name = None
-    requested_trace_id = _normalize_optional_text(requested_trace_id)
-    if requested_trace_id and (
-        requested_trace_id == prefix or requested_trace_id.startswith(f"{prefix}_")
-    ):
-        requested_name = requested_trace_id
-    return resolve_requested_name(
-        prefix,
-        existing_trace_ids,
-        requested_name=requested_name,
-        omit_zero=True,
-    )
+    del existing_trace_ids, requested_trace_id
+    return attached_display_trace_id(result_name, component)
 
 
 def restore_target_command(
@@ -208,6 +191,29 @@ def restore_target_command(
             (
                 f"    globals()[{normalized_target_name!r}] = "
                 "_hyde_lmfit_restore_target_state"
+            ),
+        ]
+    )
+
+
+def store_target_command(
+    target_name,
+    *,
+    restore_store_name="_hyde_lmfit_live_restore",
+    missing_sentinel_name="_hyde_lmfit_missing",
+):
+    normalized_target_name = _normalize_optional_text(target_name)
+    if normalized_target_name is None:
+        return ""
+    return "\n".join(
+        [
+            f"{missing_sentinel_name} = globals().get({missing_sentinel_name!r}, object())",
+            f"globals()[{missing_sentinel_name!r}] = {missing_sentinel_name}",
+            f"{restore_store_name} = globals().setdefault({restore_store_name!r}, {{}})",
+            f"if {normalized_target_name!r} not in {restore_store_name}:",
+            (
+                f"    {restore_store_name}[{normalized_target_name!r}] = globals().get("
+                f"{normalized_target_name!r}, {missing_sentinel_name})"
             ),
         ]
     )
@@ -463,7 +469,7 @@ class LmfitCodec(FeatureCodec):
         y_name,
         x_rows,
         fit_result_name,
-        coefficient_rows,
+        lowered_coefficients,
     ):
         if entry is None:
             return {"valid": False, "message": ""}
@@ -478,15 +484,39 @@ class LmfitCodec(FeatureCodec):
             }
         if not str(fit_result_name or "").strip():
             return {"valid": False, "message": "Select a fit-result target."}
+        if not lowered_coefficients["valid"]:
+            return {"valid": False, "message": lowered_coefficients["message"]}
+        return {"valid": True, "message": ""}
+
+    @classmethod
+    def _resolved_weighting_name(cls, normalized, eligible_names):
+        weighting_name = normalized["settings"].get("weighting_name")
+        return weighting_name if weighting_name in eligible_names else ""
+
+    @classmethod
+    def _lowered_coefficients(cls, coefficient_rows):
+        lowered_rows = []
         for row in coefficient_rows:
             parameter_name = row["name"]
-            if row.get("expression_owned"):
+            expression = _normalize_optional_text(row.get("expr"))
+            if expression is not None:
+                lowered_rows.append(
+                    {
+                        "name": parameter_name,
+                        "expr": expression,
+                        "value": None,
+                        "vary": False,
+                        "lower_bound": None,
+                        "upper_bound": None,
+                    }
+                )
                 continue
             initial_value = row.get("initial_value", "")
             if not str(initial_value or "").strip():
                 return {
                     "valid": False,
                     "message": f"Parameter {parameter_name} requires an initial value.",
+                    "rows": [],
                 }
             try:
                 initial_number = _parse_optional_float(
@@ -502,7 +532,11 @@ class LmfitCodec(FeatureCodec):
                     f"Parameter {parameter_name} upper bound",
                 )
             except ValueError as exc:
-                return {"valid": False, "message": str(exc)}
+                return {
+                    "valid": False,
+                    "message": str(exc),
+                    "rows": [],
+                }
             if lower_bound is not None and upper_bound is not None and lower_bound > upper_bound:
                 return {
                     "valid": False,
@@ -510,6 +544,7 @@ class LmfitCodec(FeatureCodec):
                         f"Parameter {parameter_name} lower bound must be "
                         "less than or equal to the upper bound."
                     ),
+                    "rows": [],
                 }
             if lower_bound is not None and initial_number < lower_bound:
                 return {
@@ -518,6 +553,7 @@ class LmfitCodec(FeatureCodec):
                         f"Parameter {parameter_name} initial value must be "
                         "greater than or equal to the lower bound."
                     ),
+                    "rows": [],
                 }
             if upper_bound is not None and initial_number > upper_bound:
                 return {
@@ -526,58 +562,47 @@ class LmfitCodec(FeatureCodec):
                         f"Parameter {parameter_name} initial value must be "
                         "less than or equal to the upper bound."
                     ),
+                    "rows": [],
                 }
-        return {"valid": True, "message": ""}
+            lowered_rows.append(
+                {
+                    "name": parameter_name,
+                    "expr": None,
+                    "value": initial_number,
+                    "vary": bool(row.get("vary", True)),
+                    "lower_bound": lower_bound,
+                    "upper_bound": upper_bound,
+                }
+            )
+        return {"valid": True, "message": "", "rows": lowered_rows}
 
     @classmethod
-    def _resolved_weighting_name(cls, normalized, eligible_names):
-        weighting_name = normalized["settings"].get("weighting_name")
-        return weighting_name if weighting_name in eligible_names else ""
-
-    @classmethod
-    def _parameter_add_lines(cls, coefficient_rows):
+    def _parameter_add_lines(cls, lowered_coefficients):
         lines = []
-        for row in coefficient_rows:
+        for row in lowered_coefficients:
             parameter_name = row["name"]
-            if row.get("expression_owned"):
+            if row.get("expr") is not None:
                 lines.append(
                     "_hyde_lmfit_params.add("
                     f"{parameter_name!r}, expr={row['expr']!r})"
                 )
                 continue
-            try:
-                initial_value = _parse_optional_float(
-                    row.get("initial_value"),
-                    f"Parameter {parameter_name} initial value",
-                )
-                lower_bound = _parse_optional_float(
-                    row.get("lower_bound"),
-                    f"Parameter {parameter_name} lower bound",
-                )
-                upper_bound = _parse_optional_float(
-                    row.get("upper_bound"),
-                    f"Parameter {parameter_name} upper bound",
-                )
-            except ValueError:
-                return []
-            if initial_value is None:
-                return []
             arguments = [
                 f"{parameter_name!r}",
-                f"value={initial_value!r}",
+                f"value={row['value']!r}",
                 f"vary={bool(row.get('vary', True))!r}",
             ]
-            if lower_bound is not None:
-                arguments.append(f"min={lower_bound!r}")
-            if upper_bound is not None:
-                arguments.append(f"max={upper_bound!r}")
+            if row.get("lower_bound") is not None:
+                arguments.append(f"min={row['lower_bound']!r}")
+            if row.get("upper_bound") is not None:
+                arguments.append(f"max={row['upper_bound']!r}")
             lines.append(f"_hyde_lmfit_params.add({', '.join(arguments)})")
         return lines
 
     @classmethod
-    def _preview_argument_lines(cls, coefficient_rows):
+    def _preview_argument_lines(cls, lowered_coefficients):
         arguments = []
-        for row in coefficient_rows:
+        for row in lowered_coefficients:
             expression = _coefficient_argument_expression(row)
             if not expression:
                 return []
@@ -591,7 +616,7 @@ class LmfitCodec(FeatureCodec):
         y_name,
         x_rows,
         fit_result_name,
-        coefficient_rows,
+        lowered_coefficients,
         weighting_name,
         *,
         include_report=True,
@@ -604,7 +629,7 @@ class LmfitCodec(FeatureCodec):
             f"{model_name} = lmfit.Model({callable_ref}, "
             f"independent_vars={list(entry.get('independent_vars', []))!r})"
         ]
-        parameter_lines = cls._parameter_add_lines(coefficient_rows)
+        parameter_lines = cls._parameter_add_lines(lowered_coefficients)
         if parameter_lines:
             lines.append(f"{params_name} = lmfit.Parameters()")
             lines.extend(
@@ -615,6 +640,7 @@ class LmfitCodec(FeatureCodec):
             y_name
             and fit_result_name
             and all(row.get("value") for row in x_rows)
+            and lowered_coefficients
         ):
             fit_arguments = []
             if parameter_lines:
@@ -655,7 +681,7 @@ class LmfitCodec(FeatureCodec):
         y_name,
         x_rows,
         fit_result_name,
-        coefficient_rows,
+        lowered_coefficients,
         preview_target_name,
     ):
         if entry is None:
@@ -670,7 +696,7 @@ class LmfitCodec(FeatureCodec):
         ):
             return ""
         callable_ref = str(entry.get("callable_ref") or entry["name"])
-        preview_arguments = cls._preview_argument_lines(coefficient_rows)
+        preview_arguments = cls._preview_argument_lines(lowered_coefficients)
         if not preview_arguments:
             return ""
         independent_arguments = [
@@ -764,6 +790,7 @@ class LmfitCodec(FeatureCodec):
             )
         )
         coefficient_rows = [] if entry is None else cls._coefficient_rows(normalized, entry)
+        lowered_coefficients = cls._lowered_coefficients(coefficient_rows)
         weighting_name = cls._resolved_weighting_name(normalized, eligible_names)
         fit_result_name = cls._resolved_fit_result_name(normalized, context, y_name)
         existing_names = _existing_namespace_names(context.get("namespace_view"))
@@ -773,7 +800,7 @@ class LmfitCodec(FeatureCodec):
             y_name,
             x_rows,
             fit_result_name,
-            coefficient_rows,
+            lowered_coefficients,
         )
         return {
             "fit_function_entry": entry,
@@ -784,6 +811,7 @@ class LmfitCodec(FeatureCodec):
             "y_name": y_name,
             "x_rows": x_rows,
             "coefficient_rows": coefficient_rows,
+            "lowered_coefficients": lowered_coefficients["rows"],
             "weighting_options": [""] + list(eligible_names),
             "weighting_name": weighting_name,
             "suppress_screen_updates": bool(
@@ -801,7 +829,7 @@ class LmfitCodec(FeatureCodec):
                 y_name,
                 x_rows,
                 fit_result_name,
-                coefficient_rows,
+                lowered_coefficients["rows"],
                 weighting_name,
                 include_report=True,
             ),
@@ -812,6 +840,10 @@ class LmfitCodec(FeatureCodec):
 
     @classmethod
     def state_to_python(cls, state, context=None):
+        return cls.state_to_commit_python(state, context=context)
+
+    @classmethod
+    def state_to_commit_python(cls, state, context=None):
         return cls.present_state(state, context=context)["commands_preview"]
 
     @classmethod
@@ -836,7 +868,7 @@ class LmfitCodec(FeatureCodec):
                 presented["y_name"],
                 presented["x_rows"],
                 presented["fit_result_name"],
-                presented["coefficient_rows"],
+                presented["lowered_coefficients"],
                 presented["weighting_name"],
                 include_report=bool(include_report),
             ),
@@ -860,7 +892,7 @@ class LmfitCodec(FeatureCodec):
             presented["y_name"],
             presented["x_rows"],
             presented["fit_result_name"],
-            presented["coefficient_rows"],
+            presented["lowered_coefficients"],
             preview_target_name,
         )
 
@@ -873,6 +905,20 @@ class LmfitCodec(FeatureCodec):
         missing_sentinel_name="_hyde_lmfit_missing",
     ):
         return restore_target_command(
+            target_name,
+            restore_store_name=restore_store_name,
+            missing_sentinel_name=missing_sentinel_name,
+        )
+
+    @classmethod
+    def state_to_store_target_python(
+        cls,
+        target_name,
+        *,
+        restore_store_name="_hyde_lmfit_live_restore",
+        missing_sentinel_name="_hyde_lmfit_missing",
+    ):
+        return store_target_command(
             target_name,
             restore_store_name=restore_store_name,
             missing_sentinel_name=missing_sentinel_name,

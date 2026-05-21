@@ -556,6 +556,71 @@ class TestPluginTools(unittest.TestCase):
         self.assertIs(terminal.parentWidget(), container.ui.content_widget)
         self.assertEqual(container.ui.content_layout.count(), 1)
 
+    def test_python_terminal_plugin_notifies_visible_command_service(self):
+        class FakeKernelRuntimeService:
+            def __init__(self):
+                self.client = object()
+
+            def kernel_client(self):
+                return self.client
+
+        class FakeTerminalWidget(QtWidgets.QWidget):
+            executed = QtCore.Signal(object)
+
+            def __init__(
+                self,
+                kernel_client,
+                history_sink=None,
+                initial_history=None,
+                *args,
+                **kwargs,
+            ):
+                super().__init__(*args, **kwargs)
+                self.kernel_client = kernel_client
+                self.history_sink = history_sink
+                self.initial_history = list(initial_history or [])
+
+            def restore_history_entries(self, entries):
+                self.initial_history = list(entries or [])
+
+            def shutdown(self):
+                self.kernel_client = None
+
+        class RecordingVisibleCommandService:
+            def __init__(self):
+                self.messages = []
+
+            def on_command_executed(self, message):
+                self.messages.append(message)
+
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        app = make_plugin_host(manager)
+        app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
+        visible_command_service = RecordingVisibleCommandService()
+        app.build_plugin_services = lambda: {
+            **{
+                key: value
+                for key, value in HydeApp.build_plugin_services(app).items()
+                if key != "on_visible_command_executed"
+            },
+            "kernel_runtime_service": FakeKernelRuntimeService(),
+            "visible_command_notification_service": visible_command_service,
+        }
+
+        with patch(
+            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            FakeTerminalWidget,
+        ):
+            HydeApp.setup_plugins(app)
+            plugin = manager.plugins["python_terminal"]
+            plugin.on_kernel_ready({})
+            terminal = manager.services["visible_terminal_service"].widget()
+            message = {"content": {"status": "ok"}}
+            terminal.executed.emit(message)
+
+        self.assertEqual(visible_command_service.messages, [message])
+
     def test_python_variables_plugin_keeps_namespace_service_on_its_container(self):
         class FakeChannel(QtCore.QObject):
             message_received = QtCore.Signal(object)

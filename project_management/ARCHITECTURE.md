@@ -50,6 +50,7 @@ Current deliberate public entry points:
 - `hyde.append_table(...)`
 - `@hyde.table`
 - `@hyde.figure`
+- `@hyde.fit_function`
 - `hyde.save_project(...)`
 - `hyde.load_project(...)`
 
@@ -79,7 +80,7 @@ example.hy/
 - `session.py` stores executable reopen source for open saveable windows.
 - `terminal/history.py` stores visible command history only.
 - `procedures/__init__.py` is the canonical project bootstrap and the bounded macro
-  store for explicit saved window macros.
+  store for explicit saved window macros and project-defined fit functions.
 
 ### Project load order
 1. GUI dispatches hidden `hyde.load_project(...)` through the kernel-runtime path.
@@ -138,6 +139,20 @@ when a project is loaded.
 - Routine GUI edits are semantic `comm` actions, not GUI-generated matplotlib source.
 - Saved graph macros and `session.py` restore source both lower from figure IR.
 
+### Curve Fit
+- Curve Fit is a GUI-owned command surface over kernel-owned namespace arrays,
+  project-defined `@hyde.fit_function` procedures, and live first-class figure state
+  when attached.
+- Hyde ships built-in fit functions from `hyde.__init__`, and project-defined fit
+  functions are discovered by running `procedures/__init__.py` and publishing the
+  fit-function catalog through `hyde.recreation_registry`.
+- `New Fit Function...` is intentionally narrow: it appends one minimal valid
+  `@hyde.fit_function` scaffold to `procedures/__init__.py`, triggers the normal
+  procedures reload path, refreshes the catalog, and reselects the new function.
+- Preview/commit command generation is GUI-side codec work in
+  `hyde.features.lmfit_features`; authoritative fit results and any attached figure
+  display objects live in the kernel/runtime figure path, not in Qt state.
+
 ## Plugin Structure
 
 - First-party plugins live in `hyde.user_interface.plugins`.
@@ -146,6 +161,11 @@ when a project is loaded.
 - Only plugin packages are discovered by the plugin manager.
 - UI plugins that need Jupyter execution or metadata consume the runtime-owned shared
   services directly rather than reaching through shell wrappers or other widgets.
+- Shared UI helpers should stay transport- or shell-level. Feature-specific support
+  policy belongs in the consuming plugin or dialog. For example,
+  `active_interactive_window()` only resolves the active typed Hyde interactive widget;
+  Curve Fit and figure-control plugins decide separately whether an active figure window
+  is sufficiently ready for their own dialogs.
 - **Strict Boundary Rule**: The core shell (`HydeApp`) must provide ZERO wrapper methods for plugin services (e.g. no `HydeApp.execute_command`). Plugins must consume registered services directly from the plugin manager. Providing shell wrappers over plugin logic is a boundary issue in disguise.
 
 ## Design Rule For New Work

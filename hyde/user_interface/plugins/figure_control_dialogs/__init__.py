@@ -41,8 +41,19 @@ class Plugin(HydePlugin):
         del checked
         return self._show_dialog(AxisEditDialog, lambda dialog: dialog.has_supported_axes())
 
-    def _show_dialog(self, dialog_class, support_check):
+    def _active_editable_figure_window(self):
         figure_window = active_interactive_window(self.services, FigureWindow)
+        if figure_window is None:
+            return None
+        snapshot_state = getattr(figure_window, "snapshot_state", None)
+        if snapshot_state is None or snapshot_state.figure_ir() is None:
+            return None
+        if figure_window.services.get("send_figure_action") is None:
+            return None
+        return figure_window
+
+    def _show_dialog(self, dialog_class, support_check):
+        figure_window = self._active_editable_figure_window()
         if figure_window is None:
             return False
         dialog = dialog_class(
