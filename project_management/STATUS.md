@@ -17,14 +17,9 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 ## Implemented Contracts
 
 ### Runtime
-- GUI owns presentation, menus, watchers, and plugin state.
-- Kernel owns scientific state and live figures.
-- The kernel-runtime plugin owns the kernel subprocess, shared frontend client, Lane 1
-  watcher, and the exported `kernel_runtime_service` plus
-  `python_execution_service`.
-- The Python Terminal plugin owns the visible console UI and exports
-  `visible_terminal_service`.
-- Runtime helper handles Lane 1 control messages and kernel-lifecycle watching.
+- GUI presentation and plugin state are working against a kernel-authoritative runtime.
+- The kernel-runtime and Python Terminal services are in place and exported through the
+  current plugin architecture.
 
 ### Tables
 - `hyde.create_table(...)` opens or reopens a table by requested stable name.
@@ -35,21 +30,11 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 
 ### Figures
 - Only first-class `@hyde.figure` figures open Hyde figure windows.
-- Non-decorated figures stay out of the Hyde window system.
-- Live matplotlib `Figure` is runtime truth.
-- `fig._hyde_ir` is recreation/editability truth.
-- Dirty first-class figures are re-imported from the live matplotlib object graph
-  after completed Python execution blocks.
-- Frontend figure windows apply refreshed first-class figure snapshots in one queued
-  batch per completed execution block.
-- Unsupported live figure structure keeps the figure first-class while preserving the
-  supported subset and marking the window `[Unsupported Feature]`.
-- Figure-edit consumers use a single consumer-agnostic figure edit session boundary
-  from the active editable figure context.
-- Figure windows restore from `session.py` and preserve `window_pos` plus
-  minimized/maximized window state.
-- Figures with unsupported imported live structure are marked `[Unsupported Feature]`;
-  other incomplete-save cases still surface `[Macro Incomplete]`.
+- Figure windows restore from `session.py` and preserve saved window metadata.
+- Dirty first-class figures resync from the live matplotlib object graph and stay live
+  when unsupported structure is imported.
+- Unsupported imported live structure is surfaced in figure-window chrome.
+- For detailed figure ownership and transport rules, see `ARCHITECTURE.md`.
 
 ### Curve Fit
 - `@hyde.fit_function` is the public project-facing registration path for Curve Fit
@@ -58,10 +43,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   discovered after `procedures/__init__.py` reload.
 - `New Fit Function...` appends a minimal valid scaffold to `procedures/__init__.py`,
   reloads procedures, refreshes the catalog, and keeps the dialog open on success.
-- Curve Fit preview and commit commands lower from one GUI-side coefficient model, while
-  authoritative fit results and attached figure traces remain kernel/runtime-owned.
-- Attached figure display traces are edited through the figure edit session boundary,
-  not through a dialog-local raw figure IR/action workflow.
+- Curve Fit preview/commit uses one GUI-side coefficient model over kernel-owned fit
+  results and attached figure state.
 
 ### Project persistence
 - Kernel objects save to `manifest.toml` + `data/`.
@@ -76,8 +59,3 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - expand broader table interaction coverage
 - continue figure-edit surface growth from the existing first-class figure model
 - broaden Curve Fit beyond the implemented first pass
-
-## Notes For Agents
-- Specs and architecture docs describe the intended present-tense system.
-- Keep history concise here; do not move implementation detail back into the default-open
-  docs unless it changes current constraints.

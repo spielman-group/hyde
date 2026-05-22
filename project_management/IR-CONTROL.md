@@ -121,23 +121,9 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - Generic data mutation is intentionally shared through `MutationState` /
   `MutationCodec` rather than being table-local.
 - Trivial visible project commands may share a lightweight command codec.
-- First-class figure windows are the deliberate exception to the normal
-  "GUI emits Python" rule after creation: routine editing currently uses semantic
-  `comm` actions against kernel-owned figure IR.
-- The backend, not the GUI, keeps first-class figure IR synchronized with ordinary
-  matplotlib edits by re-importing the supported semantic subset from dirty live
-  figures after completed Python execution blocks.
-- Frontend figure windows consume those refreshed first-class snapshots in one queued
-  batch per completed execution block and surface unsupported imports explicitly in
-  window chrome instead of silently dropping the figure.
-- Figure-edit consumers such as axis edit, trace appearance, and attached Curve Fit
-  display work through one figure-owned `open_session()` boundary exported by
-  `figure_interactive`.
-- That session is consumer-agnostic. It owns fine-grained figure getters, generic
-  semantic figure mutators, preview/source generation, action construction, dispatch,
-  and revert behavior.
-- Figure-edit consumers should not mutate raw figure IR dictionaries, lower figure IR
-  directly, or assemble raw figure-action payloads in dialog code.
+- Figure creation surfaces use `FigureState` for GUI-side creation state.
+- Runtime transport and feature-specific figure behavior belong in
+  `ARCHITECTURE.md`, not in this generic control-pattern document.
 
 ## Design Bias
 

@@ -55,7 +55,8 @@ Current deliberate public entry points:
 - `hyde.load_project(...)`
 
 `features/...` is not public API. It is the GUI state/codec translation layer that
-turns GUI state into Python strings or GUI-facing metadata.
+turns GUI state into Python strings or GUI-facing metadata. For the generic GUI-side
+state/codec pattern, see `IR-CONTROL.md`.
 
 Across Hyde, `IR` means feature-specific internal representation/internal state that can
 lower to standard Python. It is not always kernel-owned. Table state is GUI-owned long
@@ -176,21 +177,8 @@ when a project is loaded.
 - Shell infrastructure lives under `hyde.user_interface.main`.
 - Shared plugin helpers live in `hyde.user_interface.plugin_tools`.
 - Only plugin packages are discovered by the plugin manager.
-- First-party plugin package names are intentional and branch-facing:
-  - `*_tool` means the plugin's primary widget surface is `HydeToolWidget`
-  - `*_interactive` means the plugin's primary widget surface is
-    `HydeInteractiveWidget`
-  - `*_dialog` means the plugin's primary widget surface is `HydeDialog` or
-    `HydeDialogWidget`
-- plugins that are primarily infrastructure or non-widget services keep no suffix
-  for now
-- Refactoring work that is not owned by one plugin should use the shared
-  `refactor` branch.
-- Plugin-scoped git branches should use the exact package name:
-  `plugins/<plugin_name>`.
-- Static dialog and tool-window layout structure should live in `.ui` files by
-  default. Python should mainly load those `.ui` artifacts, wire signals, populate
-  dynamic content, and host truly runtime-specific widgets.
+- Plugin/package naming, branch naming, and `.ui` ownership conventions live in
+  `STYLE.md`.
 - UI plugins that need Jupyter execution or metadata consume the runtime-owned shared
   services directly rather than reaching through shell wrappers or other widgets.
 - Shared UI helpers should stay transport- or shell-level. Feature-specific support

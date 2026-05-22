@@ -26,31 +26,17 @@ Use `project_management/specs/` only for the feature you are touching.
 3. **Kernel is authoritative.** Use existing Jupyter/Spyder-style metadata paths rather
    than inventing GUI-owned mirrors.
 
-For first-class figures, routine editing is the deliberate exception: use the existing
-semantic figure `comm` path rather than GUI-generated matplotlib source.
-
-For command-emitting GUI surfaces or GUI-side lowering/state work, follow
+Feature-specific transport and ownership rules live in
+`project_management/ARCHITECTURE.md`. GUI-side IR/state/codec rules live in
 `project_management/IR-CONTROL.md`.
 
 ## Working Rules
-- Use feature branches for feature work.
-- Use the shared `refactor` branch for refactoring tasks that are not scoped to one
-  plugin.
-- For plugin-scoped work, use branches named `plugins/<plugin_name>`, where
-  `<plugin_name>` is the first-party plugin package name under
-  `hyde.user_interface.plugins`.
+- Use feature branches for feature work. Branch naming conventions live in
+  `project_management/STYLE.md`.
 - Prefer the simplest working change in the existing path.
 - Do not overbuild, generalize early, or add speculative infrastructure.
-- For plugin dialogs and tool-window bodies, keep static layout structure in `.ui`
-  files by default. Use Python to wire signals, populate dynamic rows/items, and host
-  genuinely runtime-only widgets, not to hand-build large static form/layout trees.
-- First-party plugin package names follow this suffix taxonomy:
-  - `*_tool` for packages whose primary widget surface is `HydeToolWidget`
-  - `*_interactive` for packages whose primary widget surface is
-    `HydeInteractiveWidget`
-  - `*_dialog` for packages whose primary widget surface is `HydeDialog` or
-    `HydeDialogWidget`
-  - no suffix for infrastructure/non-widget plugins for now
+- Follow `project_management/STYLE.md` for `.ui` ownership, plugin naming, and branch
+  naming conventions.
 - Do not add compatibility shims or migration code unless explicitly requested.
 - Do not add optional production fallbacks solely to accommodate outdated tests,
   fake UI hosts, or stale local fixtures. When the real product contract changes,
