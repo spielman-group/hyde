@@ -321,6 +321,70 @@ class TestFigureDecorator(unittest.TestCase):
 
         self.assertEqual(figure.get_label(), "Figure0")
 
+    def test_get_figure_returns_first_class_figure_by_canonical_name(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Figure0(x):
+            fig = plt.figure("Figure0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, label="x")
+            return fig
+
+        figure = Figure0([0, 1, 2])
+
+        self.assertIs(hyde.get_figure("Figure0"), figure)
+
+    def test_first_class_figure_rename_updates_canonical_lookup_and_ir_title(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Figure0(x):
+            fig = plt.figure("Figure0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, label="x")
+            return fig
+
+        figure = Figure0([0, 1, 2])
+
+        figure.set_label("RenamedFigure")
+
+        self.assertEqual(figure.get_label(), "RenamedFigure")
+        self.assertEqual(figure._hyde_ir["settings"]["title"], "RenamedFigure")
+        self.assertIs(hyde.get_figure("RenamedFigure"), figure)
+        with self.assertRaisesRegex(ValueError, "Could not resolve first-class figure"):
+            hyde.get_figure("Figure0")
+
+    def test_first_class_figure_rename_collision_restores_previous_identity(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Figure0(x):
+            fig = plt.figure("Figure0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, label="x")
+            return fig
+
+        @hyde.figure(register=False)
+        def Figure1(x):
+            fig = plt.figure("Figure1")
+            ax = fig.add_subplot(111)
+            ax.plot(x, label="x")
+            return fig
+
+        first = Figure0([0, 1, 2])
+        second = Figure1([0, 1, 2])
+
+        with self.assertRaisesRegex(ValueError, "already in use"):
+            first.set_label("Figure1")
+
+        self.assertEqual(first.get_label(), "Figure0")
+        self.assertEqual(first._hyde_ir["settings"]["title"], "Figure0")
+        self.assertEqual(second.get_label(), "Figure1")
+        self.assertEqual(second._hyde_ir["settings"]["title"], "Figure1")
+        self.assertIs(hyde.get_figure("Figure0"), first)
+        self.assertIs(hyde.get_figure("Figure1"), second)
+
     def test_decorated_figure_conflict_falls_forward_to_next_free_handle(self):
         from hyde.matplotlib_backend import FigureHyde, finalize_figure_build_session
 

@@ -696,6 +696,18 @@ def track_figure(figure, state):
     return resolved_figure
 
 
+def get_figure(name):
+    """
+    Return the live first-class Hyde figure for ``name``.
+
+    The lookup uses the canonical figure identity shared with the matplotlib
+    figure label.
+    """
+    from .matplotlib_backend import get_first_class_figure
+
+    return get_first_class_figure(name)
+
+
 def refresh_figure(figure):
     from .features.matplotlib_features import apply_figure_state
     from .matplotlib_backend import apply_figure_action

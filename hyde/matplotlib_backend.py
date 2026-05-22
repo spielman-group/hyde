@@ -61,6 +61,51 @@ def _is_windowed_figure(figure):
     )
 
 
+def _iter_windowed_figures():
+    try:
+        from matplotlib._pylab_helpers import Gcf
+    except Exception:
+        return ()
+
+    figures = []
+    for manager in Gcf.get_all_fig_managers():
+        figure = getattr(getattr(manager, "canvas", None), "figure", None)
+        if figure is None or not _is_windowed_figure(figure):
+            continue
+        figures.append(figure)
+    return tuple(figures)
+
+
+def _canonical_windowed_figure_name(name):
+    return _canonicalize_default_figure_name(str(name or "").strip())
+
+
+def _windowed_figure_with_name(name, *, exclude=None):
+    canonical_name = _canonical_windowed_figure_name(name)
+    if not canonical_name:
+        return None
+    for figure in _iter_windowed_figures():
+        if figure is exclude:
+            continue
+        current_name = _canonical_windowed_figure_name(
+            figure.get_label()
+            or getattr(figure, "_hyde_ir", {}).get("settings", {}).get("title")
+        )
+        if current_name == canonical_name:
+            return figure
+    return None
+
+
+def get_first_class_figure(name):
+    canonical_name = _canonical_windowed_figure_name(name)
+    if not canonical_name:
+        raise ValueError("First-class figure lookup requires a non-empty name.")
+    figure = _windowed_figure_with_name(canonical_name)
+    if figure is not None and getattr(figure, "_hyde_is_first_class", False):
+        return figure
+    raise ValueError(f"Could not resolve first-class figure {name!r}.")
+
+
 def _display_in_ipython_terminal(figure):
     try:
         from IPython.display import display
@@ -1413,6 +1458,21 @@ class FigureHyde(Figure):
                 **payload,
             }
         )
+
+    def set_label(self, s):
+        if not _is_windowed_figure(self):
+            return super().set_label(s)
+        canonical_name = _canonical_windowed_figure_name(s)
+        if not canonical_name:
+            raise ValueError("First-class figures require a non-empty canonical name.")
+        conflict = _windowed_figure_with_name(canonical_name, exclude=self)
+        if conflict is not None:
+            raise ValueError(
+                f"First-class figure name {canonical_name!r} is already in use."
+            )
+        result = super().set_label(canonical_name)
+        self._hyde_ir = figure_ir_apply_title(self._hyde_ir, canonical_name)
+        return result
 
     def add_subplot(self, *args, **kwargs):
         if "axes_class" not in kwargs and "projection" not in kwargs:

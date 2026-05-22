@@ -2,7 +2,7 @@
 
 ## Checklist
 
-- [ ] Slice 1: Introduce canonical first-class figure lookup and identity rules
+- [x] Slice 1: Introduce canonical first-class figure lookup and identity rules
 - [ ] Slice 2: Add backend dirty tracking and universal post-block figure resync
 - [ ] Slice 3: Re-import full supported IR and unsupported-feature status from live figures
 - [ ] Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
@@ -25,11 +25,11 @@ name collision and restoration of the previous valid name.
 
 ### Acceptance criteria
 
-- [ ] Hyde exposes a canonical first-class figure lookup primitive for Python command blocks.
-- [ ] The canonical figure identity matches the creation/label name rather than a separate Hyde-only field.
-- [ ] Renaming a first-class figure updates Hyde identity when the new name is valid.
-- [ ] Rename collision fails and restores the previous valid canonical name.
-- [ ] The canonical figure-edit Python path is compatible with Hyde's existing hidden-command logging interface.
+- [x] Hyde exposes a canonical first-class figure lookup primitive for Python command blocks.
+- [x] The canonical figure identity matches the creation/label name rather than a separate Hyde-only field.
+- [x] Renaming a first-class figure updates Hyde identity when the new name is valid.
+- [x] Rename collision fails and restores the previous valid canonical name.
+- [x] The canonical figure-edit Python path is compatible with Hyde's existing hidden-command logging interface.
 
 ### Blocked by
 
