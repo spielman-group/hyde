@@ -3,7 +3,7 @@
 ## Checklist
 
 - [x] Slice 1: Introduce canonical first-class figure lookup and identity rules
-- [ ] Slice 2: Add backend dirty tracking and universal post-block figure resync
+- [x] Slice 2: Add backend dirty tracking and universal post-block figure resync
 - [ ] Slice 3: Re-import full supported IR and unsupported-feature status from live figures
 - [ ] Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
 - [ ] Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
@@ -54,12 +54,12 @@ first-class figures and should still run after exceptions.
 
 ### Acceptance criteria
 
-- [ ] Dirty tracking for first-class figures uses matplotlib-native change/stale signals rather than broad method wrappers.
-- [ ] Completed visible and hidden Python execution blocks trigger backend resync.
-- [ ] Only dirty first-class figures are resynced after a block.
-- [ ] Resync still runs after execution blocks that end with an exception.
-- [ ] Hidden figure-edit Python blocks continue to appear in Hyde's normal debug logging stream.
-- [ ] Hidden figure-edit Python blocks appear in the same `[Hyde state] ... / python:` debug channel used by existing hidden commands such as `hyde.save_project(...)`.
+- [x] Dirty tracking for first-class figures uses matplotlib-native change/stale signals rather than broad method wrappers.
+- [x] Completed visible and hidden Python execution blocks trigger backend resync.
+- [x] Only dirty first-class figures are resynced after a block.
+- [x] Resync still runs after execution blocks that end with an exception.
+- [x] Hidden figure-edit Python blocks continue to appear in Hyde's normal debug logging stream.
+- [x] Hidden figure-edit Python blocks appear in the same `[Hyde state] ... / python:` debug channel used by existing hidden commands such as `hyde.save_project(...)`.
 
 ### Blocked by
 

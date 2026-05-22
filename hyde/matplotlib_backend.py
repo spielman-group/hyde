@@ -9,6 +9,7 @@ import re
 import sys
 import textwrap
 import threading
+import weakref
 
 import numpy as np
 from ipykernel.comm import Comm
@@ -37,6 +38,8 @@ from hyde.user_interface.shared.figure import COMM_TARGET
 _BUILD_SESSION_LOCAL = threading.local()
 LOGGER = logging.getLogger("hyde")
 _DEFAULT_FIGURE_LABEL_RE = re.compile(r"^Figure\s+(\d+)$")
+_DIRTY_FIRST_CLASS_FIGURES = weakref.WeakSet()
+_POST_RUN_CELL_EVENT = "post_run_cell"
 
 
 def _canonicalize_default_figure_name(name):
@@ -104,6 +107,71 @@ def get_first_class_figure(name):
     if figure is not None and getattr(figure, "_hyde_is_first_class", False):
         return figure
     raise ValueError(f"Could not resolve first-class figure {name!r}.")
+
+
+def _mark_first_class_figure_dirty(figure):
+    if getattr(figure, "_hyde_is_first_class", False):
+        _DIRTY_FIRST_CLASS_FIGURES.add(figure)
+
+
+def _clear_first_class_figure_dirty(figure):
+    _DIRTY_FIRST_CLASS_FIGURES.discard(figure)
+
+
+def _resync_dirty_first_class_figures(result=None):
+    del result
+    for figure in list(_DIRTY_FIRST_CLASS_FIGURES):
+        if not getattr(figure, "_hyde_is_first_class", False):
+            _clear_first_class_figure_dirty(figure)
+            continue
+        canvas = getattr(figure, "canvas", None)
+        if canvas is None or getattr(canvas, "manager", None) is None:
+            _clear_first_class_figure_dirty(figure)
+            continue
+        try:
+            canvas.draw()
+        except Exception:
+            LOGGER.exception(
+                "Figure backend failed to resync dirty first-class figure %r.",
+                _default_figure_title(figure, getattr(canvas.manager, "num", 0)),
+            )
+
+
+def _install_first_class_figure_resync_hook(shell=None):
+    if shell is None:
+        try:
+            from IPython import get_ipython
+        except Exception:
+            return False
+        shell = get_ipython()
+    if shell is None:
+        return False
+    events = getattr(shell, "events", None)
+    register = getattr(events, "register", None)
+    if register is None:
+        return False
+    if getattr(shell, "_hyde_first_class_figure_resync_installed", False):
+        return True
+    register(_POST_RUN_CELL_EVENT, _resync_dirty_first_class_figures)
+    shell._hyde_first_class_figure_resync_installed = True
+    return True
+
+
+def _install_first_class_figure_dirty_tracking(figure):
+    if getattr(figure, "_hyde_dirty_tracking_installed", False):
+        return
+    previous_callback = getattr(figure, "stale_callback", None)
+
+    def _on_stale(artist, stale):
+        if callable(previous_callback):
+            previous_callback(artist, stale)
+        if stale:
+            _mark_first_class_figure_dirty(figure)
+
+    figure._hyde_dirty_tracking_installed = True
+    figure.stale_callback = _on_stale
+    _mark_first_class_figure_dirty(figure)
+    _install_first_class_figure_resync_hook()
 
 
 def _display_in_ipython_terminal(figure):
@@ -230,6 +298,7 @@ def finalize_figure_build_session(session, result):
     figure._hyde_ast_artifact = session.ast_artifact
     figure._hyde_bound_values = dict(session.bound_values)
     figure._hyde_metadata = dict(session.metadata)
+    _install_first_class_figure_dirty_tracking(figure)
     return figure
 
 
@@ -1338,6 +1407,7 @@ class FigureManagerHyde(FigureManagerBase):
             return
         self._ensure_comm()
         if self._comm is None:
+            _clear_first_class_figure_dirty(self.canvas.figure)
             return
         buffer = io.BytesIO()
         self.canvas.print_png(buffer)
@@ -1350,6 +1420,8 @@ class FigureManagerHyde(FigureManagerBase):
                 "Figure manager failed to send draw payload for figure %s.",
                 self.num,
             )
+        finally:
+            _clear_first_class_figure_dirty(self.canvas.figure)
 
 
 class FigureCanvasHyde(FigureCanvasAgg):
@@ -1472,6 +1544,7 @@ class FigureHyde(Figure):
             )
         result = super().set_label(canonical_name)
         self._hyde_ir = figure_ir_apply_title(self._hyde_ir, canonical_name)
+        _mark_first_class_figure_dirty(self)
         return result
 
     def add_subplot(self, *args, **kwargs):

@@ -17,6 +17,7 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 from hyde.matplotlib_backend import (
     FigureCanvasHyde,
     FigureManagerHyde,
+    _install_first_class_figure_resync_hook,
     _figure_defaults_snapshot,
     apply_figure_action,
     figure_snapshot_payload,
@@ -79,6 +80,19 @@ class FakeExecutionService:
         return True
 
 
+class FakeShellEvents:
+    def __init__(self):
+        self.registered = {}
+
+    def register(self, name, callback):
+        self.registered.setdefault(name, []).append(callback)
+
+
+class FakeShell:
+    def __init__(self):
+        self.events = FakeShellEvents()
+
+
 class TestFigureCodec(unittest.TestCase):
     def test_figure_state_generates_first_class_figure_builder_code(self):
         state = FigureState()
@@ -128,6 +142,20 @@ class TestFigureCodec(unittest.TestCase):
         self.assertNotIn("ax.plot(", source)
         self.assertNotIn("delay", source)
         self.assertIn("fig.show()", source)
+
+    def test_figure_state_python_source_logs_through_standard_hyde_debug_channel(self):
+        state = FigureState()
+        state.set_title("DelayGraph")
+        state.set_x_name("delay")
+        state.set_items(["fit_delay"])
+
+        with self.assertLogs("hyde", level="DEBUG") as logs:
+            source = state.python_source()
+
+        output = "\n".join(logs.output)
+        self.assertIn("[Hyde state] FigureState", output)
+        self.assertIn("python:\n", output)
+        self.assertIn(source, output)
 
     def test_figure_codec_rejects_removed_track_command(self):
         state = FigureState()
@@ -966,6 +994,94 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             Graph0([0, 1, 2], [1, 4, 9])
 
         comm_cls.assert_called()
+
+    def test_post_run_cell_resync_hook_registers_once_and_draws_only_dirty_first_class_figures(self):
+        plt = self._configure_hyde_pyplot()
+        shell = FakeShell()
+
+        with patch("hyde.matplotlib_backend.Comm"):
+            @hyde.figure(register=False)
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            @hyde.figure(register=False)
+            def Graph1(x, y):
+                fig = plt.figure("Graph1")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            first = Graph0([0, 1, 2], [1, 4, 9])
+            second = Graph1([0, 1, 2], [1, 2, 3])
+
+            self.assertTrue(_install_first_class_figure_resync_hook(shell))
+            self.assertTrue(_install_first_class_figure_resync_hook(shell))
+            callbacks = shell.events.registered["post_run_cell"]
+            self.assertEqual(len(callbacks), 1)
+
+            first.canvas.draw()
+            second.canvas.draw()
+
+            with patch.object(first.canvas.manager, "_push_draw") as first_push, patch.object(
+                second.canvas.manager, "_push_draw"
+            ) as second_push:
+                first.axes[0].set_xlabel("Delay")
+                callbacks[0](None)
+
+            first_push.assert_called_once()
+            second_push.assert_not_called()
+
+    def test_first_class_figure_creation_installs_post_run_cell_resync_hook_once(self):
+        plt = self._configure_hyde_pyplot()
+        shell = FakeShell()
+
+        with patch("hyde.matplotlib_backend.Comm"), patch(
+            "IPython.get_ipython",
+            return_value=shell,
+        ):
+            @hyde.figure(register=False)
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            @hyde.figure(register=False)
+            def Graph1(x, y):
+                fig = plt.figure("Graph1")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            Graph0([0, 1, 2], [1, 4, 9])
+            Graph1([0, 1, 2], [1, 2, 3])
+
+        self.assertEqual(len(shell.events.registered["post_run_cell"]), 1)
+
+    def test_post_run_cell_resync_draws_dirty_first_class_figures_after_exception_result(self):
+        plt = self._configure_hyde_pyplot()
+        shell = FakeShell()
+
+        with patch("hyde.matplotlib_backend.Comm"):
+            @hyde.figure(register=False)
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            figure = Graph0([0, 1, 2], [1, 4, 9])
+            _install_first_class_figure_resync_hook(shell)
+            callback = shell.events.registered["post_run_cell"][0]
+
+            with patch.object(figure.canvas.manager, "_push_draw") as push_draw:
+                figure.axes[0].set_ylabel("Signal")
+                callback(type("FakeResult", (), {"error_in_exec": RuntimeError("boom")})())
+
+            push_draw.assert_called_once()
 
     def test_manager_destroy_closes_comm_even_if_close_payload_send_fails(self):
         figure = Figure()
