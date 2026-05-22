@@ -297,7 +297,7 @@ GUI behavior:
 
 ### Transport
 - `hyde/user_interface/main/frontend_kernel.py`
-- `hyde/user_interface/plugins/python_terminal/__init__.py`
+- `hyde/user_interface/plugins/python_terminal_tool/__init__.py`
 - `qtconsole.client.QtKernelClient`
 - shared connection file: `kernel-hyde.json`
 

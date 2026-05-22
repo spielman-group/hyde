@@ -212,7 +212,7 @@ class TableViewModel(QtCore.QAbstractTableModel):
 
 class TableWidget(HydeInteractiveWidget):
     REFRESH_TIMEOUT_MS = 5000
-    ui_filename = os.path.join("plugins", "table", "table.ui")
+    ui_filename = os.path.join("plugins", "table_interactive", "table.ui")
 
     def __init__(
         self,

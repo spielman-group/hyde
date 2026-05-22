@@ -13,8 +13,8 @@ except ModuleNotFoundError as exc:
 
 from qtutils.qt import QtGui, QtWidgets
 
-from hyde.user_interface.plugins.file_dialogs import Plugin
-from hyde.user_interface.plugins.file_dialogs.dialogs import (
+from hyde.user_interface.plugins.file import Plugin
+from hyde.user_interface.plugins.file.dialogs import (
     LoadProjectDialog,
     NewProjectDialog,
     SaveCopyProjectDialog,

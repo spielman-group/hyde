@@ -28,14 +28,14 @@ from hyde.project_tools import (
     is_excluded,
 )
 from hyde.user_interface.shared.plugin import HydePlugin
-from hyde.user_interface.plugins.figure import (
+from hyde.user_interface.plugins.figure_interactive import (
     FigureContextService,
     FigureFeatureService,
     FigureWorkspaceService,
     Plugin,
 )
-from hyde.user_interface.plugins.figure.dialogs import NewFigureDialog
-from hyde.user_interface.plugins.figure.window import (
+from hyde.user_interface.plugins.figure_interactive.dialogs import NewFigureDialog
+from hyde.user_interface.plugins.figure_interactive.window import (
     FigureState,
     FigureWindow,
 )
@@ -184,7 +184,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
                     "del _hyde_figure"
                 )
 
-        with patch("hyde.user_interface.plugins.figure.NewFigureDialog", FakeDialog):
+        with patch("hyde.user_interface.plugins.figure_interactive.NewFigureDialog", FakeDialog):
             self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
 
         self.assertEqual(len(executed), 1)
@@ -230,7 +230,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
                     "del _hyde_figure"
                 )
 
-        with patch("hyde.user_interface.plugins.figure.NewFigureDialog", FakeDialog):
+        with patch("hyde.user_interface.plugins.figure_interactive.NewFigureDialog", FakeDialog):
             self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
 
         self.assertEqual(len(executed), 1)
@@ -318,7 +318,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
                     "del _hyde_figure"
                 )
 
-        with patch("hyde.user_interface.plugins.figure.NewFigureDialog", FakeDialog):
+        with patch("hyde.user_interface.plugins.figure_interactive.NewFigureDialog", FakeDialog):
             self.assertTrue(service.show_new_figure_dialog({}, parent=None))
 
         self.assertEqual(len(executed), 1)

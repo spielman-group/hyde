@@ -27,7 +27,7 @@
 - The Python Terminal plugin uses `HydeToolWindowPlugin` for ordinary persistent
   tool-window plumbing.
 - `create_tool_window_widget()` creates a `HydeToolWidget` container in
-  `hyde/user_interface/plugins/python_terminal/__init__.py`.
+  `hyde/user_interface/plugins/python_terminal_tool/__init__.py`.
 - That container mounts `PythonTerminal`, a small `RichJupyterWidget` subclass, into
   the shared `content_layout`.
 - The `HydeToolWidget` shell is structural only. It provides the shared zero-margin

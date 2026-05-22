@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.base_hyde_widgets import HydePromptDialog
+from hyde.user_interface.base_hyde_widgets import HydeDialog
 from hyde.user_interface.shared.plugin import HydePlugin
 from hyde.user_interface.shared.project import (
     MacroStoreError,
@@ -11,7 +11,7 @@ from hyde.user_interface.shared.project import (
 )
 
 
-class SaveWindowDialog(HydePromptDialog):
+class SaveWindowDialog(HydeDialog):
     SAVE = 1
     NO_SAVE = 2
     CANCEL = 0

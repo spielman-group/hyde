@@ -14,10 +14,10 @@ from hyde.matplotlib_backend import apply_figure_action
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.shared.figure import supported_trace_records_from_figure_ir
-from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure.window import FigureState, FigureWindow
-from hyde.user_interface.plugins.figure_control_dialogs import Plugin as FigureControlPlugin
-from hyde.user_interface.plugins.figure_control_dialogs.trace_edit_dialog import (
+from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
+from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
+from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
     TraceAppearanceDialog,
 )
 
@@ -230,7 +230,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "figure_control_dialogs": FigureControlPlugin({}),
+            "figure_control_dialog": FigureControlPlugin({}),
         }
         app = make_plugin_host(manager)
 
@@ -245,7 +245,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "figure_control_dialogs": FigureControlPlugin({}),
+            "figure_control_dialog": FigureControlPlugin({}),
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
@@ -271,7 +271,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "figure_control_dialogs": FigureControlPlugin({}),
+            "figure_control_dialog": FigureControlPlugin({}),
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
@@ -289,7 +289,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
             ),
         ):
             self.assertFalse(
-                manager.plugins["figure_control_dialogs"].show_trace_appearance_dialog()
+                manager.plugins["figure_control_dialog"].show_trace_appearance_dialog()
             )
 
     def test_modify_data_appearance_action_returns_false_without_active_figure(self):

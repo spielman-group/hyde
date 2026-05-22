@@ -9,7 +9,7 @@ except ModuleNotFoundError as exc:
 
 from hyde.matplotlib_backend import apply_figure_action
 from hyde.features.matplotlib_features import figure_ir_from_live_state
-from hyde.user_interface.plugins.figure.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
 
 
 class TestFigureCommActions(unittest.TestCase):

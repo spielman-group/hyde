@@ -4,7 +4,7 @@ from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
-from hyde.user_interface.plugins.figure.window import (
+from hyde.user_interface.plugins.figure_interactive.window import (
     FigureSnapshotState,
     FigureState,
     FigureWindow,

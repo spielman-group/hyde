@@ -88,7 +88,7 @@ class PythonTerminalService(HydeToolWindowService):
 
 
 class Plugin(HydeToolWindowPlugin):
-    session_key = "python_terminal"
+    session_key = "python_terminal_tool"
     window_title = "Python Terminal"
     menu_name = "Python Terminal"
     menu_order = 10

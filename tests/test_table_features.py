@@ -16,12 +16,12 @@ except ModuleNotFoundError as exc:
 
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget, HydeToolWidget
 from hyde.user_interface.shared.core import MutationState
-from hyde.user_interface.plugins.table import (
+from hyde.user_interface.plugins.table_interactive import (
     Plugin,
     TableWorkspaceService,
 )
-from hyde.user_interface.plugins.table.dialogs import NewTableDialog
-from hyde.user_interface.plugins.table.window import (
+from hyde.user_interface.plugins.table_interactive.dialogs import NewTableDialog
+from hyde.user_interface.plugins.table_interactive.window import (
     TableState,
     TableWidget,
 )

@@ -33,9 +33,9 @@ from hyde.user_interface.main.project_state import (
     write_session,
 )
 from hyde.user_interface.shared.plugin import HydeMDIContext, HydePlugin
-from hyde.user_interface.plugins.figure import FigureWorkspaceService
-from hyde.user_interface.plugins.figure.window import FigureState
-from hyde.user_interface.plugins.table import TableWorkspaceService
+from hyde.user_interface.plugins.figure_interactive import FigureWorkspaceService
+from hyde.user_interface.plugins.figure_interactive.window import FigureState
+from hyde.user_interface.plugins.table_interactive import TableWorkspaceService
 
 
 def lookup_menu_action(app, location, text, path=()):
@@ -420,7 +420,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             tool_plugin = SessionRestoreToolWindowPlugin(
                 restored_app,
                 mdi_area,
-                ("logging", "python_terminal"),
+                ("logging", "python_terminal_tool"),
             )
             restored_app.plugin_manager = PluginManagerStub(
                 {"tools": tool_plugin},
@@ -442,7 +442,7 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             HydeApp.restore_project_session(restored_app)
 
-            terminal_subwindow = tool_plugin.subwindow("python_terminal")
+            terminal_subwindow = tool_plugin.subwindow("python_terminal_tool")
             self.assertTrue(terminal_subwindow.isVisible())
             self.assertFalse(terminal_subwindow.isMinimized())
 
@@ -462,7 +462,7 @@ class TestProjectStateHelpers(unittest.TestCase):
                 for subwindow in mdi_area.subWindowList(QtWidgets.QMdiArea.StackingOrder)
                 if str(subwindow.objectName()).strip()
             ]
-            self.assertEqual(order, ["python_terminal", "Table0", "logging"])
+            self.assertEqual(order, ["python_terminal_tool", "Table0", "logging"])
             self.assertTrue(terminal_subwindow.isMinimized())
             self.assertIn('hyde.task_complete("session_restore", True)', events[0][1])
 
@@ -531,7 +531,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             tool_plugin = SessionRestoreToolWindowPlugin(
                 restored_app,
                 mdi_area,
-                ("logging", "python_terminal"),
+                ("logging", "python_terminal_tool"),
             )
             restored_app.plugin_manager = PluginManagerStub(
                 {"tools": tool_plugin},
@@ -553,7 +553,7 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             HydeApp.restore_project_session(restored_app)
 
-            terminal_subwindow = tool_plugin.subwindow("python_terminal")
+            terminal_subwindow = tool_plugin.subwindow("python_terminal_tool")
             restored_table = mdi_area.addSubWindow(QtWidgets.QLabel("Table0"))
             restored_table.setObjectName("Table0")
             restored_table.show()
@@ -588,7 +588,7 @@ class TestProjectStateHelpers(unittest.TestCase):
         self.qapp.processEvents()
 
         created = []
-        for name in ("logging", "python_terminal", "Table0"):
+        for name in ("logging", "python_terminal_tool", "Table0"):
             subwindow = mdi_area.addSubWindow(QtWidgets.QLabel(name))
             subwindow.setObjectName(name)
             subwindow.show()
@@ -611,7 +611,7 @@ class TestProjectStateHelpers(unittest.TestCase):
 
         self.assertEqual(
             session["main_window"]["mdi_window_order"],
-            ["logging", "Table0", "python_terminal"],
+            ["logging", "Table0", "python_terminal_tool"],
         )
 
     def test_capture_session_records_hidden_named_mdi_window_order(self):
@@ -623,7 +623,7 @@ class TestProjectStateHelpers(unittest.TestCase):
         self.qapp.processEvents()
 
         subwindows = {}
-        for name in ("logging", "Table0", "Figure0", "python_terminal"):
+        for name in ("logging", "Table0", "Figure0", "python_terminal_tool"):
             subwindow = mdi_area.addSubWindow(QtWidgets.QLabel(name))
             subwindow.setObjectName(name)
             subwindow.show()
@@ -633,7 +633,7 @@ class TestProjectStateHelpers(unittest.TestCase):
         subwindows["logging"].hide()
         subwindows["Table0"].raise_()
         subwindows["Figure0"].raise_()
-        subwindows["python_terminal"].raise_()
+        subwindows["python_terminal_tool"].raise_()
         self.qapp.processEvents()
 
         app = type("CaptureApp", (), {})()
@@ -643,7 +643,7 @@ class TestProjectStateHelpers(unittest.TestCase):
 
         self.assertEqual(
             session["main_window"]["mdi_window_order"],
-            ["logging", "Table0", "Figure0", "python_terminal"],
+            ["logging", "Table0", "Figure0", "python_terminal_tool"],
         )
 
     def _figure_ir_with_title(self, title):
@@ -744,7 +744,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             tool_plugin = SessionRestoreToolWindowPlugin(
                 restored_app,
                 mdi_area,
-                ("logging", "python_terminal"),
+                ("logging", "python_terminal_tool"),
             )
             restored_app.plugin_manager = PluginManagerStub(
                 {"tools": tool_plugin},
@@ -819,7 +819,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             )
             self.qapp.processEvents()
 
-            terminal_subwindow = tool_plugin.subwindow("python_terminal")
+            terminal_subwindow = tool_plugin.subwindow("python_terminal_tool")
             logging_subwindow = tool_plugin.subwindow("logging")
             table_subwindow = restored_table.parentWidget()
             figure_subwindow = figure_workspace.figures[1].parentWidget()
@@ -837,7 +837,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             ]
             self.assertEqual(
                 visible_order,
-                ["Table0", "Figure0", "python_terminal"],
+                ["Table0", "Figure0", "python_terminal_tool"],
             )
             self.assertIn('hyde.task_complete("session_restore", True)', events[0][1])
 

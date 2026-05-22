@@ -34,11 +34,23 @@ For command-emitting GUI surfaces or GUI-side lowering/state work, follow
 
 ## Working Rules
 - Use feature branches for feature work.
+- Use the shared `refactor` branch for refactoring tasks that are not scoped to one
+  plugin.
+- For plugin-scoped work, use branches named `plugins/<plugin_name>`, where
+  `<plugin_name>` is the first-party plugin package name under
+  `hyde.user_interface.plugins`.
 - Prefer the simplest working change in the existing path.
 - Do not overbuild, generalize early, or add speculative infrastructure.
 - For plugin dialogs and tool-window bodies, keep static layout structure in `.ui`
   files by default. Use Python to wire signals, populate dynamic rows/items, and host
   genuinely runtime-only widgets, not to hand-build large static form/layout trees.
+- First-party plugin package names follow this suffix taxonomy:
+  - `*_tool` for packages whose primary widget surface is `HydeToolWidget`
+  - `*_interactive` for packages whose primary widget surface is
+    `HydeInteractiveWidget`
+  - `*_dialog` for packages whose primary widget surface is `HydeDialog` or
+    `HydeDialogWidget`
+  - no suffix for infrastructure/non-widget plugins for now
 - Do not add compatibility shims or migration code unless explicitly requested.
 - Do not add optional production fallbacks solely to accommodate outdated tests,
   fake UI hosts, or stale local fixtures. When the real product contract changes,

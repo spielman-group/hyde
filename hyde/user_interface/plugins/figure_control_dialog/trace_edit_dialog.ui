@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>traceAppearanceDialogContent</class>
+ <widget class="QWidget" name="traceAppearanceDialogContent">
+  <layout class="QHBoxLayout" name="content_layout">
+   <property name="spacing">
+    <number>12</number>
+   </property>
+   <item>
+    <widget class="QListWidget" name="trace_list">
+     <property name="minimumWidth">
+      <number>180</number>
+     </property>
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+       <horstretch>1</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="form_container">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+       <horstretch>2</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <layout class="QFormLayout" name="form_layout">
+      <property name="horizontalSpacing">
+       <number>12</number>
+      </property>
+      <property name="verticalSpacing">
+       <number>8</number>
+      </property>
+      <item row="0" column="0">
+       <widget class="QLabel" name="visibility_label">
+        <property name="text">
+         <string>Visibility</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QCheckBox" name="hide_trace_checkbox">
+        <property name="text">
+         <string>Hide trace</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="mode_label">
+        <property name="text">
+         <string>Mode</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="mode_combo"/>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="line_color_label">
+        <property name="text">
+         <string>Line color</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="MatplotlibColorLineEdit" name="line_color_edit">
+        <property name="allowEmpty">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="line_style_label">
+        <property name="text">
+         <string>Line style</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QComboBox" name="line_style_combo"/>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="line_width_label">
+        <property name="text">
+         <string>Line width</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QDoubleSpinBox" name="line_width_spin">
+        <property name="maximum">
+         <double>99.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="opacity_label">
+        <property name="text">
+         <string>Opacity</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QDoubleSpinBox" name="opacity_spin">
+        <property name="maximum">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.050000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="draw_style_label">
+        <property name="text">
+         <string>Draw style</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QComboBox" name="draw_style_combo"/>
+      </item>
+      <item row="7" column="0">
+       <widget class="QLabel" name="marker_label">
+        <property name="text">
+         <string>Marker</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="1">
+       <widget class="QComboBox" name="marker_combo"/>
+      </item>
+      <item row="8" column="0">
+       <widget class="QLabel" name="marker_size_label">
+        <property name="text">
+         <string>Marker size</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="1">
+       <widget class="QDoubleSpinBox" name="marker_size_spin">
+        <property name="maximum">
+         <double>99.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.500000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="9" column="0">
+       <widget class="QLabel" name="marker_face_label">
+        <property name="text">
+         <string>Marker face</string>
+        </property>
+       </widget>
+      </item>
+      <item row="9" column="1">
+       <widget class="MatplotlibColorLineEdit" name="marker_face_color_edit">
+        <property name="allowAuto">
+         <bool>true</bool>
+        </property>
+        <property name="allowEmpty">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="10" column="0">
+       <widget class="QLabel" name="marker_edge_label">
+        <property name="text">
+         <string>Marker edge</string>
+        </property>
+       </widget>
+      </item>
+      <item row="10" column="1">
+       <widget class="MatplotlibColorLineEdit" name="marker_edge_color_edit">
+        <property name="allowAuto">
+         <bool>true</bool>
+        </property>
+        <property name="allowEmpty">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="11" column="0">
+       <widget class="QLabel" name="marker_edge_width_label">
+        <property name="text">
+         <string>Marker edge width</string>
+        </property>
+       </widget>
+      </item>
+      <item row="11" column="1">
+       <widget class="QDoubleSpinBox" name="marker_edge_width_spin">
+        <property name="maximum">
+         <double>99.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MatplotlibColorLineEdit</class>
+   <extends>QLineEdit</extends>
+   <header>hyde.user_interface.shared.figure</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

@@ -140,7 +140,7 @@ class HydeToolWidget(QtWidgets.QWidget):
             self._subwindow.removeEventFilter(self._persistent_close_filter)
 
 
-class HydePromptDialog(QtWidgets.QDialog):
+class HydeDialog(QtWidgets.QDialog):
     def __init__(self, *args, services=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.services = dict(services or {})
@@ -155,7 +155,7 @@ class HydePromptDialog(QtWidgets.QDialog):
         return self.ui
 
 
-class HydeDialogWidget(HydePromptDialog):
+class HydeDialogWidget(HydeDialog):
     ui_filename = "hyde_dialog_widget.ui"
 
     def __init__(self, *args, services=None, **kwargs):

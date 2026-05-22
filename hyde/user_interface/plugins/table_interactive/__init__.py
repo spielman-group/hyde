@@ -142,7 +142,7 @@ class TableFeatureService:
         return self.plugin.workspace.has_active_table()
 
     def show_new_table_dialog(self, objects_metadata, preselection=None, parent=None):
-        from hyde.user_interface.plugins.table.dialogs import NewTableDialog
+        from hyde.user_interface.plugins.table_interactive.dialogs import NewTableDialog
 
         dialog = NewTableDialog(
             objects_metadata,

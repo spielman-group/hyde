@@ -20,7 +20,7 @@ class LoggingWindowService(HydeToolWindowService):
 
 
 class Plugin(HydeToolWindowPlugin):
-    session_key = "logging"
+    session_key = "logging_tool"
     window_title = "Logging"
     menu_name = "Logging"
     window_size = (800, 600)

@@ -22,7 +22,7 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.shared.plugin import HydeMDIContext
-from hyde.user_interface.plugins.python_variables import (
+from hyde.user_interface.plugins.python_variables_tool import (
     Plugin as PythonVariablesPlugin,
     PythonVariables,
     PythonVariablesService,
@@ -539,7 +539,7 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
         )()
 
         with patch(
-            "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+            "hyde.user_interface.plugins.python_variables_tool.SpyderFrontendComm",
             FakeSpyderComm,
         ):
             browser = PythonVariables(
@@ -712,7 +712,7 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
             )(),
         }
         context.add(
-            "python_variables",
+            "python_variables_tool",
             plugin.get_ui_contributions()[0],
             {"services": plugin.services},
         )
@@ -724,11 +724,11 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
         restored_mdi_area = None
         try:
             with patch(
-                "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+                "hyde.user_interface.plugins.python_variables_tool.SpyderFrontendComm",
                 fake_comm,
             ):
-                widget = plugin.ensure_mdi_widget("python_variables")
-                subwindow = plugin.mdi_subwindow("python_variables")
+                widget = plugin.ensure_mdi_widget("python_variables_tool")
+                subwindow = plugin.mdi_subwindow("python_variables_tool")
                 subwindow.setGeometry(QtCore.QRect(20, 30, 340, 280))
                 subwindow.show()
                 self.qapp.processEvents()
@@ -743,17 +743,17 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
 
                 restored_plugin, restored_mdi_area, _ = self._make_plugin()
                 with patch(
-                    "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+                    "hyde.user_interface.plugins.python_variables_tool.SpyderFrontendComm",
                     fake_comm,
                 ):
                     restored_plugin.on_project_loaded({"session": session})
 
-                restored_widget = restored_plugin.mdi_widget("python_variables")
-                restored_subwindow = restored_plugin.mdi_subwindow("python_variables")
+                restored_widget = restored_plugin.mdi_widget("python_variables_tool")
+                restored_subwindow = restored_plugin.mdi_subwindow("python_variables_tool")
                 self.qapp.processEvents()
 
             self.assertEqual(
-                session["python_variables"],
+                session["python_variables_tool"],
                 {
                     "arrays": False,
                     "variables": True,

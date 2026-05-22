@@ -44,7 +44,7 @@ class ProcedureBrowser(HydeToolWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
 
 class Plugin(HydeToolWindowPlugin):
-    session_key = "procedures"
+    session_key = "procedure_browser_tool"
     window_title = "Procedures"
     menu_name = "Procedures"
     window_size = (300, 500)

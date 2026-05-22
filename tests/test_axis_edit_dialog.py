@@ -9,10 +9,10 @@ from qtutils.qt import QtWidgets
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.shared.plugin import HydePluginManager
-from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure.window import FigureState, FigureWindow
-from hyde.user_interface.plugins.figure_control_dialogs import Plugin as FigureControlPlugin
-from hyde.user_interface.plugins.figure_control_dialogs.axis_edit_dialog import (
+from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
+from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
+from hyde.user_interface.plugins.figure_control_dialog.axis_edit_dialog import (
     AXIS_TAB_TITLES,
     AxisEditDialog,
 )
@@ -343,7 +343,7 @@ class TestAxisEditPlugin(unittest.TestCase):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "figure_control_dialogs": FigureControlPlugin({}),
+            "figure_control_dialog": FigureControlPlugin({}),
         }
         app = make_plugin_host(manager)
 
@@ -358,7 +358,7 @@ class TestAxisEditPlugin(unittest.TestCase):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "figure_control_dialogs": FigureControlPlugin({}),
+            "figure_control_dialog": FigureControlPlugin({}),
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)

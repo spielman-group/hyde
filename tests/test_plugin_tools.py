@@ -27,14 +27,14 @@ from hyde.user_interface.shared.plugin import (
     HydeToolWindowPlugin,
     SETUP_PRIORITY_RUNTIME_START,
 )
-from hyde.user_interface.plugins.figure import Plugin as FigurePlugin
-from hyde.user_interface.plugins.logging_window import Plugin as LoggingPlugin
-from hyde.user_interface.plugins.figure.window import FigureWindow
-from hyde.user_interface.plugins.procedure_browser import Plugin as ProcedureBrowserPlugin
-from hyde.user_interface.plugins.python_variables import Plugin as PythonVariablesPlugin
-from hyde.user_interface.plugins.python_terminal import Plugin as PythonTerminalPlugin
-from hyde.user_interface.plugins.table import Plugin as TablePlugin
-from hyde.user_interface.plugins.table.window import TableWidget
+from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
+from hyde.user_interface.plugins.logging_tool import Plugin as LoggingPlugin
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
+from hyde.user_interface.plugins.procedure_browser_tool import Plugin as ProcedureBrowserPlugin
+from hyde.user_interface.plugins.python_variables_tool import Plugin as PythonVariablesPlugin
+from hyde.user_interface.plugins.python_terminal_tool import Plugin as PythonTerminalPlugin
+from hyde.user_interface.plugins.table_interactive import Plugin as TablePlugin
+from hyde.user_interface.plugins.table_interactive.window import TableWidget
 from hyde.user_interface.shared.project import resolve_requested_name
 
 
@@ -534,23 +534,23 @@ class TestPluginTools(unittest.TestCase):
                 self.kernel_client = None
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        manager.plugins = {"python_terminal_tool": PythonTerminalPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
         manager.services = {"kernel_runtime_service": object()}
 
         with patch(
-            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            "hyde.user_interface.plugins.python_terminal_tool.PythonTerminal",
             FakeTerminalWidget,
         ):
             HydeApp.setup_plugins(app)
-            plugin = manager.plugins["python_terminal"]
+            plugin = manager.plugins["python_terminal_tool"]
             plugin.on_kernel_ready({})
 
-        container = plugin.mdi_widget("python_terminal")
+        container = plugin.mdi_widget("python_terminal_tool")
         terminal = manager.services["visible_terminal_service"].widget()
 
-        self.assertEqual(container.window_identifier(), "python_terminal")
+        self.assertEqual(container.window_identifier(), "python_terminal_tool")
         self.assertIsInstance(terminal, FakeTerminalWidget)
         self.assertIs(container.mounted_child, terminal)
         self.assertIs(terminal.parentWidget(), container.ui.content_widget)
@@ -594,7 +594,7 @@ class TestPluginTools(unittest.TestCase):
                 self.messages.append(message)
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        manager.plugins = {"python_terminal_tool": PythonTerminalPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
         visible_command_service = RecordingVisibleCommandService()
@@ -605,11 +605,11 @@ class TestPluginTools(unittest.TestCase):
         }
 
         with patch(
-            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            "hyde.user_interface.plugins.python_terminal_tool.PythonTerminal",
             FakeTerminalWidget,
         ):
             HydeApp.setup_plugins(app)
-            plugin = manager.plugins["python_terminal"]
+            plugin = manager.plugins["python_terminal_tool"]
             plugin.on_kernel_ready({})
             terminal = manager.services["visible_terminal_service"].widget()
             message = {"content": {"status": "ok"}}
@@ -654,7 +654,7 @@ class TestPluginTools(unittest.TestCase):
                 return None
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"python_variables": PythonVariablesPlugin({})}
+        manager.plugins = {"python_variables_tool": PythonVariablesPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
         shared_client = FakeKernelClient()
@@ -669,7 +669,7 @@ class TestPluginTools(unittest.TestCase):
         }
 
         with patch(
-            "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+            "hyde.user_interface.plugins.python_variables_tool.SpyderFrontendComm",
             FakeSpyderComm,
         ):
             HydeApp.setup_plugins(app)
@@ -680,9 +680,9 @@ class TestPluginTools(unittest.TestCase):
             action.trigger()
             self.qapp.processEvents()
 
-            plugin = manager.plugins["python_variables"]
-            widget = plugin.mdi_widget("python_variables")
-            subwindow = plugin.mdi_subwindow("python_variables")
+            plugin = manager.plugins["python_variables_tool"]
+            widget = plugin.mdi_widget("python_variables_tool")
+            subwindow = plugin.mdi_subwindow("python_variables_tool")
 
         self.assertIs(plugin.python_variables_service.widget(), widget)
         self.assertEqual(
@@ -700,9 +700,9 @@ class TestPluginTools(unittest.TestCase):
             kernel_runtime_service,
         )
         self.assertIsNotNone(widget.ui.treeView)
-        self.assertEqual(widget.window_identifier(), "python_variables")
-        self.assertEqual(widget.session_key, "python_variables")
-        self.assertEqual(subwindow.objectName(), "python_variables")
+        self.assertEqual(widget.window_identifier(), "python_variables_tool")
+        self.assertEqual(widget.session_key, "python_variables_tool")
+        self.assertEqual(subwindow.objectName(), "python_variables_tool")
         self.assertEqual(subwindow.windowTitle(), "Python Variables")
 
     def test_python_variables_service_stays_lazy_until_window_is_opened(self):
@@ -742,7 +742,7 @@ class TestPluginTools(unittest.TestCase):
                 return None
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"python_variables": PythonVariablesPlugin({})}
+        manager.plugins = {"python_variables_tool": PythonVariablesPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
         shared_client = FakeKernelClient()
@@ -757,17 +757,17 @@ class TestPluginTools(unittest.TestCase):
         }
 
         with patch(
-            "hyde.user_interface.plugins.python_variables.SpyderFrontendComm",
+            "hyde.user_interface.plugins.python_variables_tool.SpyderFrontendComm",
             FakeSpyderComm,
         ):
             HydeApp.setup_plugins(app)
-            plugin = manager.plugins["python_variables"]
+            plugin = manager.plugins["python_variables_tool"]
             service = plugin.python_variables_service
             callback_payloads = []
 
             self.assertTrue(service.connect_namespace_view_updated(callback_payloads.append))
             self.assertEqual(service.namespace_view(), {})
-            self.assertIsNone(plugin.mdi_widget("python_variables"))
+            self.assertIsNone(plugin.mdi_widget("python_variables_tool"))
 
             action = manager.services["lookup_menu_action"](
                 "window",
@@ -788,7 +788,7 @@ class TestPluginTools(unittest.TestCase):
                 }
             ],
         )
-        self.assertIsNotNone(plugin.mdi_widget("python_variables"))
+        self.assertIsNotNone(plugin.mdi_widget("python_variables_tool"))
         self.assertEqual(
             service.namespace_view(),
             {
@@ -834,12 +834,12 @@ class TestPluginTools(unittest.TestCase):
                 self.kernel_client = None
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        manager.plugins = {"python_terminal_tool": PythonTerminalPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
 
         with patch(
-            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            "hyde.user_interface.plugins.python_terminal_tool.PythonTerminal",
             FakeTerminalWidget,
         ):
             HydeApp.setup_plugins(app)
@@ -886,24 +886,24 @@ class TestPluginTools(unittest.TestCase):
                 self.kernel_client = None
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        manager.plugins = {"python_terminal_tool": PythonTerminalPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
 
         with patch(
-            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            "hyde.user_interface.plugins.python_terminal_tool.PythonTerminal",
             FakeTerminalWidget,
         ):
             HydeApp.setup_plugins(app)
-            plugin = manager.plugins["python_terminal"]
+            plugin = manager.plugins["python_terminal_tool"]
             plugin.services["kernel_runtime_service"] = FakeKernelRuntimeService()
 
-            self.assertIsNone(plugin.mdi_widget("python_terminal"))
+            self.assertIsNone(plugin.mdi_widget("python_terminal_tool"))
             self.assertIsNone(manager.services["visible_terminal_service"].widget())
 
             plugin.on_kernel_ready({})
 
-        container = plugin.mdi_widget("python_terminal")
+        container = plugin.mdi_widget("python_terminal_tool")
         terminal = manager.services["visible_terminal_service"].widget()
 
         self.assertIs(container.mounted_child, terminal)
@@ -932,41 +932,41 @@ class TestPluginTools(unittest.TestCase):
                 self.shutdown_calls += 1
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"python_terminal": PythonTerminalPlugin({})}
+        manager.plugins = {"python_terminal_tool": PythonTerminalPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
 
         with patch(
-            "hyde.user_interface.plugins.python_terminal.PythonTerminal",
+            "hyde.user_interface.plugins.python_terminal_tool.PythonTerminal",
             FakeTerminalWidget,
         ):
             HydeApp.setup_plugins(app)
-            plugin = manager.plugins["python_terminal"]
+            plugin = manager.plugins["python_terminal_tool"]
             plugin.on_kernel_ready({})
             terminal = manager.services["visible_terminal_service"].widget()
 
             plugin.on_kernel_crashed({})
 
         self.assertEqual(terminal.shutdown_calls, 1)
-        self.assertIsNone(plugin.mdi_widget("python_terminal"))
-        self.assertIsNone(plugin.mdi_subwindow("python_terminal"))
+        self.assertIsNone(plugin.mdi_widget("python_terminal_tool"))
+        self.assertIsNone(plugin.mdi_subwindow("python_terminal_tool"))
         self.assertIsNone(manager.services["visible_terminal_service"].widget())
         self.assertIsNone(manager.services["visible_terminal_service"].subwindow())
 
     def test_procedure_browser_uses_shared_tool_window_shell(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"procedure_browser": ProcedureBrowserPlugin({})}
+        manager.plugins = {"procedure_browser_tool": ProcedureBrowserPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
 
         HydeApp.setup_plugins(app)
 
-        plugin = manager.plugins["procedure_browser"]
-        widget = plugin.mdi_widget("procedures")
-        subwindow = plugin.mdi_subwindow("procedures")
+        plugin = manager.plugins["procedure_browser_tool"]
+        widget = plugin.mdi_widget("procedure_browser_tool")
+        subwindow = plugin.mdi_subwindow("procedure_browser_tool")
 
         self.assertIsInstance(widget, HydeToolWidget)
-        self.assertEqual(widget.window_identifier(), "procedures")
+        self.assertEqual(widget.window_identifier(), "procedure_browser_tool")
         self.assertIsNotNone(widget)
         self.assertTrue(subwindow.isHidden())
 
@@ -977,20 +977,20 @@ class TestPluginTools(unittest.TestCase):
         self.qapp.processEvents()
 
         self.assertFalse(closed)
-        self.assertIs(plugin.mdi_widget("procedures"), widget)
+        self.assertIs(plugin.mdi_widget("procedure_browser_tool"), widget)
         self.assertTrue(subwindow.isHidden())
 
     def test_procedure_browser_updates_state_and_opens_python_files(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"procedure_browser": ProcedureBrowserPlugin({})}
+        manager.plugins = {"procedure_browser_tool": ProcedureBrowserPlugin({})}
         app = make_plugin_host(manager)
         app.show_plugin_window = lambda key: HydeApp.show_plugin_window(app, key)
 
         HydeApp.setup_plugins(app)
 
-        plugin = manager.plugins["procedure_browser"]
+        plugin = manager.plugins["procedure_browser_tool"]
         action = manager.services["lookup_menu_action"]("window", "Procedures")
-        widget = plugin.mdi_widget("procedures")
+        widget = plugin.mdi_widget("procedure_browser_tool")
 
         plugin.on_enter_no_project_state({})
         self.assertFalse(action.isEnabled())
@@ -1014,7 +1014,7 @@ class TestPluginTools(unittest.TestCase):
             )
 
             with patch(
-                "hyde.user_interface.plugins.procedure_browser.QDesktopServices.openUrl"
+                "hyde.user_interface.plugins.procedure_browser_tool.QDesktopServices.openUrl"
             ) as open_url:
                 widget.tree_view.doubleClicked.emit(
                     widget.model.index(str(procedure_path))
@@ -1340,11 +1340,11 @@ class TestPluginTools(unittest.TestCase):
                 self.writes.append((text, color))
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"logging_window": LoggingPlugin({})}
+        manager.plugins = {"logging_tool": LoggingPlugin({})}
         app = make_plugin_host(manager)
 
         with patch(
-            "hyde.user_interface.plugins.logging_window.OutputBox",
+            "hyde.user_interface.plugins.logging_tool.OutputBox",
             FakeOutputBox,
         ):
             HydeApp.setup_plugins(app)
@@ -1366,13 +1366,13 @@ class TestPluginTools(unittest.TestCase):
 
         self.assertIs(service.ensure_widget(), widget)
         self.assertEqual(service.port(), widget.output_box.port)
-        self.assertEqual(widget.window_identifier(), "logging")
-        self.assertEqual(widget.session_key, "logging")
+        self.assertEqual(widget.window_identifier(), "logging_tool")
+        self.assertEqual(widget.session_key, "logging_tool")
         self.assertFalse(subwindow.isVisible())
 
         action.trigger()
         self.qapp.processEvents()
-        self.assertEqual(show_calls, ["logging"])
+        self.assertEqual(show_calls, ["logging_tool"])
         self.assertIs(service.widget(), widget)
 
         subwindow.close()
@@ -1391,11 +1391,11 @@ class TestPluginTools(unittest.TestCase):
                 self.writes.append((text, color))
 
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"logging_window": LoggingPlugin({})}
+        manager.plugins = {"logging_tool": LoggingPlugin({})}
         app = make_plugin_host(manager)
 
         with patch(
-            "hyde.user_interface.plugins.logging_window.OutputBox",
+            "hyde.user_interface.plugins.logging_tool.OutputBox",
             FakeOutputBox,
         ):
             HydeApp.setup_plugins(app)
@@ -1568,7 +1568,7 @@ class TestPluginTools(unittest.TestCase):
 
     def test_figure_window_shows_empty_shared_contextual_menu(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"figure": FigurePlugin({})}
+        manager.plugins = {"figure_interactive": FigurePlugin({})}
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
 
@@ -1609,7 +1609,7 @@ class TestPluginTools(unittest.TestCase):
 
     def test_table_widget_shows_shared_contextual_menu(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"table": TablePlugin({})}
+        manager.plugins = {"table_interactive": TablePlugin({})}
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
 
@@ -1645,7 +1645,7 @@ class TestPluginTools(unittest.TestCase):
 
     def test_table_plugin_registers_delete_action_with_shared_table_menu(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"table": TablePlugin({})}
+        manager.plugins = {"table_interactive": TablePlugin({})}
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
 

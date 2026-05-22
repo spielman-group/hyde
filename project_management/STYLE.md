@@ -10,6 +10,15 @@
 - At module scope, do not use leading `_` for private functions or private classes.
 - At module scope, leading `_NAME` or `_name` is reserved for private module-global
   constants or variables.
+- First-party plugin package names under `hyde.user_interface.plugins` should encode
+  their primary widget family:
+  - `*_tool` for `HydeToolWidget` plugins
+  - `*_interactive` for `HydeInteractiveWidget` plugins
+  - `*_dialog` for `HydeDialog` / `HydeDialogWidget` plugins
+  - no suffix for infrastructure or non-widget plugins for now
+- Branch naming follows the same split:
+  - `plugins/<plugin_name>` for plugin-scoped work
+  - `refactor` for cross-cutting refactors
 
 ## UI Boundary
 - If non-UI callbacks touch Qt widgets, route them onto the main thread.

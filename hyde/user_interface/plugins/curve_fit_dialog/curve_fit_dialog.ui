@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CurveFitDialogContent</class>
+ <widget class="QWidget" name="curve_fit_dialog">
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>12</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="QTabWidget" name="tab_widget">
+     <widget class="QWidget" name="function_and_data_tab">
+      <attribute name="title">
+       <string>Function and Data</string>
+      </attribute>
+      <layout class="QFormLayout" name="function_and_data_form">
+       <item row="0" column="0">
+        <widget class="QLabel" name="fit_function_label">
+         <property name="text">
+          <string>Function</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QComboBox" name="fit_function_combo"/>
+       </item>
+       <item row="1" column="1">
+        <widget class="QPushButton" name="new_fit_function_button">
+         <property name="text">
+          <string>New Fit Function...</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="0">
+        <widget class="QLabel" name="y_data_label">
+         <property name="text">
+          <string>Y Data</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="1">
+        <widget class="QComboBox" name="y_data_combo"/>
+       </item>
+       <item row="3" column="0">
+        <widget class="QLabel" name="x_data_label">
+         <property name="text">
+          <string>X Data</string>
+         </property>
+        </widget>
+       </item>
+       <item row="3" column="1">
+        <widget class="QWidget" name="x_data_container">
+         <layout class="QFormLayout" name="x_data_form">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+         </layout>
+        </widget>
+       </item>
+       <item row="4" column="1">
+        <widget class="QCheckBox" name="from_target_checkbox">
+         <property name="text">
+          <string>From Target</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="data_options_tab">
+      <attribute name="title">
+       <string>Data Options</string>
+      </attribute>
+      <layout class="QFormLayout" name="data_options_form">
+       <item row="0" column="0">
+        <widget class="QLabel" name="weighting_label">
+         <property name="text">
+          <string>Weighting</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QComboBox" name="weighting_combo"/>
+       </item>
+       <item row="1" column="1">
+        <widget class="QCheckBox" name="suppress_screen_updates_checkbox">
+         <property name="text">
+          <string>Suppress Screen Updates</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="coefficients_tab">
+      <attribute name="title">
+       <string>Coefficients</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="coefficients_layout">
+       <item>
+        <widget class="QTableWidget" name="coefficients_table">
+         <property name="rowCount">
+          <number>0</number>
+         </property>
+         <property name="columnCount">
+          <number>6</number>
+         </property>
+         <column>
+          <property name="text">
+           <string>Parameter</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Initial Value</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Vary</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Lower</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Upper</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>Expr</string>
+          </property>
+         </column>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="output_options_tab">
+      <attribute name="title">
+       <string>Output Options</string>
+      </attribute>
+      <layout class="QFormLayout" name="output_options_form">
+       <item row="0" column="0">
+        <widget class="QLabel" name="fit_result_label">
+         <property name="text">
+          <string>Fit Result</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QComboBox" name="fit_result_target_combo">
+         <property name="editable">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QCheckBox" name="show_fit_checkbox">
+         <property name="text">
+          <string>Show Fit</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="1">
+        <widget class="QCheckBox" name="show_residuals_checkbox">
+         <property name="text">
+          <string>Show Residuals</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="preview_controls">
+     <layout class="QHBoxLayout" name="preview_controls_layout">
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
+      <property name="bottomMargin">
+       <number>0</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="preview_label">
+        <property name="text">
+         <string>Preview</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="preview_spacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QComboBox" name="preview_mode_combo">
+        <item>
+         <property name="text">
+          <string>Commands</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Equation</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="status_strip">
+     <layout class="QHBoxLayout" name="status_strip_layout">
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
+      <property name="bottomMargin">
+       <number>0</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="status_title_label">
+        <property name="text">
+         <string>Status</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="status_label">
+        <property name="frameShape">
+         <enum>QFrame::StyledPanel</enum>
+        </property>
+        <property name="minimumHeight">
+         <number>24</number>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

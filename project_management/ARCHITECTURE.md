@@ -159,6 +159,18 @@ when a project is loaded.
 - Shell infrastructure lives under `hyde.user_interface.main`.
 - Shared plugin helpers live in `hyde.user_interface.plugin_tools`.
 - Only plugin packages are discovered by the plugin manager.
+- First-party plugin package names are intentional and branch-facing:
+  - `*_tool` means the plugin's primary widget surface is `HydeToolWidget`
+  - `*_interactive` means the plugin's primary widget surface is
+    `HydeInteractiveWidget`
+  - `*_dialog` means the plugin's primary widget surface is `HydeDialog` or
+    `HydeDialogWidget`
+- plugins that are primarily infrastructure or non-widget services keep no suffix
+  for now
+- Refactoring work that is not owned by one plugin should use the shared
+  `refactor` branch.
+- Plugin-scoped git branches should use the exact package name:
+  `plugins/<plugin_name>`.
 - Static dialog and tool-window layout structure should live in `.ui` files by
   default. Python should mainly load those `.ui` artifacts, wire signals, populate
   dynamic content, and host truly runtime-specific widgets.

@@ -27,9 +27,9 @@ from hyde.user_interface.main import HydeApp
 from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.shared.figure import supported_trace_records_from_figure_ir
 from hyde.user_interface.shared.plugin import HydePluginManager
-from hyde.user_interface.plugins.curve_fit import Plugin as CurveFitPlugin
-from hyde.user_interface.plugins.curve_fit.dialogs import CurveFitDialog
-from hyde.user_interface.plugins.figure.window import FigureWindow
+from hyde.user_interface.plugins.curve_fit_dialog import Plugin as CurveFitPlugin
+from hyde.user_interface.plugins.curve_fit_dialog.dialogs import CurveFitDialog
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 
 
 DEFAULT_PROCEDURES_SOURCE = """\
@@ -200,7 +200,7 @@ class FakeProjectProceduresService:
 
 
 def configure_curve_fit_runtime(app, manager):
-    plugin = manager.plugins["curve_fit"]
+    plugin = manager.plugins["curve_fit_dialog"]
     harness = ProcedureExecutionHarness(plugin)
     procedures_service = FakeProjectProceduresService(
         lambda: harness.procedures_init,
@@ -348,7 +348,7 @@ class FakeNamespaceViewService:
 def attach_namespace_view_service(manager, view):
     service = FakeNamespaceViewService(view)
     manager.services["namespace_view_service"] = service
-    manager.plugins["curve_fit"].services["namespace_view_service"] = service
+    manager.plugins["curve_fit_dialog"].services["namespace_view_service"] = service
     return service
 
 
@@ -431,7 +431,7 @@ def attach_figure_context_service(manager, figure_context):
         {"active_editable_figure": (lambda _self: figure_context)},
     )()
     manager.services["figure_context_service"] = figure_context_service
-    manager.plugins["curve_fit"].services["figure_context_service"] = (
+    manager.plugins["curve_fit_dialog"].services["figure_context_service"] = (
         figure_context_service
     )
     return figure_context_service
@@ -572,7 +572,7 @@ def create_configured_line_fit_dialog(
     figure_window=None,
 ):
     manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-    manager.plugins = {"curve_fit": CurveFitPlugin({})}
+    manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
     app = make_plugin_host(manager)
     harness = configure_curve_fit_runtime(app, manager)
     namespace_view = {
@@ -611,7 +611,7 @@ def create_configured_line_fit_dialog(
         harness.set_namespace_value("weights", np.array([1.0, 1.0]))
 
     dialog = create_curve_fit_dialog(
-        manager.plugins["curve_fit"],
+        manager.plugins["curve_fit_dialog"],
         app,
         figure_context=figure_context,
         figure_window=figure_window,
@@ -644,7 +644,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_plugin_registers_curve_fit_action_in_analysis_menu(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
 
         HydeApp.setup_plugins(app)
@@ -656,7 +656,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_action_with_no_active_figure_opens_unattached_dialog(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -705,7 +705,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_dialog_preserves_static_surface_after_ui_port(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -729,7 +729,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_action_with_active_figure_context_opens_attached_dialog(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -765,7 +765,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -789,7 +789,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_figure_context_service(manager, None)
@@ -808,7 +808,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -852,7 +852,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_dialog_includes_imported_helper_fit_functions(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -889,7 +889,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_hyde_builtin_fit_functions_are_discovered_after_bootstrap(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -904,7 +904,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_dialog_builtin_line_fit_executes_with_implicit_x(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -922,7 +922,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
         try:
             dialog = create_curve_fit_dialog(
-                manager.plugins["curve_fit"],
+                manager.plugins["curve_fit_dialog"],
                 app,
                 figure_window=make_figure_window(
                     figure_ir_with_implicit_x_trace("signal")
@@ -965,7 +965,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_new_fit_function_button_scaffolds_reloads_and_selects_new_function(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -996,7 +996,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_new_fit_function_button_rejects_real_conflicts_and_keeps_dialog_open(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -1035,7 +1035,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_catalog_service_refreshes_entries_and_default_name(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
 
@@ -1087,9 +1087,9 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
-        plugin = manager.plugins["curve_fit"]
+        plugin = manager.plugins["curve_fit_dialog"]
         harness = ProcedureExecutionHarness(plugin)
         procedures_service = FakeProjectProceduresService(
             lambda: harness.procedures_init,
@@ -1126,7 +1126,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1165,7 +1165,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.reload_procedures()
 
             dialog = create_curve_fit_dialog(
-                manager.plugins["curve_fit"],
+                manager.plugins["curve_fit_dialog"],
                 app,
                 figure_window=make_figure_window(
                     figure_ir_with_named_trace("time", "signal")
@@ -1235,7 +1235,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_dialog_defaults_x_to_calculated_for_implicit_target_trace(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1268,7 +1268,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.reload_procedures()
 
             dialog = create_curve_fit_dialog(
-                manager.plugins["curve_fit"],
+                manager.plugins["curve_fit_dialog"],
                 app,
                 figure_window=make_figure_window(
                     figure_ir_with_implicit_x_trace("signal")
@@ -1315,7 +1315,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1348,7 +1348,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             harness.reload_procedures()
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -1374,7 +1374,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_to_clip_copies_canonical_lower_text(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1406,7 +1406,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             harness.reload_procedures()
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -1437,7 +1437,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_dialog_requires_usable_free_parameter_values_for_do_it(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1468,7 +1468,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             harness.reload_procedures()
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -1488,7 +1488,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1519,7 +1519,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             harness.reload_procedures()
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -1555,7 +1555,7 @@ class TestCurveFitPlugin(unittest.TestCase):
 
     def test_curve_fit_dialog_invalid_free_parameter_does_not_preview_executable_fit(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1586,7 +1586,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             harness.reload_procedures()
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -1739,7 +1739,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1776,7 +1776,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             harness.reload_procedures()
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -1808,7 +1808,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1841,7 +1841,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
             harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0]))
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -1885,7 +1885,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -1921,7 +1921,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             previous_result = object()
             harness.set_namespace_value("signal_fit_result", previous_result)
 
-            dialog = create_curve_fit_dialog(manager.plugins["curve_fit"], app)
+            dialog = create_curve_fit_dialog(manager.plugins["curve_fit_dialog"], app)
             try:
                 dialog.fit_function_combo.setCurrentIndex(
                     dialog.fit_function_combo.findText("line_fit")
@@ -2213,7 +2213,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             np.array([0.0, 1.0, 4.0, 9.0, 15.0]),
         )
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -2237,7 +2237,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0, 4.0]))
         try:
             dialog = create_curve_fit_dialog(
-                manager.plugins["curve_fit"],
+                manager.plugins["curve_fit_dialog"],
                 app,
                 figure_window=attached_figure.figure_window,
             )
@@ -2506,7 +2506,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             np.array([1.0, 3.0, 5.0, 7.0]),
         )
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -2537,7 +2537,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
         harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0]))
         dialog = create_curve_fit_dialog(
-            manager.plugins["curve_fit"],
+            manager.plugins["curve_fit_dialog"],
             app,
             figure_window=attached_figure.figure_window,
         )
@@ -2578,7 +2578,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             implicit_x=True,
         )
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -2609,7 +2609,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
         harness.set_namespace_value("time", np.array([0.0, 1.0, 2.0, 3.0]))
         dialog = create_curve_fit_dialog(
-            manager.plugins["curve_fit"],
+            manager.plugins["curve_fit_dialog"],
             app,
             figure_window=attached_figure.figure_window
         )
@@ -2646,7 +2646,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
         harness = configure_curve_fit_runtime(app, manager)
         attach_namespace_view_service(
@@ -2673,7 +2673,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             figure_ir=figure_ir_with_implicit_x_trace("signal")
         )
         dialog = create_curve_fit_dialog(
-            manager.plugins["curve_fit"],
+            manager.plugins["curve_fit_dialog"],
             app,
             figure_context=figure_context,
         )
@@ -2718,7 +2718,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             reopening_dialog = create_curve_fit_dialog(
-                manager.plugins["curve_fit"],
+                manager.plugins["curve_fit_dialog"],
                 app,
                 figure_window=attached_figure.figure_window,
             )
@@ -2789,7 +2789,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(len(hidden_legend_subplot["traces"]), 2)
 
             reopening_dialog = create_curve_fit_dialog(
-                manager.plugins["curve_fit"],
+                manager.plugins["curve_fit_dialog"],
                 app,
                 figure_window=attached_figure.figure_window,
             )

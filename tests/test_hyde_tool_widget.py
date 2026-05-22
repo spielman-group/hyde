@@ -8,7 +8,7 @@ from qtutils.qt import QtWidgets
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.base_hyde_widgets import (
     HydeDialogWidget,
-    HydePromptDialog,
+    HydeDialog,
     HydeToolWidget,
 )
 from hyde.user_interface.main import HydeApp
@@ -22,7 +22,7 @@ class DemoDialogWidget(HydeDialogWidget):
     pass
 
 
-class DemoPromptDialog(HydePromptDialog):
+class DemoDialog(HydeDialog):
     pass
 
 
@@ -122,11 +122,11 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertIs(dialog.service("demo_service"), service)
         self.assertEqual(dialog.service("missing", "fallback"), "fallback")
 
-    def test_prompt_dialog_base_stores_services_without_tool_shell(self):
+    def test_dialog_base_stores_services_without_tool_shell(self):
         service = object()
         import hyde.user_interface.plugins.save_window_dialog  # noqa: F401
 
-        dialog = DemoPromptDialog(services={"demo_service": service})
+        dialog = DemoDialog(services={"demo_service": service})
         dialog.load_ui(
             "save_window_dialog.ui",
             module_name="hyde.user_interface.plugins.save_window_dialog",

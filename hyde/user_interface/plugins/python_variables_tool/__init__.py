@@ -89,7 +89,7 @@ class SpyderFrontendComm(CommBase):
 
 
 class PythonVariables(HydeToolWidget):
-    ui_filename = os.path.join("plugins", "python_variables", "python_variables.ui")
+    ui_filename = os.path.join("plugins", "python_variables_tool", "python_variables.ui")
     namespace_view_updated = QtCore.Signal(object)
 
     def __init__(self, services=None, session_key=None, *args, **kwargs):
@@ -471,7 +471,7 @@ class PythonVariablesService(HydeToolWindowService):
 
 
 class Plugin(HydeToolWindowPlugin):
-    session_key = "python_variables"
+    session_key = "python_variables_tool"
     window_title = "Python Variables"
     menu_name = "Python Variables"
     menu_order = 60

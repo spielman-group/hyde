@@ -33,7 +33,7 @@ from unittest.mock import patch
 
 
 def build_table_macro_source(macro_name, names, name=None, geometry=None, column_widths=None):
-    from hyde.user_interface.plugins.table.window import TableState
+    from hyde.user_interface.plugins.table_interactive.window import TableState
 
     state = TableState()
     state.set_items(names)
