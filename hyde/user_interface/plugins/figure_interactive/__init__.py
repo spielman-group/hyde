@@ -151,6 +151,8 @@ class Plugin(HydePlugin):
         self._registered_kernel_client = None
         self._figure_to_comm = {}
         self._comm_to_figure = {}
+        self._pending_figure_payloads = {}
+        self._figure_payload_flush_timer = None
 
     def setup(self, data=None):
         del data
@@ -228,12 +230,14 @@ class Plugin(HydePlugin):
 
     def on_enter_no_project_state(self, data):
         del data
+        self._clear_pending_figure_payloads()
         self.workspace.clear()
         self.figure_macros = []
         self.rebuild_configured_window_macros_menu()
 
     def on_kernel_crashed(self, data):
         del data
+        self._clear_pending_figure_payloads()
         self.workspace.clear()
         self._registered_kernel_client = None
         self._comm_to_figure = {}
@@ -249,6 +253,7 @@ class Plugin(HydePlugin):
 
     def on_project_loaded(self, data):
         del data
+        self._clear_pending_figure_payloads()
         self.workspace.clear()
 
     def on_kernel_ready(self, data):
@@ -320,11 +325,34 @@ class Plugin(HydePlugin):
 
     @inmain_decorator()
     def _handle_figure_payload(self, payload):
-        event = payload.get("event")
-        if event == "close":
-            self._handle_figure_close(payload.get("figure_number"))
+        figure_number = payload.get("figure_number")
+        if figure_number is None:
             return
-        self.workspace.open_or_update_figure(payload)
+        figure_number = int(figure_number)
+        self._pending_figure_payloads.pop(figure_number, None)
+        self._pending_figure_payloads[figure_number] = dict(payload or {})
+        if self._figure_payload_flush_timer is None:
+            self._figure_payload_flush_timer = QtCore.QTimer(self.services.get("ui"))
+            self._figure_payload_flush_timer.setSingleShot(True)
+            self._figure_payload_flush_timer.timeout.connect(self._flush_figure_payloads)
+        if not self._figure_payload_flush_timer.isActive():
+            self._figure_payload_flush_timer.start(0)
+
+    def _clear_pending_figure_payloads(self):
+        self._pending_figure_payloads.clear()
+        if self._figure_payload_flush_timer is not None:
+            self._figure_payload_flush_timer.stop()
+
+    @inmain_decorator()
+    def _flush_figure_payloads(self):
+        pending = list(self._pending_figure_payloads.values())
+        self._pending_figure_payloads.clear()
+        for payload in pending:
+            event = payload.get("event")
+            if event == "close":
+                self._handle_figure_close(payload.get("figure_number"))
+                continue
+            self.workspace.open_or_update_figure(payload)
 
     @inmain_decorator()
     def _handle_figure_close(self, figure_number):

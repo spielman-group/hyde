@@ -127,6 +127,9 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - The backend, not the GUI, keeps first-class figure IR synchronized with ordinary
   matplotlib edits by re-importing the supported semantic subset from dirty live
   figures after completed Python execution blocks.
+- Frontend figure windows consume those refreshed first-class snapshots in one queued
+  batch per completed execution block and surface unsupported imports explicitly in
+  window chrome instead of silently dropping the figure.
 - Figure-edit consumers such as axis edit, trace appearance, and attached Curve Fit
   display work through one figure-owned `open_session()` boundary exported by
   `figure_interactive`.

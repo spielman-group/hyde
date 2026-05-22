@@ -2101,6 +2101,94 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(plugin.get_session_restore_source(), "")
         mdi_area.close()
 
+    def test_plugin_batches_figure_payload_application_until_event_loop_flush(self):
+        plugin = Plugin({})
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            "get_shutting_down": lambda: False,
+        }
+        initial_payload = {
+            "figure_number": 1,
+            "title": "FigureA",
+            "snapshot": {
+                "is_first_class": True,
+                "default_macro_name": "FigureA",
+                "call_source": "fig = plt.figure('FigureA')",
+                "figure_size": (320, 240),
+                "figure_ir": figure_ir,
+            },
+        }
+        unsupported_payload = {
+            "figure_number": 1,
+            "title": "FigureA",
+            "snapshot": {
+                "is_first_class": True,
+                "default_macro_name": "FigureA",
+                "call_source": "fig = plt.figure('FigureA')",
+                "figure_size": (320, 240),
+                "figure_ir": figure_ir,
+                "save_error": "unsupported trace source",
+            },
+        }
+        try:
+            plugin._handle_figure_payload(initial_payload)
+            plugin._handle_figure_payload(unsupported_payload)
+
+            self.assertEqual(plugin.workspace.figures, {})
+
+            self.qapp.processEvents()
+
+            figure = plugin.workspace.figures[1]
+            self.assertEqual(
+                figure.parentWidget().windowTitle(),
+                "FigureA [Unsupported Feature]",
+            )
+            self.assertFalse(figure.warning_label.isHidden())
+            self.assertIn("unsupported trace source", figure.warning_label.text().lower())
+        finally:
+            plugin.workspace.clear()
+            mdi_area.close()
+
+    def test_plugin_discards_pending_batched_payloads_when_workspace_is_cleared(self):
+        plugin = Plugin({})
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            "get_shutting_down": lambda: False,
+        }
+        payload = {
+            "figure_number": 1,
+            "title": "FigureA",
+            "snapshot": {
+                "is_first_class": True,
+                "default_macro_name": "FigureA",
+                "call_source": "fig = plt.figure('FigureA')",
+                "figure_size": (320, 240),
+                "figure_ir": figure_ir,
+            },
+        }
+        try:
+            plugin._handle_figure_payload(payload)
+
+            plugin.on_project_loaded(None)
+            self.qapp.processEvents()
+
+            self.assertEqual(plugin.workspace.figures, {})
+        finally:
+            plugin.workspace.clear()
+            mdi_area.close()
+
 
 class TestBackendBootstrap(unittest.TestCase):
     def test_configure_gui_matplotlib_backend_forces_module_backend_only(self):

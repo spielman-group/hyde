@@ -45,7 +45,6 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             call_source=None,
             tracked_names=None,
             figure_ir=figure_ir,
-            live_state=None,
         )
 
         self.assertEqual(snapshot.default_macro_name(), "Figure0")
@@ -71,7 +70,6 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             tracked_names=None,
             figure_ir=figure_ir,
             figure_defaults=figure_defaults,
-            live_state=None,
         )
 
         self.assertEqual(
@@ -229,7 +227,9 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(subwindow.windowTitle(), "Figure7 [Macro Incomplete]")
+            self.assertEqual(subwindow.windowTitle(), "Figure7 [Unsupported Feature]")
+            self.assertIn("unsupported trace source", widget.warning_label.text().lower())
+            self.assertFalse(widget.warning_label.isHidden())
         finally:
             widget.close()
 
@@ -256,7 +256,9 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(subwindow.windowTitle(), "Figure7 [Macro Incomplete]")
+            self.assertEqual(subwindow.windowTitle(), "Figure7 [Unsupported Feature]")
+            self.assertIn("unsupported trace source", widget.warning_label.text().lower())
+            self.assertFalse(widget.warning_label.isHidden())
         finally:
             widget.force_close()
             mdi_area.close()

@@ -184,6 +184,19 @@ class FigureSnapshotState:
     def has_save_warning(self):
         return bool(self._save_error)
 
+    def window_warning_text(self):
+        if not self._save_error:
+            return None
+        if "unsupported" in str(self._save_error).lower():
+            return "Unsupported Feature"
+        return "Macro Incomplete"
+
+    def window_warning_message(self):
+        warning_text = self.window_warning_text()
+        if warning_text is None:
+            return ""
+        return f"{warning_text}: {self._save_error}"
+
     def trace_styles(self):
         return copy.deepcopy(self._trace_styles)
 
@@ -245,6 +258,19 @@ class FigureWindow(HydeInteractiveWidget):
         content = QtWidgets.QWidget(self.ui.content_widget)
         layout = QtWidgets.QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.warning_label = QtWidgets.QLabel(content)
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setVisible(False)
+        self.warning_label.setStyleSheet(
+            "QLabel {"
+            " background: #fff3cd;"
+            " color: #5c4400;"
+            " border: 1px solid #e0c46c;"
+            " border-radius: 4px;"
+            " padding: 6px 8px;"
+            "}"
+        )
+        layout.addWidget(self.warning_label)
         self.image_label = QtWidgets.QLabel(content)
         self.image_label.setAlignment(QtCore.Qt.AlignCenter)
         self.image_label.setMinimumSize(240, 180)
@@ -287,13 +313,12 @@ class FigureWindow(HydeInteractiveWidget):
         if self._subwindow is not None:
             self._subwindow.setWindowTitle(
                 self.formatted_window_title(
-                    warning_text=(
-                        "Macro Incomplete"
-                        if self.snapshot_state.has_save_warning()
-                        else None
-                    ),
+                    warning_text=self.snapshot_state.window_warning_text(),
                 )
             )
+        warning_message = self.snapshot_state.window_warning_message()
+        self.warning_label.setVisible(bool(warning_message))
+        self.warning_label.setText(warning_message)
         self._tracked_namespace_state = self.current_tracked_namespace_state()
 
         image_base64 = payload.get("image_png_base64")

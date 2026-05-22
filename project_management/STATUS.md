@@ -40,14 +40,16 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - `fig._hyde_ir` is recreation/editability truth.
 - Dirty first-class figures are re-imported from the live matplotlib object graph
   after completed Python execution blocks.
+- Frontend figure windows apply refreshed first-class figure snapshots in one queued
+  batch per completed execution block.
 - Unsupported live figure structure keeps the figure first-class while preserving the
-  supported subset and marking the window `[Macro Incomplete]`.
+  supported subset and marking the window `[Unsupported Feature]`.
 - Figure-edit consumers use a single consumer-agnostic figure edit session boundary
   from the active editable figure context.
 - Figure windows restore from `session.py` and preserve `window_pos` plus
   minimized/maximized window state.
-- Figures that cannot yet lower complete recreation source are marked
-  `[Macro Incomplete]`.
+- Figures with unsupported imported live structure are marked `[Unsupported Feature]`;
+  other incomplete-save cases still surface `[Macro Incomplete]`.
 
 ### Curve Fit
 - `@hyde.fit_function` is the public project-facing registration path for Curve Fit

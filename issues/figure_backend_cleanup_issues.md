@@ -5,7 +5,7 @@
 - [x] Slice 1: Introduce canonical first-class figure lookup and identity rules
 - [x] Slice 2: Add backend dirty tracking and universal post-block figure resync
 - [x] Slice 3: Re-import full supported IR and unsupported-feature status from live figures
-- [ ] Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
+- [x] Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
 - [ ] Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
 - [ ] Slice 6: Move Curve Fit attached display onto canonical matplotlib patch emission
 - [ ] Slice 7: Restore save/reopen behavior for partially supported figures and harden tests
@@ -121,11 +121,11 @@ text and remain usable as first-class windows with the imported supported subset
 
 ### Acceptance criteria
 
-- [ ] Figure snapshot updates are delivered to the GUI in one batch per completed execution block.
-- [ ] Figure windows show clear unsupported/incomplete warning text when appropriate.
-- [ ] Supported figure-window behaviors continue to work after batched refresh.
-- [ ] Unsupported figures stay live in Hyde windows rather than disappearing.
-- [ ] Batched refresh works from backend-imported figure snapshots rather than reviving any first-class `refresh_from_live_state` bridge.
+- [x] Figure snapshot updates are delivered to the GUI in one batch per completed execution block.
+- [x] Figure windows show clear unsupported/incomplete warning text when appropriate.
+- [x] Supported figure-window behaviors continue to work after batched refresh.
+- [x] Unsupported figures stay live in Hyde windows rather than disappearing.
+- [x] Batched refresh works from backend-imported figure snapshots rather than reviving any first-class `refresh_from_live_state` bridge.
 
 ### Blocked by
 
