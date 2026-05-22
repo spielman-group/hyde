@@ -457,6 +457,15 @@ def make_figure_window(figure_ir):
         def figure_ir(self):
             return figure_ir
 
+        def figure_defaults(self):
+            return None
+
+        def resolved_axis_limits(self):
+            return {}
+
+        def trace_styles(self):
+            return {}
+
     figure_window.snapshot_state = MockSnapshotState()
     return figure_window
 

@@ -1288,6 +1288,8 @@ class FigureEditSession:
         )
         if current_trace == live_trace:
             return
+        if self._same_attribute_path_trace_identity(current_trace, live_trace):
+            return
         revert_trace = self._trace_from_state(
             self._revert_state,
             trace_id,
@@ -1303,6 +1305,21 @@ class FigureEditSession:
                 "trace_id": str(trace_id),
                 "trace": copy.deepcopy(live_trace),
             },
+        )
+
+    def _same_attribute_path_trace_identity(self, current_trace, live_trace):
+        if not isinstance(current_trace, dict) or not isinstance(live_trace, dict):
+            return False
+        current_y_source = dict(current_trace.get("y_source") or {})
+        live_y_source = dict(live_trace.get("y_source") or {})
+        if current_y_source.get("kind") != "attribute_path":
+            return False
+        if live_y_source.get("kind") != "attribute_path":
+            return False
+        return (
+            str(current_trace.get("id")) == str(live_trace.get("id"))
+            and tuple(current_y_source.get("path") or ())
+            == tuple(live_y_source.get("path") or ())
         )
 
     def _subplot(self, subplot_id=None):
