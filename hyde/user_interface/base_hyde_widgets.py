@@ -150,6 +150,12 @@ class HydeDialog(QtWidgets.QDialog):
     def service(self, key, default=None):
         return self.services.get(key, default)
 
+    def execute_hidden_command(self, code):
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return False
+        return bool(python_execution_service.execute_hidden(code))
+
     def load_ui(self, ui_filename, *, module_name=None):
         self.ui = load_ui_for_owner(self, ui_filename, module_name=module_name)
         return self.ui

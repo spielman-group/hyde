@@ -1,6 +1,10 @@
+import copy
+
 from qtutils.qt import QtWidgets
 
+from hyde.features.matplotlib_features import figure_patch_source
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.core import log_hyde_state_debug
 from hyde.user_interface.shared.figure import (
     MatplotlibColorLineEdit,
     default_trace_color,
@@ -54,6 +58,8 @@ class TraceAppearanceDialog(HydeDialogWidget):
     def __init__(self, figure_context, services=None, parent=None):
         self.figure_context = figure_context
         self._session = self.figure_context.open_session()
+        self._opening_effective_state = self._session.opening_effective_state()
+        self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
         self._loading_controls = False
         self._trace_records = []
         self._trace_records_by_id = {}
@@ -209,8 +215,15 @@ class TraceAppearanceDialog(HydeDialogWidget):
             replace=replace,
             style=dict(patch),
         )
-        if not self._session.apply_live():
+        target_state = self._session.current_effective_state()
+        code = figure_patch_source(
+            self._applied_effective_state,
+            target_state,
+            figure_name=self.figure_context.figure_name(),
+        )
+        if not self._execute_patch(code, mode="live_update"):
             return False
+        self._applied_effective_state = copy.deepcopy(target_state)
         if trace_id == self._current_trace_id():
             self._update_color_field_previews(trace_id)
         if reload_controls and trace_id == self._current_trace_id():
@@ -219,7 +232,30 @@ class TraceAppearanceDialog(HydeDialogWidget):
         return True
 
     def canonical_text_payload(self):
-        return self._session.preview_source()
+        return figure_patch_source(
+            self._opening_effective_state,
+            self._session.current_effective_state(),
+            figure_name=self.figure_context.figure_name(),
+        )
+
+    def can_send_to_cmd_line(self):
+        return self.service("visible_terminal_service") is not None
+
+    def _execute_patch(self, code, *, mode):
+        if not str(code or "").strip():
+            return True
+        log_hyde_state_debug(
+            "FigurePatchState",
+            {
+                "feature": "figure_patch",
+                "command": "trace_style_edit",
+                "mode": str(mode),
+                "figure_number": int(self.figure_context.figure_number),
+                "figure_name": self.figure_context.figure_name(),
+            },
+            code,
+        )
+        return self.execute_hidden_command(code)
 
     def _on_trace_changed(self, row):
         if row < 0 or row >= len(self._trace_records):
@@ -375,7 +411,16 @@ class TraceAppearanceDialog(HydeDialogWidget):
         )
 
     def handle_do_it(self):
-        if self._session.commit():
+        target_state = self._session.current_effective_state()
+        if self._execute_patch(
+            figure_patch_source(
+                self._applied_effective_state,
+                target_state,
+                figure_name=self.figure_context.figure_name(),
+            ),
+            mode="do_it",
+        ):
+            self._applied_effective_state = copy.deepcopy(target_state)
             self.accept()
 
     def _on_marker_edge_width_changed(self, value):
@@ -387,5 +432,13 @@ class TraceAppearanceDialog(HydeDialogWidget):
         self._send_style_update(trace_id, {"markeredgewidth": float(value)})
 
     def reject(self):
-        self._session.revert()
+        if self._execute_patch(
+            figure_patch_source(
+                self._applied_effective_state,
+                self._opening_effective_state,
+                figure_name=self.figure_context.figure_name(),
+            ),
+            mode="cancel",
+        ):
+            self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
         super().reject()

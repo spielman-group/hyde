@@ -5,6 +5,17 @@ import hyde
 from hyde.features.hyde_features import MutationCodec, RuntimeCommandCodec
 
 
+def log_hyde_state_debug(label, state, source):
+    if not hyde.HYDE_DEBUG:
+        return
+    logging.getLogger("hyde").debug(
+        "[Hyde state] %s\nstate:\n%s\npython:\n%s",
+        str(label),
+        pprint.pformat(state, sort_dicts=True),
+        str(source),
+    )
+
+
 class HydeGuiState:
     codec = None
 
@@ -30,25 +41,13 @@ class HydeGuiState:
     def python_source(self):
         normalized = self.validate_state()
         source = self.codec.state_to_python(self._state)
-        if hyde.HYDE_DEBUG:
-            logging.getLogger("hyde").debug(
-                "[Hyde state] %s\nstate:\n%s\npython:\n%s",
-                type(self).__name__,
-                pprint.pformat(normalized, sort_dicts=True),
-                source,
-            )
+        log_hyde_state_debug(type(self).__name__, normalized, source)
         return source
 
     def macro_source(self, macro_name):
         normalized = self.validate_state()
         source = self.codec.state_to_macro_source(self._state, macro_name)
-        if hyde.HYDE_DEBUG:
-            logging.getLogger("hyde").debug(
-                "[Hyde state] %s\nstate:\n%s\npython:\n%s",
-                type(self).__name__,
-                pprint.pformat(normalized, sort_dicts=True),
-                source,
-            )
+        log_hyde_state_debug(type(self).__name__, normalized, source)
         return source
 
 

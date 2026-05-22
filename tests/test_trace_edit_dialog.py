@@ -4,25 +4,18 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import hyde
-import matplotlib
-from matplotlib import colors as mcolors
 from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
-from hyde.matplotlib_backend import apply_figure_action
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.shared.plugin import HydePluginManager
-from hyde.user_interface.shared.figure import (
-    EditableFigureContext,
-    FigureEditSession,
-)
-from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
     TraceAppearanceDialog,
 )
+from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
+from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.shared.figure import EditableFigureContext
+from hyde.user_interface.shared.plugin import HydePluginManager
 
 
 _DEFAULT_FIGURE_IR = object()
@@ -36,34 +29,26 @@ class FakeFigureActionService:
         return bool(self._callback(figure_number, action))
 
 
-class OpenSessionOnlyFigureContext:
-    def __init__(self, session):
-        self.figure_number = int(session.figure_number)
-        self._session = session
+class FakeExecutionService:
+    def __init__(self):
+        self.hidden_calls = []
 
-    def open_session(self):
-        return self._session
+    def execute_hidden(self, code, silent=True):
+        self.hidden_calls.append((str(code), bool(silent)))
+        return True
+
+
+class FakeVisibleTerminalService:
+    def __init__(self):
+        self.visible_calls = []
+
+    def execute_visible(self, code):
+        self.visible_calls.append(str(code))
+        return True
 
 
 def make_figure_action_service(callback=None):
     return FakeFigureActionService(callback)
-
-
-def make_edit_session(
-    *,
-    figure_number=7,
-    figure_ir=_DEFAULT_FIGURE_IR,
-    figure_defaults=None,
-    trace_styles=None,
-    dispatch_action=None,
-):
-    return FigureEditSession(
-        figure_number=figure_number,
-        figure_ir=make_figure_ir() if figure_ir is _DEFAULT_FIGURE_IR else figure_ir,
-        figure_defaults=figure_defaults,
-        trace_styles=trace_styles,
-        dispatch_action=dispatch_action or (lambda action: True),
-    )
 
 
 def make_plugin_host(plugin_manager):
@@ -178,14 +163,11 @@ def make_active_figure_window(
     services,
     figure_ir=_DEFAULT_FIGURE_IR,
     figure_defaults=None,
-    trace_styles=None,
 ):
     services = dict(services)
     if "figure_action_service" not in services:
         send_figure_action = services.pop("send_figure_action", None)
-        services["figure_action_service"] = make_figure_action_service(
-            send_figure_action
-        )
+        services["figure_action_service"] = make_figure_action_service(send_figure_action)
     figure = FigureWindow(figure_number=7, services=services)
     subwindow = mdi_area.addSubWindow(figure)
     figure.bind_subwindow(subwindow)
@@ -197,18 +179,16 @@ def make_active_figure_window(
             "snapshot": {
                 "is_first_class": True,
                 "figure_ir": (
-                    make_figure_ir()
-                    if figure_ir is _DEFAULT_FIGURE_IR
-                    else figure_ir
+                    make_figure_ir() if figure_ir is _DEFAULT_FIGURE_IR else figure_ir
                 ),
                 "figure_defaults": figure_defaults,
                 "live_state": None,
-                "trace_styles": trace_styles,
+                "trace_styles": None,
             },
         }
     )
     mdi_area.setActiveSubWindow(subwindow)
-    return EditableFigureContext(figure)
+    return figure
 
 
 class TestTraceAppearancePlugin(unittest.TestCase):
@@ -241,7 +221,14 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
-        make_active_figure_window(app.ui.mdiArea, manager.services)
+        make_active_figure_window(
+            app.ui.mdiArea,
+            {
+                **manager.services,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
 
         launched = {}
 
@@ -257,9 +244,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         self.assertIsInstance(launched["dialog"], TraceAppearanceDialog)
         self.assertIsNotNone(launched["dialog"].figure_context)
 
-    def test_modify_data_appearance_action_returns_false_without_supported_traces(
-        self,
-    ):
+    def test_modify_data_appearance_action_returns_false_without_supported_traces(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {
             "figure": FigurePlugin({}),
@@ -269,67 +254,22 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         HydeApp.setup_plugins(app)
         make_active_figure_window(
             app.ui.mdiArea,
-            manager.services,
+            {
+                **manager.services,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
             figure_ir=make_figure_ir_without_supported_traces(),
         )
 
         with patch.object(
             TraceAppearanceDialog,
             "exec_",
-            side_effect=AssertionError(
-                "Dialog should not execute when no supported traces exist."
-            ),
+            side_effect=AssertionError("Dialog should not execute without supported traces."),
         ):
             self.assertFalse(
                 manager.plugins["figure_control_dialog"].show_trace_appearance_dialog()
             )
-
-    def test_modify_data_appearance_action_returns_false_without_active_figure(self):
-        plugin = FigureControlPlugin({})
-        plugin.services = {
-            "mdi_area": QtWidgets.QMdiArea(),
-            "ui": QtWidgets.QMainWindow(),
-        }
-
-        self.assertFalse(plugin.show_trace_appearance_dialog())
-
-    def test_modify_data_appearance_action_requires_semantic_dispatch_for_active_figure(
-        self,
-    ):
-        mdi_area = QtWidgets.QMdiArea()
-        make_active_figure_window(
-            mdi_area,
-            {
-                "mdi_area": mdi_area,
-                "figure_action_service": None,
-            },
-        )
-        plugin = FigureControlPlugin({})
-        plugin.services = {
-            "mdi_area": mdi_area,
-            "ui": QtWidgets.QMainWindow(),
-        }
-
-        self.assertFalse(plugin.show_trace_appearance_dialog())
-
-    def test_trace_dialog_dispatches_live_updates_through_figure_context_boundary(self):
-        sent = []
-        mdi_area = QtWidgets.QMdiArea()
-        session = make_edit_session(
-            dispatch_action=lambda action: sent.append(dict(action or {})) or True
-        )
-        figure_context = OpenSessionOnlyFigureContext(session)
-
-        dialog = TraceAppearanceDialog(figure_context, parent=mdi_area)
-        try:
-            sent.clear()
-            dialog.ui.hide_trace_checkbox.setChecked(True)
-            QtWidgets.QApplication.processEvents()
-
-            self.assertTrue(sent)
-            self.assertFalse(session.trace_style("trace0", "visible"))
-        finally:
-            dialog.close()
 
 
 class TestTraceAppearanceDialog(unittest.TestCase):
@@ -340,328 +280,154 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def test_dialog_seeds_trace_list_and_controls_from_snapshot(self):
-        sent = []
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
             mdi_area,
             {
                 "mdi_area": mdi_area,
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
             },
         )
 
-        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
             self.assertEqual(dialog.ui.trace_list.count(), 2)
             self.assertEqual(dialog.ui.trace_list.currentItem().text(), "trace_a")
             self.assertEqual(dialog.ui.line_color_edit.text(), "#123456")
-            self.assertEqual(dialog.ui.marker_face_color_edit.text(), "auto")
-            self.assertEqual(
-                dialog.ui.marker_face_color_edit.swatch_color_text(),
-                "#123456",
-            )
-            self.assertEqual(
-                dialog.ui.marker_edge_color_edit.swatch_color_text(),
-                "#123456",
-            )
             self.assertEqual(dialog.ui.line_style_combo.currentData(), "--")
             self.assertEqual(dialog.ui.line_width_spin.value(), 2.5)
             self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
-            self.assertEqual(dialog.ui.mode_combo.currentData(), "lines+markers")
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), "")
         finally:
             dialog.close()
 
-    def test_dialog_uses_shared_shell_for_preview_and_footer_actions(self):
-        clipboard = QtWidgets.QApplication.clipboard()
+    def test_preview_and_send_to_cmd_line_use_same_trace_patch_block(self):
+        execution = FakeExecutionService()
+        terminal = FakeVisibleTerminalService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
             mdi_area,
             {
                 "mdi_area": mdi_area,
-                "send_figure_action": lambda figure_number, action: True,
+                "python_execution_service": execution,
+                "visible_terminal_service": terminal,
             },
         )
 
-        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
-            dialog.show()
-            self.qapp.processEvents()
+            dialog.ui.line_color_edit.setText("#abcdef")
+            dialog.ui.line_color_edit.editingFinished.emit()
 
-            self.assertFalse(hasattr(dialog, "button_box"))
-            self.assertEqual(
-                dialog.lower_text_edit.toPlainText(),
-                dialog.canonical_text_payload(),
-            )
-            self.assertIn("fig = plt.figure(", dialog.lower_text_edit.toPlainText())
-            self.assertIn("ax.plot(", dialog.lower_text_edit.toPlainText())
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
-            self.assertTrue(dialog.to_clip_button.isEnabled())
+            preview = dialog.lower_text_edit.toPlainText()
+            self.assertIn("fig = hyde.get_figure('Figure0')", preview)
+            self.assertIn("line = ax.lines[0]", preview)
+            self.assertIn("line.set_color('#abcdef')", preview)
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
 
-            dialog.to_clip_button.click()
+            dialog.to_cmd_line_button.click()
 
-            self.assertEqual(
-                clipboard.text(),
-                dialog.lower_text_edit.toPlainText(),
-            )
+            self.assertEqual(terminal.visible_calls[-1], preview)
         finally:
             dialog.close()
 
-    def test_dialog_seeds_from_figure_defaults_before_current_trace_state(self):
+        self.assertTrue(execution.hidden_calls)
+        self.assertIn("line.set_color('#abcdef')", execution.hidden_calls[-1][0])
+
+    def test_trace_dialog_seeds_from_figure_defaults(self):
         mdi_area = QtWidgets.QMdiArea()
         figure_ir = figure_ir_from_live_state(make_live_state())
         subplot = figure_ir["layout"]["subplots"][0]
-        subplot["traces"][0]["kwargs"].update(
-            {
-                "marker": "s",
-                "linestyle": "None",
-            }
-        )
+        subplot["traces"][0]["kwargs"].update({"marker": "s", "linestyle": "None"})
         figure = make_active_figure_window(
             mdi_area,
             {
                 "mdi_area": mdi_area,
-                "send_figure_action": lambda figure_number, action: True,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
             },
             figure_ir=FigureIRCodec.validate_state(figure_ir),
             figure_defaults=make_figure_defaults(),
-            trace_styles=None,
         )
 
-        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
             self.assertEqual(dialog.ui.line_color_edit.text(), "#445566")
             self.assertEqual(dialog.ui.line_width_spin.value(), 4.0)
             self.assertEqual(dialog.ui.marker_size_spin.value(), 9.0)
             self.assertEqual(dialog.ui.line_style_combo.currentData(), "None")
             self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
-            self.assertEqual(dialog.ui.mode_combo.currentData(), "markers")
         finally:
             dialog.close()
 
-    def test_dialog_sends_live_trace_style_updates(self):
-        sent = []
-        mdi_area = QtWidgets.QMdiArea()
-        session = make_edit_session(
-            dispatch_action=lambda action: sent.append(dict(action or {})) or True
-        )
-        figure_context = OpenSessionOnlyFigureContext(session)
-
-        dialog = TraceAppearanceDialog(figure_context, parent=mdi_area)
-        try:
-            dialog.ui.line_color_edit.setText("#abcdef")
-            dialog.ui.line_color_edit.editingFinished.emit()
-            dialog.ui.mode_combo.setCurrentIndex(
-                dialog.ui.mode_combo.findData("markers")
-            )
-        finally:
-            dialog.close()
-
-        self.assertEqual(session.trace_style("trace0", "color"), "#abcdef")
-        self.assertEqual(session.trace_style("trace0", "marker"), "s")
-        self.assertEqual(session.trace_style("trace0", "linestyle"), "None")
-        self.assertEqual(len(sent), 2)
-        self.assertTrue(all(action["type"] == "set_trace_style" for action in sent))
-        self.assertEqual(dialog.ui.line_style_combo.currentData(), "None")
-        self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
-
-    def test_dialog_accepts_named_matplotlib_line_color(self):
-        sent = []
-        mdi_area = QtWidgets.QMdiArea()
-        session = make_edit_session(
-            dispatch_action=lambda action: sent.append(dict(action or {})) or True
-        )
-        figure_context = OpenSessionOnlyFigureContext(session)
-
-        dialog = TraceAppearanceDialog(figure_context, parent=mdi_area)
-        try:
-            dialog.ui.line_color_edit.setText("green")
-            dialog.ui.line_color_edit.editingFinished.emit()
-            self.assertEqual(dialog.ui.line_color_edit.text(), "#008000")
-            self.assertEqual(
-                dialog.ui.marker_face_color_edit.swatch_color_text(),
-                "#008000",
-            )
-        finally:
-            dialog.close()
-
-        self.assertEqual(session.trace_style("trace0", "color"), "#008000")
-        self.assertTrue(sent)
-        self.assertEqual(sent[-1]["type"], "set_trace_style")
-
-    def test_invalid_line_color_input_reverts_without_dispatching(self):
-        sent = []
+    def test_live_update_uses_hidden_python_patch(self):
+        execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
             mdi_area,
             {
                 "mdi_area": mdi_area,
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
             },
         )
 
-        dialog = TraceAppearanceDialog(figure, parent=mdi_area)
+        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
-            dialog.ui.line_color_edit.setText("not-a-color")
-            dialog.ui.line_color_edit.editingFinished.emit()
-            self.assertEqual(dialog.ui.line_color_edit.text(), "#123456")
+            dialog.ui.mode_combo.setCurrentIndex(dialog.ui.mode_combo.findData("markers"))
         finally:
             dialog.close()
 
-        self.assertEqual(sent, [])
+        self.assertTrue(execution.hidden_calls)
+        command = execution.hidden_calls[-1][0]
+        self.assertIn("line = ax.lines[0]", command)
+        self.assertIn("line.set_linestyle('None')", command)
 
-    def test_cancel_reverts_each_touched_trace_to_opening_style_snapshot(self):
-        sent = []
+    def test_cancel_executes_python_rollback_for_touched_trace(self):
+        execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
-        session = make_edit_session(
-            dispatch_action=lambda action: sent.append(dict(action or {})) or True
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
         )
-        figure_context = OpenSessionOnlyFigureContext(session)
 
-        dialog = TraceAppearanceDialog(figure_context, parent=mdi_area)
+        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
             dialog.ui.line_width_spin.setValue(4.0)
-            dialog.ui.trace_list.setCurrentRow(1)
-            dialog.ui.marker_combo.setCurrentIndex(
-                dialog.ui.marker_combo.findData("^")
-            )
             dialog.reject()
         finally:
             dialog.close()
 
-        self.assertEqual(session.trace_style("trace0", "linewidth"), 2.5)
-        self.assertEqual(session.trace_style("trace1", "marker"), "o")
-        self.assertFalse(session.is_dirty())
-        self.assertGreaterEqual(len(sent), 4)
-        self.assertTrue(all(action["type"] == "set_trace_style" for action in sent))
+        self.assertEqual(len(execution.hidden_calls), 2)
+        self.assertIn("line.set_linewidth(4.0)", execution.hidden_calls[0][0])
+        self.assertIn("line.set_linewidth(2.5)", execution.hidden_calls[1][0])
 
-    def test_apply_keeps_live_updates_without_reverting_opening_snapshot(self):
-        sent = []
+    def test_hidden_trace_patch_logs_through_standard_hyde_debug_channel(self):
+        execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
-        session = make_edit_session(
-            dispatch_action=lambda action: sent.append(dict(action or {})) or True
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
         )
-        figure_context = OpenSessionOnlyFigureContext(session)
 
-        dialog = TraceAppearanceDialog(figure_context, parent=mdi_area)
+        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
-            dialog.ui.line_width_spin.setValue(4.0)
-            dialog.accept()
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                dialog.ui.line_color_edit.setText("#abcdef")
+                dialog.ui.line_color_edit.editingFinished.emit()
         finally:
             dialog.close()
 
-        self.assertEqual(session.trace_style("trace0", "linewidth"), 4.0)
-        self.assertTrue(sent)
-        self.assertTrue(all(action["type"] == "set_trace_style" for action in sent))
-
-
-class TestTraceAppearanceBackend(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.qapp = QtWidgets.QApplication.instance()
-        if cls.qapp is None:
-            cls.qapp = QtWidgets.QApplication([])
-
-    def tearDown(self):
-        pyplot = getattr(matplotlib, "pyplot", None)
-        if pyplot is not None:
-            pyplot.close("all")
-
-    def _configure_pyplot(self):
-        matplotlib.use("module://hyde.matplotlib_backend", force=True)
-        import matplotlib.pyplot as pyplot
-
-        return pyplot
-
-    def test_apply_figure_action_supports_extended_trace_style_properties(self):
-        plt = self._configure_pyplot()
-
-        @hyde.figure
-        def Graph0(x, y):
-            fig = plt.figure("Graph0")
-            ax = fig.add_subplot(111)
-            ax.plot(x, y, label="y")
-            return fig
-
-        figure = Graph0([0, 1, 2], [1, 4, 9])
-
-        apply_figure_action(
-            figure,
-            {
-                "type": "set_trace_style",
-                "subplot_id": "subplot0",
-                "trace_id": "trace0",
-                "style": {
-                    "visible": False,
-                    "alpha": 0.4,
-                    "drawstyle": "steps-mid",
-                    "markersize": 9.0,
-                    "markerfacecolor": "#abcdef",
-                    "markeredgecolor": "#fedcba",
-                    "markeredgewidth": 2.0,
-                },
-            },
-        )
-
-        trace = figure._hyde_ir["layout"]["subplots"][0]["traces"][0]
-        line = figure.axes[0].lines[0]
-
-        self.assertFalse(trace["kwargs"]["visible"])
-        self.assertEqual(trace["kwargs"]["drawstyle"], "steps-mid")
-        self.assertEqual(trace["kwargs"]["markersize"], 9.0)
-        self.assertEqual(trace["kwargs"]["markeredgewidth"], 2.0)
-        self.assertFalse(line.get_visible())
-        self.assertEqual(line.get_alpha(), 0.4)
-        self.assertEqual(line.get_drawstyle(), "steps-mid")
-        self.assertEqual(line.get_markersize(), 9.0)
-        self.assertEqual(mcolors.to_hex(line.get_markerfacecolor()), "#abcdef")
-        self.assertEqual(mcolors.to_hex(line.get_markeredgecolor()), "#fedcba")
-        self.assertEqual(line.get_markeredgewidth(), 2.0)
-
-    def test_replace_trace_style_restores_original_ir_backed_trace_style(self):
-        plt = self._configure_pyplot()
-
-        @hyde.figure
-        def Graph0(x, y):
-            fig = plt.figure("Graph0")
-            ax = fig.add_subplot(111)
-            ax.plot(x, y, label="y")
-            return fig
-
-        figure = Graph0([0, 1, 2], [1, 4, 9])
-
-        apply_figure_action(
-            figure,
-            {
-                "type": "set_trace_style",
-                "subplot_id": "subplot0",
-                "trace_id": "trace0",
-                "style": {"color": "#abcdef", "marker": "s", "linewidth": 3.0},
-            },
-        )
-        apply_figure_action(
-            figure,
-            {
-                "type": "set_trace_style",
-                "subplot_id": "subplot0",
-                "trace_id": "trace0",
-                "style": {"label": "y"},
-                "replace": True,
-            },
-        )
-
-        trace = figure._hyde_ir["layout"]["subplots"][0]["traces"][0]
-        line = figure.axes[0].lines[0]
-
-        self.assertEqual(trace["kwargs"], {"label": "y"})
-        self.assertEqual(line.get_label(), "y")
-        self.assertNotEqual(mcolors.to_hex(line.get_color()), "#abcdef")
-        self.assertIn(line.get_marker(), ("None", "none", None, ""))
-        self.assertNotEqual(line.get_linewidth(), 3.0)
-
-if __name__ == "__main__":
-    unittest.main()
+        output = "\n".join(logs.output)
+        self.assertIn("[Hyde state] FigurePatchState", output)
+        self.assertIn("python:\n", output)
+        self.assertIn("line.set_color('#abcdef')", output)

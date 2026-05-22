@@ -1,6 +1,10 @@
+import copy
+
 from qtutils.qt import QtWidgets
 
+from hyde.features.matplotlib_features import figure_patch_source
 from hyde.user_interface.shared.figure import MatplotlibColorLineEdit
+from hyde.user_interface.shared.core import log_hyde_state_debug
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 
 AXIS_TAB_TITLES = [
@@ -181,6 +185,8 @@ class AxisEditDialog(HydeDialogWidget):
     def __init__(self, figure_context, services=None, parent=None):
         self.figure_context = figure_context
         self._session = self.figure_context.open_session()
+        self._opening_effective_state = self._session.opening_effective_state()
+        self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
         self._preview_error_message = ""
         super().__init__(parent=parent, services=dict(services or {}))
         self.setWindowTitle("Modify Axis")
@@ -1157,13 +1163,48 @@ class AxisEditDialog(HydeDialogWidget):
         self._preview_error_message = str(error_message or "")
         self.refresh_shell()
 
+    def _current_effective_state(self):
+        return self._session.current_effective_state()
+
+    def _patch_source(self, source_state, target_state):
+        return figure_patch_source(
+            source_state,
+            target_state,
+            figure_name=self.figure_context.figure_name(),
+        )
+
+    def _execute_patch(self, code, *, mode):
+        if not str(code or "").strip():
+            return True
+        log_hyde_state_debug(
+            "FigurePatchState",
+            {
+                "feature": "figure_patch",
+                "command": "axis_edit",
+                "mode": str(mode),
+                "figure_number": int(self.figure_context.figure_number),
+                "figure_name": self.figure_context.figure_name(),
+            },
+            code,
+        )
+        return self.execute_hidden_command(code)
+
     def canonical_text_payload(self):
         if self._preview_error_message:
             return self._preview_error_message
         try:
-            return self._session.preview_source()
+            return self._patch_source(
+                self._opening_effective_state,
+                self._current_effective_state(),
+            )
         except Exception as exc:
             return str(exc)
+
+    def can_send_to_cmd_line(self):
+        return (
+            not self._preview_error_message
+            and self.service("visible_terminal_service") is not None
+        )
 
     def _on_controls_changed(self, *args):
         del args
@@ -1175,7 +1216,12 @@ class AxisEditDialog(HydeDialogWidget):
         if not result["valid"]:
             return
         if self.ui.live_update_checkbox.isChecked():
-            self._session.apply_live()
+            target_state = self._current_effective_state()
+            if self._execute_patch(
+                self._patch_source(self._applied_effective_state, target_state),
+                mode="live_update",
+            ):
+                self._applied_effective_state = copy.deepcopy(target_state)
 
     def _on_live_update_toggled(self, checked):
         if self._loading_controls or not checked:
@@ -1183,14 +1229,24 @@ class AxisEditDialog(HydeDialogWidget):
         result = self._apply_current_controls_to_session()
         self._update_preview(result["message"])
         if result["valid"]:
-            self._session.apply_live()
+            target_state = self._current_effective_state()
+            if self._execute_patch(
+                self._patch_source(self._applied_effective_state, target_state),
+                mode="live_update_enable",
+            ):
+                self._applied_effective_state = copy.deepcopy(target_state)
 
     def handle_do_it(self):
         result = self._apply_current_controls_to_session()
         self._update_preview(result["message"])
         if not result["valid"]:
             return
-        if self._session.commit():
+        target_state = self._current_effective_state()
+        if self._execute_patch(
+            self._patch_source(self._applied_effective_state, target_state),
+            mode="do_it",
+        ):
+            self._applied_effective_state = copy.deepcopy(target_state)
             self.accept()
 
     def _set_auto_tick_values(self):
@@ -1241,5 +1297,12 @@ class AxisEditDialog(HydeDialogWidget):
         self._on_controls_changed()
 
     def reject(self):
-        self._session.revert()
+        if self._execute_patch(
+            self._patch_source(
+                self._applied_effective_state,
+                self._opening_effective_state,
+            ),
+            mode="cancel",
+        ):
+            self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
         super().reject()

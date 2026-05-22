@@ -6,7 +6,7 @@
 - [x] Slice 2: Add backend dirty tracking and universal post-block figure resync
 - [x] Slice 3: Re-import full supported IR and unsupported-feature status from live figures
 - [x] Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
-- [ ] Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
+- [x] Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
 - [ ] Slice 6: Move Curve Fit attached display onto canonical matplotlib patch emission
 - [ ] Slice 7: Restore save/reopen behavior for partially supported figures and harden tests
 
@@ -16,7 +16,7 @@ These checkpoints are not separate work items. They are completion conditions fo
 remaining slices so the old dual-path backend does not survive under a new name.
 
 - [ ] Remove the remaining non-first-class `_hyde_live_state` / `_infer_live_state` backend replay path as part of the final cleanup once the new command-driven figure path is fully in place.
-- [ ] Remove first-class figure edit use of semantic figure `comm` actions for routine edits as part of Slices 5 and 6.
+- [ ] Remove first-class figure edit use of semantic figure `comm` actions for remaining routine edits as part of Slices 5 and 6.
 - [ ] Delete obsolete tests that still defend the old live-state replay or semantic figure-action edit path when the product contract changes.
 - [ ] Update docs and agent guidance so they no longer describe the old figure-edit `comm` exception as the intended architecture once the migration is complete.
 
@@ -150,14 +150,14 @@ than live matplotlib objects directly.
 
 ### Acceptance criteria
 
-- [ ] Axis and trace dialogs emit the same canonical matplotlib patch block for hidden execution and `To Cmd Line`.
-- [ ] Live update uses the same command path as final commit.
-- [ ] Cancel under live update restores the opening state of the dialog-owned region through the same Python ingress path.
-- [ ] Dialog command emission changes only actually changed features.
-- [ ] Hidden axis/trace edit commands are logged through Hyde's ordinary hidden-command logging path.
-- [ ] Hidden axis/trace edit commands are logged through the same `[Hyde state] ... / python:` channel used for existing hidden commands.
-- [ ] Axis and trace edits no longer depend on `FigureEditSession.commit()`, `send_figure_action(...)`, or backend semantic edit actions for routine mutation.
-- [ ] Old axis/trace tests are updated to verify canonical emitted matplotlib patches and backend resync rather than the former figure-action transport.
+- [x] Axis and trace dialogs emit the same canonical matplotlib patch block for hidden execution and `To Cmd Line`.
+- [x] Live update uses the same command path as final commit.
+- [x] Cancel under live update restores the opening state of the dialog-owned region through the same Python ingress path.
+- [x] Dialog command emission changes only actually changed features.
+- [x] Hidden axis/trace edit commands are logged through Hyde's ordinary hidden-command logging path.
+- [x] Hidden axis/trace edit commands are logged through the same `[Hyde state] ... / python:` channel used for existing hidden commands.
+- [x] Axis and trace edits no longer depend on `FigureEditSession.commit()`, `send_figure_action(...)`, or backend semantic edit actions for routine mutation.
+- [x] Old axis/trace tests are updated to verify canonical emitted matplotlib patches and backend resync rather than the former figure-action transport.
 
 ### Blocked by
 

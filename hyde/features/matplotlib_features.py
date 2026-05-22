@@ -24,6 +24,49 @@ def _ordered_unique(items):
     return result
 
 
+def _patch_empty_choice(value):
+    if value in (None, "", "none", "None", " "):
+        return "None"
+    return str(value)
+
+
+def _patch_can_dispatch_trace_style_edit(source_trace, target_trace):
+    if not isinstance(source_trace, dict) or not isinstance(target_trace, dict):
+        return False
+    source_copy = copy.deepcopy(source_trace)
+    target_copy = copy.deepcopy(target_trace)
+    source_kwargs = dict(source_copy.pop("kwargs", {}) or {})
+    target_kwargs = dict(target_copy.pop("kwargs", {}) or {})
+    if source_copy != target_copy:
+        return False
+    changed_keys = {
+        key
+        for key in set(source_kwargs) | set(target_kwargs)
+        if source_kwargs.get(key) != target_kwargs.get(key)
+    }
+    if not changed_keys:
+        return False
+    if "label" in changed_keys and "label" not in target_kwargs:
+        return False
+    return changed_keys <= set(TRACE_STYLE_ACTION_KEYS)
+
+
+TRACE_STYLE_ACTION_KEYS = (
+    "alpha",
+    "color",
+    "drawstyle",
+    "label",
+    "linestyle",
+    "linewidth",
+    "marker",
+    "markeredgecolor",
+    "markeredgewidth",
+    "markerfacecolor",
+    "markersize",
+    "visible",
+)
+
+
 def _operand_to_python(operand):
     if operand is None:
         return None
@@ -1590,6 +1633,375 @@ def figure_ir_append_trace(figure_ir, trace):
     subplot["traces"].append(FigureIRCodec._normalize_trace(trace, trace_index))
     subplot["legend"] = len(subplot["traces"]) > 1
     return FigureIRCodec.validate_state(normalized)
+
+
+def _figure_patch_subplot(state, subplot_id):
+    normalized = FigureIRCodec.validate_state(state)
+    return FigureIRCodec._resolve_subplot(normalized, subplot_id)
+
+
+def _figure_patch_reset_color(target, default_expr):
+    return repr(target) if target is not None else default_expr
+
+
+def _figure_patch_label_lines(axis_name, source_axis_state, target_axis_state):
+    setter = "xlabel" if axis_name == "x" else "ylabel"
+    axis_obj = f"ax.{axis_name}axis"
+    source_label = source_axis_state["label"]
+    target_label = target_axis_state["label"]
+    lines = []
+    if source_label["side"] != target_label["side"]:
+        lines.append(f"{axis_obj}.set_label_position({target_label['side']!r})")
+    if source_label["text"] != target_label["text"]:
+        lines.append(f"ax.set_{setter}({target_label['text']!r})")
+    if source_label["visible"] != target_label["visible"]:
+        lines.append(f"{axis_obj}.label.set_visible({target_label['visible']!r})")
+    if source_label["color"] != target_label["color"]:
+        color_value = _figure_patch_reset_color(
+            target_label["color"],
+            "rcParams['axes.labelcolor']",
+        )
+        lines.append(
+            f"{axis_obj}.label.set_color({color_value})"
+        )
+    if source_label["rotation"] != target_label["rotation"]:
+        lines.append(
+            f"{axis_obj}.label.set_rotation({(target_label['rotation'] or 0.0)!r})"
+        )
+    if source_label["line_spacing"] != target_label["line_spacing"]:
+        lines.append(
+            f"{axis_obj}.label.set_linespacing({target_label['line_spacing']!r})"
+        )
+    if (
+        source_label["position_mode"] != target_label["position_mode"]
+        or source_label["position"] != target_label["position"]
+    ):
+        coord_name = f"_hyde_{axis_name}_label_coords"
+        lines.append(f"{coord_name} = {axis_obj}.label.get_position()")
+        if target_label["position_mode"] == "manual" and target_label["position"] is not None:
+            if axis_name == "x":
+                lines.append(
+                    f"{axis_obj}.set_label_coords({target_label['position']!r}, {coord_name}[1])"
+                )
+            else:
+                lines.append(
+                    f"{axis_obj}.set_label_coords({coord_name}[0], {target_label['position']!r})"
+                )
+        elif axis_name == "x":
+            lines.append(f"{axis_obj}.set_label_coords(0.5, {coord_name}[1])")
+        else:
+            lines.append(f"{axis_obj}.set_label_coords({coord_name}[0], 0.5)")
+    if source_label["offset"] != target_label["offset"]:
+        lines.append(f"{axis_obj}.labelpad = {target_label['offset']!r}")
+    return lines
+
+
+def _figure_patch_range_lines(axis_name, source_axis_state, target_axis_state):
+    source_range = source_axis_state["range"]
+    target_range = target_axis_state["range"]
+    if source_range == target_range:
+        return []
+    lower_name, upper_name = (
+        ("left", "right") if axis_name == "x" else ("bottom", "top")
+    )
+    setter = f"ax.set_{axis_name}lim"
+    limit_mode = target_range["limit_mode"]
+    limits = target_range["limits"]
+    lines = []
+    if (
+        limits is not None
+        and limit_mode["min"] == "manual"
+        and limit_mode["max"] == "manual"
+    ):
+        lines.append(f"{setter}({limits[0]!r}, {limits[1]!r})")
+    else:
+        lines.append(f"ax.autoscale(enable=True, axis={axis_name!r})")
+        kwargs = []
+        if limits is not None and limit_mode["min"] == "manual":
+            kwargs.append(f"{lower_name}={limits[0]!r}")
+        if limits is not None and limit_mode["max"] == "manual":
+            kwargs.append(f"{upper_name}={limits[1]!r}")
+        if kwargs:
+            lines.append(f"{setter}({', '.join(kwargs)})")
+    if source_range["reverse"] != target_range["reverse"]:
+        lines.append(
+            f"ax.{axis_name}axis.set_inverted({target_range['reverse']!r})"
+        )
+    return lines
+
+
+def _figure_patch_tick_params_lines(axis_name, source_subplot, target_subplot):
+    primary_side = _PRIMARY_SIDE[axis_name]
+    mirror_side = _MIRROR_SIDE[axis_name]
+    source_axis_state = source_subplot["axes"][axis_name]
+    target_axis_state = target_subplot["axes"][axis_name]
+    source_primary = source_subplot["axis_sides"][primary_side]
+    target_primary = target_subplot["axis_sides"][primary_side]
+    source_mirror = source_subplot["axis_sides"][mirror_side]
+    target_mirror = target_subplot["axis_sides"][mirror_side]
+    if (
+        source_primary["ticks_visible"] == target_primary["ticks_visible"]
+        and source_primary["tick_labels_visible"] == target_primary["tick_labels_visible"]
+        and source_mirror["ticks_visible"] == target_mirror["ticks_visible"]
+        and source_mirror["tick_labels_visible"] == target_mirror["tick_labels_visible"]
+        and source_axis_state["ticks"]["direction"] == target_axis_state["ticks"]["direction"]
+    ):
+        return []
+    return [
+        "ax.tick_params("
+        f"axis={axis_name!r}, "
+        "which='both', "
+        f"{primary_side}={target_primary['ticks_visible']!r}, "
+        f"label{primary_side}={target_primary['tick_labels_visible']!r}, "
+        f"{mirror_side}={target_mirror['ticks_visible']!r}, "
+        f"label{mirror_side}={target_mirror['tick_labels_visible']!r}, "
+        f"direction={{'inside': 'in', 'outside': 'out', 'both': 'inout'}}[{target_axis_state['ticks']['direction']!r}]"
+        ")"
+    ]
+
+
+def _figure_patch_spine_lines(axis_name, source_subplot, target_subplot):
+    lines = []
+    for side in (_PRIMARY_SIDE[axis_name], _MIRROR_SIDE[axis_name]):
+        source_side = source_subplot["axis_sides"][side]
+        target_side = target_subplot["axis_sides"][side]
+        if source_side["spine_visible"] != target_side["spine_visible"]:
+            lines.append(f"ax.spines[{side!r}].set_visible({target_side['spine_visible']!r})")
+        if source_side["spine_color"] != target_side["spine_color"]:
+            color_value = _figure_patch_reset_color(
+                target_side["spine_color"],
+                "rcParams['axes.edgecolor']",
+            )
+            lines.append(
+                f"ax.spines[{side!r}].set_color({color_value})"
+            )
+        if source_side["spine_width"] != target_side["spine_width"]:
+            width = (
+                "rcParams['axes.linewidth']"
+                if target_side["spine_width"] is None
+                else repr(target_side["spine_width"])
+            )
+            lines.append(f"ax.spines[{side!r}].set_linewidth({width})")
+        if source_side["offset"] != target_side["offset"]:
+            lines.append(
+                f"ax.spines[{side!r}].set_position(('outward', {float(target_side['offset'] or 0.0)!r}))"
+            )
+    return lines
+
+
+def _figure_patch_tick_locator_lines(axis_name, source_axis_state, target_axis_state):
+    if (
+        source_axis_state["ticks"] == target_axis_state["ticks"]
+        and source_axis_state["scale_mode"] == target_axis_state["scale_mode"]
+    ):
+        return []
+    axis_obj = f"ax.{axis_name}axis"
+    major = target_axis_state["ticks"]["major"]
+    lines = []
+    if major["positions"] is not None:
+        lines.append(f"{axis_obj}.set_major_locator(mticker.FixedLocator({major['positions']!r}))")
+        if major["labels"] is not None:
+            lines.append(f"{axis_obj}.set_major_formatter(mticker.FixedFormatter({major['labels']!r}))")
+        else:
+            lines.append(f"{axis_obj}.set_major_formatter(mticker.ScalarFormatter())")
+    elif major["mode"] == "manual" and major["step"] is not None:
+        lines.append(f"{axis_obj}.set_major_locator(mticker.MultipleLocator({major['step']!r}))")
+        lines.append(f"{axis_obj}.set_major_formatter(mticker.ScalarFormatter())")
+    elif major["count"] is not None:
+        lines.append(f"{axis_obj}.set_major_locator(mticker.MaxNLocator(nbins={major['count']!r}))")
+        lines.append(f"{axis_obj}.set_major_formatter(mticker.ScalarFormatter())")
+    else:
+        lines.append(f"{axis_obj}.set_major_locator(mticker.AutoLocator())")
+        lines.append(f"{axis_obj}.set_major_formatter(mticker.ScalarFormatter())")
+    if target_axis_state["ticks"]["minor"]["visible"]:
+        if target_axis_state["scale_mode"] in {"log", "log2"}:
+            base = 2 if target_axis_state["scale_mode"] == "log2" else 10
+            lines.append(f"{axis_obj}.set_minor_locator(mticker.LogLocator(base={base!r}, subs='auto'))")
+        else:
+            lines.append(f"{axis_obj}.set_minor_locator(mticker.AutoMinorLocator())")
+    else:
+        lines.append(f"{axis_obj}.set_minor_locator(mticker.NullLocator())")
+    return lines
+
+
+def _figure_patch_tick_label_style_lines(axis_name, source_subplot, target_subplot):
+    axis_obj = f"ax.{axis_name}axis"
+    default_color_expr = f"rcParams['{axis_name}tick.color']"
+    lines = []
+    for side, label_attr in ((_PRIMARY_SIDE[axis_name], "label1"), (_MIRROR_SIDE[axis_name], "label2")):
+        source_side = source_subplot["axis_sides"][side]
+        target_side = target_subplot["axis_sides"][side]
+        color_changed = source_side["tick_label_color"] != target_side["tick_label_color"]
+        rotation_changed = source_side["tick_label_rotation"] != target_side["tick_label_rotation"]
+        if not color_changed and not rotation_changed:
+            continue
+        lines.append(f"for _hyde_tick in {axis_obj}.get_major_ticks() + {axis_obj}.get_minor_ticks():")
+        if color_changed:
+            color_value = _figure_patch_reset_color(target_side["tick_label_color"], default_color_expr)
+            lines.append(f"    _hyde_tick.{label_attr}.set_color({color_value})")
+        if rotation_changed:
+            lines.append(f"    _hyde_tick.{label_attr}.set_rotation({target_side['tick_label_rotation']!r})")
+    return lines
+
+
+def _figure_patch_grid_lines(axis_name, source_axis_state, target_axis_state):
+    source_grid = source_axis_state["grid"]
+    target_grid = target_axis_state["grid"]
+    if source_grid == target_grid:
+        return []
+    if not target_grid["visible"]:
+        return [f"ax.grid(False, axis={axis_name!r}, which='both')"]
+    arguments = [
+        "True",
+        f"axis={axis_name!r}",
+        f"which={target_grid['which']!r}",
+        f"linestyle={target_grid['linestyle']!r}",
+    ]
+    if target_grid["linewidth"] is not None:
+        arguments.append(f"linewidth={target_grid['linewidth']!r}")
+    if target_grid["color"] is not None:
+        arguments.append(f"color={target_grid['color']!r}")
+    return [f"ax.grid({', '.join(arguments)})"]
+
+
+def _figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state):
+    source_zero = source_axis_state["zero_line"]
+    target_zero = target_axis_state["zero_line"]
+    if source_zero == target_zero:
+        return []
+    role = f"{axis_name}_zero_line"
+    call = "axvline" if axis_name == "x" else "axhline"
+    lines = [
+        "for _hyde_line in list(ax.lines):",
+        f"    if getattr(_hyde_line, '_hyde_semantic_role', None) == {role!r}:",
+        "        _hyde_line.remove()",
+    ]
+    if target_zero["visible"]:
+        arguments = ["0", f"linestyle={target_zero['linestyle']!r}"]
+        if target_zero["linewidth"] is not None:
+            arguments.append(f"linewidth={target_zero['linewidth']!r}")
+        if target_zero["color"] is not None:
+            arguments.append(f"color={target_zero['color']!r}")
+        lines.append(f"ax.{call}({', '.join(arguments)})")
+    return lines
+
+
+def _figure_patch_trace_lines(source_trace, target_trace, *, trace_index):
+    if not _patch_can_dispatch_trace_style_edit(source_trace, target_trace):
+        return []
+    source_kwargs = dict(source_trace.get("kwargs", {}) or {})
+    target_kwargs = dict(target_trace.get("kwargs", {}) or {})
+    changed_keys = [
+        key
+        for key in TRACE_STYLE_ACTION_KEYS
+        if source_kwargs.get(key) != target_kwargs.get(key)
+    ]
+    if not changed_keys:
+        return []
+    lines = [f"line = ax.lines[{int(trace_index)}]"]
+    setter_lines = {
+        "visible": lambda value: f"line.set_visible({bool(value)!r})",
+        "alpha": lambda value: f"line.set_alpha({value!r})",
+        "color": lambda value: f"line.set_color({value!r})",
+        "drawstyle": lambda value: f"line.set_drawstyle({value!r})",
+        "marker": lambda value: f"line.set_marker({_patch_empty_choice(value)!r})",
+        "markersize": lambda value: f"line.set_markersize({value!r})",
+        "markerfacecolor": lambda value: f"line.set_markerfacecolor({value!r})",
+        "markeredgecolor": lambda value: f"line.set_markeredgecolor({value!r})",
+        "markeredgewidth": lambda value: f"line.set_markeredgewidth({value!r})",
+        "linestyle": lambda value: f"line.set_linestyle({_patch_empty_choice(value)!r})",
+        "linewidth": lambda value: f"line.set_linewidth({value!r})",
+        "label": lambda value: f"line.set_label({value!r})",
+    }
+    for key in changed_keys:
+        lines.append(setter_lines[key](target_kwargs.get(key)))
+    return lines
+
+
+def figure_patch_source(source_state, target_state, *, figure_name):
+    source = FigureIRCodec.validate_state(source_state)
+    target = FigureIRCodec.validate_state(target_state)
+    source_subplot = _figure_patch_subplot(source, None)
+    target_subplot = _figure_patch_subplot(target, None)
+    lines = []
+    needs_ticker = False
+
+    changed_margins = [
+        side
+        for side in ("left", "bottom", "right", "top")
+        if source_subplot["margins"].get(side) != target_subplot["margins"].get(side)
+    ]
+    if changed_margins:
+        kwargs = [
+            f"{side}={target_subplot['margins'].get(side)!r}"
+            for side in changed_margins
+        ]
+        lines.append(f"fig.subplots_adjust({', '.join(kwargs)})")
+
+    source_draw_on_top = any(
+        side_state["draw_on_top"] for side_state in source_subplot["axis_sides"].values()
+    )
+    target_draw_on_top = any(
+        side_state["draw_on_top"] for side_state in target_subplot["axis_sides"].values()
+    )
+    if source_draw_on_top != target_draw_on_top:
+        lines.append(f"ax.set_axisbelow({(not target_draw_on_top)!r})")
+
+    for axis_name in ("x", "y"):
+        source_axis_state = source_subplot["axes"][axis_name]
+        target_axis_state = target_subplot["axes"][axis_name]
+        if source_axis_state["scale_mode"] != target_axis_state["scale_mode"]:
+            if target_axis_state["scale_mode"] == "linear":
+                lines.append(f"ax.set_{axis_name}scale('linear')")
+            elif target_axis_state["scale_mode"] == "log":
+                lines.append(f"ax.set_{axis_name}scale('log')")
+            else:
+                lines.append(f"ax.set_{axis_name}scale('log', base=2)")
+        lines.extend(_figure_patch_label_lines(axis_name, source_axis_state, target_axis_state))
+        lines.extend(_figure_patch_range_lines(axis_name, source_axis_state, target_axis_state))
+        tick_param_lines = _figure_patch_tick_params_lines(axis_name, source_subplot, target_subplot)
+        lines.extend(tick_param_lines)
+        lines.extend(_figure_patch_spine_lines(axis_name, source_subplot, target_subplot))
+        locator_lines = _figure_patch_tick_locator_lines(axis_name, source_axis_state, target_axis_state)
+        if locator_lines:
+            needs_ticker = True
+            lines.extend(locator_lines)
+        lines.extend(_figure_patch_tick_label_style_lines(axis_name, source_subplot, target_subplot))
+        lines.extend(_figure_patch_grid_lines(axis_name, source_axis_state, target_axis_state))
+        lines.extend(_figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state))
+
+    trace_lines = []
+    refresh_legend = False
+    source_traces = {trace["id"]: trace for trace in source_subplot.get("traces", [])}
+    for index, target_trace in enumerate(target_subplot.get("traces", [])):
+        source_trace = source_traces.get(target_trace["id"])
+        lowered = _figure_patch_trace_lines(
+            source_trace,
+            target_trace,
+            trace_index=index,
+        )
+        if lowered:
+            refresh_legend = True
+            trace_lines.extend(lowered)
+    lines.extend(trace_lines)
+    if refresh_legend:
+        lines.append("if ax.get_legend() is not None:")
+        lines.append("    ax.legend()")
+    if not lines:
+        return ""
+
+    prelude = ["import hyde"]
+    if needs_ticker:
+        prelude.append("import matplotlib.ticker as mticker")
+    if any("rcParams[" in line for line in lines):
+        prelude.append("from matplotlib import rcParams")
+    prelude.extend(
+        [
+            f"fig = hyde.get_figure({str(figure_name)!r})",
+            "ax = fig.axes[0]",
+        ]
+    )
+    return "\n".join(prelude + lines + ["fig.canvas.draw_idle()"])
 
 
 def operand_from_runtime_value(value, named_values=None):

@@ -34,6 +34,10 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Dirty first-class figures resync from the live matplotlib object graph and stay live
   when unsupported structure is imported.
 - Unsupported imported live structure is surfaced in figure-window chrome.
+- Axis and trace dialogs now mutate first-class figures through hidden matplotlib
+  patch Python routed over Hyde's standard hidden-command execution/logging path.
+- Curve Fit attached-display figure mutation still uses the older semantic figure edit
+  path pending the next cleanup slice.
 - For detailed figure ownership and transport rules, see `ARCHITECTURE.md`.
 
 ### Curve Fit

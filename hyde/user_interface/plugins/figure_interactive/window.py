@@ -471,7 +471,7 @@ class FigureWindow(HydeInteractiveWidget):
         return self.services.get("figure_action_service") is not None
 
     def is_editable_figure_ready(self):
-        return self.has_figure_ir() and self.can_request_figure_actions()
+        return self.has_figure_ir()
 
     def open_edit_session(self):
         if not self.is_editable_figure_ready():

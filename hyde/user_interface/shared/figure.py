@@ -746,6 +746,9 @@ class EditableFigureContext:
         self.figure_number = int(figure_window.figure_number)
         self._figure_window = figure_window
 
+    def figure_name(self):
+        return str(self._figure_window.snapshot_state.default_macro_name())
+
     def open_session(self):
         return self._figure_window.open_edit_session()
 
@@ -901,6 +904,24 @@ class FigureEditSession:
 
     def python_source(self):
         return self.preview_source()
+
+    def opening_effective_state(self):
+        return figure_ir_with_defaults(
+            self._dispatch_state(
+                self._opening_state,
+                self._opening_trace_style_states,
+            ),
+            self._figure_defaults,
+        )
+
+    def current_effective_state(self):
+        return figure_ir_with_defaults(
+            self._dispatch_state(
+                self._current_state,
+                self._current_trace_style_states,
+            ),
+            self._figure_defaults,
+        )
 
     def set_figure_title(self, title, *, subplot_id=None):
         return self._update_current_state(

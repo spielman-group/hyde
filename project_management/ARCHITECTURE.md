@@ -4,9 +4,10 @@
 1. The GUI may hold UI state, never authoritative scientific state.
 2. The kernel is authoritative for namespace objects, live figures, and any Hyde-owned
    state that must stay scientifically correct.
-3. GUI actions normally emit explicit Python strings. The main exception is routine
-   first-class figure editing, which uses semantic Jupyter `comm` actions against
-   kernel-owned figure IR.
+3. GUI actions normally emit explicit Python strings. First-class figure transport is
+   mid-migration: axis and trace dialogs now emit explicit matplotlib patch Python,
+   while Curve Fit attached-display figure edits still use semantic Jupyter `comm`
+   actions against kernel-owned figure IR until that path is migrated.
 4. Use the narrowest existing transport that fits the feature. Prefer standard Jupyter
    execution/comms over Hyde-specific relays.
 
@@ -144,12 +145,17 @@ when a project is loaded.
 - Unsupported live figure structure does not eject the figure from Hyde; Hyde keeps
   the supported subset in `fig._hyde_ir`, keeps the figure window live, and marks the
   window `[Unsupported Feature]`.
-- Routine GUI edits are semantic `comm` actions, not GUI-generated matplotlib source.
+- Axis and trace dialogs emit hidden matplotlib patch Python using
+  `hyde.get_figure(...)`, and those hidden commands flow through Hyde's ordinary
+  hidden-command logging path.
+- Curve Fit attached-display figure mutation still uses the figure edit session /
+  semantic `comm` path until that migration completes.
 - Consumer plugins edit first-class figures through the figure-owned
   `EditableFigureContext.open_session()` boundary exported by
   `figure_interactive`.
 - That figure edit session owns draft/revert lifecycle, preview/source generation,
-  semantic figure-action construction, live apply, commit, and revert.
+  semantic figure-action construction, live apply, commit, and revert where the
+  remaining semantic edit path is still in use.
 - Consumer dialogs do not use raw `figure_ir` dictionaries or raw figure-action
   payloads as their working contract.
 - Saved graph macros and `session.py` restore source both lower from figure IR.

@@ -3,7 +3,8 @@
 This document defines Hyde's GUI-side control pattern for command-emitting features.
 
 Across Hyde, `IR` means feature-specific internal representation/internal state that can
-lower to standard Python or, for first-class figures, support semantic `comm` actions.
+lower to standard Python or, for the remaining first-class figure edit path, support
+semantic `comm` actions.
 It is not automatically kernel-owned. Ownership depends on the feature:
 
 - table IR/state is GUI-owned long enough to generate commands and recreation source
@@ -122,6 +123,8 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
   `MutationCodec` rather than being table-local.
 - Trivial visible project commands may share a lightweight command codec.
 - Figure creation surfaces use `FigureState` for GUI-side creation state.
+- Figure axis and trace dialogs now emit matplotlib patch Python rather than using the
+  semantic figure-action transport.
 - Runtime transport and feature-specific figure behavior belong in
   `ARCHITECTURE.md`, not in this generic control-pattern document.
 
