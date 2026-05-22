@@ -159,6 +159,9 @@ when a project is loaded.
 - Shell infrastructure lives under `hyde.user_interface.main`.
 - Shared plugin helpers live in `hyde.user_interface.plugin_tools`.
 - Only plugin packages are discovered by the plugin manager.
+- Static dialog and tool-window layout structure should live in `.ui` files by
+  default. Python should mainly load those `.ui` artifacts, wire signals, populate
+  dynamic content, and host truly runtime-specific widgets.
 - UI plugins that need Jupyter execution or metadata consume the runtime-owned shared
   services directly rather than reaching through shell wrappers or other widgets.
 - Shared UI helpers should stay transport- or shell-level. Feature-specific support

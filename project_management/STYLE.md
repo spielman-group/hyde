@@ -16,6 +16,13 @@
 - GUI code may hold only transient state needed to generate commands or render UI.
 
 ## UI Conventions
+- For Hyde-authored dialogs and tool-window bodies, prefer `.ui` files for static
+  structure. Python should normally supply signal wiring, state synchronization,
+  dynamic row/item creation, and runtime-only widgets rather than assembling large
+  static layout trees in code.
+- Treat code-built widget trees as exceptions that need a concrete reason, such as a
+  third-party runtime widget or a layout that is materially impossible or misleading
+  to express in Qt Designer.
 - For color selection, prefer the shared matplotlib-aware color picker in
   `hyde.user_interface.matplotlib_color_picker`.
 - New Hyde color-entry surfaces should normally use `MatplotlibColorDialog` and/or

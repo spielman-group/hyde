@@ -49,6 +49,8 @@ Simplify aggressively when you see:
 - repeated call-site logic that would become shorter and clearer with one small domain wrapper
 - new abstractions without repeated call sites
 - broad refactors mixed into a narrow task
+- large static dialog or tool-window layouts assembled in Python instead of being moved
+  into `.ui` files
 - extra state variables, flags, or policy branches
 - GUI-side behavior that should be a command string plus kernel-owned execution
 - separate GUI and non-GUI implementations of the same user-visible behavior
@@ -60,6 +62,7 @@ Ask these questions explicitly:
 
 - What is the smallest clear change that satisfies the request?
 - Can this be done inside an existing function or module instead of a new helper?
+- Should this static UI structure live in a `.ui` file instead of Python code?
 - Can an existing queue, thread, IPC path, or public command carry this behavior?
 - Is the GUI doing anything beyond collecting UI state, generating a command string, and reacting to kernel results?
 - Has the patch created two implementation paths where Hyde should have one?

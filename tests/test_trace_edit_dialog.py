@@ -330,7 +330,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
         dialog = TraceAppearanceDialog(figure_context, parent=mdi_area)
         try:
             sent.clear()
-            dialog.hide_trace_checkbox.setChecked(True)
+            dialog.ui.hide_trace_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
 
             self.assertTrue(sent)
@@ -361,16 +361,22 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(figure, parent=mdi_area)
         try:
-            self.assertEqual(dialog.trace_list.count(), 2)
-            self.assertEqual(dialog.trace_list.currentItem().text(), "trace_a")
-            self.assertEqual(dialog.line_color_edit.text(), "#123456")
-            self.assertEqual(dialog.marker_face_color_edit.text(), "auto")
-            self.assertEqual(dialog.marker_face_color_edit.swatch_color_text(), "#123456")
-            self.assertEqual(dialog.marker_edge_color_edit.swatch_color_text(), "#123456")
-            self.assertEqual(dialog.line_style_combo.currentData(), "--")
-            self.assertEqual(dialog.line_width_spin.value(), 2.5)
-            self.assertEqual(dialog.marker_combo.currentData(), "s")
-            self.assertEqual(dialog.mode_combo.currentData(), "lines+markers")
+            self.assertEqual(dialog.ui.trace_list.count(), 2)
+            self.assertEqual(dialog.ui.trace_list.currentItem().text(), "trace_a")
+            self.assertEqual(dialog.ui.line_color_edit.text(), "#123456")
+            self.assertEqual(dialog.ui.marker_face_color_edit.text(), "auto")
+            self.assertEqual(
+                dialog.ui.marker_face_color_edit.swatch_color_text(),
+                "#123456",
+            )
+            self.assertEqual(
+                dialog.ui.marker_edge_color_edit.swatch_color_text(),
+                "#123456",
+            )
+            self.assertEqual(dialog.ui.line_style_combo.currentData(), "--")
+            self.assertEqual(dialog.ui.line_width_spin.value(), 2.5)
+            self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
+            self.assertEqual(dialog.ui.mode_combo.currentData(), "lines+markers")
         finally:
             dialog.close()
 
@@ -433,12 +439,12 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(figure, parent=mdi_area)
         try:
-            self.assertEqual(dialog.line_color_edit.text(), "#445566")
-            self.assertEqual(dialog.line_width_spin.value(), 4.0)
-            self.assertEqual(dialog.marker_size_spin.value(), 9.0)
-            self.assertEqual(dialog.line_style_combo.currentData(), "None")
-            self.assertEqual(dialog.marker_combo.currentData(), "s")
-            self.assertEqual(dialog.mode_combo.currentData(), "markers")
+            self.assertEqual(dialog.ui.line_color_edit.text(), "#445566")
+            self.assertEqual(dialog.ui.line_width_spin.value(), 4.0)
+            self.assertEqual(dialog.ui.marker_size_spin.value(), 9.0)
+            self.assertEqual(dialog.ui.line_style_combo.currentData(), "None")
+            self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
+            self.assertEqual(dialog.ui.mode_combo.currentData(), "markers")
         finally:
             dialog.close()
 
@@ -457,9 +463,11 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(figure, parent=mdi_area)
         try:
-            dialog.line_color_edit.setText("#abcdef")
-            dialog.line_color_edit.editingFinished.emit()
-            dialog.mode_combo.setCurrentIndex(dialog.mode_combo.findData("markers"))
+            dialog.ui.line_color_edit.setText("#abcdef")
+            dialog.ui.line_color_edit.editingFinished.emit()
+            dialog.ui.mode_combo.setCurrentIndex(
+                dialog.ui.mode_combo.findData("markers")
+            )
         finally:
             dialog.close()
 
@@ -486,8 +494,8 @@ class TestTraceAppearanceDialog(unittest.TestCase):
                 ),
             ],
         )
-        self.assertEqual(dialog.line_style_combo.currentData(), "None")
-        self.assertEqual(dialog.marker_combo.currentData(), "s")
+        self.assertEqual(dialog.ui.line_style_combo.currentData(), "None")
+        self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
 
     def test_dialog_accepts_named_matplotlib_line_color(self):
         sent = []
@@ -504,10 +512,13 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(figure, parent=mdi_area)
         try:
-            dialog.line_color_edit.setText("green")
-            dialog.line_color_edit.editingFinished.emit()
-            self.assertEqual(dialog.line_color_edit.text(), "#008000")
-            self.assertEqual(dialog.marker_face_color_edit.swatch_color_text(), "#008000")
+            dialog.ui.line_color_edit.setText("green")
+            dialog.ui.line_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.ui.line_color_edit.text(), "#008000")
+            self.assertEqual(
+                dialog.ui.marker_face_color_edit.swatch_color_text(),
+                "#008000",
+            )
         finally:
             dialog.close()
 
@@ -539,9 +550,9 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(figure, parent=mdi_area)
         try:
-            dialog.line_color_edit.setText("not-a-color")
-            dialog.line_color_edit.editingFinished.emit()
-            self.assertEqual(dialog.line_color_edit.text(), "#123456")
+            dialog.ui.line_color_edit.setText("not-a-color")
+            dialog.ui.line_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.ui.line_color_edit.text(), "#123456")
         finally:
             dialog.close()
 
@@ -562,9 +573,11 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(figure, parent=mdi_area)
         try:
-            dialog.line_width_spin.setValue(4.0)
-            dialog.trace_list.setCurrentRow(1)
-            dialog.marker_combo.setCurrentIndex(dialog.marker_combo.findData("^"))
+            dialog.ui.line_width_spin.setValue(4.0)
+            dialog.ui.trace_list.setCurrentRow(1)
+            dialog.ui.marker_combo.setCurrentIndex(
+                dialog.ui.marker_combo.findData("^")
+            )
             dialog.reject()
         finally:
             dialog.close()
@@ -652,7 +665,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(figure, parent=mdi_area)
         try:
-            dialog.line_width_spin.setValue(4.0)
+            dialog.ui.line_width_spin.setValue(4.0)
             dialog.accept()
         finally:
             dialog.close()

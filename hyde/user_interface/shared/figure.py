@@ -482,6 +482,23 @@ class MatplotlibColorLineEdit(QtWidgets.QLineEdit):
             "}"
         )
 
+    def getAllowAuto(self):
+        return bool(self._allow_auto)
+
+    def setAllowAuto(self, allow_auto):
+        self._allow_auto = bool(allow_auto)
+        self._commit_current_text()
+
+    def getAllowEmpty(self):
+        return bool(self._allow_empty)
+
+    def setAllowEmpty(self, allow_empty):
+        self._allow_empty = bool(allow_empty)
+        self._commit_current_text()
+
+    allowAuto = QtCore.pyqtProperty(bool, fget=getAllowAuto, fset=setAllowAuto)
+    allowEmpty = QtCore.pyqtProperty(bool, fget=getAllowEmpty, fset=setAllowEmpty)
+
 
 COMM_TARGET = "hyde_figure"
 LOGGER = logging.getLogger("hyde")

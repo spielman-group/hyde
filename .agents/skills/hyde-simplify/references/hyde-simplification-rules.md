@@ -25,6 +25,8 @@ Bias toward:
 - explicit command strings instead of helper indirection
 - reuse of existing queues, threads, relays, and public commands
 - concise contract-focused tests
+- static plugin dialog/window structure living in `.ui` files rather than Python-built
+  layout trees
 
 Bias against:
 
@@ -34,6 +36,7 @@ Bias against:
 - invented policy or defensive behavior
 - speculative infrastructure
 - compatibility shims
+- hand-built static widget trees in Python where a `.ui` file should own the layout
 - tests that depend on internal choreography
 
 ## 1. Find The Irreducible Requirement

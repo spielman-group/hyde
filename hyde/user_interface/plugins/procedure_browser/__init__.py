@@ -1,8 +1,8 @@
 import os
 from qtutils.qt.QtCore import QUrl
-from qtutils.qt.QtWidgets import QWidget, QVBoxLayout, QTreeView, QFileSystemModel
+from qtutils.qt.QtWidgets import QWidget, QFileSystemModel
 from qtutils.qt.QtGui import QDesktopServices
-from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.base_hyde_widgets import HydeToolWidget, load_ui_for_owner
 from hyde.user_interface.shared.plugin import HydeToolWindowPlugin
 
 
@@ -10,30 +10,22 @@ class ProcedureBrowser(HydeToolWidget):
     def __init__(self, procedures_dir, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setWindowTitle("Procedures")
-        content = QWidget()
-        self.layout = QVBoxLayout(content)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        content = load_ui_for_owner(
+            QWidget(self),
+            "procedure_browser.ui",
+            module_name=__name__,
+        )
+        self.mount_child_widget(content)
 
-        # File System Model configured for the procedures directory
         self.model = QFileSystemModel()
-        # Filters: only files (no dirs in top level for now), only .py files
         self.model.setNameFilters(["*.py"])
         self.model.setNameFilterDisables(False)
-        
-        # Tree View setup
-        self.tree_view = QTreeView()
+        self.tree_view = content.treeView
         self.tree_view.setModel(self.model)
-        
-        # UI Polish: Hide unnecessary columns (Size, Type, Date)
         self.tree_view.setColumnHidden(1, True)
         self.tree_view.setColumnHidden(2, True)
         self.tree_view.setColumnHidden(3, True)
-        self.tree_view.header().hide()
-        
         self.tree_view.doubleClicked.connect(self.on_double_click)
-
-        self.layout.addWidget(self.tree_view)
-        self.mount_child_widget(content)
         self.set_procedures_dir(procedures_dir)
 
     def set_procedures_dir(self, procedures_dir):

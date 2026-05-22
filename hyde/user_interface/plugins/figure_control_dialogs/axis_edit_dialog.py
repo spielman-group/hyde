@@ -77,6 +77,29 @@ AUTOSCALE_CHOICES = [
     ("Tight", "tight"),
 ]
 
+AXIS_DIALOG_COMBO_SPECS = (
+    ("axis_selector", AXIS_SIDE_CHOICES),
+    ("axis_mode_combo", AXIS_MODE_CHOICES),
+    ("log_tick_mode_combo", LOG_TICK_MODE_CHOICES),
+    ("major_tick_mode_combo", (("Auto", "auto"), ("Manual Step", "manual"))),
+    ("formatter_style_combo", FORMATTER_STYLE_CHOICES),
+    ("tick_direction_combo", TICK_DIRECTION_CHOICES),
+    ("grid_which_combo", GRID_WHICH_CHOICES),
+    ("grid_style_combo", LINE_STYLE_CHOICES),
+    ("label_side_combo", LABEL_SIDE_CHOICES),
+    ("label_position_mode_combo", LABEL_POSITION_MODE_CHOICES),
+    ("autoscale_combo", AUTOSCALE_CHOICES),
+    ("zero_line_style_combo", LINE_STYLE_CHOICES),
+)
+
+AXIS_DIALOG_COLOR_FIELD_SPECS = (
+    ("side_color_container", "side_color_edit"),
+    ("axis_label_color_container", "axis_label_color_edit"),
+    ("tick_label_color_container", "tick_label_color_edit"),
+    ("grid_color_container", "grid_color_edit"),
+    ("zero_line_color_container", "zero_line_color_edit"),
+)
+
 
 def _format_optional_number(value):
     if value is None:
@@ -233,433 +256,123 @@ class AxisEditDialog(HydeDialogWidget):
             ),
             revert_state=self._original_figure_ir,
         )
-        self._build_ui()
+        self.load_ui("axis_edit_dialog.ui", module_name=__name__)
+        self._install_color_fields()
+        self._populate_choice_controls()
+        self._wire_signals()
         self._apply_initial_dialog_size()
         self._load_initial_axis()
 
-    def _build_ui(self):
-        content = QtWidgets.QWidget(self)
-        layout = QtWidgets.QVBoxLayout(content)
+    def _install_color_fields(self):
+        for container_name, attr_name in AXIS_DIALOG_COLOR_FIELD_SPECS:
+            container = getattr(self.ui, container_name)
+            widget = MatplotlibColorLineEdit(container)
+            layout = container.layout()
+            if layout is None:
+                layout = QtWidgets.QHBoxLayout(container)
+                layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(widget)
+            setattr(self.ui, attr_name, widget)
 
-        header_layout = QtWidgets.QHBoxLayout()
-        layout.addLayout(header_layout)
+    def _populate_choice_controls(self):
+        for name, choices in AXIS_DIALOG_COMBO_SPECS:
+            combo = getattr(self.ui, name)
+            combo.clear()
+            for label, value in choices:
+                combo.addItem(label, value)
 
-        header_layout.addWidget(QtWidgets.QLabel("Axis", self))
-        self.axis_selector = QtWidgets.QComboBox(self)
-        for label, value in AXIS_SIDE_CHOICES:
-            self.axis_selector.addItem(label, value)
-        self.axis_selector.currentIndexChanged.connect(self._on_axis_side_changed)
-        header_layout.addWidget(self.axis_selector)
+    def _wire_signals(self):
+        self.ui.axis_selector.currentIndexChanged.connect(self._on_axis_side_changed)
+        self.ui.live_update_checkbox.toggled.connect(self._on_live_update_toggled)
 
-        header_layout.addStretch(1)
-        self.live_update_checkbox = QtWidgets.QCheckBox("Live Update", self)
-        self.live_update_checkbox.setChecked(True)
-        self.live_update_checkbox.toggled.connect(self._on_live_update_toggled)
-        header_layout.addWidget(self.live_update_checkbox)
+        for name in (
+            "axis_mode_combo",
+            "log_tick_mode_combo",
+            "major_tick_mode_combo",
+            "formatter_style_combo",
+            "tick_direction_combo",
+            "grid_which_combo",
+            "grid_style_combo",
+            "label_side_combo",
+            "label_position_mode_combo",
+            "autoscale_combo",
+            "zero_line_style_combo",
+        ):
+            getattr(self.ui, name).currentIndexChanged.connect(self._on_controls_changed)
 
-        self.tab_widget = QtWidgets.QTabWidget(self)
-        layout.addWidget(self.tab_widget, 1)
+        for name in (
+            "side_visible_checkbox",
+            "side_ticks_checkbox",
+            "side_tick_labels_checkbox",
+            "draw_on_top_checkbox",
+            "minor_ticks_checkbox",
+            "grid_visible_checkbox",
+            "zero_line_visible_checkbox",
+            "use_thousands_separator_checkbox",
+            "zero_as_zero_checkbox",
+            "trim_trailing_zeros_checkbox",
+            "trim_leading_zero_checkbox",
+            "prefer_exponent_checkbox",
+            "label_visible_checkbox",
+            "minimum_auto_checkbox",
+            "maximum_auto_checkbox",
+            "reverse_axis_checkbox",
+        ):
+            getattr(self.ui, name).toggled.connect(self._on_controls_changed)
 
-        self._build_axis_tab()
-        self._build_auto_ticks_tab()
-        self._build_ticks_grids_tab()
-        self._build_tick_options_tab()
-        self._build_axis_label_tab()
-        self._build_label_options_tab()
-        self._build_range_tab()
-        self.mount_content_widget(content)
+        for name in (
+            "side_line_width_spin",
+            "side_offset_spin",
+            "spine_offset_spin",
+            "major_tick_count_spin",
+            "major_tick_step_spin",
+            "low_trip_spin",
+            "high_trip_spin",
+            "exponent_prescale_spin",
+            "grid_width_spin",
+            "zero_line_width_spin",
+            "max_log_cycles_minor_spin",
+            "max_log_cycles_minor_labels_spin",
+            "line_spacing_spin",
+            "label_rotation_spin",
+            "label_position_spin",
+            "label_offset_spin",
+            "tick_label_rotation_spin",
+            "tick_label_offset_spin",
+        ):
+            getattr(self.ui, name).valueChanged.connect(self._on_controls_changed)
+
+        for name in (
+            "major_tick_positions_edit",
+            "major_tick_labels_edit",
+            "display_range_min_edit",
+            "display_range_max_edit",
+            "suppressed_values_edit",
+            "axis_label_edit",
+            "minimum_edit",
+            "maximum_edit",
+        ):
+            getattr(self.ui, name).editingFinished.connect(self._on_controls_changed)
+
+        for name in (
+            "side_color_edit",
+            "axis_label_color_edit",
+            "tick_label_color_edit",
+            "grid_color_edit",
+            "zero_line_color_edit",
+        ):
+            getattr(self.ui, name).editingFinished.connect(self._on_controls_changed)
+
+        self.ui.set_auto_ticks_button.clicked.connect(self._set_auto_tick_values)
+        self.ui.expand_range_button.clicked.connect(self._expand_range)
+        self.ui.swap_range_button.clicked.connect(self._swap_range)
+        self.ui.set_autoscale_values_button.clicked.connect(self._set_autoscale_values)
 
     def _apply_initial_dialog_size(self):
-        tab_bar_width = self.tab_widget.tabBar().sizeHint().width()
+        tab_bar_width = self.ui.tab_widget.tabBar().sizeHint().width()
         target_width = max(self.sizeHint().width(), tab_bar_width + 48)
         self.setMinimumWidth(target_width)
         self.resize(target_width, max(self.height(), self.sizeHint().height()))
-
-    def _build_axis_tab(self):
-        axis_tab = QtWidgets.QWidget(self)
-        form = QtWidgets.QFormLayout(axis_tab)
-
-        self.axis_mode_combo = QtWidgets.QComboBox(axis_tab)
-        for label, value in AXIS_MODE_CHOICES:
-            self.axis_mode_combo.addItem(label, value)
-        self.axis_mode_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Axis mode", self.axis_mode_combo)
-
-        self.log_tick_mode_combo = QtWidgets.QComboBox(axis_tab)
-        for label, value in LOG_TICK_MODE_CHOICES:
-            self.log_tick_mode_combo.addItem(label, value)
-        self.log_tick_mode_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Log ticks", self.log_tick_mode_combo)
-
-        self.side_visible_checkbox = QtWidgets.QCheckBox("Show axis line", axis_tab)
-        self.side_visible_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Axis line", self.side_visible_checkbox)
-
-        self.side_ticks_checkbox = QtWidgets.QCheckBox("Show ticks", axis_tab)
-        self.side_ticks_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Ticks", self.side_ticks_checkbox)
-
-        self.side_tick_labels_checkbox = QtWidgets.QCheckBox(
-            "Show tick labels",
-            axis_tab,
-        )
-        self.side_tick_labels_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Tick labels", self.side_tick_labels_checkbox)
-
-        self.side_line_width_spin = QtWidgets.QDoubleSpinBox(axis_tab)
-        self.side_line_width_spin.setRange(0.0, 99.0)
-        self.side_line_width_spin.setSingleStep(0.1)
-        self.side_line_width_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Line width", self.side_line_width_spin)
-
-        self.side_offset_spin = QtWidgets.QDoubleSpinBox(axis_tab)
-        self.side_offset_spin.setRange(0.0, 1.0)
-        self.side_offset_spin.setDecimals(3)
-        self.side_offset_spin.setSingleStep(0.01)
-        self.side_offset_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Shift axis", self.side_offset_spin)
-
-        self.spine_offset_spin = QtWidgets.QDoubleSpinBox(axis_tab)
-        self.spine_offset_spin.setRange(-999.0, 999.0)
-        self.spine_offset_spin.setDecimals(1)
-        self.spine_offset_spin.setSingleStep(1.0)
-        self.spine_offset_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Offset axis", self.spine_offset_spin)
-
-        self.draw_on_top_checkbox = QtWidgets.QCheckBox(
-            "Draw on top of traces",
-            axis_tab,
-        )
-        self.draw_on_top_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Z order", self.draw_on_top_checkbox)
-
-        self.side_color_edit = MatplotlibColorLineEdit(axis_tab)
-        self.side_color_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Axis color", self.side_color_edit)
-
-        self.axis_label_color_edit = MatplotlibColorLineEdit(axis_tab)
-        self.axis_label_color_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Label color", self.axis_label_color_edit)
-
-        self.tick_label_color_edit = MatplotlibColorLineEdit(axis_tab)
-        self.tick_label_color_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Tick label color", self.tick_label_color_edit)
-
-        self.tab_widget.addTab(axis_tab, AXIS_TAB_TITLES[0])
-
-    def _build_auto_ticks_tab(self):
-        auto_ticks_tab = QtWidgets.QWidget(self)
-        form = QtWidgets.QFormLayout(auto_ticks_tab)
-
-        self.major_tick_mode_combo = QtWidgets.QComboBox(auto_ticks_tab)
-        self.major_tick_mode_combo.addItem("Auto", "auto")
-        self.major_tick_mode_combo.addItem("Manual Step", "manual")
-        self.major_tick_mode_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Major ticks", self.major_tick_mode_combo)
-
-        self.major_tick_count_spin = QtWidgets.QSpinBox(auto_ticks_tab)
-        self.major_tick_count_spin.setRange(0, 50)
-        self.major_tick_count_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Approx. count", self.major_tick_count_spin)
-
-        self.major_tick_step_spin = QtWidgets.QDoubleSpinBox(auto_ticks_tab)
-        self.major_tick_step_spin.setRange(0.0, 999999.0)
-        self.major_tick_step_spin.setSingleStep(0.1)
-        self.major_tick_step_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Manual step", self.major_tick_step_spin)
-
-        self.minor_ticks_checkbox = QtWidgets.QCheckBox("Show minor ticks", auto_ticks_tab)
-        self.minor_ticks_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Minor ticks", self.minor_ticks_checkbox)
-
-        self.major_tick_positions_edit = QtWidgets.QLineEdit(auto_ticks_tab)
-        self.major_tick_positions_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Manual positions", self.major_tick_positions_edit)
-
-        self.major_tick_labels_edit = QtWidgets.QLineEdit(auto_ticks_tab)
-        self.major_tick_labels_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Manual labels", self.major_tick_labels_edit)
-
-        self.set_auto_ticks_button = QtWidgets.QPushButton("Set to Auto Values", auto_ticks_tab)
-        self.set_auto_ticks_button.clicked.connect(self._set_auto_tick_values)
-        form.addRow("", self.set_auto_ticks_button)
-
-        self.tab_widget.addTab(auto_ticks_tab, AXIS_TAB_TITLES[1])
-
-    def _build_ticks_grids_tab(self):
-        ticks_grid_tab = QtWidgets.QWidget(self)
-        form = QtWidgets.QFormLayout(ticks_grid_tab)
-
-        self.formatter_style_combo = QtWidgets.QComboBox(ticks_grid_tab)
-        for label, value in FORMATTER_STYLE_CHOICES:
-            self.formatter_style_combo.addItem(label, value)
-        self.formatter_style_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Number style", self.formatter_style_combo)
-
-        self.low_trip_spin = QtWidgets.QDoubleSpinBox(ticks_grid_tab)
-        self.low_trip_spin.setRange(-99.0, 99.0)
-        self.low_trip_spin.setSpecialValueText("")
-        self.low_trip_spin.setValue(0.0)
-        self.low_trip_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Low trip", self.low_trip_spin)
-
-        self.high_trip_spin = QtWidgets.QDoubleSpinBox(ticks_grid_tab)
-        self.high_trip_spin.setRange(-99.0, 99.0)
-        self.high_trip_spin.setSpecialValueText("")
-        self.high_trip_spin.setValue(0.0)
-        self.high_trip_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("High trip", self.high_trip_spin)
-
-        self.exponent_prescale_spin = QtWidgets.QSpinBox(ticks_grid_tab)
-        self.exponent_prescale_spin.setRange(-99, 99)
-        self.exponent_prescale_spin.setSpecialValueText("")
-        self.exponent_prescale_spin.setValue(0)
-        self.exponent_prescale_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Exponent prescale", self.exponent_prescale_spin)
-
-        self.tick_direction_combo = QtWidgets.QComboBox(ticks_grid_tab)
-        for label, value in TICK_DIRECTION_CHOICES:
-            self.tick_direction_combo.addItem(label, value)
-        self.tick_direction_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Tick direction", self.tick_direction_combo)
-
-        self.grid_visible_checkbox = QtWidgets.QCheckBox("Show grid", ticks_grid_tab)
-        self.grid_visible_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Grid", self.grid_visible_checkbox)
-
-        self.grid_which_combo = QtWidgets.QComboBox(ticks_grid_tab)
-        for label, value in GRID_WHICH_CHOICES:
-            self.grid_which_combo.addItem(label, value)
-        self.grid_which_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Grid which", self.grid_which_combo)
-
-        self.grid_style_combo = QtWidgets.QComboBox(ticks_grid_tab)
-        for label, value in LINE_STYLE_CHOICES:
-            self.grid_style_combo.addItem(label, value)
-        self.grid_style_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Grid style", self.grid_style_combo)
-
-        self.grid_width_spin = QtWidgets.QDoubleSpinBox(ticks_grid_tab)
-        self.grid_width_spin.setRange(0.0, 99.0)
-        self.grid_width_spin.setSingleStep(0.1)
-        self.grid_width_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Grid width", self.grid_width_spin)
-
-        self.grid_color_edit = MatplotlibColorLineEdit(ticks_grid_tab)
-        self.grid_color_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Grid color", self.grid_color_edit)
-
-        self.zero_line_visible_checkbox = QtWidgets.QCheckBox(
-            "Show zero line",
-            ticks_grid_tab,
-        )
-        self.zero_line_visible_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Zero line", self.zero_line_visible_checkbox)
-
-        self.zero_line_style_combo = QtWidgets.QComboBox(ticks_grid_tab)
-        for label, value in LINE_STYLE_CHOICES:
-            self.zero_line_style_combo.addItem(label, value)
-        self.zero_line_style_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Zero style", self.zero_line_style_combo)
-
-        self.zero_line_width_spin = QtWidgets.QDoubleSpinBox(ticks_grid_tab)
-        self.zero_line_width_spin.setRange(0.0, 99.0)
-        self.zero_line_width_spin.setSingleStep(0.1)
-        self.zero_line_width_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Zero width", self.zero_line_width_spin)
-
-        self.zero_line_color_edit = MatplotlibColorLineEdit(ticks_grid_tab)
-        self.zero_line_color_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Zero color", self.zero_line_color_edit)
-
-        self.tab_widget.addTab(ticks_grid_tab, AXIS_TAB_TITLES[2])
-
-    def _build_tick_options_tab(self):
-        tick_options_tab = QtWidgets.QWidget(self)
-        form = QtWidgets.QFormLayout(tick_options_tab)
-
-        display_range_widget = QtWidgets.QWidget(tick_options_tab)
-        display_range_layout = QtWidgets.QHBoxLayout(display_range_widget)
-        display_range_layout.setContentsMargins(0, 0, 0, 0)
-        self.display_range_min_edit = QtWidgets.QLineEdit(display_range_widget)
-        self.display_range_min_edit.editingFinished.connect(self._on_controls_changed)
-        display_range_layout.addWidget(self.display_range_min_edit)
-        display_range_layout.addWidget(QtWidgets.QLabel("to", display_range_widget))
-        self.display_range_max_edit = QtWidgets.QLineEdit(display_range_widget)
-        self.display_range_max_edit.editingFinished.connect(self._on_controls_changed)
-        display_range_layout.addWidget(self.display_range_max_edit)
-        form.addRow("Display range", display_range_widget)
-
-        self.suppressed_values_edit = QtWidgets.QLineEdit(tick_options_tab)
-        self.suppressed_values_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Suppress values", self.suppressed_values_edit)
-
-        self.max_log_cycles_minor_spin = QtWidgets.QDoubleSpinBox(tick_options_tab)
-        self.max_log_cycles_minor_spin.setRange(0.0, 99.0)
-        self.max_log_cycles_minor_spin.setSingleStep(0.5)
-        self.max_log_cycles_minor_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Max minor cycles", self.max_log_cycles_minor_spin)
-
-        self.max_log_cycles_minor_labels_spin = QtWidgets.QDoubleSpinBox(tick_options_tab)
-        self.max_log_cycles_minor_labels_spin.setRange(0.0, 99.0)
-        self.max_log_cycles_minor_labels_spin.setSingleStep(0.5)
-        self.max_log_cycles_minor_labels_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Max minor-label cycles", self.max_log_cycles_minor_labels_spin)
-
-        self.use_thousands_separator_checkbox = QtWidgets.QCheckBox(
-            "Use thousands separator",
-            tick_options_tab,
-        )
-        self.use_thousands_separator_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Thousands", self.use_thousands_separator_checkbox)
-
-        self.zero_as_zero_checkbox = QtWidgets.QCheckBox("Format zero as 0", tick_options_tab)
-        self.zero_as_zero_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Zero format", self.zero_as_zero_checkbox)
-
-        self.trim_trailing_zeros_checkbox = QtWidgets.QCheckBox(
-            "Trim trailing zeros",
-            tick_options_tab,
-        )
-        self.trim_trailing_zeros_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Trailing zeros", self.trim_trailing_zeros_checkbox)
-
-        self.trim_leading_zero_checkbox = QtWidgets.QCheckBox(
-            "Trim leading zero",
-            tick_options_tab,
-        )
-        self.trim_leading_zero_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Leading zero", self.trim_leading_zero_checkbox)
-
-        self.prefer_exponent_checkbox = QtWidgets.QCheckBox(
-            "Prefer exponent",
-            tick_options_tab,
-        )
-        self.prefer_exponent_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Exponent style", self.prefer_exponent_checkbox)
-
-        self.tab_widget.addTab(tick_options_tab, AXIS_TAB_TITLES[3])
-
-    def _build_axis_label_tab(self):
-        axis_label_tab = QtWidgets.QWidget(self)
-        form = QtWidgets.QFormLayout(axis_label_tab)
-
-        self.axis_label_edit = QtWidgets.QLineEdit(axis_label_tab)
-        self.axis_label_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Axis label", self.axis_label_edit)
-
-        self.axis_label_preview = QtWidgets.QLabel(axis_label_tab)
-        self.axis_label_preview.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        form.addRow("Preview", self.axis_label_preview)
-
-        self.line_spacing_spin = QtWidgets.QDoubleSpinBox(axis_label_tab)
-        self.line_spacing_spin.setRange(0.1, 9.0)
-        self.line_spacing_spin.setSingleStep(0.1)
-        self.line_spacing_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Line spacing", self.line_spacing_spin)
-
-        self.label_rotation_spin = QtWidgets.QDoubleSpinBox(axis_label_tab)
-        self.label_rotation_spin.setRange(-360.0, 360.0)
-        self.label_rotation_spin.setSingleStep(1.0)
-        self.label_rotation_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Label rotation", self.label_rotation_spin)
-
-        self.tab_widget.addTab(axis_label_tab, AXIS_TAB_TITLES[4])
-
-    def _build_label_options_tab(self):
-        label_options_tab = QtWidgets.QWidget(self)
-        form = QtWidgets.QFormLayout(label_options_tab)
-
-        self.label_side_combo = QtWidgets.QComboBox(label_options_tab)
-        for label, value in LABEL_SIDE_CHOICES:
-            self.label_side_combo.addItem(label, value)
-        self.label_side_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Label side", self.label_side_combo)
-
-        self.label_visible_checkbox = QtWidgets.QCheckBox("Show label", label_options_tab)
-        self.label_visible_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Visibility", self.label_visible_checkbox)
-
-        self.label_position_mode_combo = QtWidgets.QComboBox(label_options_tab)
-        for label, value in LABEL_POSITION_MODE_CHOICES:
-            self.label_position_mode_combo.addItem(label, value)
-        self.label_position_mode_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Position mode", self.label_position_mode_combo)
-
-        self.label_position_spin = QtWidgets.QDoubleSpinBox(label_options_tab)
-        self.label_position_spin.setRange(-999.0, 999.0)
-        self.label_position_spin.setSingleStep(0.05)
-        self.label_position_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Label position", self.label_position_spin)
-
-        self.label_offset_spin = QtWidgets.QDoubleSpinBox(label_options_tab)
-        self.label_offset_spin.setRange(-999.0, 999.0)
-        self.label_offset_spin.setSingleStep(0.5)
-        self.label_offset_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Label margin", self.label_offset_spin)
-
-        self.tick_label_rotation_spin = QtWidgets.QDoubleSpinBox(label_options_tab)
-        self.tick_label_rotation_spin.setRange(-360.0, 360.0)
-        self.tick_label_rotation_spin.setSingleStep(1.0)
-        self.tick_label_rotation_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Tick label rotation", self.tick_label_rotation_spin)
-
-        self.tick_label_offset_spin = QtWidgets.QDoubleSpinBox(label_options_tab)
-        self.tick_label_offset_spin.setRange(-999.0, 999.0)
-        self.tick_label_offset_spin.setSingleStep(0.5)
-        self.tick_label_offset_spin.valueChanged.connect(self._on_controls_changed)
-        form.addRow("Tick label offset", self.tick_label_offset_spin)
-
-        self.tab_widget.addTab(label_options_tab, AXIS_TAB_TITLES[5])
-
-    def _build_range_tab(self):
-        range_tab = QtWidgets.QWidget(self)
-        form = QtWidgets.QFormLayout(range_tab)
-
-        self.autoscale_combo = QtWidgets.QComboBox(range_tab)
-        for label, value in AUTOSCALE_CHOICES:
-            self.autoscale_combo.addItem(label, value)
-        self.autoscale_combo.currentIndexChanged.connect(self._on_controls_changed)
-        form.addRow("Autoscale", self.autoscale_combo)
-
-        self.minimum_auto_checkbox = QtWidgets.QCheckBox("Auto minimum", range_tab)
-        self.minimum_auto_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Minimum mode", self.minimum_auto_checkbox)
-
-        self.minimum_edit = QtWidgets.QLineEdit(range_tab)
-        self.minimum_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Minimum", self.minimum_edit)
-
-        self.maximum_auto_checkbox = QtWidgets.QCheckBox("Auto maximum", range_tab)
-        self.maximum_auto_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Maximum mode", self.maximum_auto_checkbox)
-
-        self.maximum_edit = QtWidgets.QLineEdit(range_tab)
-        self.maximum_edit.editingFinished.connect(self._on_controls_changed)
-        form.addRow("Maximum", self.maximum_edit)
-
-        self.reverse_axis_checkbox = QtWidgets.QCheckBox("Reverse axis", range_tab)
-        self.reverse_axis_checkbox.toggled.connect(self._on_controls_changed)
-        form.addRow("Direction", self.reverse_axis_checkbox)
-
-        range_actions = QtWidgets.QWidget(range_tab)
-        range_actions_layout = QtWidgets.QHBoxLayout(range_actions)
-        range_actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.expand_range_button = QtWidgets.QPushButton("Expand 5%", range_actions)
-        self.expand_range_button.clicked.connect(self._expand_range)
-        range_actions_layout.addWidget(self.expand_range_button)
-        self.swap_range_button = QtWidgets.QPushButton("Swap", range_actions)
-        self.swap_range_button.clicked.connect(self._swap_range)
-        range_actions_layout.addWidget(self.swap_range_button)
-        self.set_autoscale_values_button = QtWidgets.QPushButton(
-            "Set to Autoscale Values",
-            range_actions,
-        )
-        self.set_autoscale_values_button.clicked.connect(self._set_autoscale_values)
-        range_actions_layout.addWidget(self.set_autoscale_values_button)
-        form.addRow("", range_actions)
-
-        self.tab_widget.addTab(range_tab, AXIS_TAB_TITLES[6])
 
     def has_supported_axes(self):
         return self._current_subplot() is not None
@@ -668,9 +381,9 @@ class AxisEditDialog(HydeDialogWidget):
         if not self.has_supported_axes():
             self._update_preview()
             return
-        index = self.axis_selector.findData("bottom")
+        index = self.ui.axis_selector.findData("bottom")
         if index >= 0:
-            self.axis_selector.setCurrentIndex(index)
+            self.ui.axis_selector.setCurrentIndex(index)
         self._load_selected_side()
 
     def _on_axis_side_changed(self, index):
@@ -688,7 +401,7 @@ class AxisEditDialog(HydeDialogWidget):
         subplot = self._current_subplot()
         if subplot is None:
             return None
-        side = self.axis_selector.currentData()
+        side = self.ui.axis_selector.currentData()
         if side not in {"left", "bottom", "right", "top"}:
             return None
         axis_name = _axis_name_for_side(side)
@@ -722,134 +435,134 @@ class AxisEditDialog(HydeDialogWidget):
 
         self._loading_controls = True
         try:
-            self._set_combo_data(self.axis_mode_combo, axis_state.get("scale_mode"))
+            self._set_combo_data(self.ui.axis_mode_combo, axis_state.get("scale_mode"))
             self._set_combo_data(
-                self.log_tick_mode_combo,
+                self.ui.log_tick_mode_combo,
                 axis_state.get("log_tick_mode", "plain"),
             )
-            self.axis_label_edit.setText(_format_optional_text(label_state.get("text")))
-            self.axis_label_preview.setText(_format_optional_text(label_state.get("text")))
-            self.label_visible_checkbox.setChecked(bool(label_state.get("visible")))
+            self.ui.axis_label_edit.setText(_format_optional_text(label_state.get("text")))
+            self.ui.axis_label_preview.setText(_format_optional_text(label_state.get("text")))
+            self.ui.label_visible_checkbox.setChecked(bool(label_state.get("visible")))
             self._set_combo_data(
-                self.label_side_combo,
+                self.ui.label_side_combo,
                 _label_choice_for_side(label_state.get("side"), context["axis_name"]),
             )
             self._set_combo_data(
-                self.label_position_mode_combo,
+                self.ui.label_position_mode_combo,
                 label_state.get("position_mode", "auto"),
             )
-            self.label_position_spin.setValue(float(label_state.get("position") or 0.0))
-            self.label_offset_spin.setValue(float(label_state.get("offset") or 0.0))
-            self.label_rotation_spin.setValue(float(label_state.get("rotation") or 0.0))
-            self.line_spacing_spin.setValue(float(label_state.get("line_spacing") or 1.2))
-            self.axis_label_color_edit.set_committed_text(
+            self.ui.label_position_spin.setValue(float(label_state.get("position") or 0.0))
+            self.ui.label_offset_spin.setValue(float(label_state.get("offset") or 0.0))
+            self.ui.label_rotation_spin.setValue(float(label_state.get("rotation") or 0.0))
+            self.ui.line_spacing_spin.setValue(float(label_state.get("line_spacing") or 1.2))
+            self.ui.axis_label_color_edit.set_committed_text(
                 _format_optional_text(label_state.get("color"))
             )
             self._set_combo_data(
-                self.autoscale_combo,
+                self.ui.autoscale_combo,
                 range_state.get("autoscale", "data"),
             )
-            self.minimum_auto_checkbox.setChecked(limit_mode.get("min", "auto") == "auto")
-            self.minimum_edit.setText(_format_optional_number(limits[0]))
-            self.maximum_auto_checkbox.setChecked(limit_mode.get("max", "auto") == "auto")
-            self.maximum_edit.setText(_format_optional_number(limits[1]))
-            self.reverse_axis_checkbox.setChecked(bool(range_state.get("reverse")))
-            self.side_visible_checkbox.setChecked(bool(side_state.get("spine_visible")))
-            self.side_ticks_checkbox.setChecked(bool(side_state.get("ticks_visible")))
-            self.side_tick_labels_checkbox.setChecked(
+            self.ui.minimum_auto_checkbox.setChecked(limit_mode.get("min", "auto") == "auto")
+            self.ui.minimum_edit.setText(_format_optional_number(limits[0]))
+            self.ui.maximum_auto_checkbox.setChecked(limit_mode.get("max", "auto") == "auto")
+            self.ui.maximum_edit.setText(_format_optional_number(limits[1]))
+            self.ui.reverse_axis_checkbox.setChecked(bool(range_state.get("reverse")))
+            self.ui.side_visible_checkbox.setChecked(bool(side_state.get("spine_visible")))
+            self.ui.side_ticks_checkbox.setChecked(bool(side_state.get("ticks_visible")))
+            self.ui.side_tick_labels_checkbox.setChecked(
                 bool(side_state.get("tick_labels_visible"))
             )
-            self.side_line_width_spin.setValue(
+            self.ui.side_line_width_spin.setValue(
                 float(side_state.get("spine_width") or 0.0)
             )
-            self.side_offset_spin.setValue(float(margins.get(context["side"]) or 0.0))
-            self.spine_offset_spin.setValue(float(side_state.get("offset") or 0.0))
-            self.draw_on_top_checkbox.setChecked(bool(side_state.get("draw_on_top")))
-            self.side_color_edit.set_committed_text(
+            self.ui.side_offset_spin.setValue(float(margins.get(context["side"]) or 0.0))
+            self.ui.spine_offset_spin.setValue(float(side_state.get("offset") or 0.0))
+            self.ui.draw_on_top_checkbox.setChecked(bool(side_state.get("draw_on_top")))
+            self.ui.side_color_edit.set_committed_text(
                 _format_optional_text(side_state.get("spine_color"))
             )
-            self.tick_label_color_edit.set_committed_text(
+            self.ui.tick_label_color_edit.set_committed_text(
                 _format_optional_text(side_state.get("tick_label_color"))
             )
-            self.tick_label_rotation_spin.setValue(
+            self.ui.tick_label_rotation_spin.setValue(
                 float(side_state.get("tick_label_rotation") or 0.0)
             )
-            self.tick_label_offset_spin.setValue(
+            self.ui.tick_label_offset_spin.setValue(
                 float(side_state.get("tick_label_offset") or 0.0)
             )
-            self.major_tick_count_spin.setValue(int(major_ticks.get("count") or 0))
-            self.major_tick_step_spin.setValue(float(major_ticks.get("step") or 0.0))
-            self.major_tick_positions_edit.setText(
+            self.ui.major_tick_count_spin.setValue(int(major_ticks.get("count") or 0))
+            self.ui.major_tick_step_spin.setValue(float(major_ticks.get("step") or 0.0))
+            self.ui.major_tick_positions_edit.setText(
                 _format_float_list(major_ticks.get("positions"))
             )
-            self.major_tick_labels_edit.setText(
+            self.ui.major_tick_labels_edit.setText(
                 _format_text_list(major_ticks.get("labels"))
             )
             self._set_combo_data(
-                self.major_tick_mode_combo,
+                self.ui.major_tick_mode_combo,
                 major_ticks.get("mode", "auto"),
             )
-            self.minor_ticks_checkbox.setChecked(
+            self.ui.minor_ticks_checkbox.setChecked(
                 bool(dict(tick_state.get("minor", {}) or {}).get("visible"))
             )
             self._set_combo_data(
-                self.tick_direction_combo,
+                self.ui.tick_direction_combo,
                 tick_state.get("direction", "outside"),
             )
             self._set_combo_data(
-                self.formatter_style_combo,
+                self.ui.formatter_style_combo,
                 formatter_state.get("style", "plain"),
             )
-            self.low_trip_spin.setValue(float(formatter_state.get("low_trip") or 0.0))
-            self.high_trip_spin.setValue(float(formatter_state.get("high_trip") or 0.0))
-            self.exponent_prescale_spin.setValue(
+            self.ui.low_trip_spin.setValue(float(formatter_state.get("low_trip") or 0.0))
+            self.ui.high_trip_spin.setValue(float(formatter_state.get("high_trip") or 0.0))
+            self.ui.exponent_prescale_spin.setValue(
                 int(formatter_state.get("exponent_prescale") or 0)
             )
-            self.display_range_min_edit.setText(_format_optional_number(display_range[0]))
-            self.display_range_max_edit.setText(_format_optional_number(display_range[1]))
-            self.suppressed_values_edit.setText(
+            self.ui.display_range_min_edit.setText(_format_optional_number(display_range[0]))
+            self.ui.display_range_max_edit.setText(_format_optional_number(display_range[1]))
+            self.ui.suppressed_values_edit.setText(
                 _format_float_list(tick_state.get("suppressed_values"))
             )
-            self.max_log_cycles_minor_spin.setValue(
+            self.ui.max_log_cycles_minor_spin.setValue(
                 float(tick_state.get("max_log_cycles_minor") or 0.0)
             )
-            self.max_log_cycles_minor_labels_spin.setValue(
+            self.ui.max_log_cycles_minor_labels_spin.setValue(
                 float(tick_state.get("max_log_cycles_minor_labels") or 0.0)
             )
-            self.use_thousands_separator_checkbox.setChecked(
+            self.ui.use_thousands_separator_checkbox.setChecked(
                 bool(formatter_state.get("use_thousands_separator"))
             )
-            self.zero_as_zero_checkbox.setChecked(
+            self.ui.zero_as_zero_checkbox.setChecked(
                 bool(formatter_state.get("zero_as_zero", True))
             )
-            self.trim_trailing_zeros_checkbox.setChecked(
+            self.ui.trim_trailing_zeros_checkbox.setChecked(
                 bool(formatter_state.get("trim_trailing_zeros"))
             )
-            self.trim_leading_zero_checkbox.setChecked(
+            self.ui.trim_leading_zero_checkbox.setChecked(
                 bool(formatter_state.get("trim_leading_zero"))
             )
-            self.prefer_exponent_checkbox.setChecked(
+            self.ui.prefer_exponent_checkbox.setChecked(
                 bool(formatter_state.get("prefer_exponent"))
             )
-            self.grid_visible_checkbox.setChecked(bool(grid_state.get("visible")))
-            self._set_combo_data(self.grid_which_combo, grid_state.get("which", "major"))
+            self.ui.grid_visible_checkbox.setChecked(bool(grid_state.get("visible")))
+            self._set_combo_data(self.ui.grid_which_combo, grid_state.get("which", "major"))
             self._set_combo_data(
-                self.grid_style_combo,
+                self.ui.grid_style_combo,
                 grid_state.get("linestyle", "-"),
             )
-            self.grid_width_spin.setValue(float(grid_state.get("linewidth") or 0.0))
-            self.grid_color_edit.set_committed_text(
+            self.ui.grid_width_spin.setValue(float(grid_state.get("linewidth") or 0.0))
+            self.ui.grid_color_edit.set_committed_text(
                 _format_optional_text(grid_state.get("color"))
             )
-            self.zero_line_visible_checkbox.setChecked(bool(zero_line_state.get("visible")))
+            self.ui.zero_line_visible_checkbox.setChecked(bool(zero_line_state.get("visible")))
             self._set_combo_data(
-                self.zero_line_style_combo,
+                self.ui.zero_line_style_combo,
                 zero_line_state.get("linestyle", "-"),
             )
-            self.zero_line_width_spin.setValue(
+            self.ui.zero_line_width_spin.setValue(
                 float(zero_line_state.get("linewidth") or 0.0)
             )
-            self.zero_line_color_edit.set_committed_text(
+            self.ui.zero_line_color_edit.set_committed_text(
                 _format_optional_text(zero_line_state.get("color"))
             )
         finally:
@@ -862,11 +575,11 @@ class AxisEditDialog(HydeDialogWidget):
             combo.setCurrentIndex(index)
 
     def _validate_range_inputs(self):
-        minimum_auto = bool(self.minimum_auto_checkbox.isChecked())
-        maximum_auto = bool(self.maximum_auto_checkbox.isChecked())
+        minimum_auto = bool(self.ui.minimum_auto_checkbox.isChecked())
+        maximum_auto = bool(self.ui.maximum_auto_checkbox.isChecked())
         try:
-            minimum = None if minimum_auto else _parse_optional_float(self.minimum_edit.text(), "Minimum")
-            maximum = None if maximum_auto else _parse_optional_float(self.maximum_edit.text(), "Maximum")
+            minimum = None if minimum_auto else _parse_optional_float(self.ui.minimum_edit.text(), "Minimum")
+            maximum = None if maximum_auto else _parse_optional_float(self.ui.maximum_edit.text(), "Maximum")
         except ValueError as exc:
             return {"limits": None, "valid": False, "message": str(exc)}
         if not minimum_auto and minimum is None:
@@ -892,8 +605,8 @@ class AxisEditDialog(HydeDialogWidget):
         }
 
     def _validate_display_range_inputs(self):
-        minimum_text = self.display_range_min_edit.text().strip()
-        maximum_text = self.display_range_max_edit.text().strip()
+        minimum_text = self.ui.display_range_min_edit.text().strip()
+        maximum_text = self.ui.display_range_max_edit.text().strip()
         if not minimum_text and not maximum_text:
             return {"display_range": None, "valid": True, "message": ""}
         try:
@@ -930,12 +643,12 @@ class AxisEditDialog(HydeDialogWidget):
             return display_range_validation
         try:
             manual_positions = _parse_float_list(
-                self.major_tick_positions_edit.text(),
+                self.ui.major_tick_positions_edit.text(),
                 "Manual positions",
             )
-            manual_labels = _parse_text_list(self.major_tick_labels_edit.text())
+            manual_labels = _parse_text_list(self.ui.major_tick_labels_edit.text())
             suppressed_values = _parse_float_list(
-                self.suppressed_values_edit.text(),
+                self.ui.suppressed_values_edit.text(),
                 "Suppress values",
             )
         except ValueError as exc:
@@ -955,127 +668,127 @@ class AxisEditDialog(HydeDialogWidget):
                 "message": "Manual labels must match the number of manual positions.",
             }
 
-        axis_state["scale_mode"] = str(self.axis_mode_combo.currentData() or "linear")
+        axis_state["scale_mode"] = str(self.ui.axis_mode_combo.currentData() or "linear")
         axis_state["log_tick_mode"] = str(
-            self.log_tick_mode_combo.currentData() or "plain"
+            self.ui.log_tick_mode_combo.currentData() or "plain"
         )
-        label_text = self.axis_label_edit.text().strip()
+        label_text = self.ui.axis_label_edit.text().strip()
         axis_state["label"]["text"] = None if not label_text else label_text
-        axis_state["label"]["visible"] = bool(self.label_visible_checkbox.isChecked())
+        axis_state["label"]["visible"] = bool(self.ui.label_visible_checkbox.isChecked())
         axis_state["label"]["side"] = _side_for_label_choice(
-            self.label_side_combo.currentData() or "primary",
+            self.ui.label_side_combo.currentData() or "primary",
             context["axis_name"],
         )
         axis_state["label"]["position_mode"] = str(
-            self.label_position_mode_combo.currentData() or "auto"
+            self.ui.label_position_mode_combo.currentData() or "auto"
         )
-        label_position = float(self.label_position_spin.value())
+        label_position = float(self.ui.label_position_spin.value())
         axis_state["label"]["position"] = (
             None
             if axis_state["label"]["position_mode"] == "auto"
             else label_position
         )
-        axis_state["label"]["offset"] = float(self.label_offset_spin.value())
-        axis_state["label"]["rotation"] = float(self.label_rotation_spin.value())
-        axis_state["label"]["line_spacing"] = float(self.line_spacing_spin.value())
-        label_color = self.axis_label_color_edit.text().strip()
+        axis_state["label"]["offset"] = float(self.ui.label_offset_spin.value())
+        axis_state["label"]["rotation"] = float(self.ui.label_rotation_spin.value())
+        axis_state["label"]["line_spacing"] = float(self.ui.line_spacing_spin.value())
+        label_color = self.ui.axis_label_color_edit.text().strip()
         axis_state["label"]["color"] = None if not label_color else label_color
         axis_state["range"]["limits"] = range_validation["limits"]
         axis_state["range"]["limit_mode"] = dict(range_validation.get("limit_mode", {}))
         axis_state["range"]["autoscale"] = str(
-            self.autoscale_combo.currentData() or "data"
+            self.ui.autoscale_combo.currentData() or "data"
         )
-        axis_state["range"]["reverse"] = bool(self.reverse_axis_checkbox.isChecked())
+        axis_state["range"]["reverse"] = bool(self.ui.reverse_axis_checkbox.isChecked())
         axis_state["ticks"]["major"]["mode"] = str(
-            self.major_tick_mode_combo.currentData() or "auto"
+            self.ui.major_tick_mode_combo.currentData() or "auto"
         )
-        count = int(self.major_tick_count_spin.value())
+        count = int(self.ui.major_tick_count_spin.value())
         axis_state["ticks"]["major"]["count"] = None if count <= 0 else count
-        step = float(self.major_tick_step_spin.value())
+        step = float(self.ui.major_tick_step_spin.value())
         axis_state["ticks"]["major"]["step"] = None if step <= 0 else step
         axis_state["ticks"]["major"]["positions"] = manual_positions
         axis_state["ticks"]["major"]["labels"] = manual_labels
         axis_state["ticks"]["minor"]["visible"] = bool(
-            self.minor_ticks_checkbox.isChecked()
+            self.ui.minor_ticks_checkbox.isChecked()
         )
         axis_state["ticks"]["direction"] = str(
-            self.tick_direction_combo.currentData() or "outside"
+            self.ui.tick_direction_combo.currentData() or "outside"
         )
         axis_state["ticks"]["formatter"]["style"] = str(
-            self.formatter_style_combo.currentData() or "plain"
+            self.ui.formatter_style_combo.currentData() or "plain"
         )
         axis_state["ticks"]["formatter"]["low_trip"] = (
-            None if self.low_trip_spin.value() == 0.0 else float(self.low_trip_spin.value())
+            None if self.ui.low_trip_spin.value() == 0.0 else float(self.ui.low_trip_spin.value())
         )
         axis_state["ticks"]["formatter"]["high_trip"] = (
-            None if self.high_trip_spin.value() == 0.0 else float(self.high_trip_spin.value())
+            None if self.ui.high_trip_spin.value() == 0.0 else float(self.ui.high_trip_spin.value())
         )
         axis_state["ticks"]["formatter"]["exponent_prescale"] = (
             None
-            if self.exponent_prescale_spin.value() == 0
-            else float(self.exponent_prescale_spin.value())
+            if self.ui.exponent_prescale_spin.value() == 0
+            else float(self.ui.exponent_prescale_spin.value())
         )
         axis_state["ticks"]["formatter"]["use_thousands_separator"] = bool(
-            self.use_thousands_separator_checkbox.isChecked()
+            self.ui.use_thousands_separator_checkbox.isChecked()
         )
         axis_state["ticks"]["formatter"]["zero_as_zero"] = bool(
-            self.zero_as_zero_checkbox.isChecked()
+            self.ui.zero_as_zero_checkbox.isChecked()
         )
         axis_state["ticks"]["formatter"]["trim_trailing_zeros"] = bool(
-            self.trim_trailing_zeros_checkbox.isChecked()
+            self.ui.trim_trailing_zeros_checkbox.isChecked()
         )
         axis_state["ticks"]["formatter"]["trim_leading_zero"] = bool(
-            self.trim_leading_zero_checkbox.isChecked()
+            self.ui.trim_leading_zero_checkbox.isChecked()
         )
         axis_state["ticks"]["formatter"]["prefer_exponent"] = bool(
-            self.prefer_exponent_checkbox.isChecked()
+            self.ui.prefer_exponent_checkbox.isChecked()
         )
         axis_state["ticks"]["suppressed_values"] = suppressed_values or []
         axis_state["ticks"]["display_range"] = display_range_validation["display_range"]
         axis_state["ticks"]["max_log_cycles_minor"] = (
             None
-            if self.max_log_cycles_minor_spin.value() <= 0
-            else float(self.max_log_cycles_minor_spin.value())
+            if self.ui.max_log_cycles_minor_spin.value() <= 0
+            else float(self.ui.max_log_cycles_minor_spin.value())
         )
         axis_state["ticks"]["max_log_cycles_minor_labels"] = (
             None
-            if self.max_log_cycles_minor_labels_spin.value() <= 0
-            else float(self.max_log_cycles_minor_labels_spin.value())
+            if self.ui.max_log_cycles_minor_labels_spin.value() <= 0
+            else float(self.ui.max_log_cycles_minor_labels_spin.value())
         )
-        axis_state["grid"]["visible"] = bool(self.grid_visible_checkbox.isChecked())
-        axis_state["grid"]["which"] = str(self.grid_which_combo.currentData() or "major")
-        axis_state["grid"]["linestyle"] = str(self.grid_style_combo.currentData() or "-")
-        grid_width = float(self.grid_width_spin.value())
+        axis_state["grid"]["visible"] = bool(self.ui.grid_visible_checkbox.isChecked())
+        axis_state["grid"]["which"] = str(self.ui.grid_which_combo.currentData() or "major")
+        axis_state["grid"]["linestyle"] = str(self.ui.grid_style_combo.currentData() or "-")
+        grid_width = float(self.ui.grid_width_spin.value())
         axis_state["grid"]["linewidth"] = None if grid_width <= 0 else grid_width
-        grid_color = self.grid_color_edit.text().strip()
+        grid_color = self.ui.grid_color_edit.text().strip()
         axis_state["grid"]["color"] = None if not grid_color else grid_color
         axis_state["zero_line"]["visible"] = bool(
-            self.zero_line_visible_checkbox.isChecked()
+            self.ui.zero_line_visible_checkbox.isChecked()
         )
         axis_state["zero_line"]["linestyle"] = str(
-            self.zero_line_style_combo.currentData() or "-"
+            self.ui.zero_line_style_combo.currentData() or "-"
         )
-        zero_width = float(self.zero_line_width_spin.value())
+        zero_width = float(self.ui.zero_line_width_spin.value())
         axis_state["zero_line"]["linewidth"] = None if zero_width <= 0 else zero_width
-        zero_color = self.zero_line_color_edit.text().strip()
+        zero_color = self.ui.zero_line_color_edit.text().strip()
         axis_state["zero_line"]["color"] = None if not zero_color else zero_color
 
-        side_state["spine_visible"] = bool(self.side_visible_checkbox.isChecked())
-        side_state["ticks_visible"] = bool(self.side_ticks_checkbox.isChecked())
+        side_state["spine_visible"] = bool(self.ui.side_visible_checkbox.isChecked())
+        side_state["ticks_visible"] = bool(self.ui.side_ticks_checkbox.isChecked())
         side_state["tick_labels_visible"] = bool(
-            self.side_tick_labels_checkbox.isChecked()
+            self.ui.side_tick_labels_checkbox.isChecked()
         )
-        width = float(self.side_line_width_spin.value())
+        width = float(self.ui.side_line_width_spin.value())
         side_state["spine_width"] = None if width <= 0 else width
-        context["subplot"]["margins"][context["side"]] = float(self.side_offset_spin.value())
-        side_state["offset"] = float(self.spine_offset_spin.value())
-        side_state["draw_on_top"] = bool(self.draw_on_top_checkbox.isChecked())
-        side_color = self.side_color_edit.text().strip()
+        context["subplot"]["margins"][context["side"]] = float(self.ui.side_offset_spin.value())
+        side_state["offset"] = float(self.ui.spine_offset_spin.value())
+        side_state["draw_on_top"] = bool(self.ui.draw_on_top_checkbox.isChecked())
+        side_color = self.ui.side_color_edit.text().strip()
         side_state["spine_color"] = None if not side_color else side_color
-        tick_color = self.tick_label_color_edit.text().strip()
+        tick_color = self.ui.tick_label_color_edit.text().strip()
         side_state["tick_label_color"] = None if not tick_color else tick_color
-        side_state["tick_label_rotation"] = float(self.tick_label_rotation_spin.value())
-        side_state["tick_label_offset"] = float(self.tick_label_offset_spin.value())
+        side_state["tick_label_rotation"] = float(self.ui.tick_label_rotation_spin.value())
+        side_state["tick_label_offset"] = float(self.ui.tick_label_offset_spin.value())
 
         try:
             self._draft_figure_ir = self._draft_tracker.replace(
@@ -1176,12 +889,12 @@ class AxisEditDialog(HydeDialogWidget):
         del args
         if self._loading_controls:
             return
-        self.axis_label_preview.setText(self.axis_label_edit.text())
+        self.ui.axis_label_preview.setText(self.ui.axis_label_edit.text())
         result = self._apply_current_controls_to_draft()
         self._update_preview(result["message"])
         if not result["valid"]:
             return
-        if self.live_update_checkbox.isChecked():
+        if self.ui.live_update_checkbox.isChecked():
             self._dispatch_selected_state()
 
     def _on_live_update_toggled(self, checked):
@@ -1197,22 +910,22 @@ class AxisEditDialog(HydeDialogWidget):
         self._update_preview(result["message"])
         if not result["valid"]:
             return
-        if not self.live_update_checkbox.isChecked():
+        if not self.ui.live_update_checkbox.isChecked():
             self._dispatch_all_state(self._draft_figure_ir)
         self.accept()
 
     def _set_auto_tick_values(self):
-        self.major_tick_mode_combo.setCurrentIndex(self.major_tick_mode_combo.findData("auto"))
-        self.major_tick_count_spin.setValue(0)
-        self.major_tick_step_spin.setValue(0.0)
-        self.major_tick_positions_edit.clear()
-        self.major_tick_labels_edit.clear()
+        self.ui.major_tick_mode_combo.setCurrentIndex(self.ui.major_tick_mode_combo.findData("auto"))
+        self.ui.major_tick_count_spin.setValue(0)
+        self.ui.major_tick_step_spin.setValue(0.0)
+        self.ui.major_tick_positions_edit.clear()
+        self.ui.major_tick_labels_edit.clear()
 
     def _swap_range(self):
-        minimum = self.minimum_edit.text()
-        maximum = self.maximum_edit.text()
-        self.minimum_edit.setText(maximum)
-        self.maximum_edit.setText(minimum)
+        minimum = self.ui.minimum_edit.text()
+        maximum = self.ui.maximum_edit.text()
+        self.ui.minimum_edit.setText(maximum)
+        self.ui.maximum_edit.setText(minimum)
         self._on_controls_changed()
 
     def _expand_range(self):
@@ -1224,8 +937,8 @@ class AxisEditDialog(HydeDialogWidget):
         if span <= 0:
             return
         delta = span * 0.05
-        self.minimum_edit.setText(str(limits[0] - delta))
-        self.maximum_edit.setText(str(limits[1] + delta))
+        self.ui.minimum_edit.setText(str(limits[0] - delta))
+        self.ui.maximum_edit.setText(str(limits[1] + delta))
         self._on_controls_changed()
 
     def _set_autoscale_values(self):
@@ -1241,10 +954,10 @@ class AxisEditDialog(HydeDialogWidget):
             return
         self._loading_controls = True
         try:
-            self.minimum_edit.setText(_format_optional_number(resolved_limits[0]))
-            self.maximum_edit.setText(_format_optional_number(resolved_limits[1]))
-            self.minimum_auto_checkbox.setChecked(False)
-            self.maximum_auto_checkbox.setChecked(False)
+            self.ui.minimum_edit.setText(_format_optional_number(resolved_limits[0]))
+            self.ui.maximum_edit.setText(_format_optional_number(resolved_limits[1]))
+            self.ui.minimum_auto_checkbox.setChecked(False)
+            self.ui.maximum_auto_checkbox.setChecked(False)
         finally:
             self._loading_controls = False
         self._on_controls_changed()

@@ -412,8 +412,8 @@ class TestAxisEditPlugin(unittest.TestCase):
         dialog = AxisEditDialog(figure_context, parent=mdi_area)
         try:
             sent.clear()
-            dialog.axis_mode_combo.setCurrentIndex(
-                dialog.axis_mode_combo.findData("linear")
+            dialog.ui.axis_mode_combo.setCurrentIndex(
+                dialog.ui.axis_mode_combo.findData("linear")
             )
             QtWidgets.QApplication.processEvents()
 
@@ -444,63 +444,63 @@ class TestAxisEditDialog(unittest.TestCase):
         try:
             self.assertEqual(dialog.windowTitle(), "Modify Axis")
             self.assertEqual(
-                [dialog.tab_widget.tabText(index) for index in range(dialog.tab_widget.count())],
+                [dialog.ui.tab_widget.tabText(index) for index in range(dialog.ui.tab_widget.count())],
                 AXIS_TAB_TITLES,
             )
             self.assertEqual(
-                [dialog.axis_selector.itemData(index) for index in range(dialog.axis_selector.count())],
+                [dialog.ui.axis_selector.itemData(index) for index in range(dialog.ui.axis_selector.count())],
                 ["left", "bottom", "right", "top"],
             )
-            self.assertEqual(dialog.axis_selector.currentData(), "bottom")
-            self.assertTrue(dialog.live_update_checkbox.isChecked())
+            self.assertEqual(dialog.ui.axis_selector.currentData(), "bottom")
+            self.assertTrue(dialog.ui.live_update_checkbox.isChecked())
             self.assertFalse(dialog.help_button.isEnabled())
-            self.assertEqual(dialog.axis_mode_combo.currentData(), "log2")
-            self.assertEqual(dialog.log_tick_mode_combo.currentData(), "loglin")
-            self.assertEqual(dialog.axis_label_edit.text(), "Delay")
-            self.assertEqual(dialog.axis_label_preview.text(), "Delay")
-            self.assertEqual(dialog.label_side_combo.currentData(), "mirror")
-            self.assertEqual(dialog.label_position_mode_combo.currentData(), "manual")
-            self.assertEqual(dialog.label_position_spin.value(), 0.35)
-            self.assertEqual(dialog.label_offset_spin.value(), 14.0)
-            self.assertEqual(dialog.label_rotation_spin.value(), 12.0)
-            self.assertEqual(dialog.line_spacing_spin.value(), 1.6)
-            self.assertEqual(dialog.axis_label_color_edit.text(), "#aa5500")
-            self.assertEqual(dialog.axis_label_color_edit.swatch_color_text(), "#aa5500")
-            self.assertEqual(dialog.autoscale_combo.currentData(), "tight")
-            self.assertEqual(dialog.minimum_edit.text(), "1.0")
-            self.assertEqual(dialog.maximum_edit.text(), "8.0")
-            self.assertTrue(dialog.reverse_axis_checkbox.isChecked())
-            self.assertFalse(dialog.side_visible_checkbox.isChecked())
-            self.assertFalse(dialog.side_ticks_checkbox.isChecked())
-            self.assertFalse(dialog.side_tick_labels_checkbox.isChecked())
-            self.assertEqual(dialog.side_offset_spin.value(), 0.2)
-            self.assertEqual(dialog.spine_offset_spin.value(), 12.0)
-            self.assertEqual(dialog.major_tick_mode_combo.currentData(), "manual")
-            self.assertEqual(dialog.major_tick_positions_edit.text(), "1.0, 2.0, 4.0, 8.0")
-            self.assertEqual(dialog.major_tick_labels_edit.text(), "1, 2, 4, 8")
-            self.assertEqual(dialog.tick_direction_combo.currentData(), "both")
-            self.assertEqual(dialog.formatter_style_combo.currentData(), "engineering")
-            self.assertEqual(dialog.low_trip_spin.value(), -3.0)
-            self.assertEqual(dialog.high_trip_spin.value(), 4.0)
-            self.assertEqual(dialog.exponent_prescale_spin.value(), 3)
-            self.assertTrue(dialog.use_thousands_separator_checkbox.isChecked())
-            self.assertFalse(dialog.zero_as_zero_checkbox.isChecked())
-            self.assertTrue(dialog.trim_trailing_zeros_checkbox.isChecked())
-            self.assertTrue(dialog.trim_leading_zero_checkbox.isChecked())
-            self.assertTrue(dialog.prefer_exponent_checkbox.isChecked())
-            self.assertEqual(dialog.display_range_min_edit.text(), "0.5")
-            self.assertEqual(dialog.display_range_max_edit.text(), "9.0")
-            self.assertEqual(dialog.suppressed_values_edit.text(), "2.0, 8.0")
-            self.assertEqual(dialog.max_log_cycles_minor_spin.value(), 5.0)
-            self.assertEqual(dialog.max_log_cycles_minor_labels_spin.value(), 2.5)
-            self.assertEqual(dialog.grid_which_combo.currentData(), "both")
-            self.assertEqual(dialog.grid_style_combo.currentData(), "--")
-            self.assertEqual(dialog.grid_width_spin.value(), 1.25)
-            self.assertEqual(dialog.grid_color_edit.text(), "#123456")
-            self.assertTrue(dialog.zero_line_visible_checkbox.isChecked())
-            self.assertEqual(dialog.zero_line_style_combo.currentData(), ":")
-            self.assertEqual(dialog.zero_line_width_spin.value(), 1.75)
-            self.assertEqual(dialog.zero_line_color_edit.text(), "#335577")
+            self.assertEqual(dialog.ui.axis_mode_combo.currentData(), "log2")
+            self.assertEqual(dialog.ui.log_tick_mode_combo.currentData(), "loglin")
+            self.assertEqual(dialog.ui.axis_label_edit.text(), "Delay")
+            self.assertEqual(dialog.ui.axis_label_preview.text(), "Delay")
+            self.assertEqual(dialog.ui.label_side_combo.currentData(), "mirror")
+            self.assertEqual(dialog.ui.label_position_mode_combo.currentData(), "manual")
+            self.assertEqual(dialog.ui.label_position_spin.value(), 0.35)
+            self.assertEqual(dialog.ui.label_offset_spin.value(), 14.0)
+            self.assertEqual(dialog.ui.label_rotation_spin.value(), 12.0)
+            self.assertEqual(dialog.ui.line_spacing_spin.value(), 1.6)
+            self.assertEqual(dialog.ui.axis_label_color_edit.text(), "#aa5500")
+            self.assertEqual(dialog.ui.axis_label_color_edit.swatch_color_text(), "#aa5500")
+            self.assertEqual(dialog.ui.autoscale_combo.currentData(), "tight")
+            self.assertEqual(dialog.ui.minimum_edit.text(), "1.0")
+            self.assertEqual(dialog.ui.maximum_edit.text(), "8.0")
+            self.assertTrue(dialog.ui.reverse_axis_checkbox.isChecked())
+            self.assertFalse(dialog.ui.side_visible_checkbox.isChecked())
+            self.assertFalse(dialog.ui.side_ticks_checkbox.isChecked())
+            self.assertFalse(dialog.ui.side_tick_labels_checkbox.isChecked())
+            self.assertEqual(dialog.ui.side_offset_spin.value(), 0.2)
+            self.assertEqual(dialog.ui.spine_offset_spin.value(), 12.0)
+            self.assertEqual(dialog.ui.major_tick_mode_combo.currentData(), "manual")
+            self.assertEqual(dialog.ui.major_tick_positions_edit.text(), "1.0, 2.0, 4.0, 8.0")
+            self.assertEqual(dialog.ui.major_tick_labels_edit.text(), "1, 2, 4, 8")
+            self.assertEqual(dialog.ui.tick_direction_combo.currentData(), "both")
+            self.assertEqual(dialog.ui.formatter_style_combo.currentData(), "engineering")
+            self.assertEqual(dialog.ui.low_trip_spin.value(), -3.0)
+            self.assertEqual(dialog.ui.high_trip_spin.value(), 4.0)
+            self.assertEqual(dialog.ui.exponent_prescale_spin.value(), 3)
+            self.assertTrue(dialog.ui.use_thousands_separator_checkbox.isChecked())
+            self.assertFalse(dialog.ui.zero_as_zero_checkbox.isChecked())
+            self.assertTrue(dialog.ui.trim_trailing_zeros_checkbox.isChecked())
+            self.assertTrue(dialog.ui.trim_leading_zero_checkbox.isChecked())
+            self.assertTrue(dialog.ui.prefer_exponent_checkbox.isChecked())
+            self.assertEqual(dialog.ui.display_range_min_edit.text(), "0.5")
+            self.assertEqual(dialog.ui.display_range_max_edit.text(), "9.0")
+            self.assertEqual(dialog.ui.suppressed_values_edit.text(), "2.0, 8.0")
+            self.assertEqual(dialog.ui.max_log_cycles_minor_spin.value(), 5.0)
+            self.assertEqual(dialog.ui.max_log_cycles_minor_labels_spin.value(), 2.5)
+            self.assertEqual(dialog.ui.grid_which_combo.currentData(), "both")
+            self.assertEqual(dialog.ui.grid_style_combo.currentData(), "--")
+            self.assertEqual(dialog.ui.grid_width_spin.value(), 1.25)
+            self.assertEqual(dialog.ui.grid_color_edit.text(), "#123456")
+            self.assertTrue(dialog.ui.zero_line_visible_checkbox.isChecked())
+            self.assertEqual(dialog.ui.zero_line_style_combo.currentData(), ":")
+            self.assertEqual(dialog.ui.zero_line_width_spin.value(), 1.75)
+            self.assertEqual(dialog.ui.zero_line_color_edit.text(), "#335577")
             self.assertTrue(dialog.lower_text_edit.toPlainText())
             self.assertIn(
                 "fig.subplots_adjust(left=0.12, bottom=0.2, right=0.97, top=0.98)",
@@ -551,7 +551,7 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.show()
             self.qapp.processEvents()
 
-            tab_bar = dialog.tab_widget.tabBar()
+            tab_bar = dialog.ui.tab_widget.tabBar()
             last_tab_rect = tab_bar.tabRect(tab_bar.count() - 1)
 
             self.assertGreaterEqual(dialog.width(), tab_bar.sizeHint().width())
@@ -590,23 +590,23 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            self.assertEqual(dialog.axis_label_edit.text(), "Delay")
-            self.assertTrue(dialog.label_visible_checkbox.isChecked())
-            self.assertEqual(dialog.label_offset_spin.value(), 9.0)
-            self.assertEqual(dialog.label_rotation_spin.value(), 11.0)
-            self.assertEqual(dialog.axis_label_color_edit.text(), "#654321")
-            self.assertEqual(dialog.tick_direction_combo.currentData(), "inside")
-            self.assertTrue(dialog.grid_visible_checkbox.isChecked())
-            self.assertEqual(dialog.grid_width_spin.value(), 2.5)
-            self.assertEqual(dialog.grid_color_edit.text(), "#123456")
-            self.assertEqual(dialog.side_line_width_spin.value(), 3.0)
-            self.assertEqual(dialog.side_color_edit.text(), "#abcdef")
-            self.assertEqual(dialog.side_offset_spin.value(), 0.2)
-            self.assertEqual(dialog.spine_offset_spin.value(), 12.0)
-            self.assertTrue(dialog.reverse_axis_checkbox.isChecked())
+            self.assertEqual(dialog.ui.axis_label_edit.text(), "Delay")
+            self.assertTrue(dialog.ui.label_visible_checkbox.isChecked())
+            self.assertEqual(dialog.ui.label_offset_spin.value(), 9.0)
+            self.assertEqual(dialog.ui.label_rotation_spin.value(), 11.0)
+            self.assertEqual(dialog.ui.axis_label_color_edit.text(), "#654321")
+            self.assertEqual(dialog.ui.tick_direction_combo.currentData(), "inside")
+            self.assertTrue(dialog.ui.grid_visible_checkbox.isChecked())
+            self.assertEqual(dialog.ui.grid_width_spin.value(), 2.5)
+            self.assertEqual(dialog.ui.grid_color_edit.text(), "#123456")
+            self.assertEqual(dialog.ui.side_line_width_spin.value(), 3.0)
+            self.assertEqual(dialog.ui.side_color_edit.text(), "#abcdef")
+            self.assertEqual(dialog.ui.side_offset_spin.value(), 0.2)
+            self.assertEqual(dialog.ui.spine_offset_spin.value(), 12.0)
+            self.assertTrue(dialog.ui.reverse_axis_checkbox.isChecked())
 
-            dialog.axis_label_edit.setText("Delay [ms]")
-            dialog.axis_label_edit.editingFinished.emit()
+            dialog.ui.axis_label_edit.setText("Delay [ms]")
+            dialog.ui.axis_label_edit.editingFinished.emit()
         finally:
             dialog.close()
 
@@ -645,13 +645,13 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            self.assertTrue(dialog.label_visible_checkbox.isChecked())
+            self.assertTrue(dialog.ui.label_visible_checkbox.isChecked())
             self.assertNotIn(
                 "ax.xaxis.label.set_visible(False)",
                 dialog.lower_text_edit.toPlainText(),
             )
 
-            dialog.label_visible_checkbox.setChecked(False)
+            dialog.ui.label_visible_checkbox.setChecked(False)
 
             self.assertIn(
                 "ax.xaxis.label.set_visible(False)",
@@ -688,9 +688,9 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.side_visible_checkbox.setChecked(False)
-            dialog.side_ticks_checkbox.setChecked(False)
-            dialog.side_tick_labels_checkbox.setChecked(False)
+            dialog.ui.side_visible_checkbox.setChecked(False)
+            dialog.ui.side_ticks_checkbox.setChecked(False)
+            dialog.ui.side_tick_labels_checkbox.setChecked(False)
 
             preview = dialog.lower_text_edit.toPlainText()
             self.assertIn("ax.set_xlabel('asdf')", preview)
@@ -712,26 +712,26 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.axis_selector.setCurrentIndex(dialog.axis_selector.findData("top"))
-            self.assertEqual(dialog.axis_mode_combo.currentData(), "log2")
-            self.assertEqual(dialog.axis_label_edit.text(), "Delay")
-            self.assertTrue(dialog.side_visible_checkbox.isChecked())
-            self.assertTrue(dialog.side_ticks_checkbox.isChecked())
-            self.assertTrue(dialog.side_tick_labels_checkbox.isChecked())
-            self.assertEqual(dialog.side_offset_spin.value(), 0.98)
-            self.assertEqual(dialog.side_line_width_spin.value(), 2.5)
-            self.assertTrue(dialog.draw_on_top_checkbox.isChecked())
+            dialog.ui.axis_selector.setCurrentIndex(dialog.ui.axis_selector.findData("top"))
+            self.assertEqual(dialog.ui.axis_mode_combo.currentData(), "log2")
+            self.assertEqual(dialog.ui.axis_label_edit.text(), "Delay")
+            self.assertTrue(dialog.ui.side_visible_checkbox.isChecked())
+            self.assertTrue(dialog.ui.side_ticks_checkbox.isChecked())
+            self.assertTrue(dialog.ui.side_tick_labels_checkbox.isChecked())
+            self.assertEqual(dialog.ui.side_offset_spin.value(), 0.98)
+            self.assertEqual(dialog.ui.side_line_width_spin.value(), 2.5)
+            self.assertTrue(dialog.ui.draw_on_top_checkbox.isChecked())
 
-            dialog.axis_selector.setCurrentIndex(dialog.axis_selector.findData("right"))
-            self.assertEqual(dialog.axis_mode_combo.currentData(), "linear")
-            self.assertEqual(dialog.axis_label_edit.text(), "Signal")
-            self.assertEqual(dialog.label_side_combo.currentData(), "mirror")
-            self.assertFalse(dialog.reverse_axis_checkbox.isChecked())
-            self.assertTrue(dialog.side_visible_checkbox.isChecked())
-            self.assertEqual(dialog.tick_label_rotation_spin.value(), 35.0)
-            self.assertEqual(dialog.tick_label_offset_spin.value(), 4.5)
-            self.assertEqual(dialog.side_color_edit.text(), "#ff00ff")
-            self.assertEqual(dialog.tick_label_color_edit.text(), "#00aa00")
+            dialog.ui.axis_selector.setCurrentIndex(dialog.ui.axis_selector.findData("right"))
+            self.assertEqual(dialog.ui.axis_mode_combo.currentData(), "linear")
+            self.assertEqual(dialog.ui.axis_label_edit.text(), "Signal")
+            self.assertEqual(dialog.ui.label_side_combo.currentData(), "mirror")
+            self.assertFalse(dialog.ui.reverse_axis_checkbox.isChecked())
+            self.assertTrue(dialog.ui.side_visible_checkbox.isChecked())
+            self.assertEqual(dialog.ui.tick_label_rotation_spin.value(), 35.0)
+            self.assertEqual(dialog.ui.tick_label_offset_spin.value(), 4.5)
+            self.assertEqual(dialog.ui.side_color_edit.text(), "#ff00ff")
+            self.assertEqual(dialog.ui.tick_label_color_edit.text(), "#00aa00")
             self.assertIn("fig = plt.figure", dialog.lower_text_edit.toPlainText())
         finally:
             dialog.close()
@@ -751,9 +751,9 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.axis_label_edit.setText("Delay [ms]")
-            dialog.axis_label_edit.editingFinished.emit()
-            dialog.side_visible_checkbox.setChecked(True)
+            dialog.ui.axis_label_edit.setText("Delay [ms]")
+            dialog.ui.axis_label_edit.editingFinished.emit()
+            dialog.ui.side_visible_checkbox.setChecked(True)
         finally:
             dialog.close()
 
@@ -787,19 +787,19 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.label_position_mode_combo.setCurrentIndex(
-                dialog.label_position_mode_combo.findData("manual")
+            dialog.ui.label_position_mode_combo.setCurrentIndex(
+                dialog.ui.label_position_mode_combo.findData("manual")
             )
-            dialog.label_position_spin.setValue(0.6)
-            dialog.axis_label_color_edit.setText("#111111")
-            dialog.axis_label_color_edit.editingFinished.emit()
-            dialog.major_tick_positions_edit.setText("1, 3, 9")
-            dialog.major_tick_positions_edit.editingFinished.emit()
-            dialog.major_tick_labels_edit.setText("one, three, nine")
-            dialog.major_tick_labels_edit.editingFinished.emit()
-            dialog.grid_style_combo.setCurrentIndex(dialog.grid_style_combo.findData(":"))
-            dialog.zero_line_style_combo.setCurrentIndex(
-                dialog.zero_line_style_combo.findData("--")
+            dialog.ui.label_position_spin.setValue(0.6)
+            dialog.ui.axis_label_color_edit.setText("#111111")
+            dialog.ui.axis_label_color_edit.editingFinished.emit()
+            dialog.ui.major_tick_positions_edit.setText("1, 3, 9")
+            dialog.ui.major_tick_positions_edit.editingFinished.emit()
+            dialog.ui.major_tick_labels_edit.setText("one, three, nine")
+            dialog.ui.major_tick_labels_edit.editingFinished.emit()
+            dialog.ui.grid_style_combo.setCurrentIndex(dialog.ui.grid_style_combo.findData(":"))
+            dialog.ui.zero_line_style_combo.setCurrentIndex(
+                dialog.ui.zero_line_style_combo.findData("--")
             )
         finally:
             dialog.close()
@@ -830,15 +830,15 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.axis_label_color_edit.setText("green")
-            dialog.axis_label_color_edit.editingFinished.emit()
-            self.assertEqual(dialog.axis_label_color_edit.text(), "#008000")
-            self.assertEqual(dialog.axis_label_color_edit.swatch_color_text(), "#008000")
+            dialog.ui.axis_label_color_edit.setText("green")
+            dialog.ui.axis_label_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.ui.axis_label_color_edit.text(), "#008000")
+            self.assertEqual(dialog.ui.axis_label_color_edit.swatch_color_text(), "#008000")
 
-            dialog.grid_color_edit.setText("(0.4, 0.9, 1.0, 0.5)")
-            dialog.grid_color_edit.editingFinished.emit()
-            self.assertEqual(dialog.grid_color_edit.text(), "#66e6ff80")
-            self.assertEqual(dialog.grid_color_edit.swatch_color_text(), "#66e6ff80")
+            dialog.ui.grid_color_edit.setText("(0.4, 0.9, 1.0, 0.5)")
+            dialog.ui.grid_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.ui.grid_color_edit.text(), "#66e6ff80")
+            self.assertEqual(dialog.ui.grid_color_edit.swatch_color_text(), "#66e6ff80")
         finally:
             dialog.close()
 
@@ -863,7 +863,7 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            swatch = dialog.axis_label_color_edit.findChild(QtWidgets.QToolButton)
+            swatch = dialog.ui.axis_label_color_edit.findChild(QtWidgets.QToolButton)
             self.assertIsNotNone(swatch)
 
             with patch(
@@ -877,8 +877,8 @@ class TestAxisEditDialog(unittest.TestCase):
             ):
                 swatch.click()
 
-            self.assertEqual(dialog.axis_label_color_edit.text(), "#112233")
-            self.assertEqual(dialog.axis_label_color_edit.swatch_color_text(), "#112233")
+            self.assertEqual(dialog.ui.axis_label_color_edit.text(), "#112233")
+            self.assertEqual(dialog.ui.axis_label_color_edit.swatch_color_text(), "#112233")
         finally:
             dialog.close()
 
@@ -901,9 +901,9 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.maximum_auto_checkbox.setChecked(True)
-            dialog.minimum_edit.setText("0.5")
-            dialog.minimum_edit.editingFinished.emit()
+            dialog.ui.maximum_auto_checkbox.setChecked(True)
+            dialog.ui.minimum_edit.setText("0.5")
+            dialog.ui.minimum_edit.editingFinished.emit()
             self.assertIn("ax.autoscale(enable=True, axis='x')", dialog.lower_text_edit.toPlainText())
             self.assertIn("ax.set_xlim(left=0.5)", dialog.lower_text_edit.toPlainText())
         finally:
@@ -931,12 +931,12 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.set_autoscale_values_button.click()
+            dialog.ui.set_autoscale_values_button.click()
 
-            self.assertEqual(dialog.minimum_edit.text(), "1.25")
-            self.assertEqual(dialog.maximum_edit.text(), "9.75")
-            self.assertFalse(dialog.minimum_auto_checkbox.isChecked())
-            self.assertFalse(dialog.maximum_auto_checkbox.isChecked())
+            self.assertEqual(dialog.ui.minimum_edit.text(), "1.25")
+            self.assertEqual(dialog.ui.maximum_edit.text(), "9.75")
+            self.assertFalse(dialog.ui.minimum_auto_checkbox.isChecked())
+            self.assertFalse(dialog.ui.maximum_auto_checkbox.isChecked())
             self.assertIn("ax.set_xlim(1.25, 9.75)", dialog.lower_text_edit.toPlainText())
         finally:
             dialog.close()
@@ -962,9 +962,9 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.live_update_checkbox.setChecked(False)
-            dialog.axis_label_edit.setText("Delay [s]")
-            dialog.axis_label_edit.editingFinished.emit()
+            dialog.ui.live_update_checkbox.setChecked(False)
+            dialog.ui.axis_label_edit.setText("Delay [s]")
+            dialog.ui.axis_label_edit.editingFinished.emit()
             self.assertEqual(sent, [])
             dialog.do_it_button.click()
         finally:
@@ -1005,8 +1005,8 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.axis_label_edit.setText("Delay [s]")
-            dialog.axis_label_edit.editingFinished.emit()
+            dialog.ui.axis_label_edit.setText("Delay [s]")
+            dialog.ui.axis_label_edit.editingFinished.emit()
             dialog.reject()
         finally:
             dialog.close()
@@ -1043,10 +1043,10 @@ class TestAxisEditDialog(unittest.TestCase):
 
         dialog = AxisEditDialog(figure, parent=mdi_area)
         try:
-            dialog.axis_label_edit.setText("Delay [s]")
-            dialog.axis_label_edit.editingFinished.emit()
-            dialog.axis_label_edit.setText("Delay")
-            dialog.axis_label_edit.editingFinished.emit()
+            dialog.ui.axis_label_edit.setText("Delay [s]")
+            dialog.ui.axis_label_edit.editingFinished.emit()
+            dialog.ui.axis_label_edit.setText("Delay")
+            dialog.ui.axis_label_edit.editingFinished.emit()
             dialog.reject()
         finally:
             dialog.close()

@@ -242,13 +242,13 @@ def trigger_curve_fit_action_and_capture_dialog(manager):
 
 def tab_titles(dialog):
     return [
-        dialog.tab_widget.tabText(index)
-        for index in range(dialog.tab_widget.count())
+        dialog.ui.tab_widget.tabText(index)
+        for index in range(dialog.ui.tab_widget.count())
     ]
 
 
 def show_output_options_tab(dialog):
-    dialog.tab_widget.setCurrentIndex(3)
+    dialog.ui.tab_widget.setCurrentIndex(3)
     QtWidgets.QApplication.processEvents()
 
 
@@ -685,7 +685,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(dialog.preview_mode_combo.currentText(), "Commands")
             self.assertEqual(dialog.status_label.text(), "Select Y data.")
             self.assertEqual(
-                dialog.status_strip.layout().itemAt(0).widget().text(),
+                dialog.ui.status_title_label.text(),
                 "Status",
             )
             self.assertEqual(dialog.do_it_button.text(), "Do It")
@@ -699,6 +699,30 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertFalse(dialog.show_fit_checkbox.isEnabled())
             self.assertTrue(dialog.show_residuals_checkbox.isVisible())
             self.assertFalse(dialog.show_residuals_checkbox.isEnabled())
+            dialog.close()
+        finally:
+            harness.close()
+
+    def test_curve_fit_dialog_preserves_static_surface_after_ui_port(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+
+        try:
+            dialog = trigger_curve_fit_action_and_capture_dialog(manager)
+
+            self.assertEqual(
+                tab_titles(dialog),
+                [
+                    "Function and Data",
+                    "Data Options",
+                    "Coefficients",
+                    "Output Options",
+                ],
+            )
+            self.assertEqual(dialog.preview_mode_combo.currentText(), "Commands")
+            self.assertEqual(dialog.status_label.text(), "Select Y data.")
             dialog.close()
         finally:
             harness.close()

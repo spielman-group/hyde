@@ -107,98 +107,35 @@ class TraceAppearanceDialog(HydeDialogWidget):
         self._load_traces()
 
     def _build_ui(self):
-        content = QtWidgets.QWidget(self)
-        layout = QtWidgets.QVBoxLayout(content)
-
-        content_layout = QtWidgets.QHBoxLayout()
-        layout.addLayout(content_layout)
-
-        self.trace_list = QtWidgets.QListWidget(self)
-        self.trace_list.currentRowChanged.connect(self._on_trace_changed)
-        content_layout.addWidget(self.trace_list, 1)
-
-        form_container = QtWidgets.QWidget(self)
-        form_layout = QtWidgets.QFormLayout(form_container)
-        content_layout.addWidget(form_container, 2)
-
-        self.hide_trace_checkbox = QtWidgets.QCheckBox("Hide trace", self)
-        self.hide_trace_checkbox.toggled.connect(self._on_hide_trace_toggled)
-        form_layout.addRow("Visibility", self.hide_trace_checkbox)
-
-        self.mode_combo = QtWidgets.QComboBox(self)
-        for label, value in MODE_CHOICES:
-            self.mode_combo.addItem(label, value)
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        form_layout.addRow("Mode", self.mode_combo)
-
-        self.line_color_edit = MatplotlibColorLineEdit(self, allow_empty=False)
-        self.line_color_edit.editingFinished.connect(self._on_line_color_changed)
-        form_layout.addRow("Line color", self.line_color_edit)
-
-        self.line_style_combo = QtWidgets.QComboBox(self)
-        for label, value in LINE_STYLE_CHOICES:
-            self.line_style_combo.addItem(label, value)
-        self.line_style_combo.currentIndexChanged.connect(self._on_line_style_changed)
-        form_layout.addRow("Line style", self.line_style_combo)
-
-        self.line_width_spin = QtWidgets.QDoubleSpinBox(self)
-        self.line_width_spin.setRange(0.0, 99.0)
-        self.line_width_spin.setSingleStep(0.1)
-        self.line_width_spin.valueChanged.connect(self._on_line_width_changed)
-        form_layout.addRow("Line width", self.line_width_spin)
-
-        self.opacity_spin = QtWidgets.QDoubleSpinBox(self)
-        self.opacity_spin.setRange(0.0, 1.0)
-        self.opacity_spin.setSingleStep(0.05)
-        self.opacity_spin.valueChanged.connect(self._on_opacity_changed)
-        form_layout.addRow("Opacity", self.opacity_spin)
-
-        self.draw_style_combo = QtWidgets.QComboBox(self)
-        for label, value in DRAW_STYLE_CHOICES:
-            self.draw_style_combo.addItem(label, value)
-        self.draw_style_combo.currentIndexChanged.connect(self._on_draw_style_changed)
-        form_layout.addRow("Draw style", self.draw_style_combo)
-
-        self.marker_combo = QtWidgets.QComboBox(self)
-        for label, value in MARKER_CHOICES:
-            self.marker_combo.addItem(label, value)
-        self.marker_combo.currentIndexChanged.connect(self._on_marker_changed)
-        form_layout.addRow("Marker", self.marker_combo)
-
-        self.marker_size_spin = QtWidgets.QDoubleSpinBox(self)
-        self.marker_size_spin.setRange(0.0, 99.0)
-        self.marker_size_spin.setSingleStep(0.5)
-        self.marker_size_spin.valueChanged.connect(self._on_marker_size_changed)
-        form_layout.addRow("Marker size", self.marker_size_spin)
-
-        self.marker_face_color_edit = MatplotlibColorLineEdit(
-            self,
-            allow_empty=False,
-            allow_auto=True,
-        )
-        self.marker_face_color_edit.editingFinished.connect(
+        self.load_ui("trace_edit_dialog.ui", module_name=__name__)
+        self.ui.trace_list.currentRowChanged.connect(self._on_trace_changed)
+        self.ui.hide_trace_checkbox.toggled.connect(self._on_hide_trace_toggled)
+        self.ui.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.ui.line_color_edit.editingFinished.connect(self._on_line_color_changed)
+        self.ui.line_style_combo.currentIndexChanged.connect(self._on_line_style_changed)
+        self.ui.line_width_spin.valueChanged.connect(self._on_line_width_changed)
+        self.ui.opacity_spin.valueChanged.connect(self._on_opacity_changed)
+        self.ui.draw_style_combo.currentIndexChanged.connect(self._on_draw_style_changed)
+        self.ui.marker_combo.currentIndexChanged.connect(self._on_marker_changed)
+        self.ui.marker_size_spin.valueChanged.connect(self._on_marker_size_changed)
+        self.ui.marker_face_color_edit.editingFinished.connect(
             self._on_marker_face_color_changed
         )
-        form_layout.addRow("Marker face", self.marker_face_color_edit)
-
-        self.marker_edge_color_edit = MatplotlibColorLineEdit(
-            self,
-            allow_empty=False,
-            allow_auto=True,
-        )
-        self.marker_edge_color_edit.editingFinished.connect(
+        self.ui.marker_edge_color_edit.editingFinished.connect(
             self._on_marker_edge_color_changed
         )
-        form_layout.addRow("Marker edge", self.marker_edge_color_edit)
-
-        self.marker_edge_width_spin = QtWidgets.QDoubleSpinBox(self)
-        self.marker_edge_width_spin.setRange(0.0, 99.0)
-        self.marker_edge_width_spin.setSingleStep(0.1)
-        self.marker_edge_width_spin.valueChanged.connect(
+        self.ui.marker_edge_width_spin.valueChanged.connect(
             self._on_marker_edge_width_changed
         )
-        form_layout.addRow("Marker edge width", self.marker_edge_width_spin)
-        self.mount_content_widget(content)
+
+        for label, value in MODE_CHOICES:
+            self.ui.mode_combo.addItem(label, value)
+        for label, value in LINE_STYLE_CHOICES:
+            self.ui.line_style_combo.addItem(label, value)
+        for label, value in DRAW_STYLE_CHOICES:
+            self.ui.draw_style_combo.addItem(label, value)
+        for label, value in MARKER_CHOICES:
+            self.ui.marker_combo.addItem(label, value)
 
     def _load_traces(self):
         figure_ir = self.figure_context.figure_ir() or {}
@@ -245,9 +182,9 @@ class TraceAppearanceDialog(HydeDialogWidget):
             self._trace_records.append(record)
             self._trace_records_by_id[trace_id] = dict(record)
             self._draft_tracker.seed(trace_id, style)
-            self.trace_list.addItem(record["label"])
-        if self.trace_list.count():
-            self.trace_list.setCurrentRow(0)
+            self.ui.trace_list.addItem(record["label"])
+        if self.ui.trace_list.count():
+            self.ui.trace_list.setCurrentRow(0)
         self.refresh_shell()
 
     def _style_from_trace(self, trace, index, default_trace=None, live_style=None):
@@ -260,7 +197,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
         return style
 
     def _current_record(self):
-        row = self.trace_list.currentRow()
+        row = self.ui.trace_list.currentRow()
         if row < 0 or row >= len(self._trace_records):
             return None
         return self._trace_records[row]
@@ -273,26 +210,26 @@ class TraceAppearanceDialog(HydeDialogWidget):
         style = self._current_styles[trace_id]
         self._loading_controls = True
         try:
-            self.hide_trace_checkbox.setChecked(not style["visible"])
-            self.mode_combo.setCurrentIndex(
-                self.mode_combo.findData(self._mode_from_style(style))
+            self.ui.hide_trace_checkbox.setChecked(not style["visible"])
+            self.ui.mode_combo.setCurrentIndex(
+                self.ui.mode_combo.findData(self._mode_from_style(style))
             )
-            self.line_color_edit.set_committed_text(style["color"])
-            self.line_style_combo.setCurrentIndex(
-                self.line_style_combo.findData(style["linestyle"])
+            self.ui.line_color_edit.set_committed_text(style["color"])
+            self.ui.line_style_combo.setCurrentIndex(
+                self.ui.line_style_combo.findData(style["linestyle"])
             )
-            self.line_width_spin.setValue(style["linewidth"])
-            self.opacity_spin.setValue(style["alpha"])
-            self.draw_style_combo.setCurrentIndex(
-                self.draw_style_combo.findData(style["drawstyle"])
+            self.ui.line_width_spin.setValue(style["linewidth"])
+            self.ui.opacity_spin.setValue(style["alpha"])
+            self.ui.draw_style_combo.setCurrentIndex(
+                self.ui.draw_style_combo.findData(style["drawstyle"])
             )
-            self.marker_combo.setCurrentIndex(
-                self.marker_combo.findData(style["marker"])
+            self.ui.marker_combo.setCurrentIndex(
+                self.ui.marker_combo.findData(style["marker"])
             )
-            self.marker_size_spin.setValue(style["markersize"])
-            self.marker_face_color_edit.set_committed_text(style["markerfacecolor"])
-            self.marker_edge_color_edit.set_committed_text(style["markeredgecolor"])
-            self.marker_edge_width_spin.setValue(style["markeredgewidth"])
+            self.ui.marker_size_spin.setValue(style["markersize"])
+            self.ui.marker_face_color_edit.set_committed_text(style["markerfacecolor"])
+            self.ui.marker_edge_color_edit.set_committed_text(style["markeredgecolor"])
+            self.ui.marker_edge_width_spin.setValue(style["markeredgewidth"])
             self._update_color_field_previews(trace_id)
         finally:
             self._loading_controls = False
@@ -313,8 +250,8 @@ class TraceAppearanceDialog(HydeDialogWidget):
     def _update_color_field_previews(self, trace_id):
         style = self._current_styles[str(trace_id)]
         line_color = style["color"]
-        self.marker_face_color_edit.set_swatch_preview_text(line_color)
-        self.marker_edge_color_edit.set_swatch_preview_text(line_color)
+        self.ui.marker_face_color_edit.set_swatch_preview_text(line_color)
+        self.ui.marker_edge_color_edit.set_swatch_preview_text(line_color)
 
     def _send_style_update(self, trace_id, patch, replace=False, reload_controls=False):
         trace_id = str(trace_id)
@@ -396,7 +333,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
         style = self._current_styles[trace_id]
         current_marker = style["marker"]
         current_linestyle = style["linestyle"]
-        mode = self.mode_combo.itemData(index)
+        mode = self.ui.mode_combo.itemData(index)
         marker = current_marker if current_marker != "None" else "o"
         linestyle = current_linestyle if current_linestyle != "None" else "-"
         if mode == "lines":
@@ -413,7 +350,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
         trace_id = self._current_trace_id()
         if trace_id is None:
             return
-        color = self.line_color_edit.text().strip()
+        color = self.ui.line_color_edit.text().strip()
         if color == self._current_styles[trace_id]["color"]:
             return
         self._send_style_update(trace_id, {"color": color})
@@ -426,7 +363,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
             return
         self._send_style_update(
             trace_id,
-            {"linestyle": self.line_style_combo.itemData(index)},
+            {"linestyle": self.ui.line_style_combo.itemData(index)},
             reload_controls=True,
         )
 
@@ -454,7 +391,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
             return
         self._send_style_update(
             trace_id,
-            {"drawstyle": self.draw_style_combo.itemData(index)},
+            {"drawstyle": self.ui.draw_style_combo.itemData(index)},
         )
 
     def _on_marker_changed(self, index):
@@ -465,7 +402,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
             return
         self._send_style_update(
             trace_id,
-            {"marker": self.marker_combo.itemData(index)},
+            {"marker": self.ui.marker_combo.itemData(index)},
             reload_controls=True,
         )
 
@@ -483,7 +420,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
         trace_id = self._current_trace_id()
         if trace_id is None:
             return
-        color = self.marker_face_color_edit.text().strip()
+        color = self.ui.marker_face_color_edit.text().strip()
         if color == self._current_styles[trace_id]["markerfacecolor"]:
             return
         self._send_style_update(
@@ -497,7 +434,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
         trace_id = self._current_trace_id()
         if trace_id is None:
             return
-        color = self.marker_edge_color_edit.text().strip()
+        color = self.ui.marker_edge_color_edit.text().strip()
         if color == self._current_styles[trace_id]["markeredgecolor"]:
             return
         self._send_style_update(

@@ -46,6 +46,10 @@ For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md
 - Do not invent Hyde-specific backend protocols when existing suite, Jupyter, or Spyder paths already satisfy the feature's contract.
 - Do not add fake actions or placeholder implementations to the spec. If a control is visible but intentionally inactive in the initial deployment, say so explicitly.
 - Do not implement feature code as part of this skill.
+- Treat Hyde plugin UI structure as `.ui`-first by default.
+  Specs should assume static dialog/window layout is authored in one or more `.ui`
+  files, with Python reserved for signal wiring, dynamic row/item population, and
+  genuinely runtime-only widgets.
 
 ## Output Requirements
 - Create or update `project_management/specs/<feature>/SPEC.md`.
@@ -55,6 +59,9 @@ For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md
 - Separate initial deployment behavior from future work whenever the artifacts imply a larger eventual feature.
 - In `Window Layout`, include ASCII layout sketches whenever layout fidelity matters.
   For tabbed interfaces, include a separate sketch for each tab. For multi-mode or multi-page interfaces, include a separate sketch for each materially different visible arrangement.
+- When the feature is a plugin dialog or tool window, include a short note in the spec
+  stating which parts of the surface should be defined in `.ui` files and which parts,
+  if any, are expected to remain dynamic in Python.
 - Explicitly list visible controls and classify them as `active`, `inert-but-visible`, or `excluded`.
 - Add architecture guardrails whenever the UI depends on backend behavior, live kernel state, or synchronization.
 - For mutable widgets, include explicit sections covering:

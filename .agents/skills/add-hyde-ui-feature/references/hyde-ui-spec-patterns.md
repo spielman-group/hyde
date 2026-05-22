@@ -55,6 +55,21 @@ need to span multiple columns.
 The sketch does not need pixel precision. It should be structurally precise enough to
 prevent a correct-widget / wrong-layout outcome.
 
+## UI Artifact Ownership
+
+Hyde plugin UI surfaces are `.ui`-first by default.
+
+Specs should normally state that:
+
+- static dialog or tool-window structure belongs in one or more `.ui` files
+- Python is responsible for signal wiring, state synchronization, dynamic row/item
+  population, and genuinely runtime-only widgets
+- large static form trees should not be hand-built in Python without a specific
+  product or technical reason
+
+When a surface really does need code-built content, the spec should say why so the
+exception is deliberate rather than drift.
+
 ## Mutable Widget Requirements
 
 If the feature allows the user to mutate scientific state, the spec must make that explicit.

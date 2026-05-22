@@ -81,17 +81,32 @@ class CurveFitDialog(HydeDialogWidget):
         self.setModal(True)
         self.setWindowTitle("Curve Fit")
         self.resize(720, 520)
-
-        self.tab_widget = self._build_tab_widget()
-        self.preview_controls = self._build_preview_controls()
-        self.status_strip = self._build_status_strip()
-        upper_content = QtWidgets.QWidget(self)
-        upper_layout = QtWidgets.QVBoxLayout(upper_content)
-        upper_layout.setContentsMargins(0, 0, 0, 0)
-        upper_layout.addWidget(self.tab_widget)
-        upper_layout.addWidget(self.preview_controls)
-        upper_layout.addWidget(self.status_strip)
-        self.mount_content_widget(upper_content)
+        self.load_ui("curve_fit_dialog.ui", module_name=__name__)
+        self.fit_function_combo = self.ui.fit_function_combo
+        self.new_fit_function_button = self.ui.new_fit_function_button
+        self.y_data_combo = self.ui.y_data_combo
+        self.x_data_container = self.ui.x_data_container
+        self.x_data_form = self.ui.x_data_form
+        self.x_data_rows = []
+        self.from_target_checkbox = self.ui.from_target_checkbox
+        self.weighting_combo = self.ui.weighting_combo
+        self.suppress_screen_updates_checkbox = (
+            self.ui.suppress_screen_updates_checkbox
+        )
+        self.coefficients_table = self.ui.coefficients_table
+        self.fit_result_target_combo = self.ui.fit_result_target_combo
+        self.show_fit_checkbox = self.ui.show_fit_checkbox
+        self.show_residuals_checkbox = self.ui.show_residuals_checkbox
+        self.preview_mode_combo = self.ui.preview_mode_combo
+        self.status_label = self.ui.status_label
+        self.coefficients_table.horizontalHeader().setStretchLastSection(True)
+        self.fit_function_combo.currentTextChanged.connect(self._on_fit_function_changed)
+        self.y_data_combo.currentTextChanged.connect(self._on_y_data_changed)
+        self.from_target_checkbox.toggled.connect(self._on_from_target_toggled)
+        self.fit_result_target_combo.editTextChanged.connect(
+            self._on_fit_result_target_changed
+        )
+        self.from_target_checkbox.setChecked(self.figure_context is not None)
 
         self.new_fit_function_button.clicked.connect(self._on_new_fit_function_clicked)
         self.preview_mode_combo.currentTextChanged.connect(self._on_preview_mode_changed)
@@ -174,120 +189,6 @@ class CurveFitDialog(HydeDialogWidget):
                 self._update_status_label(message)
                 return
         self.accept()
-
-    def _build_tab_widget(self):
-        self.tab_widget = QtWidgets.QTabWidget(self)
-        self.tab_widget.addTab(
-            self._build_function_and_data_tab(),
-            "Function and Data",
-        )
-        self.tab_widget.addTab(self._build_data_options_tab(), "Data Options")
-        self.tab_widget.addTab(self._build_coefficients_tab(), "Coefficients")
-        self.tab_widget.addTab(self._build_output_options_tab(), "Output Options")
-        return self.tab_widget
-
-    def _build_function_and_data_tab(self):
-        tab = QtWidgets.QWidget(self)
-        layout = QtWidgets.QFormLayout(tab)
-
-        self.fit_function_combo = QtWidgets.QComboBox(tab)
-        self.fit_function_combo.currentTextChanged.connect(self._on_fit_function_changed)
-        layout.addRow("Function", self.fit_function_combo)
-
-        self.new_fit_function_button = QtWidgets.QPushButton(
-            "New Fit Function...",
-            tab,
-        )
-        layout.addRow("", self.new_fit_function_button)
-
-        self.y_data_combo = QtWidgets.QComboBox(tab)
-        self.y_data_combo.currentTextChanged.connect(self._on_y_data_changed)
-        layout.addRow("Y Data", self.y_data_combo)
-
-        self.x_data_container = QtWidgets.QWidget(tab)
-        self.x_data_form = QtWidgets.QFormLayout(self.x_data_container)
-        self.x_data_form.setContentsMargins(0, 0, 0, 0)
-        self.x_data_rows = []
-        layout.addRow("X Data", self.x_data_container)
-
-        self.from_target_checkbox = QtWidgets.QCheckBox("From Target", tab)
-        self.from_target_checkbox.setChecked(self.figure_context is not None)
-        self.from_target_checkbox.toggled.connect(self._on_from_target_toggled)
-        layout.addRow("", self.from_target_checkbox)
-        return tab
-
-    def _build_data_options_tab(self):
-        tab = QtWidgets.QWidget(self)
-        layout = QtWidgets.QFormLayout(tab)
-
-        self.weighting_combo = QtWidgets.QComboBox(tab)
-        layout.addRow("Weighting", self.weighting_combo)
-
-        self.suppress_screen_updates_checkbox = QtWidgets.QCheckBox(
-            "Suppress Screen Updates",
-            tab,
-        )
-        layout.addRow("", self.suppress_screen_updates_checkbox)
-        return tab
-
-    def _build_coefficients_tab(self):
-        tab = QtWidgets.QWidget(self)
-        layout = QtWidgets.QVBoxLayout(tab)
-
-        self.coefficients_table = QtWidgets.QTableWidget(0, 6, tab)
-        self.coefficients_table.setHorizontalHeaderLabels(
-            [
-                "Parameter",
-                "Initial Value",
-                "Vary",
-                "Lower",
-                "Upper",
-                "Expr",
-            ]
-        )
-        self.coefficients_table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.coefficients_table)
-        return tab
-
-    def _build_output_options_tab(self):
-        tab = QtWidgets.QWidget(self)
-        layout = QtWidgets.QFormLayout(tab)
-
-        self.fit_result_target_combo = QtWidgets.QComboBox(tab)
-        self.fit_result_target_combo.setEditable(True)
-        self.fit_result_target_combo.editTextChanged.connect(
-            self._on_fit_result_target_changed
-        )
-        layout.addRow("Fit Result", self.fit_result_target_combo)
-
-        self.show_fit_checkbox = QtWidgets.QCheckBox("Show Fit", self)
-        self.show_residuals_checkbox = QtWidgets.QCheckBox("Show Residuals", self)
-        layout.addRow("", self.show_fit_checkbox)
-        layout.addRow("", self.show_residuals_checkbox)
-        return tab
-
-    def _build_preview_controls(self):
-        container = QtWidgets.QWidget(self)
-        layout = QtWidgets.QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QtWidgets.QLabel("Preview", container))
-        layout.addStretch(1)
-        self.preview_mode_combo = QtWidgets.QComboBox(container)
-        self.preview_mode_combo.addItems(["Commands", "Equation"])
-        layout.addWidget(self.preview_mode_combo)
-        return container
-
-    def _build_status_strip(self):
-        container = QtWidgets.QWidget(self)
-        layout = QtWidgets.QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QtWidgets.QLabel("Status", container))
-        self.status_label = QtWidgets.QLabel("", container)
-        self.status_label.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.status_label.setMinimumHeight(24)
-        self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label, 1)
-        return container
 
     def _namespace_view(self):
         namespace_view_service = self.services.get("namespace_view_service")

@@ -35,6 +35,8 @@ Flag a patch when it solves the immediate bug or feature request with more machi
 Raise findings for:
 
 - single-use private helpers that only hide a short local change
+- large static dialog or tool-window widget trees built in Python when a `.ui` file
+  should own the structure
 - new abstraction layers without repeated call sites or a real architectural need
 - broad cleanup or refactor mixed into a narrow feature change
 - extra queues, threads, processes, watchers, relays, or state machines when an existing path could carry the behavior
@@ -42,6 +44,11 @@ Raise findings for:
 - defensive policy decisions that are not grounded in Hyde docs or the task
 
 Treat "functionally valid but overbuilt" as a real review issue.
+
+For plugin UI work, treat `.ui`-first layout ownership as the default. Static structure
+should live in `.ui` files; Python should mostly wire signals, synchronize state,
+populate dynamic content, and host runtime-only widgets. Raise a finding when a patch
+drifts away from that without a concrete reason.
 
 ## 2. `features/..._features.py` Owns Command Strings
 

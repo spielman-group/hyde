@@ -43,6 +43,8 @@ Prefer Hyde's Markdown architecture and spec files over legacy implementation de
 Ask these questions explicitly while reviewing:
 
 - Is this the smallest clear change?
+- Has the patch kept static dialog/window structure in `.ui` files where Hyde expects
+  `.ui`-first layout ownership?
 - Does the GUI only generate command strings and react to kernel results?
 - Are GUI-triggered kernel command strings generated in `features/..._features.py` rather than in GUI widgets, dialogs, or runtime helpers?
 - Is there exactly one authoritative implementation path?
@@ -54,6 +56,8 @@ Ask these questions explicitly while reviewing:
 Raise findings for any of the following:
 
 - unnecessary abstractions, speculative refactors, broad cleanups, extra state machines, or single-use helpers that are not required for the task
+- large static dialog or tool-window layouts hand-built in Python when they should be
+  defined in `.ui` files, unless there is a clear runtime-widget exception
 - GUI-built kernel command strings outside the `features/..._features.py` translation layer
 - direct imperative GUI-to-backend behavior where Hyde should have used a visible or deliberate kernel command path
 - patches that create separate GUI and non-GUI implementations of the same feature

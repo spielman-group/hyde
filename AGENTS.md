@@ -36,6 +36,9 @@ For command-emitting GUI surfaces or GUI-side lowering/state work, follow
 - Use feature branches for feature work.
 - Prefer the simplest working change in the existing path.
 - Do not overbuild, generalize early, or add speculative infrastructure.
+- For plugin dialogs and tool-window bodies, keep static layout structure in `.ui`
+  files by default. Use Python to wire signals, populate dynamic rows/items, and host
+  genuinely runtime-only widgets, not to hand-build large static form/layout trees.
 - Do not add compatibility shims or migration code unless explicitly requested.
 - Do not add optional production fallbacks solely to accommodate outdated tests,
   fake UI hosts, or stale local fixtures. When the real product contract changes,
