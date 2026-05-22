@@ -13,7 +13,10 @@ from hyde.features.matplotlib_features import (
 )
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
 from hyde.user_interface.shared.core import HydeGuiState
-from hyde.user_interface.shared.figure import supported_trace_records_from_figure_ir
+from hyde.user_interface.shared.figure import (
+    FigureEditSession,
+    supported_trace_records_from_figure_ir,
+)
 from hyde.user_interface.shared.plugin import (
     apply_saveable_window_state,
 )
@@ -474,6 +477,19 @@ class FigureWindow(HydeInteractiveWidget):
 
     def is_editable_figure_ready(self):
         return self.has_figure_ir() and self.can_request_figure_actions()
+
+    def open_edit_session(self):
+        if not self.is_editable_figure_ready():
+            raise ValueError("Figure window is not ready for a first-class edit session.")
+        return FigureEditSession(
+            figure_number=self.figure_number,
+            figure_ir=self.figure_ir(),
+            figure_defaults=self.figure_defaults(),
+            trace_styles=self.trace_styles(),
+            resolved_axis_limits=self.resolved_axis_limits(),
+            dispatch_action=self.request_figure_action,
+            current_figure_ir=self.figure_ir,
+        )
 
     def supported_trace_records(self):
         return supported_trace_records_from_figure_ir(self.figure_ir())

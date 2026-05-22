@@ -124,6 +124,14 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - First-class figure windows are the deliberate exception to the normal
   "GUI emits Python" rule after creation: routine editing uses semantic `comm`
   actions against kernel-owned figure IR.
+- Figure-edit consumers such as axis edit, trace appearance, and attached Curve Fit
+  display work through one figure-owned `open_session()` boundary exported by
+  `figure_interactive`.
+- That session is consumer-agnostic. It owns fine-grained figure getters, generic
+  semantic figure mutators, preview/source generation, action construction, dispatch,
+  and revert behavior.
+- Figure-edit consumers should not mutate raw figure IR dictionaries, lower figure IR
+  directly, or assemble raw figure-action payloads in dialog code.
 
 ## Design Bias
 

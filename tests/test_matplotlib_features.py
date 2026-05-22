@@ -39,6 +39,7 @@ from hyde.user_interface.plugins.figure_interactive.window import (
     FigureState,
     FigureWindow,
 )
+from hyde.user_interface.shared.figure import EditableFigureContext
 
 
 class FakeNamespaceViewService:
@@ -2078,17 +2079,169 @@ class TestFigureContextService(unittest.TestCase):
         service = FigureContextService(type("Plugin", (), {"services": {"mdi_area": mdi_area}})())
         try:
             context = service.active_editable_figure()
+            session = context.open_session()
 
             self.assertIsNotNone(context)
             self.assertEqual(context.figure_number, 1)
-            self.assertEqual(context.supported_trace_records(), widget.supported_trace_records())
-            self.assertTrue(context.request_figure_action({"type": "refresh_from_live_state"}))
+            self.assertTrue(context.has_supported_traces())
+            self.assertEqual(session.trace_ids(), ("trace0",))
             self.assertEqual(
-                sent,
-                [(1, {"type": "refresh_from_live_state"})],
+                tuple(record["trace_id"] for record in session.supported_trace_records()),
+                ("trace0",),
             )
         finally:
-            widget.close()
+            widget.force_close()
+
+
+class TestEditableFigureSession(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def _figure_ir(self):
+        state = FigureState()
+        state.set_title("Figure0")
+        state.set_x_name("x")
+        state.set_items(["trace_a"])
+        return figure_ir_from_live_state(state.normalized_state())
+
+    def _editable_context(self, sent_actions):
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "get_shutting_down": lambda: True,
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent_actions.append(
+                                    (int(figure_number), dict(action or {}))
+                                )
+                                or True
+                            )
+                        )
+                    },
+                )(),
+            },
+        )
+        widget.update_payload({"snapshot": {"figure_ir": self._figure_ir()}})
+        return EditableFigureContext(widget), widget
+
+    def test_open_session_returns_non_qt_boundary_without_raw_ir_contract(self):
+        sent = []
+        context, widget = self._editable_context(sent)
+        try:
+            session = context.open_session()
+            second_session = context.open_session()
+
+            self.assertEqual(session.figure_number, 1)
+            self.assertFalse(isinstance(session, QtCore.QObject))
+            self.assertFalse(hasattr(session, "figure_ir"))
+            self.assertFalse(hasattr(session, "request_figure_action"))
+            self.assertEqual(session.figure_title(), "Figure0")
+            self.assertEqual(session.trace_ids(), ("trace0",))
+            self.assertEqual(session.trace_style("trace0", "label"), "trace_a")
+            self.assertFalse(session.is_dirty())
+
+            session.set_axis_label("x", "Delay")
+
+            self.assertTrue(session.is_dirty())
+            self.assertEqual(session.axis_label("x"), "Delay")
+            self.assertIn("ax.set_xlabel('Delay')", session.preview_source())
+            self.assertNotEqual(second_session.axis_label("x"), "Delay")
+        finally:
+            widget.force_close()
+
+    def test_edit_session_apply_commit_and_revert_own_session_lifecycle(self):
+        sent = []
+        context, widget = self._editable_context(sent)
+        try:
+            session = context.open_session()
+
+            session.set_axis_label("x", "Delay")
+            self.assertTrue(session.apply_live())
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0][0], 1)
+            self.assertEqual(sent[0][1]["type"], "set_axis_state")
+            self.assertEqual(sent[0][1]["subplot_id"], "subplot0")
+            self.assertEqual(sent[0][1]["axis"], "x")
+            self.assertTrue(sent[0][1]["replace"])
+            self.assertEqual(sent[0][1]["state"]["label"]["text"], "Delay")
+            self.assertTrue(session.is_dirty())
+
+            self.assertTrue(session.commit())
+            self.assertFalse(session.is_dirty())
+            self.assertEqual(session.axis_label("x"), "Delay")
+            self.assertEqual(len(sent), 1)
+
+            session.set_axis_label("x", "Other Delay")
+            self.assertTrue(session.apply_live())
+            self.assertTrue(session.revert())
+
+            self.assertEqual(len(sent), 3)
+            self.assertEqual(sent[-1][1]["type"], "set_axis_state")
+            self.assertEqual(sent[-1][1]["state"]["label"]["text"], "Delay")
+            self.assertFalse(session.is_dirty())
+            self.assertEqual(session.axis_label("x"), "Delay")
+        finally:
+            widget.force_close()
+
+    def test_apply_live_rolls_back_partial_dispatch_failure(self):
+        sent = []
+
+        def dispatch_action(figure_number, action):
+            sent.append((int(figure_number), dict(action or {})))
+            return action.get("trace_id") != "trace_new"
+
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "get_shutting_down": lambda: True,
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: dispatch_action(
+                                figure_number,
+                                action,
+                            )
+                        )
+                    },
+                )(),
+            },
+        )
+        widget.update_payload({"snapshot": {"figure_ir": self._figure_ir()}})
+        try:
+            session = EditableFigureContext(widget).open_session()
+            session.set_trace_style("trace0", color="red")
+            session.set_trace(
+                "trace_new",
+                {
+                    "kind": "line",
+                    "x_source": {"kind": "name", "value": "x"},
+                    "y_source": {"kind": "name", "value": "trace_a"},
+                    "kwargs": {"label": "trace_new"},
+                },
+            )
+
+            self.assertFalse(session.apply_live())
+            self.assertEqual(
+                [action["type"] for _, action in sent],
+                ["set_trace_style", "set_trace", "set_trace_style"],
+            )
+            self.assertEqual(sent[-1][1]["trace_id"], "trace0")
+            self.assertTrue(session.is_dirty())
+
+            self.assertTrue(session.revert())
+            self.assertFalse(session.is_dirty())
+            self.assertEqual(session.trace_style("trace0", "color"), "#1f77b4")
+        finally:
+            widget.force_close()
 
 
 class TestFigureRefreshHelpers(unittest.TestCase):

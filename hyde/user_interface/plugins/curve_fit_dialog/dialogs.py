@@ -1,19 +1,12 @@
-import copy
-
 from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.lmfit_features import (
+    CALCULATED_X_NAME,
     LmfitCodec,
     attached_display_label,
-    attached_display_trace,
-    attached_display_trace_id,
-    resolve_attached_display_trace_id,
 )
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 from hyde.user_interface.shared.core import HydeGuiState
-from hyde.user_interface.shared.figure import (
-    FigureControlDraftTracker,
-)
 
 from .fit_function_scaffolding import CurveFitCatalogError
 
@@ -77,7 +70,7 @@ class CurveFitDialog(HydeDialogWidget):
         self._live_restore_store_name = f"_hyde_lmfit_live_restore_{id(self)}"
         self._live_missing_sentinel_name = f"_hyde_lmfit_missing_{id(self)}"
         self._preview_target_name = f"_hyde_lmfit_preview_{id(self)}"
-        self._attached_display_tracker = FigureControlDraftTracker()
+        self._figure_session = None
         self.setModal(True)
         self.setWindowTitle("Curve Fit")
         self.resize(720, 520)
@@ -130,10 +123,10 @@ class CurveFitDialog(HydeDialogWidget):
             self.show_fit_checkbox.setEnabled(False)
             self.show_residuals_checkbox.setEnabled(False)
         else:
+            self._figure_session = self.figure_context.open_session()
             self._loading_controls = True
             try:
-                self.show_fit_checkbox.setChecked(True)
-                self.show_residuals_checkbox.setChecked(False)
+                self._seed_attached_display_controls()
             finally:
                 self._loading_controls = False
             self.state.apply_action(
@@ -143,7 +136,6 @@ class CurveFitDialog(HydeDialogWidget):
                     "value": True,
                 }
             )
-            self._seed_attached_display_tracker()
 
         if self._catalog_service is not None:
             self._catalog_service.catalog_changed.connect(
@@ -188,6 +180,8 @@ class CurveFitDialog(HydeDialogWidget):
             if not success:
                 self._update_status_label(message)
                 return
+        if self._figure_session is not None:
+            self._figure_session.commit()
         self.accept()
 
     def _namespace_view(self):
@@ -206,8 +200,8 @@ class CurveFitDialog(HydeDialogWidget):
             "namespace_view": self._namespace_view(),
             "trace_records": (
                 ()
-                if self.figure_context is None
-                else self.figure_context.supported_trace_records()
+                if self._figure_session is None
+                else self._figure_session.supported_trace_records()
             ),
         }
 
@@ -419,24 +413,30 @@ class CurveFitDialog(HydeDialogWidget):
             self._loading_controls = False
 
     def _attached_display_figure_state(self):
-        subplot_state = self._attached_display_subplot_state()
-        if subplot_state is None:
+        if self._figure_session is None:
             return None
-        fit_trace = self._attached_display_trace_entry(
-            subplot_state["traces"],
+        subplot_ids = self._figure_session.subplot_ids()
+        if not subplot_ids:
+            return None
+        subplot_id = str(subplot_ids[0])
+        fit_trace = self._figure_session.attribute_path_trace(
             "best_fit",
+            subplot_id=subplot_id,
         )
-        residual_trace = self._attached_display_trace_entry(
-            subplot_state["traces"],
+        residual_trace = self._figure_session.attribute_path_trace(
             "residual",
+            subplot_id=subplot_id,
+            id_suffix="_residuals",
         )
         fit_result_name = None
         if fit_trace is not None:
-            fit_result_name = fit_trace["fit_result_name"]
+            fit_result_name = fit_trace["display_name"]
         elif residual_trace is not None:
-            fit_result_name = residual_trace["fit_result_name"]
+            fit_result_name = residual_trace["display_name"]
         return {
-            "subplot_id": subplot_state["subplot_id"],
+            "subplot_id": subplot_id,
+            "show_fit": fit_trace is not None,
+            "show_residuals": residual_trace is not None,
             "fit_trace_id": None if fit_trace is None else fit_trace["trace_id"],
             "fit_trace": None if fit_trace is None else fit_trace["trace"],
             "residual_trace_id": (
@@ -448,55 +448,7 @@ class CurveFitDialog(HydeDialogWidget):
             "fit_result_name": fit_result_name,
         }
 
-    def _attached_display_subplot_state(self):
-        if self.figure_context is None:
-            return None
-        figure_ir = self.figure_context.figure_ir() or {}
-        subplots = figure_ir.get("layout", {}).get("subplots", [])
-        if not subplots:
-            return None
-        subplot = dict(subplots[0])
-        traces = {
-            str(trace.get("id")): dict(trace)
-            for trace in subplot.get("traces", [])
-            if isinstance(trace, dict)
-        }
-        return {
-            "subplot_id": str(subplot.get("id") or "subplot0"),
-            "traces": traces,
-        }
-
-    def _attached_display_trace_entry(self, traces, component):
-        def fit_result_name_from_trace_id(trace_id):
-            trace_id = str(trace_id or "").strip()
-            if component == "best_fit":
-                return trace_id or None
-            suffix = "_residuals"
-            if component == "residual" and trace_id.endswith(suffix):
-                return trace_id[: -len(suffix)] or None
-            return None
-
-        for trace in traces.values():
-            trace_id = str(trace.get("id") or "").strip()
-            y_source = dict(trace.get("y_source") or {})
-            if y_source.get("kind") != "attribute_path":
-                continue
-            path = [str(value) for value in y_source.get("path", [])]
-            if path != [str(component)]:
-                continue
-            fit_result_name = fit_result_name_from_trace_id(trace_id)
-            if not fit_result_name:
-                continue
-            if trace_id != attached_display_trace_id(fit_result_name, component):
-                continue
-            return {
-                "trace_id": trace_id,
-                "trace": dict(trace),
-                "fit_result_name": fit_result_name,
-            }
-        return None
-
-    def _seed_attached_display_tracker(self):
+    def _seed_attached_display_controls(self):
         display_state = self._attached_display_figure_state()
         if display_state is None:
             return
@@ -504,48 +456,30 @@ class CurveFitDialog(HydeDialogWidget):
             display_state["fit_trace"] is None
             and display_state["residual_trace"] is None
         )
-        opening_state = {
-            "subplot_id": display_state["subplot_id"],
-            "show_fit": default_show_fit or display_state["fit_trace"] is not None,
-            "show_residuals": display_state["residual_trace"] is not None,
-            "fit_trace_id": display_state["fit_trace_id"],
-            "residual_trace_id": display_state["residual_trace_id"],
-            "fit_result_name": display_state["fit_result_name"],
-        }
-        self._attached_display_tracker.seed(
-            "attached_display",
-            opening_state,
-            revert_state=display_state,
+        self.show_fit_checkbox.setChecked(
+            bool(default_show_fit or display_state["fit_trace"] is not None)
         )
-        self._loading_controls = True
-        try:
-            self.show_fit_checkbox.setChecked(bool(opening_state["show_fit"]))
-            self.show_residuals_checkbox.setChecked(bool(opening_state["show_residuals"]))
-        finally:
-            self._loading_controls = False
+        self.show_residuals_checkbox.setChecked(
+            bool(display_state["residual_trace"] is not None)
+        )
 
     def _current_attached_display_state(self):
-        current_state = self._attached_display_tracker.current_states.get(
-            "attached_display"
-        )
-        if current_state is None:
+        display_state = self._attached_display_figure_state()
+        if display_state is None:
             return None
         show_fit = bool(self.show_fit_checkbox.isChecked())
         show_residuals = bool(self.show_residuals_checkbox.isChecked())
-        fit_result_name = current_state.get("fit_result_name")
+        fit_result_name = None
         if show_fit or show_residuals:
             fit_result_name = str(
                 self._current_model.get("fit_result_name")
                 if self._current_model is not None
-                else fit_result_name
-                or ""
+                else ""
             ).strip()
         return {
-            "subplot_id": current_state["subplot_id"],
+            "subplot_id": display_state["subplot_id"],
             "show_fit": show_fit,
             "show_residuals": show_residuals,
-            "fit_trace_id": current_state.get("fit_trace_id"),
-            "residual_trace_id": current_state.get("residual_trace_id"),
             "fit_result_name": fit_result_name or None,
         }
 
@@ -555,220 +489,13 @@ class CurveFitDialog(HydeDialogWidget):
         x_rows = list(self._current_model.get("x_rows") or [])
         if not x_rows:
             return None
-        return x_rows[0].get("value")
+        x_name = x_rows[0].get("value")
+        if x_name == CALCULATED_X_NAME:
+            return None
+        return x_name
 
     def _attached_display_failure_message(self):
         return "Curve Fit attached display update failed."
-
-    def _apply_attached_display_actions(self, subplot_id, trace_actions):
-        if self.figure_context is None:
-            return False
-        rollback_state = self._attached_display_subplot_state()
-        applied_trace_ids = []
-        for trace_id, trace in trace_actions:
-            if self.figure_context.request_figure_action(
-                {
-                    "type": "set_trace",
-                    "subplot_id": subplot_id,
-                    "trace_id": trace_id,
-                    "trace": trace,
-                },
-            ):
-                applied_trace_ids.append(trace_id)
-                continue
-            if rollback_state is not None:
-                for applied_trace_id in reversed(applied_trace_ids):
-                    self.figure_context.request_figure_action(
-                        {
-                            "type": "set_trace",
-                            "subplot_id": subplot_id,
-                            "trace_id": applied_trace_id,
-                            "trace": rollback_state["traces"].get(applied_trace_id),
-                        },
-                    )
-            return False
-        return True
-
-    def _owned_attached_trace_id(
-        self,
-        subplot_state,
-        trace_id,
-        *,
-        component,
-        root_names,
-    ):
-        normalized_roots = {
-            str(root_name).strip()
-            for root_name in tuple(root_names or ())
-            if str(root_name or "").strip()
-        }
-        if subplot_state is None or not normalized_roots:
-            return None
-
-        def fit_result_name_from_trace_id(trace_id):
-            trace_id = str(trace_id or "").strip()
-            if component == "best_fit":
-                return trace_id or None
-            suffix = "_residuals"
-            if component == "residual" and trace_id.endswith(suffix):
-                return trace_id[: -len(suffix)] or None
-            return None
-
-        def matches(candidate_id):
-            trace = subplot_state["traces"].get(str(candidate_id))
-            if not isinstance(trace, dict):
-                return False
-            y_source = dict(trace.get("y_source") or {})
-            if y_source.get("kind") != "attribute_path":
-                return False
-            root = dict(y_source.get("root") or {})
-            if root.get("kind") != "name":
-                return False
-            root_name = str(root.get("value") or "").strip()
-            fit_result_name = fit_result_name_from_trace_id(candidate_id)
-            if not fit_result_name:
-                return False
-            if root_name not in normalized_roots and fit_result_name not in normalized_roots:
-                return False
-            if str(candidate_id) != attached_display_trace_id(fit_result_name, component):
-                return False
-            return [str(value) for value in y_source.get("path", ())] == [str(component)]
-
-        if trace_id and matches(trace_id):
-            return str(trace_id)
-        for candidate_id in subplot_state["traces"]:
-            if matches(candidate_id):
-                return str(candidate_id)
-        return None
-
-    def _record_attached_display_state(
-        self,
-        desired_state,
-        *,
-        fit_trace_id,
-        residual_trace_id,
-    ):
-        current_state = self._attached_display_tracker.current_states.get(
-            "attached_display"
-        )
-        if current_state is None or desired_state is None:
-            return None
-        next_state = {
-            "subplot_id": desired_state["subplot_id"],
-            "show_fit": fit_trace_id is not None,
-            "show_residuals": residual_trace_id is not None,
-            "fit_trace_id": fit_trace_id,
-            "residual_trace_id": residual_trace_id,
-            "fit_result_name": (
-                desired_state.get("fit_result_name")
-                if fit_trace_id is not None or residual_trace_id is not None
-                else None
-            ),
-        }
-        return self._attached_display_tracker.replace("attached_display", next_state)
-
-    def _capture_attached_display_collision_revert_state(
-        self,
-        *,
-        subplot_state,
-        current_state,
-        fit_trace_id,
-        residual_trace_id,
-    ):
-        if subplot_state is None or current_state is None:
-            return
-        revert_state = self._attached_display_tracker.revert_state("attached_display")
-        changed = False
-        if (
-            fit_trace_id is not None
-            and current_state.get("fit_trace_id") is None
-            and fit_trace_id in subplot_state.get("traces", {})
-        ):
-            revert_state["fit_trace_id"] = fit_trace_id
-            revert_state["fit_trace"] = copy.deepcopy(
-                subplot_state["traces"][fit_trace_id]
-            )
-            revert_state["trace_order"] = list(subplot_state.get("traces", {}))
-            changed = True
-        if (
-            residual_trace_id is not None
-            and current_state.get("residual_trace_id") is None
-            and residual_trace_id in subplot_state.get("traces", {})
-        ):
-            revert_state["residual_trace_id"] = residual_trace_id
-            revert_state["residual_trace"] = copy.deepcopy(
-                subplot_state["traces"][residual_trace_id]
-            )
-            revert_state["trace_order"] = list(subplot_state.get("traces", {}))
-            changed = True
-        if changed:
-            self._attached_display_tracker.replace_revert_state(
-                "attached_display",
-                revert_state,
-            )
-
-    def _restore_attached_display_revert_state(self):
-        if not self._attached_display_tracker.changed_keys():
-            return
-        revert_state = self._attached_display_tracker.revert_state("attached_display")
-        current_state = self._attached_display_tracker.current_states.get(
-            "attached_display",
-            {},
-        )
-        trace_actions = []
-        current_fit_trace_id = current_state.get("fit_trace_id")
-        revert_fit_trace_id = revert_state.get("fit_trace_id")
-        if current_fit_trace_id and current_fit_trace_id != revert_fit_trace_id:
-            trace_actions.append((current_fit_trace_id, None))
-        if revert_fit_trace_id is not None:
-            trace_actions.append((revert_fit_trace_id, revert_state["fit_trace"]))
-        current_residual_trace_id = current_state.get("residual_trace_id")
-        revert_residual_trace_id = revert_state.get("residual_trace_id")
-        trace_order = list(revert_state.get("trace_order") or [])
-        if trace_order:
-            for trace_id in filter(None, [current_fit_trace_id, current_residual_trace_id]):
-                trace_actions.append((trace_id, None))
-            for trace_id in reversed(trace_order):
-                if trace_id == revert_fit_trace_id and revert_fit_trace_id is not None:
-                    trace_actions.append((revert_fit_trace_id, revert_state["fit_trace"]))
-                elif (
-                    trace_id == revert_residual_trace_id
-                    and revert_residual_trace_id is not None
-                ):
-                    trace_actions.append(
-                        (
-                            revert_residual_trace_id,
-                            revert_state["residual_trace"],
-                        )
-                    )
-        else:
-            if (
-                current_residual_trace_id
-                and current_residual_trace_id != revert_residual_trace_id
-            ):
-                trace_actions.append((current_residual_trace_id, None))
-            if revert_residual_trace_id is not None:
-                trace_actions.append(
-                    (
-                        revert_residual_trace_id,
-                        revert_state["residual_trace"],
-                    )
-                )
-        self._apply_attached_display_actions(
-            revert_state["subplot_id"],
-            trace_actions,
-        )
-        self._attached_display_tracker.replace(
-            "attached_display",
-            {
-                "subplot_id": revert_state["subplot_id"],
-                "show_fit": revert_state["fit_trace"] is not None,
-                "show_residuals": revert_state["residual_trace"] is not None,
-                "fit_trace_id": revert_state["fit_trace_id"],
-                "residual_trace_id": revert_state["residual_trace_id"],
-                "fit_result_name": revert_state["fit_result_name"],
-            },
-        )
 
     def _run_commit_path(
         self,
@@ -810,7 +537,8 @@ class CurveFitDialog(HydeDialogWidget):
             )
             if needs_rollback_snapshot and rollback_command:
                 python_execution_service.execute_hidden(rollback_command)
-            self._restore_attached_display_revert_state()
+            if self._figure_session is not None:
+                self._figure_session.revert()
             return False, self._attached_display_failure_message()
         if success_target_name is not None:
             self._live_result_target_name = success_target_name
@@ -833,23 +561,13 @@ class CurveFitDialog(HydeDialogWidget):
         )
 
     def _has_active_attached_preview(self):
-        if self.figure_context is None:
+        if self._figure_session is None:
             return False
-        current_state = self._attached_display_tracker.current_states.get(
-            "attached_display",
-            {},
-        )
-        return bool(
-            current_state.get("fit_trace_id") or current_state.get("residual_trace_id")
-        )
+        display_state = self._attached_display_figure_state() or {}
+        return bool(display_state.get("fit_trace_id") or display_state.get("residual_trace_id"))
 
     def _sync_preview_object(self):
-        if self.figure_context is None or self._current_model is None:
-            return True
-        current_state = self._attached_display_tracker.current_states.get(
-            "attached_display"
-        )
-        if current_state is None:
+        if self._figure_session is None or self._current_model is None:
             return True
         if not (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()):
             return True
@@ -866,13 +584,18 @@ class CurveFitDialog(HydeDialogWidget):
         return bool(python_execution_service.execute_hidden(preview_command))
 
     def _sync_attached_display(self, *, force=False, root_name=None):
-        current_state = self._attached_display_tracker.current_states.get(
-            "attached_display"
-        )
+        if self._figure_session is None:
+            return True
+        current_state = self._attached_display_figure_state()
         desired_state = self._current_attached_display_state()
         if current_state is None or desired_state is None:
             return True
-        if not force and desired_state == current_state:
+        if (
+            not force
+            and current_state["show_fit"] == desired_state["show_fit"]
+            and current_state["show_residuals"] == desired_state["show_residuals"]
+            and current_state.get("fit_result_name") == desired_state.get("fit_result_name")
+        ):
             return True
         has_plot = bool(desired_state["show_fit"] or desired_state["show_residuals"])
         if force and not has_plot and not (
@@ -888,148 +611,66 @@ class CurveFitDialog(HydeDialogWidget):
             resolved_root_name = (
                 str(root_name).strip() if root_name is not None else self._preview_target_name
             )
-            x_name = self._attached_plot_x_name()
-            subplot_state = self._attached_display_subplot_state()
-            existing_trace_ids = (
-                set()
-                if subplot_state is None
-                else set(subplot_state.get("traces", {}))
-            )
-            owned_root_names = (
+            owner_root_names = (
                 self._preview_target_name,
                 current_state.get("fit_result_name"),
                 resolved_root_name,
             )
-            current_fit_trace_id = self._owned_attached_trace_id(
-                subplot_state,
-                current_state.get("fit_trace_id"),
-                component="best_fit",
-                root_names=owned_root_names,
-            )
-            current_residual_trace_id = self._owned_attached_trace_id(
-                subplot_state,
-                current_state.get("residual_trace_id"),
-                component="residual",
-                root_names=owned_root_names,
-            )
-            fit_trace_id = None
-            residual_trace_id = None
-            if desired_state["show_fit"]:
-                fit_trace_id = resolve_attached_display_trace_id(
-                    fit_result_name,
-                    "best_fit",
-                    existing_trace_ids - {current_fit_trace_id},
-                    requested_trace_id=current_fit_trace_id,
-                )
-                existing_trace_ids.add(fit_trace_id)
-            fit_trace = (
-                attached_display_trace(
-                    fit_result_name,
-                    x_name,
-                    fit_trace_id,
-                    "best_fit",
-                    attached_display_label(fit_result_name, "best_fit"),
-                    {"linestyle": "--"},
-                    root_name=resolved_root_name,
-                )
-                if desired_state["show_fit"]
-                else None
-            )
-            if desired_state["show_residuals"]:
-                residual_trace_id = resolve_attached_display_trace_id(
-                    fit_result_name,
-                    "residual",
-                    existing_trace_ids - {current_residual_trace_id},
-                    requested_trace_id=current_residual_trace_id,
-                )
-                existing_trace_ids.add(residual_trace_id)
-            residual_trace = (
-                attached_display_trace(
-                    fit_result_name,
-                    x_name,
-                    residual_trace_id,
-                    "residual",
-                    attached_display_label(fit_result_name, "residual"),
-                    {"linestyle": ":"},
-                    root_name=resolved_root_name,
-                )
-                if desired_state["show_residuals"]
-                else None
-            )
-            self._capture_attached_display_collision_revert_state(
-                subplot_state=subplot_state,
-                current_state=current_state,
-                fit_trace_id=fit_trace_id,
-                residual_trace_id=residual_trace_id,
-            )
         else:
-            subplot_state = self._attached_display_subplot_state()
-            owned_root_names = (
+            fit_result_name = None
+            resolved_root_name = None
+            owner_root_names = (
                 self._preview_target_name,
                 current_state.get("fit_result_name"),
             )
-            current_fit_trace_id = self._owned_attached_trace_id(
-                subplot_state,
-                current_state.get("fit_trace_id"),
-                component="best_fit",
-                root_names=owned_root_names,
-            )
-            current_residual_trace_id = self._owned_attached_trace_id(
-                subplot_state,
-                current_state.get("residual_trace_id"),
-                component="residual",
-                root_names=owned_root_names,
-            )
-            fit_trace = None
-            residual_trace = None
-            fit_trace_id = None
-            residual_trace_id = None
-        trace_actions = []
-        if current_fit_trace_id and current_fit_trace_id != fit_trace_id:
-            trace_actions.append((current_fit_trace_id, None))
-        if desired_state["show_fit"] and (
-            force
-            or desired_state["show_fit"] != current_state["show_fit"]
-            or current_fit_trace_id != fit_trace_id
-            or desired_state.get("fit_result_name") != current_state.get("fit_result_name")
-        ):
-            trace_actions.append((fit_trace_id, fit_trace))
-        if current_residual_trace_id and current_residual_trace_id != residual_trace_id:
-            trace_actions.append((current_residual_trace_id, None))
-        if desired_state["show_residuals"] and (
-            force
-            or desired_state["show_residuals"] != current_state["show_residuals"]
-            or current_residual_trace_id != residual_trace_id
-            or desired_state.get("fit_result_name") != current_state.get("fit_result_name")
-        ):
-            trace_actions.append((residual_trace_id, residual_trace))
-        if (
-            not desired_state["show_fit"]
-            and current_state["show_fit"]
-            and current_fit_trace_id
-            and current_fit_trace_id == fit_trace_id
-        ):
-            trace_actions.append((current_fit_trace_id, None))
-        if (
-            not desired_state["show_residuals"]
-            and current_state["show_residuals"]
-            and current_residual_trace_id
-            and current_residual_trace_id == residual_trace_id
-        ):
-            trace_actions.append((current_residual_trace_id, None))
-        if not trace_actions:
+        self._figure_session.set_attribute_path_lines(
+            fit_result_name,
+            subplot_id=desired_state["subplot_id"],
+            root_name=resolved_root_name,
+            x_name=self._attached_plot_x_name(),
+            owner_root_names=owner_root_names,
+            components=(
+                {
+                    "component": "best_fit",
+                    "visible": desired_state["show_fit"],
+                    "label": (
+                        None
+                        if fit_result_name is None
+                        else attached_display_label(fit_result_name, "best_fit")
+                    ),
+                    "style": {"linestyle": "--"},
+                },
+                {
+                    "component": "residual",
+                    "visible": desired_state["show_residuals"],
+                    "id_suffix": "_residuals",
+                    "label": (
+                        None
+                        if fit_result_name is None
+                        else attached_display_label(fit_result_name, "residual")
+                    ),
+                    "style": {"linestyle": ":"},
+                },
+            ),
+        )
+        should_refresh_visible_traces = force and has_plot and self._figure_session.matches_live_state()
+        if self._figure_session.is_dirty() and not should_refresh_visible_traces:
+            return self._figure_session.apply_live()
+        if not should_refresh_visible_traces:
             return True
-        success = self._apply_attached_display_actions(
-            desired_state["subplot_id"],
-            trace_actions,
-        )
-        if not success:
-            return False
-        self._record_attached_display_state(
-            desired_state,
-            fit_trace_id=fit_trace_id,
-            residual_trace_id=residual_trace_id,
-        )
+        refreshed_state = self._attached_display_figure_state() or {}
+        if desired_state["show_fit"] and refreshed_state.get("fit_trace_id"):
+            if not self._figure_session.refresh_trace(
+                refreshed_state["fit_trace_id"],
+                subplot_id=desired_state["subplot_id"],
+            ):
+                return False
+        if desired_state["show_residuals"] and refreshed_state.get("residual_trace_id"):
+            if not self._figure_session.refresh_trace(
+                refreshed_state["residual_trace_id"],
+                subplot_id=desired_state["subplot_id"],
+            ):
+                return False
         return True
 
     def _after_relevant_state_change(self):
@@ -1221,5 +862,6 @@ class CurveFitDialog(HydeDialogWidget):
             if rollback_command:
                 python_execution_service.execute_hidden(rollback_command)
         self._live_result_target_name = None
-        self._restore_attached_display_revert_state()
+        if self._figure_session is not None:
+            self._figure_session.revert()
         super().reject()

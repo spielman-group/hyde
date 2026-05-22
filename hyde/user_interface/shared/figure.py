@@ -3,7 +3,10 @@ import copy
 import logging
 
 from matplotlib import colors as mcolors
+from matplotlib import rcParams
 from qtutils.qt import QtCore, QtGui, QtWidgets
+
+from hyde.features.matplotlib_features import FigureIRCodec
 
 _COMMON_COLOR_NAMES = [
     "black",
@@ -535,6 +538,108 @@ def normalize_empty_choice(value):
     return str(value)
 
 
+SUPPORTED_TRACE_STYLE_DEFAULTS = {
+    "visible": True,
+    "linestyle": "-",
+    "linewidth": 1.5,
+    "alpha": 1.0,
+    "drawstyle": "default",
+    "marker": "None",
+    "markersize": 6.0,
+    "markerfacecolor": "auto",
+    "markeredgecolor": "auto",
+    "markeredgewidth": 1.0,
+}
+
+TRACE_STYLE_ACTION_KEYS = (
+    "alpha",
+    "color",
+    "drawstyle",
+    "label",
+    "linestyle",
+    "linewidth",
+    "marker",
+    "markeredgecolor",
+    "markeredgewidth",
+    "markerfacecolor",
+    "markersize",
+    "visible",
+)
+
+
+def default_trace_color(index):
+    colors = rcParams["axes.prop_cycle"].by_key().get("color", ["#1f77b4"])
+    return str(colors[index % len(colors)])
+
+
+def normalize_trace_style_color(value, fallback):
+    if value in (None, ""):
+        return fallback
+    normalized = normalize_matplotlib_color_text(value, allow_auto=True)
+    return fallback if normalized in (None, "") else normalized
+
+
+def apply_trace_style_values(style, values):
+    if not isinstance(values, dict):
+        return style
+    for key in ("color",) + TRACE_STYLE_ACTION_KEYS:
+        if key not in values:
+            continue
+        value = values[key]
+        if key == "color":
+            style[key] = normalize_trace_style_color(value, style[key])
+        elif key in {"markerfacecolor", "markeredgecolor"}:
+            style[key] = normalize_trace_style_color(value, style[key])
+        elif key in {"linestyle", "marker"}:
+            style[key] = normalize_empty_choice(value)
+        elif key == "visible":
+            style[key] = bool(value)
+        elif key in {"linewidth", "alpha", "markersize", "markeredgewidth"}:
+            style[key] = float(value)
+        else:
+            style[key] = value
+    return style
+
+
+def trace_style_defaults_by_subplot(figure_defaults):
+    defaults = dict(figure_defaults or {})
+    default_ir = defaults.get("figure_ir")
+    if default_ir is None and ("layout" in defaults or "settings" in defaults):
+        default_ir = defaults
+    trace_defaults_by_subplot = {}
+    if isinstance(default_ir, dict):
+        for subplot in default_ir.get("layout", {}).get("subplots", []):
+            subplot_id = str(subplot.get("id"))
+            trace_defaults_by_subplot[subplot_id] = {
+                str(trace.get("id")): dict(trace or {})
+                for trace in subplot.get("traces", [])
+            }
+    for subplot_id, trace_defaults in dict(defaults.get("trace_styles", {}) or {}).items():
+        subplot_defaults = trace_defaults_by_subplot.setdefault(str(subplot_id), {})
+        for trace_id, style in dict(trace_defaults or {}).items():
+            subplot_defaults.setdefault(
+                str(trace_id),
+                {"kwargs": dict(style or {})},
+            )
+    return trace_defaults_by_subplot
+
+
+def supported_trace_style_state(
+    trace,
+    *,
+    index,
+    default_trace=None,
+    live_style=None,
+):
+    style = dict(SUPPORTED_TRACE_STYLE_DEFAULTS)
+    style["color"] = default_trace_color(index)
+    if isinstance(default_trace, dict):
+        apply_trace_style_values(style, default_trace.get("kwargs", {}))
+    apply_trace_style_values(style, dict(trace.get("kwargs", {}) or {}))
+    apply_trace_style_values(style, live_style)
+    return style
+
+
 def trace_source_name(source):
     if not isinstance(source, dict):
         return None
@@ -577,31 +682,1072 @@ def supported_trace_records_from_figure_ir(figure_ir):
     return tuple(records)
 
 
+def default_subplot_layout_state():
+    return FigureIRCodec.validate_state({"layout": {"subplots": [{}]}})["layout"][
+        "subplots"
+    ][0]
+
+
+def merge_defaulted_value(current, default, baseline):
+    if isinstance(baseline, dict) and isinstance(current, dict):
+        merged = {}
+        keys = set(baseline) | set(current) | set(default or {})
+        for key in keys:
+            merged[key] = merge_defaulted_value(
+                current.get(key),
+                None if not isinstance(default, dict) else default.get(key),
+                baseline.get(key),
+            )
+        return merged
+    if current != baseline:
+        return copy.deepcopy(current)
+    if default is not None:
+        return copy.deepcopy(default)
+    return copy.deepcopy(current)
+
+
+def figure_ir_with_defaults(figure_ir, figure_defaults):
+    if figure_ir is None:
+        return None
+    if not isinstance(figure_defaults, dict):
+        return FigureIRCodec.validate_state(figure_ir)
+    merged = FigureIRCodec.validate_state(figure_ir)
+    defaults = FigureIRCodec.validate_state(figure_defaults)
+    baseline_subplot = default_subplot_layout_state()
+    default_subplots = {
+        subplot["id"]: subplot for subplot in defaults.get("layout", {}).get("subplots", [])
+    }
+    for subplot in merged.get("layout", {}).get("subplots", []):
+        default_subplot = default_subplots.get(subplot["id"])
+        if default_subplot is None:
+            continue
+        for axis_name in ("x", "y"):
+            subplot["axes"][axis_name] = merge_defaulted_value(
+                subplot["axes"][axis_name],
+                default_subplot["axes"][axis_name],
+                baseline_subplot["axes"][axis_name],
+            )
+        for side in ("bottom", "top", "left", "right"):
+            subplot["axis_sides"][side] = merge_defaulted_value(
+                subplot["axis_sides"][side],
+                default_subplot["axis_sides"][side],
+                baseline_subplot["axis_sides"][side],
+            )
+        subplot["margins"] = merge_defaulted_value(
+            subplot.get("margins", {}),
+            default_subplot.get("margins", {}),
+            baseline_subplot.get("margins", {}),
+        )
+    return merged
+
+
 class EditableFigureContext:
     def __init__(self, figure_window):
         self.figure_number = int(figure_window.figure_number)
         self._figure_window = figure_window
 
-    def figure_ir(self):
-        return self._figure_window.figure_ir()
+    def open_session(self):
+        return self._figure_window.open_edit_session()
 
-    def figure_defaults(self):
-        return self._figure_window.figure_defaults()
+    def has_supported_traces(self):
+        return self.open_session().has_supported_traces()
 
-    def resolved_axis_limits(self):
-        return self._figure_window.resolved_axis_limits()
 
-    def trace_styles(self):
-        return self._figure_window.trace_styles()
+class FigureEditSession:
+    def __init__(
+        self,
+        *,
+        figure_number,
+        figure_ir,
+        figure_defaults=None,
+        trace_styles=None,
+        resolved_axis_limits=None,
+        dispatch_action=None,
+        current_figure_ir=None,
+    ):
+        self.figure_number = int(figure_number)
+        self._dispatch_action = dispatch_action
+        self._current_figure_ir = current_figure_ir
+        self._figure_defaults = copy.deepcopy(figure_defaults)
+        self._trace_styles = copy.deepcopy(trace_styles) or {}
+        self._trace_style_defaults = trace_style_defaults_by_subplot(self._figure_defaults)
+        self._resolved_axis_limits = copy.deepcopy(resolved_axis_limits) or {}
+        self._opening_state = FigureIRCodec.validate_state(figure_ir)
+        self._current_state = copy.deepcopy(self._opening_state)
+        self._revert_state = copy.deepcopy(self._opening_state)
+        self._applied_state = copy.deepcopy(self._opening_state)
+        self._opening_trace_style_states = self._initial_trace_style_states(
+            self._opening_state
+        )
+        self._current_trace_style_states = copy.deepcopy(
+            self._opening_trace_style_states
+        )
+        self._revert_trace_style_states = copy.deepcopy(
+            self._opening_trace_style_states
+        )
+        self._applied_trace_style_states = copy.deepcopy(
+            self._opening_trace_style_states
+        )
+
+    def figure_title(self):
+        return self._current_state["settings"]["title"]
+
+    def figure_size(self):
+        return copy.deepcopy(self._current_state["settings"]["figsize"])
+
+    def subplot_ids(self):
+        return tuple(
+            subplot["id"] for subplot in self._current_state["layout"]["subplots"]
+        )
+
+    def subplot_title(self, subplot_id=None):
+        return self._subplot(subplot_id)["title"]
+
+    def legend_visible(self, subplot_id=None):
+        return bool(self._subplot(subplot_id)["legend"])
+
+    def axis_label(self, axis, subplot_id=None):
+        return self.axis_value(axis, "label", "text", subplot_id=subplot_id)
+
+    def axis_limits(self, axis, subplot_id=None):
+        return self.axis_value(axis, "range", "limits", subplot_id=subplot_id)
+
+    def axis_limit_mode(self, axis, subplot_id=None):
+        return self.axis_value(axis, "range", "limit_mode", subplot_id=subplot_id)
+
+    def axis_scale(self, axis, subplot_id=None):
+        return self.axis_value(axis, "scale_mode", subplot_id=subplot_id)
+
+    def axis_value(self, axis, *path, subplot_id=None, default=None):
+        value = self._value_from_path(
+            self._effective_axis_state(axis, subplot_id),
+            path,
+            default=default,
+        )
+        return copy.deepcopy(value)
+
+    def axis_side_value(self, side, *path, subplot_id=None, default=None):
+        value = self._value_from_path(
+            self._effective_axis_side_state(side, subplot_id),
+            path,
+            default=default,
+        )
+        return copy.deepcopy(value)
+
+    def subplot_margin(self, side, *, subplot_id=None, default=None):
+        subplot = self._effective_subplot(subplot_id)
+        return copy.deepcopy(subplot.get("margins", {}).get(str(side), default))
+
+    def resolved_axis_limits(self, axis, subplot_id=None):
+        subplot_id = self._resolve_subplot_id(subplot_id)
+        return copy.deepcopy(
+            self._resolved_axis_limits.get(subplot_id, {}).get(
+                self._normalize_axis_name(axis)
+            )
+        )
+
+    def trace_ids(self, subplot_id=None):
+        return tuple(trace["id"] for trace in self._subplot(subplot_id)["traces"])
+
+    def trace(self, trace_id, subplot_id=None):
+        return copy.deepcopy(self._trace(trace_id, subplot_id))
+
+    def trace_style(self, trace_id, name, subplot_id=None, default=None):
+        trace_key = self._trace_style_key(trace_id, subplot_id)
+        if trace_key in self._current_trace_style_states:
+            return copy.deepcopy(
+                self._current_trace_style_states[trace_key].get(str(name), default)
+            )
+        trace = self._trace(trace_id, subplot_id)
+        return copy.deepcopy(trace["kwargs"].get(str(name), default))
 
     def supported_trace_records(self):
-        return supported_trace_records_from_figure_ir(self.figure_ir())
+        return supported_trace_records_from_figure_ir(self._current_state)
 
     def has_supported_traces(self):
         return bool(self.supported_trace_records())
 
-    def request_figure_action(self, action):
-        return bool(self._figure_window.request_figure_action(action))
+    def is_dirty(self):
+        return (
+            self._current_state != self._opening_state
+            or self._current_trace_style_states != self._opening_trace_style_states
+        )
+
+    def matches_live_state(self):
+        if self._current_figure_ir is None:
+            return (
+                self._current_state == self._applied_state
+                and self._current_trace_style_states
+                == self._applied_trace_style_states
+            )
+        live_state = self._current_figure_ir()
+        if live_state is None:
+            return False
+        validated_live_state = FigureIRCodec.validate_state(live_state)
+        live_trace_style_states = self._initial_trace_style_states(validated_live_state)
+        return self._dispatch_state(
+            validated_live_state,
+            live_trace_style_states,
+        ) == self._dispatch_state(
+            self._current_state,
+            self._current_trace_style_states,
+        )
+
+    def preview_source(self):
+        return FigureIRCodec.state_to_python(
+            self._dispatch_state(self._current_state, self._current_trace_style_states),
+            context={"figure_defaults": self._figure_defaults},
+        )
+
+    def python_source(self):
+        return self.preview_source()
+
+    def set_figure_title(self, title, *, subplot_id=None):
+        return self._update_current_state(
+            {
+                "type": "set_figure_title",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "title": title,
+            }
+        )
+
+    def set_subplot_title(self, title, *, subplot_id=None):
+        return self._update_current_state(
+            {
+                "type": "set_subplot_title",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "title": title,
+            }
+        )
+
+    def set_legend_visible(self, visible, *, subplot_id=None):
+        return self._update_current_state(
+            {
+                "type": "set_legend_visible",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "visible": bool(visible),
+            }
+        )
+
+    def set_axis_label(self, axis, label, *, subplot_id=None):
+        return self._update_current_state(
+            {
+                "type": "set_axis_label",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "axis": self._normalize_axis_name(axis),
+                "label": label,
+            }
+        )
+
+    def set_axis_limits(self, axis, minimum, maximum, *, subplot_id=None):
+        return self._update_current_state(
+            {
+                "type": "set_axis_limits",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "axis": self._normalize_axis_name(axis),
+                "min": minimum,
+                "max": maximum,
+            }
+        )
+
+    def set_xlim(self, left, right, *, subplot_id=None):
+        return self.set_axis_limits("x", left, right, subplot_id=subplot_id)
+
+    def set_ylim(self, bottom, top, *, subplot_id=None):
+        return self.set_axis_limits("y", bottom, top, subplot_id=subplot_id)
+
+    def set_axis_state(self, axis, state, *, subplot_id=None, replace=False):
+        return self._update_current_state(
+            {
+                "type": "set_axis_state",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "axis": self._normalize_axis_name(axis),
+                "state": copy.deepcopy(state),
+                "replace": bool(replace),
+            }
+        )
+
+    def set_axis_side_state(self, side, state, *, subplot_id=None, replace=False):
+        return self._update_current_state(
+            {
+                "type": "set_axis_side_state",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "side": self._normalize_side_name(side),
+                "state": copy.deepcopy(state),
+                "replace": bool(replace),
+            }
+        )
+
+    def set_subplot_margins(self, *, subplot_id=None, replace=False, **state):
+        return self._update_current_state(
+            {
+                "type": "set_subplot_margins",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "state": copy.deepcopy(state),
+                "replace": bool(replace),
+            }
+        )
+
+    def subplots_adjust(
+        self,
+        *,
+        left=None,
+        bottom=None,
+        right=None,
+        top=None,
+        subplot_id=None,
+        replace=False,
+    ):
+        state = {
+            key: value
+            for key, value in (
+                ("left", left),
+                ("bottom", bottom),
+                ("right", right),
+                ("top", top),
+            )
+            if value is not None
+        }
+        return self.set_subplot_margins(
+            subplot_id=subplot_id,
+            replace=replace,
+            **state,
+        )
+
+    def set_trace_style(
+        self,
+        trace_id,
+        *,
+        subplot_id=None,
+        replace=False,
+        style=None,
+        **kwargs,
+    ):
+        merged_style = dict(style or {})
+        merged_style.update(kwargs)
+        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
+        updated_state = self._update_current_state(
+            {
+                "type": "set_trace_style",
+                "subplot_id": resolved_subplot_id,
+                "trace_id": str(trace_id),
+                "style": merged_style,
+                "replace": bool(replace),
+            }
+        )
+        self._update_trace_style_state(
+            trace_id,
+            subplot_id=resolved_subplot_id,
+            style=merged_style,
+            replace=replace,
+        )
+        return updated_state
+
+    def set_trace(self, trace_id, trace=None, *, subplot_id=None):
+        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
+        updated_state = self._update_current_state(
+            {
+                "type": "set_trace",
+                "subplot_id": resolved_subplot_id,
+                "trace_id": str(trace_id),
+                "trace": copy.deepcopy(trace),
+            }
+        )
+        self._sync_current_trace_style_state(
+            trace_id,
+            subplot_id=resolved_subplot_id,
+        )
+        return updated_state
+
+    def refresh_trace(self, trace_id, *, subplot_id=None):
+        if self._dispatch_action is None:
+            return False
+        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
+        trace = self._trace(trace_id, subplot_id=resolved_subplot_id)
+        return bool(
+            self._dispatch_action(
+                {
+                    "type": "set_trace",
+                    "subplot_id": resolved_subplot_id,
+                    "trace_id": str(trace_id),
+                    "trace": copy.deepcopy(trace),
+                }
+            )
+        )
+
+    def attribute_path_trace(
+        self,
+        component,
+        *,
+        subplot_id=None,
+        trace_id=None,
+        id_suffix="",
+        root_names=(),
+    ):
+        entry = self._find_attribute_path_trace(
+            component,
+            subplot_id=subplot_id,
+            trace_id=trace_id,
+            id_suffix=id_suffix,
+            root_names=root_names,
+        )
+        return copy.deepcopy(entry)
+
+    def set_attribute_path_lines(
+        self,
+        display_name=None,
+        *,
+        components=(),
+        root_name=None,
+        x_name=None,
+        subplot_id=None,
+        owner_root_names=(),
+    ):
+        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
+        normalized_display_name = self._normalize_optional_text(display_name)
+        normalized_root_name = (
+            self._normalize_optional_text(root_name) or normalized_display_name
+        )
+        normalized_owner_roots = self._normalized_root_names(
+            owner_root_names,
+            normalized_display_name,
+            normalized_root_name,
+        )
+        for component_spec in self._normalized_attribute_path_components(components):
+            current_entry = self._find_attribute_path_trace(
+                component_spec["path"],
+                subplot_id=resolved_subplot_id,
+                id_suffix=component_spec["id_suffix"],
+                root_names=normalized_owner_roots,
+            )
+            if not component_spec["visible"] or normalized_display_name is None:
+                if current_entry is not None:
+                    self.set_trace(
+                        current_entry["trace_id"],
+                        None,
+                        subplot_id=resolved_subplot_id,
+                    )
+                continue
+            desired_trace_id = f"{normalized_display_name}{component_spec['id_suffix']}"
+            self._capture_live_collision_revert_trace(
+                desired_trace_id,
+                subplot_id=resolved_subplot_id,
+            )
+            if (
+                current_entry is not None
+                and current_entry["trace_id"] != desired_trace_id
+            ):
+                self.set_trace(
+                    current_entry["trace_id"],
+                    None,
+                    subplot_id=resolved_subplot_id,
+                )
+            self.set_trace(
+                desired_trace_id,
+                self._attribute_path_line_trace(
+                    trace_id=desired_trace_id,
+                    root_name=normalized_root_name,
+                    path=component_spec["path"],
+                    x_name=x_name,
+                    label=component_spec["label"],
+                    style=component_spec["style"],
+                ),
+                subplot_id=resolved_subplot_id,
+            )
+        return copy.deepcopy(self._current_state)
+
+    def apply_live(self):
+        if (
+            self._current_state == self._applied_state
+            and self._current_trace_style_states == self._applied_trace_style_states
+        ):
+            return True
+        self._refresh_applied_state_from_live()
+        actions = figure_edit_actions_between(
+            self._dispatch_state(self._applied_state, self._applied_trace_style_states),
+            self._dispatch_state(self._current_state, self._current_trace_style_states),
+        )
+        return self._dispatch_actions(
+            actions,
+            target_state=self._current_state,
+            target_trace_style_states=self._current_trace_style_states,
+        )
+
+    def commit(self):
+        if not self.apply_live():
+            return False
+        self._opening_state = copy.deepcopy(self._current_state)
+        self._revert_state = copy.deepcopy(self._current_state)
+        self._applied_state = copy.deepcopy(self._current_state)
+        self._opening_trace_style_states = copy.deepcopy(
+            self._current_trace_style_states
+        )
+        self._revert_trace_style_states = copy.deepcopy(
+            self._current_trace_style_states
+        )
+        self._applied_trace_style_states = copy.deepcopy(
+            self._current_trace_style_states
+        )
+        return True
+
+    def revert(self):
+        if (
+            self._current_state == self._revert_state
+            and self._current_trace_style_states == self._revert_trace_style_states
+        ):
+            return True
+        if (
+            self._applied_state != self._revert_state
+            or self._applied_trace_style_states != self._revert_trace_style_states
+        ):
+            self._refresh_applied_state_from_live()
+            actions = figure_edit_actions_between(
+                self._dispatch_state(
+                    self._applied_state,
+                    self._applied_trace_style_states,
+                ),
+                self._dispatch_state(
+                    self._revert_state,
+                    self._revert_trace_style_states,
+                ),
+            )
+            if not self._dispatch_actions(
+                actions,
+                target_state=self._revert_state,
+                target_trace_style_states=self._revert_trace_style_states,
+            ):
+                return False
+        self._current_state = copy.deepcopy(self._revert_state)
+        self._current_trace_style_states = copy.deepcopy(
+            self._revert_trace_style_states
+        )
+        return True
+
+    def _update_current_state(self, action):
+        self._current_state = FigureIRCodec.update_state(self._current_state, action)
+        return copy.deepcopy(self._current_state)
+
+    def _refresh_applied_state_from_live(self):
+        if self._current_figure_ir is None:
+            return False
+        live_state = self._current_figure_ir()
+        if live_state is None:
+            return False
+        self._applied_state = FigureIRCodec.validate_state(live_state)
+        self._applied_trace_style_states = self._initial_trace_style_states(
+            self._applied_state
+        )
+        return True
+
+    def _dispatch_actions(self, actions, *, target_state, target_trace_style_states):
+        if self._dispatch_action is None:
+            return False
+        applied_dispatch_state = self._dispatch_state(
+            self._applied_state,
+            self._applied_trace_style_states,
+        )
+        live_dispatch_state = copy.deepcopy(applied_dispatch_state)
+        for action in actions:
+            if not self._dispatch_action(copy.deepcopy(action)):
+                rollback_actions = figure_edit_actions_between(
+                    live_dispatch_state,
+                    applied_dispatch_state,
+                )
+                for rollback_action in rollback_actions:
+                    if not self._dispatch_action(copy.deepcopy(rollback_action)):
+                        return False
+                return False
+            live_dispatch_state = FigureIRCodec.update_state(live_dispatch_state, action)
+        self._applied_state = copy.deepcopy(target_state)
+        self._applied_trace_style_states = copy.deepcopy(target_trace_style_states)
+        return True
+
+    def _dispatch_state(self, state, trace_style_states):
+        dispatch_state = copy.deepcopy(state)
+        for (subplot_id, trace_id), style in trace_style_states.items():
+            dispatch_state = FigureIRCodec.update_state(
+                dispatch_state,
+                {
+                    "type": "set_trace_style",
+                    "subplot_id": subplot_id,
+                    "trace_id": trace_id,
+                    "style": copy.deepcopy(style),
+                    "replace": True,
+                },
+            )
+        return dispatch_state
+
+    def _capture_live_collision_revert_trace(self, trace_id, *, subplot_id=None):
+        live_trace = self._live_trace(trace_id, subplot_id=subplot_id)
+        if live_trace is None:
+            return
+        current_trace = self._trace_from_state(
+            self._current_state,
+            trace_id,
+            subplot_id=subplot_id,
+        )
+        if current_trace == live_trace:
+            return
+        revert_trace = self._trace_from_state(
+            self._revert_state,
+            trace_id,
+            subplot_id=subplot_id,
+        )
+        if revert_trace == live_trace:
+            return
+        self._revert_state = FigureIRCodec.update_state(
+            self._revert_state,
+            {
+                "type": "set_trace",
+                "subplot_id": self._resolve_subplot_id(subplot_id),
+                "trace_id": str(trace_id),
+                "trace": copy.deepcopy(live_trace),
+            },
+        )
+
+    def _subplot(self, subplot_id=None):
+        resolved_id = self._resolve_subplot_id(subplot_id)
+        for subplot in self._current_state["layout"]["subplots"]:
+            if subplot["id"] == resolved_id:
+                return subplot
+        raise ValueError(f"Unknown figure subplot id: {resolved_id!r}.")
+
+    def _effective_state(self):
+        return figure_ir_with_defaults(self._current_state, self._figure_defaults)
+
+    def _effective_subplot(self, subplot_id=None):
+        resolved_id = self._resolve_subplot_id(subplot_id)
+        for subplot in self._effective_state()["layout"]["subplots"]:
+            if subplot["id"] == resolved_id:
+                return subplot
+        raise ValueError(f"Unknown figure subplot id: {resolved_id!r}.")
+
+    def _axis_state(self, axis, subplot_id=None):
+        return self._subplot(subplot_id)["axes"][self._normalize_axis_name(axis)]
+
+    def _effective_axis_state(self, axis, subplot_id=None):
+        return self._effective_subplot(subplot_id)["axes"][self._normalize_axis_name(axis)]
+
+    def _effective_axis_side_state(self, side, subplot_id=None):
+        return self._effective_subplot(subplot_id)["axis_sides"][
+            self._normalize_side_name(side)
+        ]
+
+    def _trace(self, trace_id, subplot_id=None):
+        for trace in self._subplot(subplot_id)["traces"]:
+            if trace["id"] == str(trace_id):
+                return trace
+        raise ValueError(f"Unknown figure trace id: {trace_id!r}.")
+
+    def _trace_from_state(self, state, trace_id, *, subplot_id=None):
+        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
+        for subplot in state["layout"]["subplots"]:
+            if subplot["id"] != resolved_subplot_id:
+                continue
+            for trace in subplot.get("traces", []):
+                if trace["id"] == str(trace_id):
+                    return copy.deepcopy(trace)
+            return None
+        return None
+
+    def _trace_style_key(self, trace_id, subplot_id=None):
+        return (self._resolve_subplot_id(subplot_id), str(trace_id))
+
+    def _sync_current_trace_style_state(self, trace_id, *, subplot_id=None):
+        trace_key = self._trace_style_key(trace_id, subplot_id)
+        self._current_trace_style_states.pop(trace_key, None)
+        for index, record in enumerate(supported_trace_records_from_figure_ir(self._current_state)):
+            if record["subplot_id"] != trace_key[0]:
+                continue
+            if record["trace_id"] != trace_key[1]:
+                continue
+            default_trace = self._trace_style_defaults.get(record["subplot_id"], {}).get(
+                record["trace_id"]
+            )
+            live_style = self._trace_styles.get(record["subplot_id"], {}).get(
+                record["trace_id"]
+            )
+            self._current_trace_style_states[trace_key] = supported_trace_style_state(
+                record["trace"],
+                index=index,
+                default_trace=default_trace,
+                live_style=live_style,
+            )
+            return self._current_trace_style_states[trace_key]
+        return None
+
+    def _find_attribute_path_trace(
+        self,
+        component,
+        *,
+        subplot_id=None,
+        trace_id=None,
+        id_suffix="",
+        root_names=(),
+    ):
+        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
+        normalized_path = self._normalize_attribute_path(component)
+        normalized_suffix = str(id_suffix or "")
+        normalized_roots = self._normalized_root_names(root_names)
+        subplot = self._subplot(resolved_subplot_id)
+
+        def matches(candidate_trace_id):
+            candidate_trace = None
+            for trace in subplot["traces"]:
+                if trace["id"] == str(candidate_trace_id):
+                    candidate_trace = trace
+                    break
+            if not isinstance(candidate_trace, dict):
+                return None
+            y_source = dict(candidate_trace.get("y_source") or {})
+            if y_source.get("kind") != "attribute_path":
+                return None
+            path = tuple(str(value) for value in y_source.get("path", ()))
+            if path != normalized_path:
+                return None
+            root = dict(y_source.get("root") or {})
+            if root.get("kind") != "name":
+                return None
+            display_name = self._attribute_path_display_name(
+                candidate_trace_id,
+                normalized_suffix,
+            )
+            if display_name is None:
+                return None
+            root_name = self._normalize_optional_text(root.get("value"))
+            if (
+                normalized_roots
+                and root_name not in normalized_roots
+                and display_name not in normalized_roots
+            ):
+                return None
+            return {
+                "trace_id": str(candidate_trace_id),
+                "trace": copy.deepcopy(candidate_trace),
+                "display_name": display_name,
+                "root_name": root_name,
+            }
+
+        if trace_id:
+            matched = matches(trace_id)
+            if matched is not None:
+                return matched
+        for trace in subplot["traces"]:
+            matched = matches(trace["id"])
+            if matched is not None:
+                return matched
+        return None
+
+    def _live_trace(self, trace_id, *, subplot_id=None):
+        if self._current_figure_ir is None:
+            return None
+        live_state = self._current_figure_ir()
+        if live_state is None:
+            return None
+        validated_state = FigureIRCodec.validate_state(live_state)
+        return self._trace_from_state(
+            validated_state,
+            trace_id,
+            subplot_id=subplot_id,
+        )
+
+    def _normalized_attribute_path_components(self, components):
+        normalized = []
+        for component in tuple(components or ()):
+            component_state = dict(component or {})
+            normalized.append(
+                {
+                    "path": self._normalize_attribute_path(
+                        component_state.get("path", component_state.get("component"))
+                    ),
+                    "visible": bool(component_state.get("visible", True)),
+                    "id_suffix": str(component_state.get("id_suffix") or ""),
+                    "label": component_state.get("label"),
+                    "style": copy.deepcopy(component_state.get("style") or {}),
+                }
+            )
+        return normalized
+
+    def _normalize_attribute_path(self, component):
+        if isinstance(component, (tuple, list)):
+            path = tuple(
+                str(value) for value in component if str(value or "").strip()
+            )
+        else:
+            normalized = self._normalize_optional_text(component)
+            path = () if normalized is None else (normalized,)
+        if not path:
+            raise ValueError("Attribute-path trace component path cannot be empty.")
+        return path
+
+    def _attribute_path_display_name(self, trace_id, id_suffix):
+        normalized_trace_id = self._normalize_optional_text(trace_id)
+        if normalized_trace_id is None:
+            return None
+        normalized_suffix = str(id_suffix or "")
+        if normalized_suffix:
+            if not normalized_trace_id.endswith(normalized_suffix):
+                return None
+            display_name = normalized_trace_id[: -len(normalized_suffix)]
+            return display_name or None
+        return normalized_trace_id
+
+    def _normalized_root_names(self, root_names, *extra_root_names):
+        normalized = set()
+        for root_name in tuple(root_names or ()) + tuple(extra_root_names):
+            normalized_root = self._normalize_optional_text(root_name)
+            if normalized_root is not None:
+                normalized.add(normalized_root)
+        return normalized
+
+    def _normalize_optional_text(self, value):
+        text = str(value or "").strip()
+        return text or None
+
+    def _attribute_path_line_trace(
+        self,
+        *,
+        trace_id,
+        root_name,
+        path,
+        x_name,
+        label,
+        style,
+    ):
+        trace_kwargs = dict(style or {})
+        normalized_label = self._normalize_optional_text(label)
+        if normalized_label is not None:
+            trace_kwargs["label"] = normalized_label
+        normalized_x_name = self._normalize_optional_text(x_name)
+        return {
+            "id": str(trace_id),
+            "kind": "line",
+            "x_source": (
+                None
+                if normalized_x_name is None
+                else {"kind": "name", "value": normalized_x_name}
+            ),
+            "y_source": {
+                "kind": "attribute_path",
+                "root": {"kind": "name", "value": str(root_name)},
+                "path": [str(value) for value in path],
+            },
+            "kwargs": trace_kwargs,
+        }
+
+    def _initial_trace_style_states(self, state):
+        trace_style_states = {}
+        for index, record in enumerate(supported_trace_records_from_figure_ir(state)):
+            trace_key = (record["subplot_id"], record["trace_id"])
+            default_trace = self._trace_style_defaults.get(record["subplot_id"], {}).get(
+                record["trace_id"]
+            )
+            live_style = self._trace_styles.get(record["subplot_id"], {}).get(
+                record["trace_id"]
+            )
+            trace_style_states[trace_key] = supported_trace_style_state(
+                record["trace"],
+                index=index,
+                default_trace=default_trace,
+                live_style=live_style,
+            )
+        return trace_style_states
+
+    def _update_trace_style_state(
+        self,
+        trace_id,
+        *,
+        subplot_id=None,
+        style=None,
+        replace=False,
+    ):
+        trace_key = self._trace_style_key(trace_id, subplot_id)
+        current_style = self._current_trace_style_states.get(trace_key)
+        if current_style is None:
+            return None
+        if replace:
+            replacement = dict(
+                self._opening_trace_style_states.get(trace_key, current_style)
+            )
+            apply_trace_style_values(replacement, dict(style or {}))
+            self._current_trace_style_states[trace_key] = replacement
+            return replacement
+        apply_trace_style_values(current_style, dict(style or {}))
+        return current_style
+
+    def _resolve_subplot_id(self, subplot_id):
+        if subplot_id not in (None, ""):
+            return str(subplot_id)
+        subplot_ids = self.subplot_ids()
+        if not subplot_ids:
+            raise ValueError("Figure edit session does not contain any subplots.")
+        return subplot_ids[0]
+
+    def _normalize_axis_name(self, axis):
+        axis_name = str(axis or "")
+        if axis_name not in {"x", "y"}:
+            raise ValueError("Figure edit session axis must be 'x' or 'y'.")
+        return axis_name
+
+    def _normalize_side_name(self, side):
+        side_name = str(side or "")
+        if side_name not in {"bottom", "top", "left", "right"}:
+            raise ValueError(f"Unsupported axis side: {side_name!r}.")
+        return side_name
+
+    def _value_from_path(self, value, path, *, default=None):
+        if not path:
+            return copy.deepcopy(value)
+        current = value
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                return copy.deepcopy(default)
+            current = current[key]
+        return current
+
+
+def figure_edit_actions_between(source_state, target_state):
+    source = FigureIRCodec.validate_state(source_state)
+    target = FigureIRCodec.validate_state(target_state)
+    actions = []
+    source_subplots = {
+        subplot["id"]: subplot for subplot in source["layout"]["subplots"]
+    }
+
+    for target_subplot in target["layout"]["subplots"]:
+        subplot_id = target_subplot["id"]
+        source_subplot = source_subplots.get(subplot_id)
+        if source_subplot is None:
+            raise ValueError(f"Unknown figure subplot id: {subplot_id!r}.")
+
+        figure_title_changed = source["settings"]["title"] != target["settings"]["title"]
+        if figure_title_changed:
+            actions.append(
+                {
+                    "type": "set_figure_title",
+                    "subplot_id": subplot_id,
+                    "title": target["settings"]["title"],
+                }
+            )
+        if not figure_title_changed and source_subplot["title"] != target_subplot["title"]:
+            actions.append(
+                {
+                    "type": "set_subplot_title",
+                    "subplot_id": subplot_id,
+                    "title": target_subplot["title"],
+                }
+            )
+        if source_subplot["legend"] != target_subplot["legend"]:
+            actions.append(
+                {
+                    "type": "set_legend_visible",
+                    "subplot_id": subplot_id,
+                    "visible": target_subplot["legend"],
+                }
+            )
+        if source_subplot["margins"] != target_subplot["margins"]:
+            actions.append(
+                {
+                    "type": "set_subplot_margins",
+                    "subplot_id": subplot_id,
+                    "state": copy.deepcopy(target_subplot["margins"]),
+                    "replace": True,
+                }
+            )
+        for axis_name in ("x", "y"):
+            if source_subplot["axes"][axis_name] != target_subplot["axes"][axis_name]:
+                actions.append(
+                    {
+                        "type": "set_axis_state",
+                        "subplot_id": subplot_id,
+                        "axis": axis_name,
+                        "state": copy.deepcopy(target_subplot["axes"][axis_name]),
+                        "replace": True,
+                    }
+                )
+        for side in ("bottom", "top", "left", "right"):
+            if (
+                source_subplot["axis_sides"][side]
+                != target_subplot["axis_sides"][side]
+            ):
+                actions.append(
+                    {
+                        "type": "set_axis_side_state",
+                        "subplot_id": subplot_id,
+                        "side": side,
+                        "state": copy.deepcopy(target_subplot["axis_sides"][side]),
+                        "replace": True,
+                    }
+                )
+
+        source_traces = {
+            trace["id"]: trace for trace in source_subplot.get("traces", [])
+        }
+        target_traces = {
+            trace["id"]: trace for trace in target_subplot.get("traces", [])
+        }
+        for trace in source_subplot.get("traces", []):
+            trace_id = trace["id"]
+            if trace_id not in target_traces:
+                actions.append(
+                    {
+                        "type": "set_trace",
+                        "subplot_id": subplot_id,
+                        "trace_id": trace_id,
+                        "trace": None,
+                    }
+                )
+        for trace in target_subplot.get("traces", []):
+            trace_id = trace["id"]
+            source_trace = source_traces.get(trace_id)
+            if source_trace == trace:
+                continue
+            if can_dispatch_trace_style_edit(source_trace, trace):
+                actions.append(
+                    {
+                        "type": "set_trace_style",
+                        "subplot_id": subplot_id,
+                        "trace_id": trace_id,
+                        "style": {
+                            key: copy.deepcopy(value)
+                            for key, value in trace.get("kwargs", {}).items()
+                            if key in TRACE_STYLE_ACTION_KEYS
+                        },
+                        "replace": True,
+                    }
+                )
+                continue
+            actions.append(
+                {
+                    "type": "set_trace",
+                    "subplot_id": subplot_id,
+                    "trace_id": trace_id,
+                    "trace": copy.deepcopy(trace),
+                }
+            )
+
+    return actions
+
+
+def can_dispatch_trace_style_edit(source_trace, target_trace):
+    if not isinstance(source_trace, dict) or not isinstance(target_trace, dict):
+        return False
+    source_copy = copy.deepcopy(source_trace)
+    target_copy = copy.deepcopy(target_trace)
+    source_kwargs = dict(source_copy.pop("kwargs", {}) or {})
+    target_kwargs = dict(target_copy.pop("kwargs", {}) or {})
+    if source_copy != target_copy:
+        return False
+    changed_keys = {
+        key
+        for key in set(source_kwargs) | set(target_kwargs)
+        if source_kwargs.get(key) != target_kwargs.get(key)
+    }
+    if not changed_keys:
+        return False
+    if "label" in changed_keys and "label" not in target_kwargs:
+        return False
+    return changed_keys <= set(TRACE_STYLE_ACTION_KEYS)
 
 
 class FigureControlDraftTracker:

@@ -145,6 +145,11 @@ The Figure window itself is primarily a viewport. Supported live edits in the in
 deployment are launched from figure-related dialogs and target the kernel-owned IR for
 first-class figures.
 
+Those dialogs do not own raw figure-semantic draft dictionaries. They open one
+consumer-agnostic figure edit session from the active figure context and work through
+that session's getters, mutators, preview/source, live apply, commit, and revert
+operations.
+
 Those edits target:
 
 - `FigureIR`
@@ -200,6 +205,11 @@ Saved figure macros are generated from `fig._hyde_ir` only. They lower to ordina
 object-oriented matplotlib Python source and are written into the project's bounded
 macro block in `procedures/__init__.py`.
 
+The figure-edit session boundary is intentionally consumer-agnostic. Axis editing,
+trace appearance editing, and attached Curve Fit display all use the same session
+entry point and generic figure operations rather than consumer-specific figure
+services.
+
 Project session restore uses the same lower-level recreation-source builder in
 `session.py`, wrapped as `@hyde.figure(..., register=False)` and invoked after project
 activation so first-class figures reopen through the same figure-building path.
@@ -249,6 +259,26 @@ Examples of intended omission behavior:
 This is a figure-wide rule, not an axis-dialog-specific rule. Any Hyde figure feature
 that produces user-facing matplotlib source must compare against the kernel-owned
 defaults snapshot rather than lowering a full effective state dump.
+
+## Edit Session Boundary
+
+The active editable figure context exports one `open_session()` entry point.
+
+That session:
+
+- is ephemeral per dialog opening
+- is plain Python, not a Qt object
+- owns current/opening/revert figure edit state
+- exposes fine-grained getters over first-class figure state
+- exposes generic semantic figure mutators, including trace and attribute-path line
+  operations needed by current figure consumers
+- owns preview/source generation
+- owns semantic action construction and dispatch
+- owns live apply, commit, and revert behavior
+
+Consumer dialogs may wrap those fine-grained getters into higher-level local helpers,
+but they do not treat raw `figure_ir` dictionaries or raw `comm` payloads as their
+edit contract.
 
 ## Synchronization
 

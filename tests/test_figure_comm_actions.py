@@ -539,9 +539,19 @@ class TestFigureCommActions(unittest.TestCase):
         window = FigureWindow(
             figure_number=7,
             services={
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "get_shutting_down": lambda: True,
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent.append((figure_number, dict(action or {})))
+                                or True
+                            )
+                        )
+                    },
+                )(),
             },
         )
         try:
@@ -568,16 +578,26 @@ class TestFigureCommActions(unittest.TestCase):
                 ],
             )
         finally:
-            window.close()
+            window.force_close()
 
     def test_figure_window_requests_refresh_from_live_state_action(self):
         sent = []
         window = FigureWindow(
             figure_number=7,
             services={
-                "send_figure_action": lambda figure_number, action: (
-                    sent.append((figure_number, action)) or True
-                ),
+                "get_shutting_down": lambda: True,
+                "figure_action_service": type(
+                    "FigureActionService",
+                    (),
+                    {
+                        "request_figure_action": (
+                            lambda _self, figure_number, action: (
+                                sent.append((figure_number, dict(action or {})))
+                                or True
+                            )
+                        )
+                    },
+                )(),
             },
         )
         try:
@@ -586,7 +606,7 @@ class TestFigureCommActions(unittest.TestCase):
             self.assertTrue(window.request_refresh_from_live_state())
             self.assertEqual(sent, [(7, {"type": "refresh_from_live_state"})])
         finally:
-            window.close()
+            window.force_close()
 
     def test_refresh_figure_regenerates_first_class_figure_from_ir(self):
         plt = self._configure_pyplot()

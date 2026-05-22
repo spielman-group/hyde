@@ -137,6 +137,13 @@ when a project is loaded.
 - Runtime truth is the live kernel `Figure`.
 - Recreation/editability truth is kernel-owned `fig._hyde_ir`.
 - Routine GUI edits are semantic `comm` actions, not GUI-generated matplotlib source.
+- Consumer plugins edit first-class figures through the figure-owned
+  `EditableFigureContext.open_session()` boundary exported by
+  `figure_interactive`.
+- That figure edit session owns draft/revert lifecycle, preview/source generation,
+  semantic figure-action construction, live apply, commit, and revert.
+- Consumer dialogs do not use raw `figure_ir` dictionaries or raw figure-action
+  payloads as their working contract.
 - Saved graph macros and `session.py` restore source both lower from figure IR.
 
 ### Curve Fit
@@ -152,6 +159,9 @@ when a project is loaded.
 - Preview/commit command generation is GUI-side codec work in
   `hyde.features.lmfit_features`; authoritative fit results and any attached figure
   display objects live in the kernel/runtime figure path, not in Qt state.
+- When Curve Fit is attached to a first-class figure, attached display traces are
+  managed through the figure edit session boundary rather than by a dialog-local
+  figure trace manager.
 
 ## Plugin Structure
 

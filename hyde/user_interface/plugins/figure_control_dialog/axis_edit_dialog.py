@@ -1,13 +1,7 @@
-import copy
+from qtutils.qt import QtWidgets
 
-from qtutils.qt import QtCore, QtWidgets
-
-from hyde.features.matplotlib_features import FigureIRCodec
 from hyde.user_interface.shared.figure import MatplotlibColorLineEdit
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
-from hyde.user_interface.shared.figure import (
-    FigureControlDraftTracker,
-)
 
 AXIS_TAB_TITLES = [
     "Axis",
@@ -183,79 +177,14 @@ def _side_for_label_choice(choice, axis_name):
     )
 
 
-def _default_subplot_state():
-    return FigureIRCodec.validate_state({"layout": {"subplots": [{}]}})["layout"][
-        "subplots"
-    ][0]
-
-
-def _merge_defaulted_value(current, default, baseline):
-    if isinstance(baseline, dict) and isinstance(current, dict):
-        merged = {}
-        keys = set(baseline) | set(current) | set(default or {})
-        for key in keys:
-            merged[key] = _merge_defaulted_value(
-                current.get(key),
-                None if not isinstance(default, dict) else default.get(key),
-                baseline.get(key),
-            )
-        return merged
-    if current != baseline:
-        return copy.deepcopy(current)
-    if default is not None:
-        return copy.deepcopy(default)
-    return copy.deepcopy(current)
-
-
-def _merge_figure_ir_with_defaults(figure_ir, figure_defaults):
-    if figure_ir is None:
-        return None
-    if not isinstance(figure_defaults, dict):
-        return copy.deepcopy(figure_ir)
-    merged = FigureIRCodec.validate_state(figure_ir)
-    defaults = FigureIRCodec.validate_state(figure_defaults)
-    baseline_subplot = _default_subplot_state()
-    default_subplots = {
-        subplot["id"]: subplot for subplot in defaults.get("layout", {}).get("subplots", [])
-    }
-    for subplot in merged.get("layout", {}).get("subplots", []):
-        default_subplot = default_subplots.get(subplot["id"])
-        if default_subplot is None:
-            continue
-        for axis_name in ("x", "y"):
-            subplot["axes"][axis_name] = _merge_defaulted_value(
-                subplot["axes"][axis_name],
-                default_subplot["axes"][axis_name],
-                baseline_subplot["axes"][axis_name],
-            )
-        for side in ("bottom", "top", "left", "right"):
-            subplot["axis_sides"][side] = _merge_defaulted_value(
-                subplot["axis_sides"][side],
-                default_subplot["axis_sides"][side],
-                baseline_subplot["axis_sides"][side],
-            )
-    return merged
-
-
 class AxisEditDialog(HydeDialogWidget):
     def __init__(self, figure_context, services=None, parent=None):
         self.figure_context = figure_context
+        self._session = self.figure_context.open_session()
         self._preview_error_message = ""
-        self._draft_figure_ir = None
         super().__init__(parent=parent, services=dict(services or {}))
         self.setWindowTitle("Modify Axis")
         self._loading_controls = False
-        self._live_updates_sent = False
-        self._original_figure_ir = self.figure_context.figure_ir()
-        self._draft_tracker = FigureControlDraftTracker()
-        self._draft_figure_ir = self._draft_tracker.seed(
-            "figure",
-            _merge_figure_ir_with_defaults(
-                self._original_figure_ir,
-                self.figure_context.figure_defaults(),
-            ),
-            revert_state=self._original_figure_ir,
-        )
         self.load_ui("axis_edit_dialog.ui", module_name=__name__)
         self._install_color_fields()
         self._populate_choice_controls()
@@ -375,7 +304,7 @@ class AxisEditDialog(HydeDialogWidget):
         self.resize(target_width, max(self.height(), self.sizeHint().height()))
 
     def has_supported_axes(self):
-        return self._current_subplot() is not None
+        return bool(self._session.subplot_ids())
 
     def _load_initial_axis(self):
         if not self.has_supported_axes():
@@ -392,26 +321,21 @@ class AxisEditDialog(HydeDialogWidget):
         self._load_selected_side()
 
     def _current_subplot(self):
-        if self._draft_figure_ir is None:
-            return None
-        subplots = self._draft_figure_ir.get("layout", {}).get("subplots", [])
-        return None if not subplots else subplots[0]
+        subplot_ids = self._session.subplot_ids()
+        return None if not subplot_ids else subplot_ids[0]
 
     def _selected_context(self):
-        subplot = self._current_subplot()
-        if subplot is None:
+        subplot_id = self._current_subplot()
+        if subplot_id is None:
             return None
         side = self.ui.axis_selector.currentData()
         if side not in {"left", "bottom", "right", "top"}:
             return None
         axis_name = _axis_name_for_side(side)
         return {
-            "subplot": subplot,
-            "subplot_id": subplot["id"],
+            "subplot_id": subplot_id,
             "side": side,
             "axis_name": axis_name,
-            "axis_state": subplot["axes"][axis_name],
-            "side_state": subplot["axis_sides"][side],
         }
 
     def _load_selected_side(self):
@@ -419,151 +343,558 @@ class AxisEditDialog(HydeDialogWidget):
         if context is None:
             self._update_preview()
             return
-        axis_state = context["axis_state"]
-        side_state = context["side_state"]
-        label_state = dict(axis_state.get("label", {}) or {})
-        range_state = dict(axis_state.get("range", {}) or {})
-        tick_state = dict(axis_state.get("ticks", {}) or {})
-        major_ticks = dict(tick_state.get("major", {}) or {})
-        formatter_state = dict(tick_state.get("formatter", {}) or {})
-        grid_state = dict(axis_state.get("grid", {}) or {})
-        zero_line_state = dict(axis_state.get("zero_line", {}) or {})
-        limits = range_state.get("limits") or (None, None)
-        display_range = tick_state.get("display_range") or (None, None)
-        limit_mode = dict(range_state.get("limit_mode", {}) or {})
-        margins = dict(context["subplot"].get("margins", {}) or {})
+        subplot_id = context["subplot_id"]
+        axis_name = context["axis_name"]
+        side = context["side"]
+        limits = self._session.axis_limits(axis_name, subplot_id=subplot_id) or (
+            None,
+            None,
+        )
+        display_range = self._session.axis_value(
+            axis_name,
+            "ticks",
+            "display_range",
+            subplot_id=subplot_id,
+        ) or (None, None)
+        limit_mode = self._session.axis_limit_mode(
+            axis_name,
+            subplot_id=subplot_id,
+        ) or {}
 
         self._loading_controls = True
         try:
-            self._set_combo_data(self.ui.axis_mode_combo, axis_state.get("scale_mode"))
+            self._set_combo_data(
+                self.ui.axis_mode_combo,
+                self._session.axis_scale(axis_name, subplot_id=subplot_id),
+            )
             self._set_combo_data(
                 self.ui.log_tick_mode_combo,
-                axis_state.get("log_tick_mode", "plain"),
+                self._session.axis_value(
+                    axis_name,
+                    "log_tick_mode",
+                    subplot_id=subplot_id,
+                    default="plain",
+                ),
             )
-            self.ui.axis_label_edit.setText(_format_optional_text(label_state.get("text")))
-            self.ui.axis_label_preview.setText(_format_optional_text(label_state.get("text")))
-            self.ui.label_visible_checkbox.setChecked(bool(label_state.get("visible")))
+            self.ui.axis_label_edit.setText(
+                _format_optional_text(
+                    self._session.axis_label(axis_name, subplot_id=subplot_id)
+                )
+            )
+            self.ui.axis_label_preview.setText(self.ui.axis_label_edit.text())
+            self.ui.label_visible_checkbox.setChecked(
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "label",
+                        "visible",
+                        subplot_id=subplot_id,
+                    )
+                )
+            )
             self._set_combo_data(
                 self.ui.label_side_combo,
-                _label_choice_for_side(label_state.get("side"), context["axis_name"]),
+                _label_choice_for_side(
+                    self._session.axis_value(
+                        axis_name,
+                        "label",
+                        "side",
+                        subplot_id=subplot_id,
+                    ),
+                    axis_name,
+                ),
             )
             self._set_combo_data(
                 self.ui.label_position_mode_combo,
-                label_state.get("position_mode", "auto"),
+                self._session.axis_value(
+                    axis_name,
+                    "label",
+                    "position_mode",
+                    subplot_id=subplot_id,
+                    default="auto",
+                ),
             )
-            self.ui.label_position_spin.setValue(float(label_state.get("position") or 0.0))
-            self.ui.label_offset_spin.setValue(float(label_state.get("offset") or 0.0))
-            self.ui.label_rotation_spin.setValue(float(label_state.get("rotation") or 0.0))
-            self.ui.line_spacing_spin.setValue(float(label_state.get("line_spacing") or 1.2))
+            self.ui.label_position_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "label",
+                        "position",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
+            self.ui.label_offset_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "label",
+                        "offset",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
+            self.ui.label_rotation_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "label",
+                        "rotation",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
+            self.ui.line_spacing_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "label",
+                        "line_spacing",
+                        subplot_id=subplot_id,
+                    )
+                    or 1.2
+                )
+            )
             self.ui.axis_label_color_edit.set_committed_text(
-                _format_optional_text(label_state.get("color"))
+                _format_optional_text(
+                    self._session.axis_value(
+                        axis_name,
+                        "label",
+                        "color",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self._set_combo_data(
                 self.ui.autoscale_combo,
-                range_state.get("autoscale", "data"),
+                self._session.axis_value(
+                    axis_name,
+                    "range",
+                    "autoscale",
+                    subplot_id=subplot_id,
+                    default="data",
+                ),
             )
             self.ui.minimum_auto_checkbox.setChecked(limit_mode.get("min", "auto") == "auto")
             self.ui.minimum_edit.setText(_format_optional_number(limits[0]))
             self.ui.maximum_auto_checkbox.setChecked(limit_mode.get("max", "auto") == "auto")
             self.ui.maximum_edit.setText(_format_optional_number(limits[1]))
-            self.ui.reverse_axis_checkbox.setChecked(bool(range_state.get("reverse")))
-            self.ui.side_visible_checkbox.setChecked(bool(side_state.get("spine_visible")))
-            self.ui.side_ticks_checkbox.setChecked(bool(side_state.get("ticks_visible")))
+            self.ui.reverse_axis_checkbox.setChecked(
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "range",
+                        "reverse",
+                        subplot_id=subplot_id,
+                    )
+                )
+            )
+            self.ui.side_visible_checkbox.setChecked(
+                bool(
+                    self._session.axis_side_value(
+                        side,
+                        "spine_visible",
+                        subplot_id=subplot_id,
+                    )
+                )
+            )
+            self.ui.side_ticks_checkbox.setChecked(
+                bool(
+                    self._session.axis_side_value(
+                        side,
+                        "ticks_visible",
+                        subplot_id=subplot_id,
+                    )
+                )
+            )
             self.ui.side_tick_labels_checkbox.setChecked(
-                bool(side_state.get("tick_labels_visible"))
+                bool(
+                    self._session.axis_side_value(
+                        side,
+                        "tick_labels_visible",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.side_line_width_spin.setValue(
-                float(side_state.get("spine_width") or 0.0)
+                float(
+                    self._session.axis_side_value(
+                        side,
+                        "spine_width",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
             )
-            self.ui.side_offset_spin.setValue(float(margins.get(context["side"]) or 0.0))
-            self.ui.spine_offset_spin.setValue(float(side_state.get("offset") or 0.0))
-            self.ui.draw_on_top_checkbox.setChecked(bool(side_state.get("draw_on_top")))
+            self.ui.side_offset_spin.setValue(
+                float(self._session.subplot_margin(side, subplot_id=subplot_id) or 0.0)
+            )
+            self.ui.spine_offset_spin.setValue(
+                float(
+                    self._session.axis_side_value(
+                        side,
+                        "offset",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
+            self.ui.draw_on_top_checkbox.setChecked(
+                bool(
+                    self._session.axis_side_value(
+                        side,
+                        "draw_on_top",
+                        subplot_id=subplot_id,
+                    )
+                )
+            )
             self.ui.side_color_edit.set_committed_text(
-                _format_optional_text(side_state.get("spine_color"))
+                _format_optional_text(
+                    self._session.axis_side_value(
+                        side,
+                        "spine_color",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.tick_label_color_edit.set_committed_text(
-                _format_optional_text(side_state.get("tick_label_color"))
+                _format_optional_text(
+                    self._session.axis_side_value(
+                        side,
+                        "tick_label_color",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.tick_label_rotation_spin.setValue(
-                float(side_state.get("tick_label_rotation") or 0.0)
+                float(
+                    self._session.axis_side_value(
+                        side,
+                        "tick_label_rotation",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
             )
             self.ui.tick_label_offset_spin.setValue(
-                float(side_state.get("tick_label_offset") or 0.0)
+                float(
+                    self._session.axis_side_value(
+                        side,
+                        "tick_label_offset",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
             )
-            self.ui.major_tick_count_spin.setValue(int(major_ticks.get("count") or 0))
-            self.ui.major_tick_step_spin.setValue(float(major_ticks.get("step") or 0.0))
+            self.ui.major_tick_count_spin.setValue(
+                int(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "major",
+                        "count",
+                        subplot_id=subplot_id,
+                    )
+                    or 0
+                )
+            )
+            self.ui.major_tick_step_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "major",
+                        "step",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
             self.ui.major_tick_positions_edit.setText(
-                _format_float_list(major_ticks.get("positions"))
+                _format_float_list(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "major",
+                        "positions",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.major_tick_labels_edit.setText(
-                _format_text_list(major_ticks.get("labels"))
+                _format_text_list(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "major",
+                        "labels",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self._set_combo_data(
                 self.ui.major_tick_mode_combo,
-                major_ticks.get("mode", "auto"),
+                self._session.axis_value(
+                    axis_name,
+                    "ticks",
+                    "major",
+                    "mode",
+                    subplot_id=subplot_id,
+                    default="auto",
+                ),
             )
             self.ui.minor_ticks_checkbox.setChecked(
-                bool(dict(tick_state.get("minor", {}) or {}).get("visible"))
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "minor",
+                        "visible",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self._set_combo_data(
                 self.ui.tick_direction_combo,
-                tick_state.get("direction", "outside"),
+                self._session.axis_value(
+                    axis_name,
+                    "ticks",
+                    "direction",
+                    subplot_id=subplot_id,
+                    default="outside",
+                ),
             )
             self._set_combo_data(
                 self.ui.formatter_style_combo,
-                formatter_state.get("style", "plain"),
+                self._session.axis_value(
+                    axis_name,
+                    "ticks",
+                    "formatter",
+                    "style",
+                    subplot_id=subplot_id,
+                    default="plain",
+                ),
             )
-            self.ui.low_trip_spin.setValue(float(formatter_state.get("low_trip") or 0.0))
-            self.ui.high_trip_spin.setValue(float(formatter_state.get("high_trip") or 0.0))
+            self.ui.low_trip_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "low_trip",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
+            self.ui.high_trip_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "high_trip",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
             self.ui.exponent_prescale_spin.setValue(
-                int(formatter_state.get("exponent_prescale") or 0)
+                int(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "exponent_prescale",
+                        subplot_id=subplot_id,
+                    )
+                    or 0
+                )
             )
             self.ui.display_range_min_edit.setText(_format_optional_number(display_range[0]))
             self.ui.display_range_max_edit.setText(_format_optional_number(display_range[1]))
             self.ui.suppressed_values_edit.setText(
-                _format_float_list(tick_state.get("suppressed_values"))
+                _format_float_list(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "suppressed_values",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.max_log_cycles_minor_spin.setValue(
-                float(tick_state.get("max_log_cycles_minor") or 0.0)
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "max_log_cycles_minor",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
             )
             self.ui.max_log_cycles_minor_labels_spin.setValue(
-                float(tick_state.get("max_log_cycles_minor_labels") or 0.0)
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "max_log_cycles_minor_labels",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
             )
             self.ui.use_thousands_separator_checkbox.setChecked(
-                bool(formatter_state.get("use_thousands_separator"))
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "use_thousands_separator",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.zero_as_zero_checkbox.setChecked(
-                bool(formatter_state.get("zero_as_zero", True))
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "zero_as_zero",
+                        subplot_id=subplot_id,
+                        default=True,
+                    )
+                )
             )
             self.ui.trim_trailing_zeros_checkbox.setChecked(
-                bool(formatter_state.get("trim_trailing_zeros"))
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "trim_trailing_zeros",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.trim_leading_zero_checkbox.setChecked(
-                bool(formatter_state.get("trim_leading_zero"))
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "trim_leading_zero",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
             self.ui.prefer_exponent_checkbox.setChecked(
-                bool(formatter_state.get("prefer_exponent"))
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "ticks",
+                        "formatter",
+                        "prefer_exponent",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
-            self.ui.grid_visible_checkbox.setChecked(bool(grid_state.get("visible")))
-            self._set_combo_data(self.ui.grid_which_combo, grid_state.get("which", "major"))
+            self.ui.grid_visible_checkbox.setChecked(
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "grid",
+                        "visible",
+                        subplot_id=subplot_id,
+                    )
+                )
+            )
+            self._set_combo_data(
+                self.ui.grid_which_combo,
+                self._session.axis_value(
+                    axis_name,
+                    "grid",
+                    "which",
+                    subplot_id=subplot_id,
+                    default="major",
+                ),
+            )
             self._set_combo_data(
                 self.ui.grid_style_combo,
-                grid_state.get("linestyle", "-"),
+                self._session.axis_value(
+                    axis_name,
+                    "grid",
+                    "linestyle",
+                    subplot_id=subplot_id,
+                    default="-",
+                ),
             )
-            self.ui.grid_width_spin.setValue(float(grid_state.get("linewidth") or 0.0))
+            self.ui.grid_width_spin.setValue(
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "grid",
+                        "linewidth",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
+            )
             self.ui.grid_color_edit.set_committed_text(
-                _format_optional_text(grid_state.get("color"))
+                _format_optional_text(
+                    self._session.axis_value(
+                        axis_name,
+                        "grid",
+                        "color",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
-            self.ui.zero_line_visible_checkbox.setChecked(bool(zero_line_state.get("visible")))
+            self.ui.zero_line_visible_checkbox.setChecked(
+                bool(
+                    self._session.axis_value(
+                        axis_name,
+                        "zero_line",
+                        "visible",
+                        subplot_id=subplot_id,
+                    )
+                )
+            )
             self._set_combo_data(
                 self.ui.zero_line_style_combo,
-                zero_line_state.get("linestyle", "-"),
+                self._session.axis_value(
+                    axis_name,
+                    "zero_line",
+                    "linestyle",
+                    subplot_id=subplot_id,
+                    default="-",
+                ),
             )
             self.ui.zero_line_width_spin.setValue(
-                float(zero_line_state.get("linewidth") or 0.0)
+                float(
+                    self._session.axis_value(
+                        axis_name,
+                        "zero_line",
+                        "linewidth",
+                        subplot_id=subplot_id,
+                    )
+                    or 0.0
+                )
             )
             self.ui.zero_line_color_edit.set_committed_text(
-                _format_optional_text(zero_line_state.get("color"))
+                _format_optional_text(
+                    self._session.axis_value(
+                        axis_name,
+                        "zero_line",
+                        "color",
+                        subplot_id=subplot_id,
+                    )
+                )
             )
         finally:
             self._loading_controls = False
@@ -628,13 +959,23 @@ class AxisEditDialog(HydeDialogWidget):
             }
         return {"display_range": (minimum, maximum), "valid": True, "message": ""}
 
-    def _apply_current_controls_to_draft(self):
+    def _apply_current_controls_to_session(self):
         context = self._selected_context()
         if context is None:
             return {"valid": False, "message": "No active axis selection."}
 
-        axis_state = context["axis_state"]
-        side_state = context["side_state"]
+        subplot_id = context["subplot_id"]
+        axis_name = context["axis_name"]
+        side = context["side"]
+        axis_state = self._session.axis_value(axis_name, subplot_id=subplot_id)
+        side_state = self._session.axis_side_value(side, subplot_id=subplot_id)
+        margins = {
+            margin_side: self._session.subplot_margin(
+                margin_side,
+                subplot_id=subplot_id,
+            )
+            for margin_side in ("left", "bottom", "right", "top")
+        }
         range_validation = self._validate_range_inputs()
         if not range_validation["valid"]:
             return range_validation
@@ -677,7 +1018,7 @@ class AxisEditDialog(HydeDialogWidget):
         axis_state["label"]["visible"] = bool(self.ui.label_visible_checkbox.isChecked())
         axis_state["label"]["side"] = _side_for_label_choice(
             self.ui.label_side_combo.currentData() or "primary",
-            context["axis_name"],
+            axis_name,
         )
         axis_state["label"]["position_mode"] = str(
             self.ui.label_position_mode_combo.currentData() or "auto"
@@ -780,7 +1121,7 @@ class AxisEditDialog(HydeDialogWidget):
         )
         width = float(self.ui.side_line_width_spin.value())
         side_state["spine_width"] = None if width <= 0 else width
-        context["subplot"]["margins"][context["side"]] = float(self.ui.side_offset_spin.value())
+        margins[side] = float(self.ui.side_offset_spin.value())
         side_state["offset"] = float(self.ui.spine_offset_spin.value())
         side_state["draw_on_top"] = bool(self.ui.draw_on_top_checkbox.isChecked())
         side_color = self.ui.side_color_edit.text().strip()
@@ -791,82 +1132,26 @@ class AxisEditDialog(HydeDialogWidget):
         side_state["tick_label_offset"] = float(self.ui.tick_label_offset_spin.value())
 
         try:
-            self._draft_figure_ir = self._draft_tracker.replace(
-                "figure",
-                FigureIRCodec.validate_state(self._draft_figure_ir),
+            self._session.set_axis_state(
+                axis_name,
+                axis_state,
+                subplot_id=subplot_id,
+                replace=True,
+            )
+            self._session.set_axis_side_state(
+                side,
+                side_state,
+                subplot_id=subplot_id,
+                replace=True,
+            )
+            self._session.set_subplot_margins(
+                subplot_id=subplot_id,
+                replace=True,
+                **margins,
             )
         except ValueError as exc:
             return {"valid": False, "message": str(exc)}
         return {"valid": True, "message": ""}
-
-    def _dispatch_selected_state(self):
-        context = self._selected_context()
-        if context is None:
-            return False
-        sent = False
-        axis_action = {
-            "type": "set_axis_state",
-            "subplot_id": context["subplot_id"],
-            "axis": context["axis_name"],
-            "state": dict(context["axis_state"]),
-            "replace": True,
-        }
-        sent = self.figure_context.request_figure_action(axis_action) or sent
-        side_action = {
-            "type": "set_axis_side_state",
-            "subplot_id": context["subplot_id"],
-            "side": context["side"],
-            "state": dict(context["side_state"]),
-            "replace": True,
-        }
-        sent = self.figure_context.request_figure_action(side_action) or sent
-        layout_action = {
-            "type": "set_subplot_margins",
-            "subplot_id": context["subplot_id"],
-            "state": dict(context["subplot"].get("margins", {}) or {}),
-            "replace": True,
-        }
-        sent = self.figure_context.request_figure_action(layout_action) or sent
-        if sent:
-            self._live_updates_sent = True
-        return sent
-
-    def _dispatch_all_state(self, figure_ir):
-        if figure_ir is None:
-            return False
-        subplots = figure_ir.get("layout", {}).get("subplots", [])
-        if not subplots:
-            return False
-        subplot = subplots[0]
-        sent = False
-        for axis_name in ("x", "y"):
-            action = {
-                "type": "set_axis_state",
-                "subplot_id": subplot["id"],
-                "axis": axis_name,
-                "state": dict(subplot["axes"][axis_name]),
-                "replace": True,
-            }
-            sent = self.figure_context.request_figure_action(action) or sent
-        for side in ("bottom", "top", "left", "right"):
-            action = {
-                "type": "set_axis_side_state",
-                "subplot_id": subplot["id"],
-                "side": side,
-                "state": dict(subplot["axis_sides"][side]),
-                "replace": True,
-            }
-            sent = self.figure_context.request_figure_action(action) or sent
-        action = {
-            "type": "set_subplot_margins",
-            "subplot_id": subplot["id"],
-            "state": dict(subplot.get("margins", {}) or {}),
-            "replace": True,
-        }
-        sent = self.figure_context.request_figure_action(action) or sent
-        if sent:
-            self._live_updates_sent = True
-        return sent
 
     def _update_preview(self, error_message=""):
         self._preview_error_message = str(error_message or "")
@@ -875,13 +1160,8 @@ class AxisEditDialog(HydeDialogWidget):
     def canonical_text_payload(self):
         if self._preview_error_message:
             return self._preview_error_message
-        if self._draft_figure_ir is None:
-            return ""
         try:
-            return FigureIRCodec.state_to_python(
-                self._draft_figure_ir,
-                context={"figure_defaults": self.figure_context.figure_defaults()},
-            )
+            return self._session.preview_source()
         except Exception as exc:
             return str(exc)
 
@@ -890,29 +1170,28 @@ class AxisEditDialog(HydeDialogWidget):
         if self._loading_controls:
             return
         self.ui.axis_label_preview.setText(self.ui.axis_label_edit.text())
-        result = self._apply_current_controls_to_draft()
+        result = self._apply_current_controls_to_session()
         self._update_preview(result["message"])
         if not result["valid"]:
             return
         if self.ui.live_update_checkbox.isChecked():
-            self._dispatch_selected_state()
+            self._session.apply_live()
 
     def _on_live_update_toggled(self, checked):
         if self._loading_controls or not checked:
             return
-        result = self._apply_current_controls_to_draft()
+        result = self._apply_current_controls_to_session()
         self._update_preview(result["message"])
         if result["valid"]:
-            self._dispatch_all_state(self._draft_figure_ir)
+            self._session.apply_live()
 
     def handle_do_it(self):
-        result = self._apply_current_controls_to_draft()
+        result = self._apply_current_controls_to_session()
         self._update_preview(result["message"])
         if not result["valid"]:
             return
-        if not self.ui.live_update_checkbox.isChecked():
-            self._dispatch_all_state(self._draft_figure_ir)
-        self.accept()
+        if self._session.commit():
+            self.accept()
 
     def _set_auto_tick_values(self):
         self.ui.major_tick_mode_combo.setCurrentIndex(self.ui.major_tick_mode_combo.findData("auto"))
@@ -945,10 +1224,9 @@ class AxisEditDialog(HydeDialogWidget):
         context = self._selected_context()
         if context is None:
             return
-        resolved_limits = (
-            self.figure_context.resolved_axis_limits()
-            .get(context["subplot_id"], {})
-            .get(context["axis_name"])
+        resolved_limits = self._session.resolved_axis_limits(
+            context["axis_name"],
+            subplot_id=context["subplot_id"],
         )
         if not isinstance(resolved_limits, (list, tuple)) or len(resolved_limits) != 2:
             return
@@ -963,6 +1241,5 @@ class AxisEditDialog(HydeDialogWidget):
         self._on_controls_changed()
 
     def reject(self):
-        if self._live_updates_sent and self._draft_tracker.changed_keys():
-            self._dispatch_all_state(self._draft_tracker.revert_state("figure"))
+        self._session.revert()
         super().reject()

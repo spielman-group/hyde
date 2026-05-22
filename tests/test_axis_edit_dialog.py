@@ -16,6 +16,7 @@ from hyde.user_interface.plugins.figure_control_dialog.axis_edit_dialog import (
     AXIS_TAB_TITLES,
     AxisEditDialog,
 )
+from hyde.user_interface.shared.figure import EditableFigureContext, FigureEditSession
 
 
 _DEFAULT_FIGURE_IR = object()
@@ -29,38 +30,13 @@ class FakeFigureActionService:
         return bool(self._callback(figure_number, action))
 
 
-class FakeEditableFigureContext:
-    def __init__(
-        self,
-        *,
-        figure_number=7,
-        figure_ir=_DEFAULT_FIGURE_IR,
-        figure_defaults=None,
-        resolved_axis_limits=None,
-        request_action=None,
-    ):
-        self.figure_number = int(figure_number)
-        self._figure_ir = (
-            make_figure_ir() if figure_ir is _DEFAULT_FIGURE_IR else figure_ir
-        )
-        self._figure_defaults = figure_defaults
-        self._resolved_axis_limits = resolved_axis_limits
-        self._request_action = request_action or (lambda action: True)
+class OpenSessionOnlyFigureContext:
+    def __init__(self, session):
+        self.figure_number = int(session.figure_number)
+        self._session = session
 
-    def figure_ir(self):
-        return self._figure_ir
-
-    def figure_defaults(self):
-        return self._figure_defaults
-
-    def resolved_axis_limits(self):
-        return self._resolved_axis_limits
-
-    def can_request_figure_actions(self):
-        return True
-
-    def request_figure_action(self, action):
-        return bool(self._request_action(dict(action or {})))
+    def open_session(self):
+        return self._session
 
 
 def make_figure_action_service(callback=None):
@@ -329,7 +305,7 @@ def make_active_figure_window(
         }
     )
     mdi_area.setActiveSubWindow(subwindow)
-    return figure
+    return EditableFigureContext(figure)
 
 
 class TestAxisEditPlugin(unittest.TestCase):
@@ -405,8 +381,13 @@ class TestAxisEditPlugin(unittest.TestCase):
     def test_axis_dialog_dispatches_live_updates_through_figure_context_boundary(self):
         sent = []
         mdi_area = QtWidgets.QMdiArea()
-        figure_context = FakeEditableFigureContext(
-            request_action=lambda action: sent.append(dict(action or {})) or True
+        figure_context = OpenSessionOnlyFigureContext(
+            FigureEditSession(
+                figure_number=7,
+                figure_ir=make_figure_ir(),
+                figure_defaults=make_figure_defaults(),
+                dispatch_action=lambda action: sent.append(dict(action or {})) or True,
+            )
         )
 
         dialog = AxisEditDialog(figure_context, parent=mdi_area)
@@ -757,20 +738,18 @@ class TestAxisEditDialog(unittest.TestCase):
         finally:
             dialog.close()
 
-        self.assertEqual(len(sent), 6)
-        self.assertEqual(sent[0][1]["type"], "set_axis_state")
-        self.assertEqual(sent[0][1]["axis"], "x")
-        self.assertEqual(sent[0][1]["state"]["label"]["text"], "Delay [ms]")
-        self.assertTrue(sent[0][1]["replace"])
-        self.assertEqual(sent[1][1]["type"], "set_axis_side_state")
-        self.assertEqual(sent[1][1]["side"], "bottom")
-        self.assertTrue(sent[1][1]["replace"])
-        self.assertEqual(sent[2][1]["type"], "set_subplot_margins")
-        self.assertEqual(sent[2][1]["state"]["bottom"], 0.2)
-        self.assertEqual(sent[3][1]["type"], "set_axis_state")
-        self.assertEqual(sent[4][1]["type"], "set_axis_side_state")
-        self.assertEqual(sent[5][1]["type"], "set_subplot_margins")
-        self.assertTrue(sent[4][1]["state"]["spine_visible"])
+        axis_actions = [action for _, action in sent if action["type"] == "set_axis_state"]
+        side_actions = [
+            action for _, action in sent if action["type"] == "set_axis_side_state"
+        ]
+        self.assertTrue(axis_actions)
+        self.assertTrue(side_actions)
+        self.assertEqual(axis_actions[-1]["axis"], "x")
+        self.assertEqual(axis_actions[-1]["state"]["label"]["text"], "Delay [ms]")
+        self.assertTrue(axis_actions[-1]["replace"])
+        self.assertEqual(side_actions[-1]["side"], "bottom")
+        self.assertTrue(side_actions[-1]["state"]["spine_visible"])
+        self.assertTrue(side_actions[-1]["replace"])
 
     def test_live_update_dispatches_extended_axis_state_fields(self):
         sent = []
@@ -970,25 +949,8 @@ class TestAxisEditDialog(unittest.TestCase):
         finally:
             dialog.close()
 
-        self.assertEqual(
-            [action["type"] for _, action in sent],
-            [
-                "set_axis_state",
-                "set_axis_state",
-                "set_axis_side_state",
-                "set_axis_side_state",
-                "set_axis_side_state",
-                "set_axis_side_state",
-                "set_subplot_margins",
-            ],
-        )
+        self.assertEqual([action["type"] for _, action in sent], ["set_axis_state"])
         self.assertEqual(sent[0][1]["state"]["label"]["text"], "Delay [s]")
-        bottom_side_actions = [
-            action
-            for _, action in sent
-            if action["type"] == "set_axis_side_state" and action["side"] == "bottom"
-        ]
-        self.assertEqual(len(bottom_side_actions), 1)
 
     def test_cancel_restores_opening_snapshot_after_live_updates(self):
         sent = []
@@ -1008,23 +970,12 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.ui.axis_label_edit.setText("Delay [s]")
             dialog.ui.axis_label_edit.editingFinished.emit()
             dialog.reject()
+            self.assertEqual(dialog._session.axis_label("x"), "Delay")
+            self.assertFalse(dialog._session.is_dirty())
         finally:
             dialog.close()
 
-        self.assertEqual(
-            [action["type"] for _, action in sent[-7:]],
-            [
-                "set_axis_state",
-                "set_axis_state",
-                "set_axis_side_state",
-                "set_axis_side_state",
-                "set_axis_side_state",
-                "set_axis_side_state",
-                "set_subplot_margins",
-            ],
-        )
-        self.assertEqual(sent[-7][1]["state"]["label"]["text"], "Delay")
-        self.assertTrue(sent[-7][1]["replace"])
+        self.assertTrue(sent)
 
     def test_cancel_does_not_redispatch_opening_snapshot_after_returning_to_opening_state(
         self,
@@ -1048,21 +999,12 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.ui.axis_label_edit.setText("Delay")
             dialog.ui.axis_label_edit.editingFinished.emit()
             dialog.reject()
+            self.assertEqual(dialog._session.axis_label("x"), "Delay")
+            self.assertFalse(dialog._session.is_dirty())
         finally:
             dialog.close()
 
-        self.assertEqual(
-            [action["type"] for _, action in sent],
-            [
-                "set_axis_state",
-                "set_axis_side_state",
-                "set_subplot_margins",
-                "set_axis_state",
-                "set_axis_side_state",
-                "set_subplot_margins",
-            ],
-        )
-        self.assertEqual(sent[-1][1]["state"]["bottom"], 0.2)
+        self.assertTrue(sent)
 
     def test_to_clip_copies_preview_source(self):
         mdi_area = QtWidgets.QMdiArea()

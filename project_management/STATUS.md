@@ -38,6 +38,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Non-decorated figures stay out of the Hyde window system.
 - Live matplotlib `Figure` is runtime truth.
 - `fig._hyde_ir` is recreation/editability truth.
+- Figure-edit consumers use a single consumer-agnostic figure edit session boundary
+  from the active editable figure context.
 - Figure windows restore from `session.py` and preserve `window_pos` plus
   minimized/maximized window state.
 - Figures that cannot yet lower complete recreation source are marked
@@ -52,6 +54,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   reloads procedures, refreshes the catalog, and keeps the dialog open on success.
 - Curve Fit preview and commit commands lower from one GUI-side coefficient model, while
   authoritative fit results and attached figure traces remain kernel/runtime-owned.
+- Attached figure display traces are edited through the figure edit session boundary,
+  not through a dialog-local raw figure IR/action workflow.
 
 ### Project persistence
 - Kernel objects save to `manifest.toml` + `data/`.

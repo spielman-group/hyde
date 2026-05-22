@@ -25,7 +25,10 @@ from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.shared.core import RuntimeCommandState
-from hyde.user_interface.shared.figure import supported_trace_records_from_figure_ir
+from hyde.user_interface.shared.figure import (
+    EditableFigureContext,
+    FigureEditSession,
+)
 from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.plugins.curve_fit_dialog import Plugin as CurveFitPlugin
 from hyde.user_interface.plugins.curve_fit_dialog.dialogs import CurveFitDialog
@@ -368,31 +371,21 @@ class FakeEditableFigureContext:
     def __init__(self, *, figure_number=7, figure_ir=None, request_action=None):
         self.figure_number = int(figure_number)
         self._figure_ir = (
-            figure_ir_without_traces() if figure_ir is None else figure_ir
+            copy.deepcopy(figure_ir_without_traces() if figure_ir is None else figure_ir)
         )
         self._request_action = request_action or (lambda action: True)
+        self._session = FigureEditSession(
+            figure_number=self.figure_number,
+            figure_ir=self._figure_ir,
+            dispatch_action=lambda action: bool(self._request_action(dict(action or {}))),
+            current_figure_ir=self.figure_ir,
+        )
+
+    def open_session(self):
+        return self._session
 
     def figure_ir(self):
-        return self._figure_ir
-
-    def supported_trace_records(self):
-        return supported_trace_records_from_figure_ir(self.figure_ir())
-
-    def request_figure_action(self, action):
-        return bool(self._request_action(dict(action or {})))
-
-
-class LiveEditableFigureContext:
-    def __init__(self, *, figure_number, figure_ir, request_action):
-        self.figure_number = int(figure_number)
-        self._figure_ir = figure_ir
-        self._request_action = request_action
-
-    def figure_ir(self):
-        return self._figure_ir()
-
-    def supported_trace_records(self):
-        return supported_trace_records_from_figure_ir(self.figure_ir())
+        return copy.deepcopy(self._figure_ir)
 
     def request_figure_action(self, action):
         return bool(self._request_action(dict(action or {})))
@@ -405,12 +398,18 @@ class DeferredFigureContext:
             figure_ir_without_traces() if figure_ir is None else copy.deepcopy(figure_ir)
         )
         self.pending_actions = []
+        self._session = FigureEditSession(
+            figure_number=self.figure_number,
+            figure_ir=self._figure_ir,
+            dispatch_action=lambda action: self.request_figure_action(action),
+            current_figure_ir=self.figure_ir,
+        )
+
+    def open_session(self):
+        return self._session
 
     def figure_ir(self):
         return copy.deepcopy(self._figure_ir)
-
-    def supported_trace_records(self):
-        return supported_trace_records_from_figure_ir(self.figure_ir())
 
     def request_figure_action(self, action):
         self.pending_actions.append(dict(action or {}))
@@ -422,6 +421,15 @@ class DeferredFigureContext:
                 self._figure_ir,
                 self.pending_actions.pop(0),
             )
+
+
+class OpenSessionOnlyFigureContext:
+    def __init__(self, session):
+        self.figure_number = int(session.figure_number)
+        self._session = session
+
+    def open_session(self):
+        return self._session
 
 
 def attach_figure_context_service(manager, figure_context):
@@ -455,11 +463,7 @@ def make_figure_window(figure_ir):
 
 def create_curve_fit_dialog(plugin, app, *, figure_context=None, figure_window=None):
     if figure_context is None and figure_window is not None:
-        figure_context = LiveEditableFigureContext(
-            figure_number=figure_window.figure_number,
-            figure_ir=figure_window.figure_ir,
-            request_action=figure_window.request_figure_action,
-        )
+        figure_context = EditableFigureContext(figure_window)
     dialog = CurveFitDialog(
         figure_context=figure_context,
         services=plugin.services,
@@ -734,7 +738,9 @@ class TestCurveFitPlugin(unittest.TestCase):
         harness = configure_curve_fit_runtime(app, manager)
 
         try:
-            figure_context = FakeEditableFigureContext(figure_ir={"some": "data"})
+            figure_context = FakeEditableFigureContext(
+                figure_ir=figure_ir_without_traces()
+            )
             attach_figure_context_service(manager, figure_context)
 
             dialog = trigger_curve_fit_action_and_capture_dialog(manager)
@@ -2093,6 +2099,42 @@ class TestCurveFitPlugin(unittest.TestCase):
                 attached_figure.figure.axes[0].lines[-1].get_ydata(),
                 result.best_fit,
             )
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_attached_display_works_with_open_session_only_context(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        session = attached_figure.figure_window.open_edit_session()
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_context=OpenSessionOnlyFigureContext(session)
+        )
+        try:
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+            dialog.show_fit_checkbox.setChecked(True)
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
+            np.testing.assert_allclose(
+                attached_figure.figure.axes[0].lines[-1].get_ydata(),
+                harness.namespace["signal_fit_result"].best_fit,
+            )
+
+            dialog.cancel_button.click()
+            QtWidgets.QApplication.processEvents()
+
+            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+                "subplots"
+            ][0]
+            self.assertEqual(len(subplot["traces"]), 1)
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
         finally:
             dialog.close()
             harness.close()
