@@ -122,8 +122,11 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
   `MutationCodec` rather than being table-local.
 - Trivial visible project commands may share a lightweight command codec.
 - First-class figure windows are the deliberate exception to the normal
-  "GUI emits Python" rule after creation: routine editing uses semantic `comm`
-  actions against kernel-owned figure IR.
+  "GUI emits Python" rule after creation: routine editing currently uses semantic
+  `comm` actions against kernel-owned figure IR.
+- The backend, not the GUI, keeps first-class figure IR synchronized with ordinary
+  matplotlib edits by re-importing the supported semantic subset from dirty live
+  figures after completed Python execution blocks.
 - Figure-edit consumers such as axis edit, trace appearance, and attached Curve Fit
   display work through one figure-owned `open_session()` boundary exported by
   `figure_interactive`.

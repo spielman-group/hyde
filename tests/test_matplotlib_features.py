@@ -18,6 +18,7 @@ from hyde.matplotlib_backend import (
     FigureCanvasHyde,
     FigureManagerHyde,
     _install_first_class_figure_resync_hook,
+    _resync_dirty_first_class_figures,
     _figure_defaults_snapshot,
     apply_figure_action,
     figure_snapshot_payload,
@@ -1083,6 +1084,56 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             push_draw.assert_called_once()
 
+    def test_post_run_cell_resync_reimports_supported_ir_from_live_first_class_figure(self):
+        plt = self._configure_hyde_pyplot()
+
+        with patch("hyde.matplotlib_backend.Comm"):
+            @hyde.figure(register=False)
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            figure = Graph0([0, 1, 2], [1, 4, 9])
+            figure.canvas.draw()
+
+            axis = figure.axes[0]
+            axis.set_xlabel("Delay")
+            axis.set_xlim(-1, 5)
+            axis.lines[0].set_color("green")
+
+            _resync_dirty_first_class_figures(None)
+
+        subplot = figure._hyde_ir["layout"]["subplots"][0]
+        self.assertEqual(subplot["axes"]["x"]["label"]["text"], "Delay")
+        self.assertEqual(
+            subplot["axes"]["x"]["range"]["limits"],
+            (-1.0, 5.0),
+        )
+        self.assertEqual(subplot["traces"][0]["kwargs"]["color"], "#008000")
+
+    def test_post_run_cell_resync_marks_unsupported_live_features_macro_incomplete(self):
+        plt = self._configure_hyde_pyplot()
+
+        with patch("hyde.matplotlib_backend.Comm"):
+            @hyde.figure(register=False)
+            def Graph0(x, y):
+                fig = plt.figure("Graph0")
+                ax = fig.add_subplot(111)
+                ax.plot(x, y, label="y")
+                return fig
+
+            figure = Graph0([0, 1, 2], [1, 4, 9])
+            figure.canvas.draw()
+            figure.axes[0].imshow([[1, 2], [3, 4]])
+
+            _resync_dirty_first_class_figures(None)
+            payload = figure_snapshot_payload(figure, 1)
+
+        self.assertEqual(payload["figure_ir"]["layout"]["subplots"][0]["traces"][0]["id"], "trace0")
+        self.assertIn("unsupported", payload["save_error"].lower())
+
     def test_manager_destroy_closes_comm_even_if_close_payload_send_fails(self):
         figure = Figure()
         canvas = FigureCanvasHyde(figure)
@@ -1167,7 +1218,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             },
         )
         try:
-            widget.set_live_state(self._live_state())
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "live_state": None,
+                    },
+                }
+            )
 
             namespace_service.emit(
                 {
@@ -1177,7 +1236,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(sent, [(1, {"type": "refresh_from_live_state"})])
+            self.assertEqual(sent, [(1, {"type": "regenerate_from_ir", "use_bound_values": False})])
         finally:
             widget.close()
 
@@ -1209,7 +1268,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             },
         )
         try:
-            widget.set_live_state(self._live_state())
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "live_state": None,
+                    },
+                }
+            )
             sent.clear()
             shared_view[0] = "[10 40 90]"
             namespace_service.emit(
@@ -1220,7 +1287,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(sent, [(1, {"type": "refresh_from_live_state"})])
+            self.assertEqual(sent, [(1, {"type": "regenerate_from_ir", "use_bound_values": False})])
         finally:
             widget.close()
 
@@ -1262,7 +1329,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             },
         )
         try:
-            widget.set_live_state(self._live_state())
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "live_state": None,
+                    },
+                }
+            )
             widget.refresh_figure()
             self.assertTrue(widget._refresh_in_flight)
 
@@ -1278,7 +1353,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             )
 
             self.assertEqual(len(sent), 2)
-            self.assertEqual(sent[1], (1, {"type": "refresh_from_live_state"}))
+            self.assertEqual(sent[1], (1, {"type": "regenerate_from_ir", "use_bound_values": False}))
         finally:
             widget.close()
 
@@ -1605,7 +1680,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(figure.parentWidget().objectName(), "FigureA")
         self.assertEqual(figure.parentWidget().windowTitle(), "FigureA")
         self.assertEqual(figure.snapshot_state.figure_ir()["settings"]["title"], "FigureA")
-        self.assertIsNone(figure.snapshot_state.live_state())
         workspace.clear()
         mdi_area.close()
 

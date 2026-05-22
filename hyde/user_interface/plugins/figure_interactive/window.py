@@ -101,7 +101,6 @@ class FigureSnapshotState:
         figure_ir=None,
         figure_defaults=None,
         resolved_axis_limits=None,
-        live_state=None,
         trace_styles=None,
     ):
         self._default_macro_name = default_macro_name or "Figure"
@@ -111,7 +110,6 @@ class FigureSnapshotState:
         self._call_source = None
         self._save_error = None
         self._figure_size = None
-        self._live_state = None
         self._trace_styles = {}
         self.update(
             default_macro_name=default_macro_name,
@@ -122,7 +120,6 @@ class FigureSnapshotState:
             figure_ir=figure_ir,
             figure_defaults=figure_defaults,
             resolved_axis_limits=resolved_axis_limits,
-            live_state=live_state,
             trace_styles=trace_styles,
         )
 
@@ -136,7 +133,6 @@ class FigureSnapshotState:
         figure_ir=None,
         figure_defaults=None,
         resolved_axis_limits=None,
-        live_state=None,
         trace_styles=None,
     ):
         self._figure_ir = copy.deepcopy(figure_ir)
@@ -162,7 +158,6 @@ class FigureSnapshotState:
             self._tracked_names = ()
         self._save_error = save_error
         self._figure_size = None if figure_size is None else tuple(figure_size)
-        self._live_state = copy.deepcopy(live_state)
         self._trace_styles = copy.deepcopy(trace_styles) or {}
 
     def default_macro_name(self):
@@ -189,22 +184,8 @@ class FigureSnapshotState:
     def has_save_warning(self):
         return bool(self._save_error)
 
-    def live_state(self):
-        return copy.deepcopy(self._live_state)
-
     def trace_styles(self):
         return copy.deepcopy(self._trace_styles)
-
-    def set_live_state(self, state):
-        self._live_state = copy.deepcopy(state)
-        if state is None:
-            self._tracked_names = ()
-            return
-        self._tracked_names = FigureCodec.tracked_names(state)
-        self._call_source = FigureCodec.state_to_python(state)
-        title = FigureCodec.normalize_state(state)["settings"]["title"]
-        if title:
-            self._default_macro_name = title
 
     def macro_source(self, macro_name, figure_title=None):
         if self._save_error:
@@ -218,12 +199,6 @@ class FigureSnapshotState:
                 macro_name,
                 context={"figure_defaults": self._figure_defaults},
             )
-        if self._live_state is not None:
-            live_state = self._live_state
-            if figure_title not in (None, ""):
-                live_state = FigureCodec.normalize_state(live_state)
-                live_state["settings"]["title"] = str(figure_title)
-            return FigureCodec.state_to_macro_source(live_state, macro_name)
         if not self._call_source:
             raise MacroStoreError("This figure does not have a saveable recreation macro yet.")
         body = "\n".join(f"    {line}" for line in self._call_source.splitlines())
@@ -307,7 +282,6 @@ class FigureWindow(HydeInteractiveWidget):
             figure_ir=snapshot.get("figure_ir"),
             figure_defaults=snapshot.get("figure_defaults"),
             resolved_axis_limits=snapshot.get("resolved_axis_limits"),
-            live_state=snapshot.get("live_state"),
             trace_styles=snapshot.get("trace_styles"),
         )
         if self._subwindow is not None:
@@ -341,10 +315,6 @@ class FigureWindow(HydeInteractiveWidget):
             self._apply_initial_subwindow_size()
             self._initial_size_applied = True
             self._apply_pending_window_state()
-
-    def set_live_state(self, state):
-        self.snapshot_state.set_live_state(state)
-        self._tracked_namespace_state = self.current_tracked_namespace_state()
 
     def apply_window_metadata(self, metadata):
         metadata = dict(metadata or {})
@@ -502,11 +472,6 @@ class FigureWindow(HydeInteractiveWidget):
             return False
         return self.request_figure_action({"type": "regenerate_from_ir"})
 
-    def request_refresh_from_live_state(self):
-        if self.snapshot_state.live_state() is None:
-            return False
-        return self.request_figure_action({"type": "refresh_from_live_state"})
-
     @inmain_decorator()
     def _on_resize_redraw_timeout(self):
         if self._closed:
@@ -526,14 +491,13 @@ class FigureWindow(HydeInteractiveWidget):
         if self._refresh_in_flight:
             self._refresh_requested = True
             return False
+        if not self.has_figure_ir():
+            return False
         self._refresh_in_flight = True
         self._refresh_requested = False
-        if self.has_figure_ir():
-            requested = self.request_figure_action(
-                {"type": "regenerate_from_ir", "use_bound_values": False}
-            )
-        else:
-            requested = self.request_refresh_from_live_state()
+        requested = self.request_figure_action(
+            {"type": "regenerate_from_ir", "use_bound_values": False}
+        )
         if requested:
             self._refresh_timeout_timer.start(self.REFRESH_TIMEOUT_MS)
             return True

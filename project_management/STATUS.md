@@ -38,6 +38,10 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Non-decorated figures stay out of the Hyde window system.
 - Live matplotlib `Figure` is runtime truth.
 - `fig._hyde_ir` is recreation/editability truth.
+- Dirty first-class figures are re-imported from the live matplotlib object graph
+  after completed Python execution blocks.
+- Unsupported live figure structure keeps the figure first-class while preserving the
+  supported subset and marking the window `[Macro Incomplete]`.
 - Figure-edit consumers use a single consumer-agnostic figure edit session boundary
   from the active editable figure context.
 - Figure windows restore from `session.py` and preserve `window_pos` plus

@@ -136,6 +136,10 @@ when a project is loaded.
   Hyde figure windows in this deployment.
 - Runtime truth is the live kernel `Figure`.
 - Recreation/editability truth is kernel-owned `fig._hyde_ir`.
+- After each completed Python execution block, the backend re-imports the supported
+  semantic IR for dirty first-class figures from the live matplotlib object graph.
+- Unsupported live figure structure does not eject the figure from Hyde; Hyde keeps
+  the supported subset in `fig._hyde_ir` and marks the figure `[Macro Incomplete]`.
 - Routine GUI edits are semantic `comm` actions, not GUI-generated matplotlib source.
 - Consumer plugins edit first-class figures through the figure-owned
   `EditableFigureContext.open_session()` boundary exported by

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import copy
 import io
 import inspect
 import logging
@@ -129,8 +130,14 @@ def _resync_dirty_first_class_figures(result=None):
             _clear_first_class_figure_dirty(figure)
             continue
         try:
+            imported_ir, import_warning = _import_first_class_figure_ir(figure)
+            figure._hyde_ir = imported_ir
+            figure._hyde_import_warning = import_warning
             canvas.draw()
         except Exception:
+            figure._hyde_import_warning = (
+                "unsupported live figure features were omitted during Hyde import"
+            )
             LOGGER.exception(
                 "Figure backend failed to resync dirty first-class figure %r.",
                 _default_figure_title(figure, getattr(canvas.manager, "num", 0)),
@@ -666,7 +673,7 @@ def figure_snapshot_payload(figure, number):
             figure_defaults = _figure_defaults_snapshot(normalized_figure_ir)
             figure._hyde_defaults = figure_defaults
         call_source = None
-        save_error = None
+        save_error = getattr(figure, "_hyde_import_warning", None)
         tracked_names = []
         try:
             call_source = FigureIRCodec.state_to_python(
@@ -675,7 +682,7 @@ def figure_snapshot_payload(figure, number):
             )
             tracked_names = list(FigureIRCodec.tracked_names(normalized_figure_ir))
         except Exception as exc:
-            save_error = str(exc)
+            save_error = save_error or str(exc)
         payload = {
             "default_macro_name": _default_figure_title(figure, number),
             "call_source": call_source,
@@ -813,6 +820,286 @@ def _resolved_axis_limits_snapshot(figure, figure_ir):
             "y": tuple(float(value) for value in axis.get_ylim()),
         }
     return limits
+
+
+def _operand_from_live_values(values, candidates, previous_operand=None, *, default_x=False):
+    if previous_operand is not None:
+        return copy.deepcopy(previous_operand)
+    if default_x and _is_default_xdata(values):
+        return None
+    resolved_name = _resolve_series_name(values, candidates)
+    if resolved_name is not None:
+        return {"kind": "name", "value": resolved_name}
+    array = np.asarray(values)
+    if array.ndim != 1:
+        raise ValueError("Only 1D line data can be imported into Hyde figure IR.")
+    return {"kind": "array_literal", "value": array.tolist()}
+
+
+def _axis_scale_mode_from_live(axis, axis_name):
+    scale = getattr(axis, f"get_{axis_name}scale")()
+    if scale != "log":
+        return "linear"
+    scale_obj = getattr(getattr(axis, _semantic_axis(axis_name)), "_scale", None)
+    base = getattr(scale_obj, "base", None)
+    return "log2" if base == 2 else "log"
+
+
+def _axis_tick_direction_from_live(axis_axis, default_direction):
+    ticks = list(axis_axis.get_major_ticks())
+    if not ticks:
+        return default_direction
+    raw = getattr(ticks[0], "_tickdir", None)
+    return {
+        "in": "inside",
+        "out": "outside",
+        "inout": "both",
+    }.get(raw, default_direction)
+
+
+def _axis_side_visibility_from_live(axis_axis, line_attr, label_attr, default_state):
+    ticks = list(axis_axis.get_major_ticks()) + list(axis_axis.get_minor_ticks())
+    if not ticks:
+        return (
+            default_state["ticks_visible"],
+            default_state["tick_labels_visible"],
+        )
+    return (
+        any(getattr(tick, line_attr).get_visible() for tick in ticks),
+        any(getattr(tick, label_attr).get_visible() for tick in ticks),
+    )
+
+
+def _axis_side_state_from_live(axis, side, default_state):
+    axis_name = "x" if side in {"bottom", "top"} else "y"
+    axis_axis = getattr(axis, _semantic_axis(axis_name))
+    line_attr = "tick1line" if side in {"bottom", "left"} else "tick2line"
+    label_attr = "label1" if side in {"bottom", "left"} else "label2"
+    ticks_visible, tick_labels_visible = _axis_side_visibility_from_live(
+        axis_axis,
+        line_attr,
+        label_attr,
+        default_state,
+    )
+    tick_labels = [getattr(tick, label_attr) for tick in axis_axis.get_major_ticks()]
+    label = next((item for item in tick_labels if item.get_visible()), None)
+    spine = axis.spines[side]
+    position = spine.get_position()
+    offset = 0.0
+    if isinstance(position, tuple) and len(position) == 2 and position[0] == "outward":
+        offset = float(position[1])
+    state = copy.deepcopy(default_state)
+    state["spine_visible"] = bool(spine.get_visible())
+    state["ticks_visible"] = bool(ticks_visible)
+    state["tick_labels_visible"] = bool(tick_labels_visible)
+    state["spine_color"] = _normalize_line_color(spine.get_edgecolor())
+    state["spine_width"] = float(spine.get_linewidth())
+    state["offset"] = offset
+    if label is not None:
+        state["tick_label_color"] = _normalize_line_color(label.get_color())
+        state["tick_label_rotation"] = float(label.get_rotation())
+    return state
+
+
+def _axis_grid_state_from_live(axis, axis_name, default_state):
+    grid_lines = list(getattr(axis, f"get_{axis_name}gridlines")())
+    visible_lines = [line for line in grid_lines if line.get_visible()]
+    state = copy.deepcopy(default_state)
+    if not visible_lines:
+        state["visible"] = False
+        return state
+    line = visible_lines[0]
+    state["visible"] = True
+    state["which"] = "major"
+    state["linestyle"] = str(line.get_linestyle())
+    state["linewidth"] = float(line.get_linewidth())
+    state["color"] = _normalize_line_color(line.get_color())
+    return state
+
+
+def _axis_zero_line_state_from_live(axis, axis_name, default_state):
+    semantic_role = f"{axis_name}_zero_line"
+    line = next(
+        (
+            candidate
+            for candidate in axis.lines
+            if getattr(candidate, "_hyde_semantic_role", None) == semantic_role
+        ),
+        None,
+    )
+    state = copy.deepcopy(default_state)
+    if line is None:
+        state["visible"] = False
+        return state
+    state["visible"] = True
+    state["linestyle"] = str(line.get_linestyle())
+    state["linewidth"] = float(line.get_linewidth())
+    state["color"] = _normalize_line_color(line.get_color())
+    return state
+
+
+def _axis_state_from_live(axis, axis_name, default_state):
+    axis_axis = getattr(axis, _semantic_axis(axis_name))
+    state = copy.deepcopy(default_state)
+    label_artist = axis_axis.label
+    limits = getattr(axis, f"get_{axis_name}lim")()
+    autoscale = getattr(axis, f"get_autoscale{axis_name}_on")()
+    label_position = axis_axis.get_label_position()
+    state["scale_mode"] = _axis_scale_mode_from_live(axis, axis_name)
+    state["range"]["reverse"] = bool(getattr(axis, f"{axis_name}axis_inverted")())
+    if autoscale:
+        state["range"]["limits"] = None
+        state["range"]["limit_mode"] = {"min": "auto", "max": "auto"}
+    else:
+        state["range"]["limits"] = tuple(float(value) for value in limits)
+        state["range"]["limit_mode"] = {"min": "manual", "max": "manual"}
+    state["label"]["text"] = None if not label_artist.get_text() else label_artist.get_text()
+    state["label"]["visible"] = bool(label_artist.get_visible())
+    state["label"]["side"] = str(label_position)
+    state["label"]["offset"] = float(axis_axis.labelpad)
+    state["label"]["rotation"] = float(label_artist.get_rotation())
+    state["label"]["line_spacing"] = float(
+        getattr(label_artist, "_linespacing", default_state["label"]["line_spacing"])
+    )
+    state["label"]["color"] = _normalize_line_color(label_artist.get_color())
+    position = label_artist.get_position()
+    axis_position = float(position[0] if axis_name == "x" else position[1])
+    if abs(axis_position - 0.5) > 1e-9:
+        state["label"]["position_mode"] = "manual"
+        state["label"]["position"] = axis_position
+    else:
+        state["label"]["position_mode"] = "auto"
+        state["label"]["position"] = None
+    state["ticks"]["direction"] = _axis_tick_direction_from_live(
+        axis_axis,
+        default_state["ticks"]["direction"],
+    )
+    state["ticks"]["minor"]["visible"] = not isinstance(
+        axis_axis.get_minor_locator(),
+        mticker.NullLocator,
+    )
+    major_locator = axis_axis.get_major_locator()
+    major_formatter = axis_axis.get_major_formatter()
+    if isinstance(major_locator, mticker.FixedLocator):
+        state["ticks"]["major"]["mode"] = "manual"
+        state["ticks"]["major"]["positions"] = [
+            float(value) for value in major_locator.locs
+        ]
+        if isinstance(major_formatter, mticker.FixedFormatter):
+            state["ticks"]["major"]["labels"] = [str(value) for value in major_formatter.seq]
+    state["grid"] = _axis_grid_state_from_live(axis, axis_name, default_state["grid"])
+    state["zero_line"] = _axis_zero_line_state_from_live(
+        axis,
+        axis_name,
+        default_state["zero_line"],
+    )
+    return state
+
+
+def _subplot_margins_from_live_figure(figure):
+    subplotpars = figure.subplotpars
+    return {
+        "left": float(subplotpars.left),
+        "bottom": float(subplotpars.bottom),
+        "right": float(subplotpars.right),
+        "top": float(subplotpars.top),
+    }
+
+
+def _import_first_class_figure_ir(figure, namespace=None):
+    namespace = _main_namespace() if namespace is None else namespace
+    candidates = _candidate_series_names(namespace)
+    previous_ir = FigureIRCodec.validate_state(getattr(figure, "_hyde_ir", None))
+    imported = FigureIRCodec.default_state()
+    imported["settings"]["title"] = _default_figure_title(
+        figure,
+        getattr(getattr(figure, "canvas", None), "manager", None).num
+        if getattr(getattr(figure, "canvas", None), "manager", None) is not None
+        else 0,
+    )
+    imported["settings"]["figsize"] = tuple(
+        float(value) for value in figure.get_size_inches()
+    )
+    warnings = []
+    axes = list(figure.axes)
+    if len(axes) > 1:
+        warnings.append("unsupported live figure features were omitted during Hyde import")
+    if not axes:
+        return FigureIRCodec.validate_state(imported), (
+            None if not warnings else warnings[0]
+        )
+    axis = axes[0]
+    if axis.images or axis.collections:
+        warnings.append("unsupported live figure features were omitted during Hyde import")
+    subplot = _default_subplot_state()
+    subplot["margins"] = _subplot_margins_from_live_figure(figure)
+    subplot["title"] = None if not axis.get_title() else axis.get_title()
+    subplot["legend"] = axis.get_legend() is not None
+    subplot["axes"]["x"] = _axis_state_from_live(
+        axis,
+        "x",
+        subplot["axes"]["x"],
+    )
+    subplot["axes"]["y"] = _axis_state_from_live(
+        axis,
+        "y",
+        subplot["axes"]["y"],
+    )
+    subplot["axis_sides"]["bottom"] = _axis_side_state_from_live(
+        axis,
+        "bottom",
+        subplot["axis_sides"]["bottom"],
+    )
+    subplot["axis_sides"]["top"] = _axis_side_state_from_live(
+        axis,
+        "top",
+        subplot["axis_sides"]["top"],
+    )
+    subplot["axis_sides"]["left"] = _axis_side_state_from_live(
+        axis,
+        "left",
+        subplot["axis_sides"]["left"],
+    )
+    subplot["axis_sides"]["right"] = _axis_side_state_from_live(
+        axis,
+        "right",
+        subplot["axis_sides"]["right"],
+    )
+    previous_traces = {
+        trace["id"]: trace
+        for trace in previous_ir["layout"]["subplots"][0]["traces"]
+    } if previous_ir["layout"]["subplots"] else {}
+    trace_index = 0
+    for line in axis.lines:
+        semantic_role = getattr(line, "_hyde_semantic_role", None)
+        if semantic_role in {"x_zero_line", "y_zero_line"}:
+            continue
+        trace_id = str(getattr(line, "_hyde_trace_id", "") or f"trace{trace_index}")
+        previous_trace = previous_traces.get(trace_id)
+        subplot["traces"].append(
+            {
+                "id": trace_id,
+                "kind": "line",
+                "x_source": _operand_from_live_values(
+                    line.get_xdata(orig=True),
+                    candidates,
+                    None if previous_trace is None else previous_trace.get("x_source"),
+                    default_x=True,
+                ),
+                "y_source": _operand_from_live_values(
+                    line.get_ydata(orig=True),
+                    candidates,
+                    None if previous_trace is None else previous_trace.get("y_source"),
+                ),
+                "kwargs": _line_style_snapshot(line),
+            }
+        )
+        line._hyde_trace_id = trace_id
+        trace_index += 1
+    imported["layout"]["subplots"] = [subplot]
+    return FigureIRCodec.validate_state(imported), (
+        None if not warnings else warnings[0]
+    )
 
 
 def _apply_line_style(line, kwargs):
@@ -1139,20 +1426,6 @@ def apply_figure_action(figure, action):
             figure,
             use_bound_values=bool(action.get("use_bound_values", True)),
         )
-    if action_type == "refresh_from_live_state":
-        live_state = getattr(figure, "_hyde_live_state", None)
-        if live_state is None:
-            live_state = _infer_live_state(figure, _main_namespace())
-            if live_state is not None:
-                figure._hyde_live_state = live_state
-        if live_state is None:
-            return figure
-        apply_figure_state(
-            figure,
-            live_state,
-            _main_namespace(),
-        )
-        return figure
 
     figure_ir = getattr(figure, "_hyde_ir", None)
     if figure_ir is None:
