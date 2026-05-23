@@ -23,6 +23,10 @@ Use this priority:
 - Treat runtime design-seam violations as more important than code-shape complaints.
 - After the runtime pass, look deliberately for duplicated behavior and missed shared
   seams in the changed area and nearby code.
+- Audit changed and nearby tests for drift away from Hyde's behavior-first testing
+  rule. Flag tests that primarily assert private state, private methods, helper
+  wiring, or incidental lowering shape when a real contract could be exercised
+  instead.
 - Keep deeper architectural opportunities separate from the near-term cleanup path.
 - Make the final section specific enough to hand off into `to-prd`.
 

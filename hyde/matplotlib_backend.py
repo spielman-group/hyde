@@ -137,6 +137,20 @@ def remove_traces_from_figure(figure, trace_ids):
         )
         if line is not None:
             line.remove()
+    legend = axis.get_legend()
+    if legend is not None:
+        legend.remove()
+        handles, labels = axis.get_legend_handles_labels()
+        visible_entries = [
+            (handle, label)
+            for handle, label in zip(handles, labels)
+            if str(label or "").strip() and not str(label).startswith("_")
+        ]
+        if visible_entries:
+            axis.legend(
+                [handle for handle, _ in visible_entries],
+                [label for _, label in visible_entries],
+            )
     _refresh_first_class_figure_metadata(figure)
     figure.canvas.draw_idle()
     return figure

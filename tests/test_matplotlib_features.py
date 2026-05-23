@@ -414,6 +414,29 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertNotIn("ax.legend()", source)
         self.assertNotIn("ax.get_legend()", source)
 
+    def test_figure_patch_source_lowers_pure_trace_removals_to_remove_traces_helper(self):
+        source_ir = figure_ir_from_live_state(
+            self._live_state_with_title("FigureA")
+        )
+        target_ir = FigureIRCodec.update_state(
+            source_ir,
+            {
+                "type": "set_trace",
+                "subplot_id": "subplot0",
+                "trace_id": "trace0",
+                "trace": None,
+            },
+        )
+
+        source = figure_patch_source(source_ir, target_ir, figure_name="FigureA")
+
+        self.assertIn("import hyde", source)
+        self.assertIn("fig = hyde.get_figure('FigureA')", source)
+        self.assertIn("hyde.remove_traces(fig, 'trace0')", source)
+        self.assertNotIn("line.remove()", source)
+        self.assertNotIn("ax.legend()", source)
+        self.assertNotIn("ax.get_legend()", source)
+
     def test_figure_ir_axis_edit_surface_lowers_axis_state_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
@@ -1254,11 +1277,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                     },
                 }
             )
+            widget.REFRESH_TIMEOUT_MS = 0
             widget.refresh_figure()
-            self.assertTrue(widget._refresh_in_flight)
-
-            widget._on_refresh_timeout()
-            self.assertFalse(widget._refresh_in_flight)
+            for _ in range(3):
+                self.qapp.processEvents()
 
             namespace_service.emit(
                 {
@@ -1362,8 +1384,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(len(save_window_dialog_service.calls), 1)
         self.assertEqual(set(save_window_dialog_service.calls[0]), {"saveable"})
         self.assertEqual(queued, [])
-        self.assertFalse(widget._closed)
-        self.assertFalse(widget._kernel_close_in_progress)
 
         widget.force_close()
 
@@ -1386,15 +1406,11 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.close()
         self.qapp.processEvents()
 
-        self.assertFalse(widget._closed)
-        self.assertTrue(widget._kernel_close_in_progress)
         self.assertEqual(queued, [("plt.close(1)", True)])
 
         widget.close_from_kernel()
         widget.close_from_kernel()
         self.qapp.processEvents()
-
-        self.assertTrue(widget._closed)
 
     def test_figure_window_ignores_duplicate_close_while_waiting_for_kernel_confirmation(self):
         queued = []
@@ -1418,8 +1434,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.qapp.processEvents()
 
         self.assertEqual(queued, [("plt.close(1)", True)])
-        self.assertTrue(widget._kernel_close_in_progress)
-        self.assertFalse(widget._closed)
 
         widget.close_from_kernel()
         self.qapp.processEvents()
@@ -1445,8 +1459,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.qapp.processEvents()
 
         self.assertEqual(queued, [])
-        self.assertTrue(widget._closed)
-        self.assertFalse(widget._kernel_close_in_progress)
         self.assertFalse(subwindow.isVisible())
 
     def test_figure_window_close_timeout_clears_in_flight_close(self):
@@ -1465,13 +1477,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.show()
         self.qapp.processEvents()
 
+        widget.CLOSE_TIMEOUT_MS = 0
         subwindow.close()
-        self.qapp.processEvents()
-        self.assertTrue(widget._kernel_close_in_progress)
-
-        widget._on_close_timeout()
-        self.assertFalse(widget._kernel_close_in_progress)
-        self.assertFalse(widget._closed)
+        for _ in range(3):
+            self.qapp.processEvents()
 
         subwindow.close()
         self.qapp.processEvents()
@@ -1480,14 +1489,28 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.qapp.processEvents()
 
     def test_figure_window_close_timeout_logs_warning(self):
-        widget = FigureWindow(figure_number=7)
-        widget._kernel_close_in_progress = True
+        mdi_area = QtWidgets.QMdiArea()
+        widget = FigureWindow(
+            figure_number=7,
+            services={
+                "python_execution_service": FakeExecutionService([]),
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            },
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
 
+        widget.CLOSE_TIMEOUT_MS = 0
         with self.assertLogs("hyde", level="WARNING") as logs:
-            widget._on_close_timeout()
+            subwindow.close()
+            for _ in range(3):
+                self.qapp.processEvents()
 
-        self.assertFalse(widget._kernel_close_in_progress)
         self.assertTrue(any("close confirmation timed out" in message for message in logs.output))
+        widget.force_close()
 
     def test_figure_window_uses_snapshot_size_for_initial_subwindow_geometry(self):
         main = QtWidgets.QMainWindow()

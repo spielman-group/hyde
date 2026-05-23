@@ -363,6 +363,31 @@ class TestFigureDecorator(unittest.TestCase):
             ("trace1",),
         )
 
+    def test_remove_traces_refreshes_existing_live_legend_entries(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Figure0(x, a, b):
+            fig = plt.figure("Figure0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, a, label="a")
+            ax.plot(x, b, label="b")
+            ax.legend()
+            return fig
+
+        figure = Figure0([0, 1, 2], [1, 4, 9], [9, 4, 1])
+
+        hyde.remove_traces(figure, "trace0")
+
+        self.assertEqual(
+            [line.get_label() for line in figure.axes[0].lines],
+            ["b"],
+        )
+        self.assertEqual(
+            [text.get_text() for text in figure.axes[0].get_legend().get_texts()],
+            ["b"],
+        )
+
     def test_first_class_figure_rename_updates_canonical_lookup_and_ir_title(self):
         plt = self._configure_pyplot()
 

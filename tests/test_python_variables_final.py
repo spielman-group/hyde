@@ -447,16 +447,16 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
             self._status_message("idle", "browser-session", msg_id="a")
         )
 
-        self.assertTrue(browser._execute_requests_in_flight)
-        self.assertFalse(browser._refresh_pending)
         self.assertEqual(len(callbacks), 1)
 
         browser._handle_iopub_message(
             self._status_message("idle", "browser-session", msg_id="b")
         )
 
-        self.assertFalse(browser._execute_requests_in_flight)
-        self.assertTrue(browser._refresh_pending)
+        self.assertEqual(len(callbacks), 1)
+
+        self._deliver_next_view(callbacks, {})
+
         self.assertEqual(len(callbacks), 1)
 
     def test_comm_status_messages_do_not_trigger_refresh_tracking(self):
@@ -480,9 +480,11 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
             )
         )
 
-        self.assertFalse(browser._execute_requests_in_flight)
-        self.assertFalse(browser._refresh_pending)
         self.assertEqual(len(callbacks), 1)
+
+        self._deliver_next_view(callbacks, {})
+
+        self.assertEqual(len(callbacks), 0)
 
 
 class TestPythonVariablesSharedClient(unittest.TestCase):

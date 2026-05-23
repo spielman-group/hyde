@@ -1944,6 +1944,56 @@ def _figure_patch_remove_trace_lines(trace_id):
     ]
 
 
+def _figure_patch_remove_trace_helper_source(
+    source_state,
+    target_state,
+    *,
+    figure_name,
+    refresh_trace_ids=(),
+):
+    if refresh_trace_ids:
+        return ""
+    source = FigureIRCodec.validate_state(source_state)
+    target = FigureIRCodec.validate_state(target_state)
+    source_subplots = list(source.get("layout", {}).get("subplots", ()) or ())
+    target_subplots = list(target.get("layout", {}).get("subplots", ()) or ())
+    if len(source_subplots) != 1 or len(target_subplots) != 1:
+        return ""
+    source_subplot = source_subplots[0]
+    target_subplot = target_subplots[0]
+
+    source_without_traces = dict(source_subplot)
+    source_without_traces["traces"] = ()
+    target_without_traces = dict(target_subplot)
+    target_without_traces["traces"] = ()
+    if source_without_traces != target_without_traces:
+        return ""
+
+    target_traces = {
+        str(trace["id"]): trace for trace in target_subplot.get("traces", ())
+    }
+    removed_trace_ids = []
+    for source_trace in source_subplot.get("traces", ()):
+        trace_id = str(source_trace["id"])
+        target_trace = target_traces.pop(trace_id, None)
+        if target_trace is None:
+            removed_trace_ids.append(trace_id)
+            continue
+        if source_trace != target_trace:
+            return ""
+    if target_traces or not removed_trace_ids:
+        return ""
+
+    joined_ids = ", ".join(repr(trace_id) for trace_id in removed_trace_ids)
+    return "\n".join(
+        [
+            "import hyde",
+            f"fig = hyde.get_figure({str(figure_name)!r})",
+            f"hyde.remove_traces(fig, {joined_ids})",
+        ]
+    )
+
+
 def _figure_patch_add_trace_lines(trace):
     arguments = []
     x_source = _operand_to_python(trace["x_source"])
@@ -1974,6 +2024,14 @@ def figure_patch_source(
 ):
     source = FigureIRCodec.validate_state(source_state)
     target = FigureIRCodec.validate_state(target_state)
+    helper_source = _figure_patch_remove_trace_helper_source(
+        source,
+        target,
+        figure_name=figure_name,
+        refresh_trace_ids=refresh_trace_ids,
+    )
+    if helper_source:
+        return helper_source
     source_subplot = _figure_patch_subplot(source, None)
     target_subplot = _figure_patch_subplot(target, None)
     lines = []

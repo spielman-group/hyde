@@ -56,6 +56,30 @@ Prefer runtime evidence over static suspicion whenever practical:
 Use static code inspection to explain or extend a finding, not to replace available
 runtime evidence.
 
+## Test Audit
+
+Audit nearby tests as part of the review, especially tests added or changed by the
+task.
+
+Treat these as review targets when they are not required by the real contract:
+
+- assertions against private flags, caches, or in-flight markers
+- direct calls to private widget or controller methods
+- tests that prove helper wiring, call order, or temporary lowering shape instead of
+  user-visible behavior
+- tests that assert exact internal command fragments when the real contract is only a
+  broader interface property
+- mock-heavy tests that could exercise the same behavior through the real product
+  surface
+
+General rule: ask what defect the test would catch in the running application. If the
+answer is only "this implementation changed," treat it as a test-quality finding.
+
+Do not flag legitimate architecture-contract tests as implementation-detail tests. It
+is still valid to test stable public APIs, documented emitted strings, debug logging
+contracts, shared shell contracts, or runtime metadata that Hyde explicitly treats as
+part of the product surface.
+
 ## Audit Workflow
 
 ### 1. Runtime Boundary Violations
@@ -81,6 +105,10 @@ Order this section by runtime severity. For each item, include:
 
 After the runtime pass, do a second deliberate pass for duplicated behavior and missed
 shared seams, even when the code is otherwise legal.
+
+Include test-shape problems here when the issue is not a live runtime violation but a
+missed chance to express the contract through a better shared or more behavioral test
+surface.
 
 Focus first on clear, near-term consolidations justified by the changed area.
 
@@ -116,6 +144,7 @@ When subagents are available, parallelize only across distinct audit surfaces su
 
 - runtime evidence gathering
 - nearby-code reuse and refactor exploration
+- nearby-test audit for implementation-coupled tests
 
 Do not split one tight reasoning thread across multiple subagents for no gain.
 
@@ -138,6 +167,8 @@ If a section has no items, say so explicitly.
   enough.
 - Treat architecturally wrong live behavior as a real finding even if tests happen to
   pass.
+- Include test-quality findings when changed or nearby tests drift away from Hyde's
+  behavior-first testing rule.
 - Keep the report concise and actionable.
 - End by asking whether to turn the `Path Forward` section into a PRD with `to-prd`.
 

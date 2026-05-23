@@ -5,8 +5,10 @@
 2. The kernel is authoritative for namespace objects, live figures, and any Hyde-owned
    state that must stay scientifically correct.
 3. GUI actions normally emit explicit Python strings. First-class figure dialogs now
-   emit explicit matplotlib patch Python for routine figure mutation and converge
-   through backend resync/import back into kernel-owned figure IR.
+   emit explicit matplotlib patch Python for routine figure mutation and may emit
+   explicit Hyde helper calls for Hyde-owned figure operations such as
+   `hyde.remove_traces(...)`, converging through backend resync/import back into
+   kernel-owned figure IR.
 4. Use the narrowest existing transport that fits the feature. Prefer standard Jupyter
    execution/comms over Hyde-specific relays.
 
@@ -146,7 +148,9 @@ when a project is loaded.
   - `{label}: {y} vs {x}` when `label` and `x` exist
   - `{label}: {y}` when `label` exists and `x` does not
   - `{y} vs {x}` when `label` does not exist and `x` exists
-  - `{y}` otherwise
+  - `{y}` when `y` exists and the earlier cases do not apply
+  - `{label}` when `label` exists and no canonical `y` name exists
+  - trace ID fallback only when neither `label` nor canonical source names exist
 - After each completed Python execution block, the backend re-imports the supported
   semantic IR for dirty first-class figures from the live matplotlib object graph.
 - GUI figure payloads from one completed execution block are applied in one queued

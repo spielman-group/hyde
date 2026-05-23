@@ -461,7 +461,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             dialog.close()
             live_figure.canvas.manager.destroy()
 
-    def test_do_it_does_not_remove_existing_live_legend(self):
+    def test_do_it_refreshes_existing_live_legend(self):
         live_figure, snapshot = make_live_first_class_figure()
         live_figure.axes[0].legend()
         execution = EvaluatingExecutionService()
@@ -499,6 +499,10 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
 
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
             self.assertIsNotNone(live_figure.axes[0].get_legend())
+            self.assertEqual(
+                [text.get_text() for text in live_figure.axes[0].get_legend().get_texts()],
+                ["trace_b"],
+            )
         finally:
             dialog.close()
             live_figure.canvas.manager.destroy()

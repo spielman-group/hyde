@@ -1,4 +1,3 @@
-import copy
 import re
 
 from qtutils.qt import QtWidgets
@@ -30,37 +29,6 @@ class RemoveFromGraphDialog(HydeFigureDialogWidget):
     def _load_traces(self):
         self._apply_trace_filter()
         self._refresh_from_selection()
-
-    def figure_patch_source(self, source_state, target_state, *, refresh_trace_ids=()):
-        del refresh_trace_ids
-        if self.figure_context is None:
-            return ""
-        source = copy.deepcopy(source_state or {})
-        target = copy.deepcopy(target_state or {})
-        source_subplots = tuple(source.get("layout", {}).get("subplots", ()) or ())
-        target_subplots = tuple(target.get("layout", {}).get("subplots", ()) or ())
-        if len(source_subplots) != 1 or len(target_subplots) != 1:
-            return ""
-        source_traces = tuple(source_subplots[0].get("traces", ()) or ())
-        target_ids = {
-            str(trace.get("id"))
-            for trace in tuple(target_subplots[0].get("traces", ()) or ())
-        }
-        removed_trace_ids = [
-            str(trace.get("id"))
-            for trace in source_traces
-            if str(trace.get("id")) not in target_ids
-        ]
-        if not removed_trace_ids:
-            return ""
-        joined_ids = ", ".join(repr(trace_id) for trace_id in removed_trace_ids)
-        return "\n".join(
-            [
-                "import hyde",
-                f"fig = hyde.get_figure({self.figure_context.figure_name()!r})",
-                f"hyde.remove_traces(fig, {joined_ids})",
-            ]
-        )
 
     def _on_filter_text_changed(self, _text):
         self._apply_trace_filter()

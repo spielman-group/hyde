@@ -78,21 +78,16 @@ ASCII layout sketch:
 
 The candidate list rows show:
 
-- a small trace-type icon
-- the display label Hyde derives for the trace
-- a source summary using the plotted data names when available
+- the canonical Hyde trace display name
+- text only in the first pass
 
 The footer keeps the broad Igor-style composition, but Hyde does not treat the lower
 pane as an executable command editor.
 
 ## Visible Controls
 
-- object-type selector: `active`
-  - `Trace(s)`: `active`
-  - `Image Plot(s)`: `inert-but-visible`
-  - `Contour Plot(s)`: `inert-but-visible`
 - removable-object list: `active`
-- trace icon plus row label/source summary: `active`
+- text-only trace rows using Hyde's canonical display names: `active`
 - trace-name filter field: `active`
 - lower preview/status pane: `active`
   - read-only only
@@ -113,8 +108,9 @@ Initial entry points are:
 - the figure right-click menu when Hyde exposes the same registered figure actions in a
   contextual popup
 
-The action is available only when the active figure contains at least one supported
-removable target in the current deployment.
+The first shipped path is the active `Figure` menu entry for the active first-class
+figure. The dialog may open even when the current figure has no supported removable
+traces.
 
 ## Editable Operations
 
@@ -122,9 +118,6 @@ The dialog performs confirmed figure mutations against kernel-owned figure state
 
 Initial live operations are:
 
-- changing the object-type selector
-  - immediate GUI-only list refresh
-  - in the initial deployment, only `Trace(s)` produces removable candidates
 - filtering the visible candidate list
   - immediate GUI-only filter update
   - targets displayed trace metadata only
@@ -144,8 +137,8 @@ Invalid or unsupported states behave as follows:
 
 - if no supported trace is selected, `Do It` is disabled and the lower pane explains
   that no removable target is selected
-- if the selected object type has no supported Hyde implementation, the candidate list
-  is empty and the lower pane states that the mode is not available yet
+- if the figure has no supported removable traces, the candidate list is empty and the
+  lower pane states that no supported traces are available to remove
 - if a trace disappears from the figure before confirmation, the stale selection is
   dropped during refresh and is not treated as an authoritative target
 
@@ -156,11 +149,11 @@ command-driven model as the shipped axis, trace, and Curve Fit attached-display
 surfaces.
 
 On `Do It`, the GUI should resolve the selected stable trace IDs from the active
-figure context and emit one bounded command block against `hyde.get_figure(...)`.
-Because stable trace identity is Hyde-owned rather than ordinary matplotlib state, the
-canonical emitted command for this dialog should use Hyde's public
+figure context and emit one bounded command block through Hyde's shared figure
+lowering path. Because stable trace identity is Hyde-owned rather than ordinary
+matplotlib state, the canonical emitted command for this dialog uses Hyde's public
 `hyde.remove_traces(...)` helper instead of exposing `_hyde_trace_id` lookup code
-directly. `To Cmd Line` should emit that same canonical block visibly.
+directly. `To Cmd Line` emits that same canonical block visibly.
 
 The lower pane shows Hyde-native preview/status text only:
 

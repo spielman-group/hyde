@@ -627,29 +627,28 @@ class TestTableWidget(unittest.TestCase):
         try:
             widget.model.update_data({"a": [0]})
             widget.refresh_data()
-            first_request_id = widget._current_request_id
 
             widget.ui.tableView.setCurrentIndex(widget.model.index(0, 1))
             widget.ui.valueEdit.setReadOnly(False)
             widget.ui.valueEdit.setText("9")
 
-            self.assertTrue(widget._submit_value_edit())
+            QtWidgets.QApplication.sendEvent(
+                widget.ui.valueEdit,
+                QtGui.QKeyEvent(
+                    QtCore.QEvent.KeyPress,
+                    QtCore.Qt.Key_Return,
+                    QtCore.Qt.NoModifier,
+                ),
+            )
             self.assertEqual(executed, [])
             self.assertEqual(len(queued), 3)
             self.assertEqual(queued[0][1], True)
             self.assertEqual(queued[1][1], True)
             self.assertEqual(queued[2][1], True)
             self.assertEqual(queued[1][0], "a[0] = 9")
-            second_request_id = widget._current_request_id
-            self.assertEqual(
-                queued[2][0],
-                widget.table_state.source_for_command(
-                    "push_table_data",
-                    request_id=second_request_id,
-                ),
-            )
+            first_request_id = queued[0][0].rsplit(", ", 1)[1][1:-2]
+            second_request_id = queued[2][0].rsplit(", ", 1)[1][1:-2]
             self.assertNotEqual(second_request_id, first_request_id)
-            self.assertFalse(widget._refresh_requested)
 
             widget.on_data_received({"a": [1]}, first_request_id)
 
@@ -658,7 +657,6 @@ class TestTableWidget(unittest.TestCase):
             widget.on_data_received({"a": [9]}, second_request_id)
 
             self.assertEqual(widget.model.data_cache["a"], [9])
-            self.assertFalse(widget._refresh_in_flight)
         finally:
             widget.shutdown_client()
             widget.close()
@@ -764,16 +762,16 @@ class TestTableWidget(unittest.TestCase):
             },
         )
         try:
+            widget.REFRESH_TIMEOUT_MS = 0
             widget.refresh_data()
-            self.assertTrue(widget._refresh_in_flight)
-
-            widget._on_refresh_timeout()
-            self.assertFalse(widget._refresh_in_flight)
+            queued_after_first_refresh = len(queued)
+            for _ in range(3):
+                self.qapp.processEvents()
 
             namespace_service.emit({"a": {"type": "ndarray", "view": "[1 9 3]"}})
 
-            self.assertEqual(len(queued), 2)
-            self.assertIn("hyde.execution.ipc.push_table_data(['a'],", queued[1][0])
+            self.assertGreater(len(queued), queued_after_first_refresh)
+            self.assertIn("hyde.execution.ipc.push_table_data(['a'],", queued[-1][0])
         finally:
             widget.shutdown_client()
             widget.close()

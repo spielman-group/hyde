@@ -73,7 +73,9 @@ QtWidgets
   - `{label}: {y} vs {x}` when `label` and `x` exist
   - `{label}: {y}` when `label` exists and `x` does not
   - `{y} vs {x}` when `label` does not exist and `x` exists
-  - `{y}` otherwise
+  - `{y}` when `y` exists and the earlier cases do not apply
+  - `{label}` when `label` exists and no canonical `y` name exists
+  - trace ID fallback only when neither `label` nor canonical source names exist
 - Figure windows may use visible titles of the form
   `{Figure_name}: {trace display names}`. This affects visible chrome only. Stable
   subwindow identity and save/restore naming must remain unchanged. For the first
