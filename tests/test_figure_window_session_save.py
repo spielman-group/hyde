@@ -233,6 +233,41 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         finally:
             widget.close()
 
+    def test_unsupported_figure_window_still_generates_supported_subset_restore_source(self):
+        widget = FigureWindow(figure_number=1)
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setObjectName("Figure7")
+        widget.bind_subwindow(subwindow)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "title": "Figure0",
+                    "snapshot": {
+                        "default_macro_name": "Figure0",
+                        "call_source": None,
+                        "save_error": "unsupported trace source",
+                        "figure_ir": figure_ir,
+                        "live_state": None,
+                        "is_first_class": True,
+                    },
+                }
+            )
+
+            macro = widget.macro_source("Figure0")
+            source = widget.session_restore_source()
+
+            self.assertIn("fig = plt.figure('Figure7')", macro)
+            self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
+            self.assertIn("fig = plt.figure('Figure7')", source)
+            self.assertIn("ax.plot(delay, raw_delay, label='raw_delay')", source)
+        finally:
+            widget.force_close()
+            mdi_area.close()
+
     def test_figure_window_uses_stable_name_when_payload_title_is_missing(self):
         widget = FigureWindow(figure_number=1)
         mdi_area = QtWidgets.QMdiArea()

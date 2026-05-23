@@ -20,7 +20,6 @@ from hyde.matplotlib_backend import (
     _install_first_class_figure_resync_hook,
     _resync_dirty_first_class_figures,
     _figure_defaults_snapshot,
-    apply_figure_action,
     figure_snapshot_payload,
 )
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
@@ -719,15 +718,18 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             tuple(int(value * figure.dpi) for value in figure.get_size_inches()),
         )
 
-    def test_snapshot_payload_prefers_hyde_live_state_when_available(self):
+    def test_snapshot_payload_ignores_stale_hyde_live_state_for_second_class_figures(self):
         figure = Figure()
         figure._hyde_live_state = self._live_state()
+        axes = figure.add_subplot(111)
+        axes.set_title("DelayGraph")
+        axes.plot([0, 1, 2], [1, 4, 9], label="fit_delay")
 
         payload = figure_snapshot_payload(figure, 1)
 
-        self.assertEqual(payload["tracked_names"], ["delay", "fit_delay", "raw_delay"])
-        self.assertEqual(payload["live_state"]["settings"]["title"], "DelayGraph")
-        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", payload["call_source"])
+        self.assertEqual(payload["tracked_names"], [])
+        self.assertIsNone(payload["live_state"])
+        self.assertIn("ax.plot(np.array([1, 4, 9])", payload["call_source"])
 
     def test_snapshot_payload_prefers_figure_ir_for_first_class_decorated_figure(self):
         plt = self._configure_hyde_pyplot()
@@ -838,34 +840,12 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 return fig
 
             figure = Graph0([0, 1, 2], [1, 4, 9])
-            apply_figure_action(
-                figure,
-                {
-                    "type": "set_trace_style",
-                    "subplot_id": "subplot0",
-                    "trace_id": "trace0",
-                    "style": {
-                        "linestyle": "--",
-                        "linewidth": 3.25,
-                    },
-                },
-            )
-            apply_figure_action(
-                figure,
-                {
-                    "type": "set_axis_state",
-                    "subplot_id": "subplot0",
-                    "axis": "x",
-                    "state": {
-                        "label": {
-                            "offset": 9.0,
-                        },
-                        "ticks": {
-                            "direction": "inside",
-                        },
-                    },
-                },
-            )
+            axis = figure.axes[0]
+            axis.lines[0].set_linestyle("--")
+            axis.lines[0].set_linewidth(3.25)
+            axis.xaxis.labelpad = 9.0
+            axis.tick_params(axis="x", direction="in")
+            _resync_dirty_first_class_figures(None)
 
             payload = figure_snapshot_payload(figure, 1)
 
@@ -913,7 +893,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIsNone(payload.get("command_log"))
         self.assertIn("ax.plot(np.array([1, 4, 9])", payload["call_source"])
 
-    def test_snapshot_payload_infers_live_state_for_simple_terminal_figure(self):
+    def test_snapshot_payload_does_not_infer_second_class_live_state_from_namespace(self):
         figure = Figure()
         axes = figure.add_subplot(111)
         axes.set_title("DelayGraph")
@@ -929,9 +909,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             payload = figure_snapshot_payload(figure, 1)
 
-            self.assertEqual(payload["tracked_names"], ["fit_delay"])
-            self.assertEqual(payload["live_state"]["settings"]["title"], "DelayGraph")
-            self.assertIn("ax.plot(fit_delay, label='fit_delay')", payload["call_source"])
+            self.assertEqual(payload["tracked_names"], [])
+            self.assertIsNone(payload["live_state"])
+            self.assertIn("ax.plot(np.array([1, 4, 9])", payload["call_source"])
         finally:
             for name, value in previous_values.items():
                 if value is None:
@@ -2189,6 +2169,43 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             plugin.workspace.clear()
             mdi_area.close()
 
+    def test_plugin_reports_session_restore_warnings_for_unsupported_figures(self):
+        plugin = Plugin({})
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            "get_shutting_down": lambda: False,
+        }
+        payload = {
+            "figure_number": 1,
+            "title": "FigureA",
+            "snapshot": {
+                "is_first_class": True,
+                "default_macro_name": "FigureA",
+                "call_source": "fig = plt.figure('FigureA')",
+                "figure_size": (320, 240),
+                "figure_ir": figure_ir,
+                "save_error": "unsupported trace source",
+            },
+        }
+        try:
+            plugin._handle_figure_payload(payload)
+            self.qapp.processEvents()
+
+            self.assertEqual(
+                plugin.get_session_restore_warnings(),
+                ["FigureA: Unsupported Feature: unsupported trace source"],
+            )
+            self.assertIn("FigureA(delay, fit_delay, raw_delay)", plugin.get_session_restore_source())
+        finally:
+            plugin.workspace.clear()
+            mdi_area.close()
+
 
 class TestBackendBootstrap(unittest.TestCase):
     def test_configure_gui_matplotlib_backend_forces_module_backend_only(self):
@@ -2420,6 +2437,9 @@ class TestEditableFigureSession(unittest.TestCase):
             self.assertFalse(isinstance(session, QtCore.QObject))
             self.assertFalse(hasattr(session, "figure_ir"))
             self.assertFalse(hasattr(session, "request_figure_action"))
+            self.assertFalse(hasattr(session, "apply_live"))
+            self.assertFalse(hasattr(session, "commit"))
+            self.assertFalse(hasattr(session, "revert"))
             self.assertEqual(session.figure_title(), "Figure0")
             self.assertEqual(session.trace_ids(), ("trace0",))
             self.assertEqual(session.trace_style("trace0", "label"), "trace_a")
@@ -2433,135 +2453,6 @@ class TestEditableFigureSession(unittest.TestCase):
             self.assertNotEqual(second_session.axis_label("x"), "Delay")
         finally:
             widget.force_close()
-
-    def test_edit_session_apply_commit_and_revert_own_session_lifecycle(self):
-        sent = []
-        context, widget = self._editable_context(sent)
-        try:
-            session = context.open_session()
-
-            session.set_axis_label("x", "Delay")
-            self.assertTrue(session.apply_live())
-            self.assertEqual(len(sent), 1)
-            self.assertEqual(sent[0][0], 1)
-            self.assertEqual(sent[0][1]["type"], "set_axis_state")
-            self.assertEqual(sent[0][1]["subplot_id"], "subplot0")
-            self.assertEqual(sent[0][1]["axis"], "x")
-            self.assertTrue(sent[0][1]["replace"])
-            self.assertEqual(sent[0][1]["state"]["label"]["text"], "Delay")
-            self.assertTrue(session.is_dirty())
-
-            self.assertTrue(session.commit())
-            self.assertFalse(session.is_dirty())
-            self.assertEqual(session.axis_label("x"), "Delay")
-            self.assertEqual(len(sent), 1)
-
-            session.set_axis_label("x", "Other Delay")
-            self.assertTrue(session.apply_live())
-            self.assertTrue(session.revert())
-
-            self.assertEqual(len(sent), 3)
-            self.assertEqual(sent[-1][1]["type"], "set_axis_state")
-            self.assertEqual(sent[-1][1]["state"]["label"]["text"], "Delay")
-            self.assertFalse(session.is_dirty())
-            self.assertEqual(session.axis_label("x"), "Delay")
-        finally:
-            widget.force_close()
-
-    def test_apply_live_rolls_back_partial_dispatch_failure(self):
-        sent = []
-
-        def dispatch_action(figure_number, action):
-            sent.append((int(figure_number), dict(action or {})))
-            return action.get("trace_id") != "trace_new"
-
-        widget = FigureWindow(
-            figure_number=1,
-            services={
-                "get_shutting_down": lambda: True,
-                "figure_action_service": type(
-                    "FigureActionService",
-                    (),
-                    {
-                        "request_figure_action": (
-                            lambda _self, figure_number, action: dispatch_action(
-                                figure_number,
-                                action,
-                            )
-                        )
-                    },
-                )(),
-            },
-        )
-        widget.update_payload({"snapshot": {"figure_ir": self._figure_ir()}})
-        try:
-            session = EditableFigureContext(widget).open_session()
-            session.set_trace_style("trace0", color="red")
-            session.set_trace(
-                "trace_new",
-                {
-                    "kind": "line",
-                    "x_source": {"kind": "name", "value": "x"},
-                    "y_source": {"kind": "name", "value": "trace_a"},
-                    "kwargs": {"label": "trace_new"},
-                },
-            )
-
-            self.assertFalse(session.apply_live())
-            self.assertEqual(
-                [action["type"] for _, action in sent],
-                ["set_trace_style", "set_trace", "set_trace_style"],
-            )
-            self.assertEqual(sent[-1][1]["trace_id"], "trace0")
-            self.assertTrue(session.is_dirty())
-
-            self.assertTrue(session.revert())
-            self.assertFalse(session.is_dirty())
-            self.assertEqual(session.trace_style("trace0", "color"), "#1f77b4")
-        finally:
-            widget.force_close()
-
-
-class TestFigureRefreshHelpers(unittest.TestCase):
-    def test_refresh_figure_reapplies_live_state_without_accumulating_lines(self):
-        state = FigureState()
-        state.set_title("DelayGraph")
-        state.set_x_name("delay")
-        state.set_items(["fit_delay", "raw_delay"])
-        normalized_state = state.normalized_state()
-
-        figure = Figure()
-        FigureCanvasHyde(figure)
-
-        main_namespace = sys.modules["__main__"].__dict__
-        previous_values = {
-            name: main_namespace.get(name)
-            for name in ("delay", "fit_delay", "raw_delay")
-        }
-        try:
-            main_namespace["delay"] = [0, 1, 2]
-            main_namespace["fit_delay"] = [1, 4, 9]
-            main_namespace["raw_delay"] = [1, 2, 3]
-
-            hyde.track_figure(figure, normalized_state)
-            hyde.refresh_figure(figure)
-
-            axis = figure.axes[0]
-            self.assertEqual(len(axis.lines), 2)
-            self.assertEqual(list(axis.lines[0].get_ydata()), [1, 4, 9])
-
-            main_namespace["fit_delay"] = [2, 5, 10]
-            hyde.refresh_figure(figure)
-
-            axis = figure.axes[0]
-            self.assertEqual(len(axis.lines), 2)
-            self.assertEqual(list(axis.lines[0].get_ydata()), [2, 5, 10])
-        finally:
-            for name, value in previous_values.items():
-                if value is None:
-                    main_namespace.pop(name, None)
-                else:
-                    main_namespace[name] = value
 
 
 if __name__ == "__main__":

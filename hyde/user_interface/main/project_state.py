@@ -94,6 +94,28 @@ def capture_session_source(app):
     return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 
+def capture_session_restore_warnings(app):
+    logger = logging.getLogger("hyde")
+    warnings = []
+    for plugin_name, plugin in _plugin_items(app):
+        warning_getter = getattr(plugin, "get_session_restore_warnings", None)
+        if warning_getter is None:
+            continue
+        try:
+            plugin_warnings = warning_getter()
+        except Exception:
+            logger.exception(
+                "Plugin session warning capture failed for '%s'.",
+                plugin_name,
+            )
+            continue
+        for warning in plugin_warnings or ():
+            text = str(warning or "").strip()
+            if text:
+                warnings.append(text)
+    return warnings
+
+
 def write_session(app, project_dir):
     path = _session_path(project_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,6 +124,7 @@ def write_session(app, project_dir):
     session_source_path = _session_source_path(project_dir)
     with session_source_path.open("w", encoding="utf-8") as handle:
         handle.write(capture_session_source(app))
+    return capture_session_restore_warnings(app)
 
 
 def read_session(project_dir):

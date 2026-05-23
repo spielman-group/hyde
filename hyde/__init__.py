@@ -687,15 +687,6 @@ def _resolve_matplotlib_figure(figure):
     return manager.canvas.figure
 
 
-def track_figure(figure, state):
-    from .features.matplotlib_features import FigureCodec
-
-    resolved_figure = _resolve_matplotlib_figure(figure)
-    resolved_figure._hyde_live_state = FigureCodec.validate_state(state)
-    resolved_figure.canvas.draw_idle()
-    return resolved_figure
-
-
 def get_figure(name):
     """
     Return the live first-class Hyde figure for ``name``.
@@ -709,7 +700,6 @@ def get_figure(name):
 
 
 def refresh_figure(figure):
-    from .features.matplotlib_features import apply_figure_state
     from .matplotlib_backend import apply_figure_action
 
     resolved_figure = _resolve_matplotlib_figure(figure)
@@ -719,12 +709,4 @@ def refresh_figure(figure):
             {"type": "regenerate_from_ir", "use_bound_values": False},
         )
         return resolved_figure
-    state = getattr(resolved_figure, "_hyde_live_state", None)
-    if state is None:
-        return None
-    apply_figure_state(
-        resolved_figure,
-        state,
-        sys.modules["__main__"].__dict__,
-    )
-    return resolved_figure
+    return None

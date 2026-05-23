@@ -520,7 +520,7 @@ class HydeApp:
                 QtWidgets.QMessageBox.warning(self.ui, "Project Save Warnings", "\\n".join(errors))
             if success:
                 try:
-                    write_session(self, path)
+                    errors.extend(write_session(self, path) or [])
                 except Exception as exc:
                     errors.append(f"session persistence: {exc}")
                 try:

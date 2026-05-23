@@ -201,7 +201,7 @@ class FigureSnapshotState:
         return copy.deepcopy(self._trace_styles)
 
     def macro_source(self, macro_name, figure_title=None):
-        if self._save_error:
+        if self._save_error and self._figure_ir is None:
             raise MacroStoreError(self._save_error)
         if self._figure_ir is not None:
             figure_ir = self._figure_ir
@@ -482,8 +482,6 @@ class FigureWindow(HydeInteractiveWidget):
             figure_defaults=self.figure_defaults(),
             trace_styles=self.trace_styles(),
             resolved_axis_limits=self.resolved_axis_limits(),
-            dispatch_action=self.request_figure_action,
-            current_figure_ir=self.figure_ir,
         )
 
     def supported_trace_records(self):
@@ -586,6 +584,12 @@ class FigureWindow(HydeInteractiveWidget):
             handle,
             figure_title=handle,
         )
+
+    def session_restore_warning(self):
+        message = self.snapshot_state.window_warning_message()
+        if not message:
+            return None
+        return f"{self.window_handle()}: {message}"
 
     def session_restore_arguments(self):
         return self.snapshot_state.tracked_names()

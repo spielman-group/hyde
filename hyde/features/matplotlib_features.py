@@ -1918,13 +1918,47 @@ def _figure_patch_trace_lines(source_trace, target_trace, *, trace_index):
     return lines
 
 
-def figure_patch_source(source_state, target_state, *, figure_name):
+def _figure_patch_remove_trace_lines(trace_id):
+    return [
+        (
+            "_hyde_line = next(("
+            "candidate for candidate in ax.lines "
+            f"if getattr(candidate, '_hyde_trace_id', None) == {str(trace_id)!r}"
+            "), None)"
+        ),
+        "if _hyde_line is not None:",
+        "    _hyde_line.remove()",
+    ]
+
+
+def _figure_patch_add_trace_lines(trace):
+    arguments = []
+    x_source = _operand_to_python(trace["x_source"])
+    y_source = _operand_to_python(trace["y_source"])
+    if x_source:
+        arguments.append(x_source)
+    arguments.append(y_source)
+    kwargs = ", ".join(
+        f"{name}={value!r}"
+        for name, value in dict(trace.get("kwargs", {}) or {}).items()
+        if value is not None
+    )
+    if kwargs:
+        arguments.append(kwargs)
+    return [
+        f"_hyde_line = ax.plot({', '.join(arguments)})[0]",
+        f"_hyde_line._hyde_trace_id = {str(trace['id'])!r}",
+    ]
+
+
+def figure_patch_source(source_state, target_state, *, figure_name, refresh_trace_ids=()):
     source = FigureIRCodec.validate_state(source_state)
     target = FigureIRCodec.validate_state(target_state)
     source_subplot = _figure_patch_subplot(source, None)
     target_subplot = _figure_patch_subplot(target, None)
     lines = []
     needs_ticker = False
+    refresh_trace_ids = {str(trace_id) for trace_id in tuple(refresh_trace_ids or ())}
 
     changed_margins = [
         side
@@ -1971,22 +2005,40 @@ def figure_patch_source(source_state, target_state, *, figure_name):
         lines.extend(_figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state))
 
     trace_lines = []
-    refresh_legend = False
+    refresh_legend = source_subplot["legend"] != target_subplot["legend"]
     source_traces = {trace["id"]: trace for trace in source_subplot.get("traces", [])}
+    target_traces = {trace["id"]: trace for trace in target_subplot.get("traces", [])}
+    for source_trace in source_subplot.get("traces", []):
+        if source_trace["id"] in target_traces:
+            continue
+        refresh_legend = True
+        trace_lines.extend(_figure_patch_remove_trace_lines(source_trace["id"]))
     for index, target_trace in enumerate(target_subplot.get("traces", [])):
         source_trace = source_traces.get(target_trace["id"])
-        lowered = _figure_patch_trace_lines(
-            source_trace,
-            target_trace,
-            trace_index=index,
-        )
+        if source_trace is None:
+            refresh_legend = True
+            trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
+            continue
+        lowered = _figure_patch_trace_lines(source_trace, target_trace, trace_index=index)
         if lowered:
             refresh_legend = True
             trace_lines.extend(lowered)
+            continue
+        if source_trace != target_trace:
+            refresh_legend = True
+            trace_lines.extend(_figure_patch_remove_trace_lines(target_trace["id"]))
+            trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
+            continue
+        if target_trace["id"] in refresh_trace_ids:
+            trace_lines.extend(_figure_patch_remove_trace_lines(target_trace["id"]))
+            trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
     lines.extend(trace_lines)
     if refresh_legend:
-        lines.append("if ax.get_legend() is not None:")
-        lines.append("    ax.legend()")
+        if target_subplot["legend"]:
+            lines.append("ax.legend()")
+        else:
+            lines.append("if ax.get_legend() is not None:")
+            lines.append("    ax.get_legend().remove()")
     if not lines:
         return ""
 

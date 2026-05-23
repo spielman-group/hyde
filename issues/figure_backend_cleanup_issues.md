@@ -7,18 +7,18 @@
 - [x] Slice 3: Re-import full supported IR and unsupported-feature status from live figures
 - [x] Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
 - [x] Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
-- [ ] Slice 6: Move Curve Fit attached display onto canonical matplotlib patch emission
-- [ ] Slice 7: Restore save/reopen behavior for partially supported figures and harden tests
+- [x] Slice 6: Move Curve Fit attached display onto canonical matplotlib patch emission
+- [x] Slice 7: Restore save/reopen behavior for partially supported figures and harden tests
 
 ## Legacy-path cleanup checkpoints
 
 These checkpoints are not separate work items. They are completion conditions for the
 remaining slices so the old dual-path backend does not survive under a new name.
 
-- [ ] Remove the remaining non-first-class `_hyde_live_state` / `_infer_live_state` backend replay path as part of the final cleanup once the new command-driven figure path is fully in place.
-- [ ] Remove first-class figure edit use of semantic figure `comm` actions for remaining routine edits as part of Slices 5 and 6.
-- [ ] Delete obsolete tests that still defend the old live-state replay or semantic figure-action edit path when the product contract changes.
-- [ ] Update docs and agent guidance so they no longer describe the old figure-edit `comm` exception as the intended architecture once the migration is complete.
+- [x] Remove the remaining non-first-class `_hyde_live_state` / `_infer_live_state` backend replay path as part of the final cleanup once the new command-driven figure path is fully in place.
+- [x] Remove first-class figure edit use of semantic figure `comm` actions for remaining routine edits as part of Slices 5 and 6.
+- [x] Delete obsolete tests that still defend the old live-state replay or semantic figure-action edit path when the product contract changes.
+- [x] Update docs and agent guidance so they no longer describe the old figure-edit `comm` exception as the intended architecture once the migration is complete.
 
 ## Slice 1: Introduce canonical first-class figure lookup and identity rules
 
@@ -183,14 +183,14 @@ all converge on one Python ingress path.
 
 ### Acceptance criteria
 
-- [ ] Curve Fit attached display uses canonical matplotlib patch emission instead of a separate figure action transport.
-- [ ] Hidden execution and visible command-line emission use the same emitted patch block.
-- [ ] Live update and rollback/cancel use the same canonical Python ingress path.
-- [ ] Attached-display figure results converge with backend resync and imported IR.
-- [ ] Hidden Curve Fit figure-edit commands are logged through Hyde's ordinary hidden-command logging path.
-- [ ] Hidden Curve Fit figure-edit commands are logged through the same `[Hyde state] ... / python:` channel used for existing hidden commands.
-- [ ] Curve Fit attached display no longer commits figure changes through `FigureEditSession.commit()`, `send_figure_action(...)`, or backend semantic edit actions.
-- [ ] Routine first-class figure mutation no longer relies on semantic figure `comm` edit traffic after axis/trace/attached-display migration is complete.
+- [x] Curve Fit attached display uses canonical matplotlib patch emission instead of a separate figure action transport.
+- [x] Hidden execution and visible command-line emission use the same emitted patch block.
+- [x] Live update and rollback/cancel use the same canonical Python ingress path.
+- [x] Attached-display figure results converge with backend resync and imported IR.
+- [x] Hidden Curve Fit figure-edit commands are logged through Hyde's ordinary hidden-command logging path.
+- [x] Hidden Curve Fit figure-edit commands are logged through the same `[Hyde state] ... / python:` channel used for existing hidden commands.
+- [x] Curve Fit attached display no longer commits figure changes through `FigureEditSession.commit()`, `send_figure_action(...)`, or backend semantic edit actions.
+- [x] Routine first-class figure mutation no longer relies on semantic figure `comm` edit traffic after axis/trace/attached-display migration is complete.
 
 ### Blocked by
 
@@ -216,15 +216,15 @@ without silently losing windows when Hyde can still recover part of the figure.
 
 ### Acceptance criteria
 
-- [ ] Saving unsupported first-class figures surfaces a clear warning.
-- [ ] Save/reopen preserves the supported subset of unsupported figures rather than dropping the window entirely.
-- [ ] Tests verify one canonical Python ingress path across figure dialogs and command-line execution.
-- [ ] Tests cover dirty tracking, post-block resync, exception resync, rename collision, unsupported-feature warnings, and partial save/reopen behavior.
-- [ ] Tests cover hidden figure-edit command logging through Hyde's existing debug log behavior.
-- [ ] Tests cover hidden figure-edit command logging through the same `[Hyde state] ... / python:` debug channel used by existing hidden commands.
-- [ ] The remaining non-first-class `_hyde_live_state` / `_infer_live_state` replay path, including stale public helpers/tests that only support it, is either removed or explicitly justified by a still-current product contract.
-- [ ] Obsolete figure-edit transport code is deleted rather than left dormant once Slices 5 and 6 finish.
-- [ ] `AGENTS.md`, `ARCHITECTURE.md`, `IR-CONTROL.md`, and `STATUS.md` describe the final one-path figure mutation model rather than the superseded semantic-edit exception.
+- [x] Saving unsupported first-class figures surfaces a clear warning.
+- [x] Save/reopen preserves the supported subset of unsupported figures rather than dropping the window entirely.
+- [x] Tests verify one canonical Python ingress path across figure dialogs and command-line execution.
+- [x] Tests cover dirty tracking, post-block resync, exception resync, rename collision, unsupported-feature warnings, and partial save/reopen behavior.
+- [x] Tests cover hidden figure-edit command logging through Hyde's existing debug log behavior.
+- [x] Tests cover hidden figure-edit command logging through the same `[Hyde state] ... / python:` debug channel used by existing hidden commands.
+- [x] The remaining non-first-class `_hyde_live_state` / `_infer_live_state` replay path, including stale public helpers/tests that only support it, is either removed or explicitly justified by a still-current product contract.
+- [x] Obsolete figure-edit transport code is deleted rather than left dormant once Slices 5 and 6 finish.
+- [x] `AGENTS.md`, `ARCHITECTURE.md`, `IR-CONTROL.md`, and `STATUS.md` describe the final one-path figure mutation model rather than the superseded semantic-edit exception.
 
 ### Blocked by
 

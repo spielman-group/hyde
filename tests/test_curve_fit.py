@@ -19,9 +19,12 @@ from qtutils.qt import QtWidgets
 
 import hyde
 from hyde import project_tools
-from hyde.features.matplotlib_features import FigureIRCodec
 from hyde.features.lmfit_features import CALCULATED_X_NAME, LmfitCodec
-from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
+from hyde.matplotlib_backend import (
+    _import_first_class_figure_ir,
+    apply_figure_action,
+    figure_snapshot_payload,
+)
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.shared.core import RuntimeCommandState
@@ -47,6 +50,8 @@ import matplotlib.pyplot as plt
 plt.ion()
 import lmfit
 """
+
+ATTACHED_FIGURE_HARNESSES = []
 
 
 def make_plugin_host(plugin_manager):
@@ -147,6 +152,8 @@ class ProcedureExecutionHarness:
                 side_effect=self._route_parent_message,
             ), contextlib.redirect_stdout(io.StringIO()):
                 exec(code, self.namespace, self.namespace)
+            for attached_figure in list(ATTACHED_FIGURE_HARNESSES):
+                attached_figure.refresh_snapshot()
         except Exception as exc:
             self.last_error_message = str(exc)
             return False
@@ -377,12 +384,13 @@ class FakeEditableFigureContext:
         self._session = FigureEditSession(
             figure_number=self.figure_number,
             figure_ir=self._figure_ir,
-            dispatch_action=lambda action: bool(self._request_action(dict(action or {}))),
-            current_figure_ir=self.figure_ir,
         )
 
     def open_session(self):
         return self._session
+
+    def figure_name(self):
+        return f"Figure{self.figure_number}"
 
     def figure_ir(self):
         return copy.deepcopy(self._figure_ir)
@@ -391,45 +399,21 @@ class FakeEditableFigureContext:
         return bool(self._request_action(dict(action or {})))
 
 
-class DeferredFigureContext:
-    def __init__(self, *, figure_number=7, figure_ir=None):
-        self.figure_number = int(figure_number)
-        self._figure_ir = (
-            figure_ir_without_traces() if figure_ir is None else copy.deepcopy(figure_ir)
-        )
-        self.pending_actions = []
-        self._session = FigureEditSession(
-            figure_number=self.figure_number,
-            figure_ir=self._figure_ir,
-            dispatch_action=lambda action: self.request_figure_action(action),
-            current_figure_ir=self.figure_ir,
-        )
-
-    def open_session(self):
-        return self._session
-
-    def figure_ir(self):
-        return copy.deepcopy(self._figure_ir)
-
-    def request_figure_action(self, action):
-        self.pending_actions.append(dict(action or {}))
-        return True
-
-    def flush_actions(self):
-        while self.pending_actions:
-            self._figure_ir = FigureIRCodec.update_state(
-                self._figure_ir,
-                self.pending_actions.pop(0),
-            )
-
-
 class OpenSessionOnlyFigureContext:
-    def __init__(self, session):
+    def __init__(self, session, *, figure_name=None):
         self.figure_number = int(session.figure_number)
         self._session = session
+        self._figure_name = (
+            str(figure_name)
+            if figure_name is not None
+            else f"Figure{self.figure_number}"
+        )
 
     def open_session(self):
         return self._session
+
+    def figure_name(self):
+        return self._figure_name
 
 
 def attach_figure_context_service(manager, figure_context):
@@ -456,6 +440,9 @@ def make_figure_window(figure_ir):
     class MockSnapshotState:
         def figure_ir(self):
             return figure_ir
+
+        def default_macro_name(self):
+            return "Figure7"
 
         def figure_defaults(self):
             return None
@@ -496,13 +483,6 @@ def configure_line_fit_dialog(dialog):
     )
 
 
-def attached_display_trace_id(result_name, kind, suffix=None):
-    trace_id = result_name if kind == "fit" else f"{result_name}_residuals"
-    if suffix is not None:
-        trace_id = f"{trace_id}_{suffix}"
-    return trace_id
-
-
 class AttachedFigureHarness:
     def __init__(
         self,
@@ -510,7 +490,6 @@ class AttachedFigureHarness:
         y_values,
         *,
         y_label="signal",
-        fail_trace_ids=None,
         implicit_x=False,
     ):
         import matplotlib
@@ -520,7 +499,6 @@ class AttachedFigureHarness:
 
         self._pyplot = plt
         self.action_log = []
-        self.fail_trace_ids = {str(trace_id) for trace_id in (fail_trace_ids or ())}
         self.namespace = {
             "time": np.array(x_values, copy=True),
             "signal": np.array(y_values, copy=True),
@@ -548,9 +526,13 @@ class AttachedFigureHarness:
                 )
             },
         )
+        ATTACHED_FIGURE_HARNESSES.append(self)
         self.refresh_snapshot()
 
     def refresh_snapshot(self):
+        imported_ir, import_warning = _import_first_class_figure_ir(self.figure)
+        self.figure._hyde_ir = imported_ir
+        self.figure._hyde_import_warning = import_warning
         self.figure_window.update_payload(
             {
                 "figure_number": self.figure.number,
@@ -565,16 +547,13 @@ class AttachedFigureHarness:
                 "action": dict(action or {}),
             }
         )
-        if (
-            action.get("type") == "set_trace"
-            and str(action.get("trace_id")) in self.fail_trace_ids
-        ):
-            return False
         apply_figure_action(self.figure, action)
         self.refresh_snapshot()
         return True
 
     def close(self):
+        if self in ATTACHED_FIGURE_HARNESSES:
+            ATTACHED_FIGURE_HARNESSES.remove(self)
         self._pyplot.close(self.figure)
 
 
@@ -2122,7 +2101,10 @@ class TestCurveFitPlugin(unittest.TestCase):
         )
         session = attached_figure.figure_window.open_edit_session()
         _, _, harness, dialog = create_configured_line_fit_dialog(
-            figure_context=OpenSessionOnlyFigureContext(session)
+            figure_context=OpenSessionOnlyFigureContext(
+                session,
+                figure_name=attached_figure.figure_window.snapshot_state.default_macro_name(),
+            )
         )
         try:
             dialog.suppress_screen_updates_checkbox.setChecked(False)
@@ -2149,7 +2131,43 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_curve_fit_attached_display_trace_uses_generic_figure_ir_action(self):
+    def test_curve_fit_dialog_attached_preview_and_send_to_cmd_line_use_same_patch_block(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            dialog.services["visible_terminal_service"] = harness.execution_service
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+            harness.execution_service.calls.clear()
+            dialog.show_residuals_checkbox.setChecked(True)
+            QtWidgets.QApplication.processEvents()
+
+            preview = dialog.lower_text_edit.toPlainText()
+            self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", preview)
+            self.assertIn("ax = fig.axes[0]", preview)
+            self.assertIn("ax.plot(", preview)
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+
+            hidden_call_count = len(harness.execution_service.calls)
+            dialog.to_cmd_line_button.click()
+
+            self.assertEqual(harness.execution_service.visible_calls[-1], preview)
+            self.assertEqual(len(harness.execution_service.calls), hidden_call_count)
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_attached_display_uses_hidden_python_patch_instead_of_figure_actions(
+        self,
+    ):
         attached_figure = AttachedFigureHarness(
             np.array([0.0, 1.0, 2.0, 3.0]),
             np.array([1.0, 3.0, 5.0, 7.0]),
@@ -2160,64 +2178,18 @@ class TestCurveFitPlugin(unittest.TestCase):
         try:
             dialog.suppress_screen_updates_checkbox.setChecked(False)
             QtWidgets.QApplication.processEvents()
-
-            self.assertIn("signal_fit_result", harness.namespace)
-
-            fit_trace_id = attached_display_trace_id("signal_fit_result", "fit")
+            harness.execution_service.calls.clear()
             attached_figure.action_log.clear()
-            attached_figure.figure_window.request_figure_action(
-                {
-                    "type": "set_trace",
-                    "subplot_id": "subplot0",
-                    "trace_id": fit_trace_id,
-                    "trace": {
-                        "kind": "line",
-                        "x_source": {"kind": "name", "value": "time"},
-                        "y_source": {
-                            "kind": "attribute_path",
-                            "root": {"kind": "name", "value": "signal_fit_result"},
-                            "path": ["best_fit"],
-                        },
-                        "kwargs": {"label": "Fit", "linestyle": "--"},
-                    },
-                }
-            )
+
+            dialog.show_residuals_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
-                "subplots"
-            ][0]
-            fit_trace = subplot["traces"][-1]
-            self.assertEqual(fit_trace["id"], fit_trace_id)
-            self.assertEqual(fit_trace["y_source"]["kind"], "attribute_path")
-            self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
-            np.testing.assert_allclose(
-                attached_figure.figure.axes[0].lines[-1].get_xdata(),
-                harness.namespace["time"],
-            )
-            np.testing.assert_allclose(
-                attached_figure.figure.axes[0].lines[-1].get_ydata(),
-                harness.namespace["signal_fit_result"].best_fit,
-            )
-        finally:
-            dialog.close()
-            harness.close()
-            attached_figure.close()
-
-    def test_curve_fit_dialog_attached_display_uses_generic_trace_actions(self):
-        attached_figure = AttachedFigureHarness(
-            np.array([0.0, 1.0, 2.0, 3.0]),
-            np.array([1.0, 3.0, 5.0, 7.0]),
-        )
-        _, _, harness, dialog = create_configured_line_fit_dialog(
-            figure_window=attached_figure.figure_window
-        )
-        try:
-            self.assertTrue(dialog.show_fit_checkbox.isChecked())
-            self.assertEqual(
-                [entry["action"]["type"] for entry in attached_figure.action_log],
-                ["set_trace"],
-            )
+            self.assertEqual(attached_figure.action_log, [])
+            self.assertTrue(harness.execution_service.calls)
+            command = harness.execution_service.calls[-1]["code"]
+            self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", command)
+            self.assertIn("ax.plot(", command)
+            self.assertEqual(len(attached_figure.figure.axes[0].lines), 3)
         finally:
             dialog.close()
             harness.close()
@@ -2399,120 +2371,19 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             self.assertNotIn("signal_fit_result", harness.namespace)
 
-            attached_figure.action_log.clear()
+            harness.execution_service.calls.clear()
             dialog.do_it_button.click()
             QtWidgets.QApplication.processEvents()
 
-            self.assertEqual([entry["action"]["type"] for entry in attached_figure.action_log], ["set_trace"])
+            self.assertTrue(harness.execution_service.calls)
+            self.assertIn(
+                "fig = hyde.get_figure('CurveFitAttachedFigure')",
+                harness.execution_service.calls[-1]["code"],
+            )
             self.assertEqual(len(attached_figure.figure.axes[0].lines), 2)
             np.testing.assert_allclose(
                 attached_figure.figure.axes[0].lines[-1].get_ydata(),
                 harness.namespace["signal_fit_result"].best_fit,
-            )
-        finally:
-            dialog.close()
-            harness.close()
-            attached_figure.close()
-
-    def test_curve_fit_dialog_attached_sync_failure_surfaces_hidden_execution_failure(
-        self,
-    ):
-        attached_figure = AttachedFigureHarness(
-            np.array([0.0, 1.0, 2.0, 3.0]),
-            np.array([1.0, 3.0, 5.0, 7.0]),
-            fail_trace_ids={attached_display_trace_id("signal_fit_result", "res")},
-        )
-        _, _, harness, dialog = create_configured_line_fit_dialog(
-            figure_window=attached_figure.figure_window
-        )
-        try:
-            previous_result = object()
-            harness.set_namespace_value("signal_fit_result", previous_result)
-            dialog.show_fit_checkbox.setChecked(True)
-            dialog.show_residuals_checkbox.setChecked(True)
-            QtWidgets.QApplication.processEvents()
-
-            attached_figure.action_log.clear()
-            dialog.do_it_button.click()
-            QtWidgets.QApplication.processEvents()
-
-            self.assertEqual(dialog.result(), 0)
-            self.assertIs(harness.namespace["signal_fit_result"], previous_result)
-            self.assertEqual(
-                dialog.status_label.text(),
-                "Curve Fit attached display update failed.",
-            )
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
-                "subplots"
-            ][0]
-            self.assertEqual([trace["id"] for trace in subplot["traces"]], ["trace0"])
-            self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
-            self.assertTrue(
-                any(
-                    entry["action"]["trace_id"]
-                    == attached_display_trace_id("signal_fit_result", "res")
-                    for entry in attached_figure.action_log
-                )
-            )
-        finally:
-            dialog.close()
-            harness.close()
-            attached_figure.close()
-
-    def test_curve_fit_dialog_attached_sync_failure_rolls_back_replaced_trace_ids(
-        self,
-    ):
-        colliding_fit_id = attached_display_trace_id("signal_fit_result", "fit")
-        colliding_residual_id = attached_display_trace_id("signal_fit_result", "res")
-        attached_figure = AttachedFigureHarness(
-            np.array([0.0, 1.0, 2.0, 3.0]),
-            np.array([1.0, 3.0, 5.0, 7.0]),
-        )
-        _, _, harness, dialog = create_configured_line_fit_dialog(
-            figure_window=attached_figure.figure_window
-        )
-        try:
-            for trace_id in (colliding_fit_id, colliding_residual_id):
-                attached_figure.figure_window.request_figure_action(
-                    {
-                        "type": "set_trace",
-                        "subplot_id": "subplot0",
-                        "trace_id": trace_id,
-                        "trace": {
-                            "kind": "line",
-                            "x_source": {"kind": "name", "value": "time"},
-                            "y_source": {"kind": "name", "value": "signal"},
-                            "kwargs": {"label": trace_id},
-                        },
-                    }
-                )
-            QtWidgets.QApplication.processEvents()
-            attached_figure.fail_trace_ids = {colliding_residual_id}
-
-            previous_result = object()
-            harness.set_namespace_value("signal_fit_result", previous_result)
-            dialog.show_fit_checkbox.setChecked(True)
-            dialog.show_residuals_checkbox.setChecked(True)
-            QtWidgets.QApplication.processEvents()
-
-            attached_figure.action_log.clear()
-            dialog.do_it_button.click()
-            QtWidgets.QApplication.processEvents()
-
-            self.assertEqual(dialog.result(), 0)
-            self.assertIs(harness.namespace["signal_fit_result"], previous_result)
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
-                "subplots"
-            ][0]
-            self.assertEqual(
-                sorted(trace["id"] for trace in subplot["traces"]),
-                sorted(["trace0", colliding_fit_id, colliding_residual_id]),
-            )
-            self.assertTrue(
-                any(
-                    entry["action"]["trace_id"] == colliding_residual_id
-                    for entry in attached_figure.action_log
-                )
             )
         finally:
             dialog.close()
@@ -2604,6 +2475,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             self.assertEqual(len(attached_figure.figure.axes[0].lines), 3)
+            hidden_calls_before_cancel = len(harness.execution_service.calls)
 
             dialog.reject()
             QtWidgets.QApplication.processEvents()
@@ -2615,10 +2487,41 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertFalse(subplot["legend"])
             self.assertEqual(len(attached_figure.figure.axes), 1)
             self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
+            self.assertGreater(len(harness.execution_service.calls), hidden_calls_before_cancel)
+            self.assertIn(
+                "fig = hyde.get_figure('CurveFitAttachedFigure')",
+                harness.execution_service.calls[-1]["code"],
+            )
         finally:
             dialog.close()
             harness.close()
             attached_figure.close()
+
+    def test_hidden_curve_fit_attached_patch_logs_through_standard_hyde_debug_channel(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                dialog.show_residuals_checkbox.setChecked(True)
+                QtWidgets.QApplication.processEvents()
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+        output = "\n".join(logs.output)
+        self.assertIn("[Hyde state] FigurePatchState", output)
+        self.assertIn("curve_fit_attached_display", output)
+        self.assertIn("python:", output)
 
     def test_curve_fit_dialog_cancel_from_blank_opening_state_removes_introduced_attached_display_for_implicit_x(
         self,
@@ -2692,64 +2595,6 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.close()
             harness.close()
             attached_figure.close()
-
-    def test_curve_fit_dialog_cancel_removes_preview_when_figure_snapshot_lags_behind_actions(
-        self,
-    ):
-        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
-        app = make_plugin_host(manager)
-        harness = configure_curve_fit_runtime(app, manager)
-        attach_namespace_view_service(
-            manager,
-            {
-                "signal": {
-                    "python_type": "ndarray",
-                    "numpy_type": "Array",
-                    "ndim": 1,
-                    "numpy_kind": "f",
-                },
-            },
-        )
-        harness.write_procedures(
-            """
-            @hyde.fit_function(independent_vars=("x",))
-            def line_fit(x, slope, offset):
-                return slope * x + offset
-            """
-        )
-        harness.reload_procedures()
-        harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
-        figure_context = DeferredFigureContext(
-            figure_ir=figure_ir_with_implicit_x_trace("signal")
-        )
-        dialog = create_curve_fit_dialog(
-            manager.plugins["curve_fit_dialog"],
-            app,
-            figure_context=figure_context,
-        )
-        try:
-            configure_line_fit_dialog(dialog)
-
-            self.assertEqual(len(figure_context.pending_actions), 1)
-            figure_context.flush_actions()
-            self.assertEqual(
-                len(figure_context.figure_ir()["layout"]["subplots"][0]["traces"]),
-                2,
-            )
-
-            dialog.cancel_button.click()
-            QtWidgets.QApplication.processEvents()
-
-            self.assertEqual(len(figure_context.pending_actions), 1)
-            figure_context.flush_actions()
-            self.assertEqual(
-                len(figure_context.figure_ir()["layout"]["subplots"][0]["traces"]),
-                1,
-            )
-        finally:
-            dialog.close()
-            harness.close()
 
     def test_curve_fit_dialog_cancel_restores_opening_attached_display_state(self):
         attached_figure = AttachedFigureHarness(

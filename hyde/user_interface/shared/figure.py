@@ -765,30 +765,18 @@ class FigureEditSession:
         figure_defaults=None,
         trace_styles=None,
         resolved_axis_limits=None,
-        dispatch_action=None,
-        current_figure_ir=None,
     ):
         self.figure_number = int(figure_number)
-        self._dispatch_action = dispatch_action
-        self._current_figure_ir = current_figure_ir
         self._figure_defaults = copy.deepcopy(figure_defaults)
         self._trace_styles = copy.deepcopy(trace_styles) or {}
         self._trace_style_defaults = trace_style_defaults_by_subplot(self._figure_defaults)
         self._resolved_axis_limits = copy.deepcopy(resolved_axis_limits) or {}
         self._opening_state = FigureIRCodec.validate_state(figure_ir)
         self._current_state = copy.deepcopy(self._opening_state)
-        self._revert_state = copy.deepcopy(self._opening_state)
-        self._applied_state = copy.deepcopy(self._opening_state)
         self._opening_trace_style_states = self._initial_trace_style_states(
             self._opening_state
         )
         self._current_trace_style_states = copy.deepcopy(
-            self._opening_trace_style_states
-        )
-        self._revert_trace_style_states = copy.deepcopy(
-            self._opening_trace_style_states
-        )
-        self._applied_trace_style_states = copy.deepcopy(
             self._opening_trace_style_states
         )
 
@@ -874,26 +862,6 @@ class FigureEditSession:
         return (
             self._current_state != self._opening_state
             or self._current_trace_style_states != self._opening_trace_style_states
-        )
-
-    def matches_live_state(self):
-        if self._current_figure_ir is None:
-            return (
-                self._current_state == self._applied_state
-                and self._current_trace_style_states
-                == self._applied_trace_style_states
-            )
-        live_state = self._current_figure_ir()
-        if live_state is None:
-            return False
-        validated_live_state = FigureIRCodec.validate_state(live_state)
-        live_trace_style_states = self._initial_trace_style_states(validated_live_state)
-        return self._dispatch_state(
-            validated_live_state,
-            live_trace_style_states,
-        ) == self._dispatch_state(
-            self._current_state,
-            self._current_trace_style_states,
         )
 
     def preview_source(self):
@@ -1080,22 +1048,6 @@ class FigureEditSession:
         )
         return updated_state
 
-    def refresh_trace(self, trace_id, *, subplot_id=None):
-        if self._dispatch_action is None:
-            return False
-        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
-        trace = self._trace(trace_id, subplot_id=resolved_subplot_id)
-        return bool(
-            self._dispatch_action(
-                {
-                    "type": "set_trace",
-                    "subplot_id": resolved_subplot_id,
-                    "trace_id": str(trace_id),
-                    "trace": copy.deepcopy(trace),
-                }
-            )
-        )
-
     def attribute_path_trace(
         self,
         component,
@@ -1150,10 +1102,6 @@ class FigureEditSession:
                     )
                 continue
             desired_trace_id = f"{normalized_display_name}{component_spec['id_suffix']}"
-            self._capture_live_collision_revert_trace(
-                desired_trace_id,
-                subplot_id=resolved_subplot_id,
-            )
             if (
                 current_entry is not None
                 and current_entry["trace_id"] != desired_trace_id
@@ -1177,111 +1125,9 @@ class FigureEditSession:
             )
         return copy.deepcopy(self._current_state)
 
-    def apply_live(self):
-        if (
-            self._current_state == self._applied_state
-            and self._current_trace_style_states == self._applied_trace_style_states
-        ):
-            return True
-        self._refresh_applied_state_from_live()
-        actions = figure_edit_actions_between(
-            self._dispatch_state(self._applied_state, self._applied_trace_style_states),
-            self._dispatch_state(self._current_state, self._current_trace_style_states),
-        )
-        return self._dispatch_actions(
-            actions,
-            target_state=self._current_state,
-            target_trace_style_states=self._current_trace_style_states,
-        )
-
-    def commit(self):
-        if not self.apply_live():
-            return False
-        self._opening_state = copy.deepcopy(self._current_state)
-        self._revert_state = copy.deepcopy(self._current_state)
-        self._applied_state = copy.deepcopy(self._current_state)
-        self._opening_trace_style_states = copy.deepcopy(
-            self._current_trace_style_states
-        )
-        self._revert_trace_style_states = copy.deepcopy(
-            self._current_trace_style_states
-        )
-        self._applied_trace_style_states = copy.deepcopy(
-            self._current_trace_style_states
-        )
-        return True
-
-    def revert(self):
-        if (
-            self._current_state == self._revert_state
-            and self._current_trace_style_states == self._revert_trace_style_states
-        ):
-            return True
-        if (
-            self._applied_state != self._revert_state
-            or self._applied_trace_style_states != self._revert_trace_style_states
-        ):
-            self._refresh_applied_state_from_live()
-            actions = figure_edit_actions_between(
-                self._dispatch_state(
-                    self._applied_state,
-                    self._applied_trace_style_states,
-                ),
-                self._dispatch_state(
-                    self._revert_state,
-                    self._revert_trace_style_states,
-                ),
-            )
-            if not self._dispatch_actions(
-                actions,
-                target_state=self._revert_state,
-                target_trace_style_states=self._revert_trace_style_states,
-            ):
-                return False
-        self._current_state = copy.deepcopy(self._revert_state)
-        self._current_trace_style_states = copy.deepcopy(
-            self._revert_trace_style_states
-        )
-        return True
-
     def _update_current_state(self, action):
         self._current_state = FigureIRCodec.update_state(self._current_state, action)
         return copy.deepcopy(self._current_state)
-
-    def _refresh_applied_state_from_live(self):
-        if self._current_figure_ir is None:
-            return False
-        live_state = self._current_figure_ir()
-        if live_state is None:
-            return False
-        self._applied_state = FigureIRCodec.validate_state(live_state)
-        self._applied_trace_style_states = self._initial_trace_style_states(
-            self._applied_state
-        )
-        return True
-
-    def _dispatch_actions(self, actions, *, target_state, target_trace_style_states):
-        if self._dispatch_action is None:
-            return False
-        applied_dispatch_state = self._dispatch_state(
-            self._applied_state,
-            self._applied_trace_style_states,
-        )
-        live_dispatch_state = copy.deepcopy(applied_dispatch_state)
-        for action in actions:
-            if not self._dispatch_action(copy.deepcopy(action)):
-                rollback_actions = figure_edit_actions_between(
-                    live_dispatch_state,
-                    applied_dispatch_state,
-                )
-                for rollback_action in rollback_actions:
-                    if not self._dispatch_action(copy.deepcopy(rollback_action)):
-                        return False
-                return False
-            live_dispatch_state = FigureIRCodec.update_state(live_dispatch_state, action)
-        self._applied_state = copy.deepcopy(target_state)
-        self._applied_trace_style_states = copy.deepcopy(target_trace_style_states)
-        return True
 
     def _dispatch_state(self, state, trace_style_states):
         dispatch_state = copy.deepcopy(state)
@@ -1297,51 +1143,6 @@ class FigureEditSession:
                 },
             )
         return dispatch_state
-
-    def _capture_live_collision_revert_trace(self, trace_id, *, subplot_id=None):
-        live_trace = self._live_trace(trace_id, subplot_id=subplot_id)
-        if live_trace is None:
-            return
-        current_trace = self._trace_from_state(
-            self._current_state,
-            trace_id,
-            subplot_id=subplot_id,
-        )
-        if current_trace == live_trace:
-            return
-        if self._same_attribute_path_trace_identity(current_trace, live_trace):
-            return
-        revert_trace = self._trace_from_state(
-            self._revert_state,
-            trace_id,
-            subplot_id=subplot_id,
-        )
-        if revert_trace == live_trace:
-            return
-        self._revert_state = FigureIRCodec.update_state(
-            self._revert_state,
-            {
-                "type": "set_trace",
-                "subplot_id": self._resolve_subplot_id(subplot_id),
-                "trace_id": str(trace_id),
-                "trace": copy.deepcopy(live_trace),
-            },
-        )
-
-    def _same_attribute_path_trace_identity(self, current_trace, live_trace):
-        if not isinstance(current_trace, dict) or not isinstance(live_trace, dict):
-            return False
-        current_y_source = dict(current_trace.get("y_source") or {})
-        live_y_source = dict(live_trace.get("y_source") or {})
-        if current_y_source.get("kind") != "attribute_path":
-            return False
-        if live_y_source.get("kind") != "attribute_path":
-            return False
-        return (
-            str(current_trace.get("id")) == str(live_trace.get("id"))
-            and tuple(current_y_source.get("path") or ())
-            == tuple(live_y_source.get("path") or ())
-        )
 
     def _subplot(self, subplot_id=None):
         resolved_id = self._resolve_subplot_id(subplot_id)
@@ -1475,19 +1276,6 @@ class FigureEditSession:
             if matched is not None:
                 return matched
         return None
-
-    def _live_trace(self, trace_id, *, subplot_id=None):
-        if self._current_figure_ir is None:
-            return None
-        live_state = self._current_figure_ir()
-        if live_state is None:
-            return None
-        validated_state = FigureIRCodec.validate_state(live_state)
-        return self._trace_from_state(
-            validated_state,
-            trace_id,
-            subplot_id=subplot_id,
-        )
 
     def _normalized_attribute_path_components(self, components):
         normalized = []
@@ -1642,150 +1430,6 @@ class FigureEditSession:
                 return copy.deepcopy(default)
             current = current[key]
         return current
-
-
-def figure_edit_actions_between(source_state, target_state):
-    source = FigureIRCodec.validate_state(source_state)
-    target = FigureIRCodec.validate_state(target_state)
-    actions = []
-    source_subplots = {
-        subplot["id"]: subplot for subplot in source["layout"]["subplots"]
-    }
-
-    for target_subplot in target["layout"]["subplots"]:
-        subplot_id = target_subplot["id"]
-        source_subplot = source_subplots.get(subplot_id)
-        if source_subplot is None:
-            raise ValueError(f"Unknown figure subplot id: {subplot_id!r}.")
-
-        figure_title_changed = source["settings"]["title"] != target["settings"]["title"]
-        if figure_title_changed:
-            actions.append(
-                {
-                    "type": "set_figure_title",
-                    "subplot_id": subplot_id,
-                    "title": target["settings"]["title"],
-                }
-            )
-        if not figure_title_changed and source_subplot["title"] != target_subplot["title"]:
-            actions.append(
-                {
-                    "type": "set_subplot_title",
-                    "subplot_id": subplot_id,
-                    "title": target_subplot["title"],
-                }
-            )
-        if source_subplot["legend"] != target_subplot["legend"]:
-            actions.append(
-                {
-                    "type": "set_legend_visible",
-                    "subplot_id": subplot_id,
-                    "visible": target_subplot["legend"],
-                }
-            )
-        if source_subplot["margins"] != target_subplot["margins"]:
-            actions.append(
-                {
-                    "type": "set_subplot_margins",
-                    "subplot_id": subplot_id,
-                    "state": copy.deepcopy(target_subplot["margins"]),
-                    "replace": True,
-                }
-            )
-        for axis_name in ("x", "y"):
-            if source_subplot["axes"][axis_name] != target_subplot["axes"][axis_name]:
-                actions.append(
-                    {
-                        "type": "set_axis_state",
-                        "subplot_id": subplot_id,
-                        "axis": axis_name,
-                        "state": copy.deepcopy(target_subplot["axes"][axis_name]),
-                        "replace": True,
-                    }
-                )
-        for side in ("bottom", "top", "left", "right"):
-            if (
-                source_subplot["axis_sides"][side]
-                != target_subplot["axis_sides"][side]
-            ):
-                actions.append(
-                    {
-                        "type": "set_axis_side_state",
-                        "subplot_id": subplot_id,
-                        "side": side,
-                        "state": copy.deepcopy(target_subplot["axis_sides"][side]),
-                        "replace": True,
-                    }
-                )
-
-        source_traces = {
-            trace["id"]: trace for trace in source_subplot.get("traces", [])
-        }
-        target_traces = {
-            trace["id"]: trace for trace in target_subplot.get("traces", [])
-        }
-        for trace in source_subplot.get("traces", []):
-            trace_id = trace["id"]
-            if trace_id not in target_traces:
-                actions.append(
-                    {
-                        "type": "set_trace",
-                        "subplot_id": subplot_id,
-                        "trace_id": trace_id,
-                        "trace": None,
-                    }
-                )
-        for trace in target_subplot.get("traces", []):
-            trace_id = trace["id"]
-            source_trace = source_traces.get(trace_id)
-            if source_trace == trace:
-                continue
-            if can_dispatch_trace_style_edit(source_trace, trace):
-                actions.append(
-                    {
-                        "type": "set_trace_style",
-                        "subplot_id": subplot_id,
-                        "trace_id": trace_id,
-                        "style": {
-                            key: copy.deepcopy(value)
-                            for key, value in trace.get("kwargs", {}).items()
-                            if key in TRACE_STYLE_ACTION_KEYS
-                        },
-                        "replace": True,
-                    }
-                )
-                continue
-            actions.append(
-                {
-                    "type": "set_trace",
-                    "subplot_id": subplot_id,
-                    "trace_id": trace_id,
-                    "trace": copy.deepcopy(trace),
-                }
-            )
-
-    return actions
-
-
-def can_dispatch_trace_style_edit(source_trace, target_trace):
-    if not isinstance(source_trace, dict) or not isinstance(target_trace, dict):
-        return False
-    source_copy = copy.deepcopy(source_trace)
-    target_copy = copy.deepcopy(target_trace)
-    source_kwargs = dict(source_copy.pop("kwargs", {}) or {})
-    target_kwargs = dict(target_copy.pop("kwargs", {}) or {})
-    if source_copy != target_copy:
-        return False
-    changed_keys = {
-        key
-        for key in set(source_kwargs) | set(target_kwargs)
-        if source_kwargs.get(key) != target_kwargs.get(key)
-    }
-    if not changed_keys:
-        return False
-    if "label" in changed_keys and "label" not in target_kwargs:
-        return False
-    return changed_keys <= set(TRACE_STYLE_ACTION_KEYS)
 
 
 class FigureControlDraftTracker:

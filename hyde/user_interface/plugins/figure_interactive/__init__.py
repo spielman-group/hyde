@@ -228,6 +228,15 @@ class Plugin(HydePlugin):
                 blocks.append(source.strip())
         return "\n\n".join(blocks) + ("\n" if blocks else "")
 
+    def get_session_restore_warnings(self):
+        warnings = []
+        for figure_number in sorted(self.workspace.figures):
+            figure = self.workspace.figures[figure_number]
+            warning = figure.session_restore_warning()
+            if warning:
+                warnings.append(str(warning))
+        return warnings
+
     def on_enter_no_project_state(self, data):
         del data
         self._clear_pending_figure_payloads()

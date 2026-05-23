@@ -283,6 +283,44 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertIn("def Figure0(delay, fit_delay):", session_source)
             self.assertIn("Figure0(delay, fit_delay)", session_source)
 
+    def test_write_session_returns_session_restore_warnings_without_dropping_source(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "session_warnings.hy")
+            os.makedirs(project_dir)
+
+            main_window = QtWidgets.QMainWindow()
+
+            class SavingPlugin:
+                def get_session_toml_data(self):
+                    return {}
+
+                def get_session_restore_source(self):
+                    return (
+                        "@hyde.figure(window_pos=(5, 42), register=False)\n"
+                        "def Figure7(delay, fit_delay):\n"
+                        "    fig = plt.figure('Figure7')\n"
+                        "    ax = fig.add_subplot(111)\n"
+                        "    ax.plot(delay, fit_delay)\n\n"
+                        "Figure7(delay, fit_delay)\n"
+                    )
+
+                def get_session_restore_warnings(self):
+                    return ["Figure7: Unsupported Feature: unsupported trace source"]
+
+            source_app = type("SourceApp", (), {})()
+            source_app.ui = main_window
+            source_app.plugin_manager = PluginManagerStub({"session": SavingPlugin()})
+
+            warnings = write_session(source_app, project_dir)
+            session_source = (Path(project_dir) / "session.py").read_text()
+
+            self.assertEqual(
+                warnings,
+                ["Figure7: Unsupported Feature: unsupported trace source"],
+            )
+            self.assertIn("@hyde.figure(window_pos=(5, 42), register=False)", session_source)
+            self.assertIn("Figure7(delay, fit_delay)", session_source)
+
     def test_restore_project_session_runs_session_python_after_project_loaded(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir) / "session_restore.hy"
@@ -354,6 +392,39 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertIn("Figure0(delay)", events[1][1])
             self.assertIn('hyde.task_complete("session_restore", True)', events[1][1])
             self.assertTrue(events[1][2])
+
+    def test_on_project_state_result_surfaces_session_restore_warnings_after_save(self):
+        app = type("SaveApp", (), {})()
+        app.ui = QtWidgets.QMainWindow()
+        app.end_project_operation = lambda: None
+        app.restore_project_session = lambda: None
+
+        with patch("hyde.user_interface.main.write_session") as write_session, patch(
+            "hyde.user_interface.main.write_history"
+        ) as write_history, patch(
+            "qtutils.qt.QtWidgets.QMessageBox.warning"
+        ) as warning_box:
+            write_session.return_value = [
+                "Figure7: Unsupported Feature: unsupported trace source"
+            ]
+            write_history.return_value = None
+
+            HydeApp.on_project_state_result(
+                app,
+                {
+                    "operation": "save",
+                    "mode": "save",
+                    "success": True,
+                    "path": "/tmp/example.hy",
+                    "errors": [],
+                },
+            )
+
+        warning_box.assert_called_once()
+        self.assertIn(
+            "Figure7: Unsupported Feature: unsupported trace source",
+            warning_box.call_args.args[2],
+        )
 
     def test_restore_project_session_finalizes_staged_order_and_states_after_success(self):
         with tempfile.TemporaryDirectory() as tmpdir:

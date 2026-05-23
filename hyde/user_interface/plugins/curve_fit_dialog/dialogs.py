@@ -1,3 +1,5 @@
+import copy
+
 from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.lmfit_features import (
@@ -5,8 +7,9 @@ from hyde.features.lmfit_features import (
     LmfitCodec,
     attached_display_label,
 )
+from hyde.features.matplotlib_features import figure_patch_source
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
-from hyde.user_interface.shared.core import HydeGuiState
+from hyde.user_interface.shared.core import HydeGuiState, log_hyde_state_debug
 
 from .fit_function_scaffolding import CurveFitCatalogError
 
@@ -71,6 +74,8 @@ class CurveFitDialog(HydeDialogWidget):
         self._live_missing_sentinel_name = f"_hyde_lmfit_missing_{id(self)}"
         self._preview_target_name = f"_hyde_lmfit_preview_{id(self)}"
         self._figure_session = None
+        self._opening_effective_state = None
+        self._applied_effective_state = None
         self.setModal(True)
         self.setWindowTitle("Curve Fit")
         self.resize(720, 520)
@@ -124,6 +129,8 @@ class CurveFitDialog(HydeDialogWidget):
             self.show_residuals_checkbox.setEnabled(False)
         else:
             self._figure_session = self.figure_context.open_session()
+            self._opening_effective_state = self._figure_session.opening_effective_state()
+            self._applied_effective_state = self._figure_session.opening_effective_state()
             self._loading_controls = True
             try:
                 self._seed_attached_display_controls()
@@ -150,38 +157,28 @@ class CurveFitDialog(HydeDialogWidget):
         model = self._current_model or {}
         if str(model.get("preview_mode") or "Commands") == "Equation":
             return str(model.get("equation_preview") or "")
-        return str(model.get("commands_preview") or "")
+        return self._do_it_command_source()
 
     def can_do_it(self):
         model = self._current_model or {}
         return bool(model.get("valid")) and not bool(self._live_error_message)
 
+    def can_send_to_cmd_line(self):
+        model = self._current_model or {}
+        if str(model.get("preview_mode") or "Commands") != "Commands":
+            return False
+        return self.service("visible_terminal_service") is not None
+
     def handle_do_it(self):
         if self._current_model is None or not self._current_model.get("valid"):
             return
-        if self.execution_mode() == "suppressed":
-            commit_command = self.state.codec.state_to_commit_python(
-                self.state._state,
-                context=self._context(),
-            )
-            success, message = self._run_commit_path(
-                commit_command,
-                success_target_name=self._current_model.get("fit_result_name"),
-                display_root_name=self._current_model.get("fit_result_name"),
-            )
-            if not success:
-                self._update_status_label(message)
-                return
-        else:
-            success, message = self._run_commit_path(
-                success_target_name=self._current_model.get("fit_result_name"),
-                display_root_name=self._current_model.get("fit_result_name"),
-            )
-            if not success:
-                self._update_status_label(message)
-                return
-        if self._figure_session is not None:
-            self._figure_session.commit()
+        success, message = self._run_commit_path(
+            success_target_name=self._current_model.get("fit_result_name"),
+            display_root_name=self._current_model.get("fit_result_name"),
+        )
+        if not success:
+            self._update_status_label(message)
+            return
         self.accept()
 
     def _namespace_view(self):
@@ -412,44 +409,54 @@ class CurveFitDialog(HydeDialogWidget):
         finally:
             self._loading_controls = False
 
-    def _attached_display_figure_state(self):
-        if self._figure_session is None:
+    def _attached_display_state_from_effective(self, effective_state):
+        if effective_state is None:
             return None
-        subplot_ids = self._figure_session.subplot_ids()
-        if not subplot_ids:
+        layout = dict(effective_state.get("layout", {}) or {})
+        subplots = list(layout.get("subplots", []) or [])
+        if not subplots:
             return None
-        subplot_id = str(subplot_ids[0])
-        fit_trace = self._figure_session.attribute_path_trace(
-            "best_fit",
-            subplot_id=subplot_id,
-        )
-        residual_trace = self._figure_session.attribute_path_trace(
-            "residual",
-            subplot_id=subplot_id,
-            id_suffix="_residuals",
-        )
+        subplot = dict(subplots[0] or {})
+        subplot_id = str(subplot.get("id") or "subplot0")
+        fit_trace = None
+        residual_trace = None
+        fit_root_name = None
+        residual_root_name = None
         fit_result_name = None
-        if fit_trace is not None:
-            fit_result_name = fit_trace["display_name"]
-        elif residual_trace is not None:
-            fit_result_name = residual_trace["display_name"]
+        for trace in list(subplot.get("traces", []) or []):
+            y_source = dict(trace.get("y_source") or {})
+            if y_source.get("kind") != "attribute_path":
+                continue
+            root = dict(y_source.get("root") or {})
+            path = tuple(y_source.get("path") or ())
+            if path == ("best_fit",):
+                fit_trace = dict(trace)
+                fit_root_name = root.get("value")
+                fit_result_name = str(trace.get("kwargs", {}).get("label") or "").strip() or fit_result_name
+            elif path == ("residual",):
+                residual_trace = dict(trace)
+                residual_root_name = root.get("value")
+                fit_result_name = (
+                    fit_result_name
+                    or str(trace.get("kwargs", {}).get("label") or "").replace("_residuals", "").strip()
+                )
         return {
             "subplot_id": subplot_id,
             "show_fit": fit_trace is not None,
             "show_residuals": residual_trace is not None,
-            "fit_trace_id": None if fit_trace is None else fit_trace["trace_id"],
-            "fit_trace": None if fit_trace is None else fit_trace["trace"],
-            "residual_trace_id": (
-                None if residual_trace is None else residual_trace["trace_id"]
-            ),
-            "residual_trace": (
-                None if residual_trace is None else residual_trace["trace"]
-            ),
+            "fit_trace_id": None if fit_trace is None else fit_trace.get("id"),
+            "fit_trace": fit_trace,
+            "fit_root_name": fit_root_name,
+            "residual_trace_id": None if residual_trace is None else residual_trace.get("id"),
+            "residual_trace": residual_trace,
+            "residual_root_name": residual_root_name,
             "fit_result_name": fit_result_name,
         }
 
     def _seed_attached_display_controls(self):
-        display_state = self._attached_display_figure_state()
+        display_state = self._attached_display_state_from_effective(
+            self._opening_effective_state
+        )
         if display_state is None:
             return
         default_show_fit = (
@@ -464,7 +471,9 @@ class CurveFitDialog(HydeDialogWidget):
         )
 
     def _current_attached_display_state(self):
-        display_state = self._attached_display_figure_state()
+        display_state = self._attached_display_state_from_effective(
+            self._applied_effective_state
+        )
         if display_state is None:
             return None
         show_fit = bool(self.show_fit_checkbox.isChecked())
@@ -497,132 +506,29 @@ class CurveFitDialog(HydeDialogWidget):
     def _attached_display_failure_message(self):
         return "Curve Fit attached display update failed."
 
-    def _run_commit_path(
-        self,
-        command=None,
-        *,
-        success_target_name=None,
-        display_root_name=None,
-    ):
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False, "Curve Fit requires python_execution_service."
-        executes_command = bool(str(command or "").strip())
-        needs_rollback_snapshot = (
-            executes_command
-            and self.figure_context is not None
-            and success_target_name is not None
-            and display_root_name is not None
-        )
-        if needs_rollback_snapshot:
-            snapshot_command = self.state.codec.state_to_store_target_python(
-                success_target_name,
-                restore_store_name=self._live_restore_store_name,
-                missing_sentinel_name=self._live_missing_sentinel_name,
-            )
-            if snapshot_command and not python_execution_service.execute_hidden(
-                snapshot_command
-            ):
-                return False, self._execution_failure_message(python_execution_service)
-        if executes_command and not python_execution_service.execute_hidden(command):
-            return False, self._execution_failure_message(python_execution_service)
-        if (
-            display_root_name is not None
-            and not self._sync_attached_display(force=True, root_name=display_root_name)
-        ):
-            rollback_command = self.state.codec.state_to_restore_target_python(
-                success_target_name,
-                restore_store_name=self._live_restore_store_name,
-                missing_sentinel_name=self._live_missing_sentinel_name,
-            )
-            if needs_rollback_snapshot and rollback_command:
-                python_execution_service.execute_hidden(rollback_command)
-            if self._figure_session is not None:
-                self._figure_session.revert()
-            return False, self._attached_display_failure_message()
-        if success_target_name is not None:
-            self._live_result_target_name = success_target_name
-        return True, ""
-
-    def _run_preview_path(self, *, force=False):
-        if self.figure_context is None or self._current_model is None:
-            return True
-        wants_display = bool(
-            self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()
-        )
-        if wants_display:
-            if not self._current_model.get("valid"):
-                return True
-            if not self._sync_preview_object():
-                return False
-        return self._sync_attached_display(
-            force=force,
-            root_name=self._preview_target_name,
-        )
-
-    def _has_active_attached_preview(self):
+    def _sync_attached_display_draft(self, *, root_name):
         if self._figure_session is None:
-            return False
-        display_state = self._attached_display_figure_state() or {}
-        return bool(display_state.get("fit_trace_id") or display_state.get("residual_trace_id"))
-
-    def _sync_preview_object(self):
-        if self._figure_session is None or self._current_model is None:
-            return True
-        if not (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()):
-            return True
-        preview_command = self.state.codec.state_to_preview_python(
-            self.state._state,
-            context=self._context(),
-            preview_target_name=self._preview_target_name,
-        )
-        if not preview_command:
-            return False
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False
-        return bool(python_execution_service.execute_hidden(preview_command))
-
-    def _sync_attached_display(self, *, force=False, root_name=None):
-        if self._figure_session is None:
-            return True
-        current_state = self._attached_display_figure_state()
+            return self._applied_effective_state
         desired_state = self._current_attached_display_state()
-        if current_state is None or desired_state is None:
-            return True
-        if (
-            not force
-            and current_state["show_fit"] == desired_state["show_fit"]
-            and current_state["show_residuals"] == desired_state["show_residuals"]
-            and current_state.get("fit_result_name") == desired_state.get("fit_result_name")
-        ):
-            return True
+        if desired_state is None:
+            return self._applied_effective_state
         has_plot = bool(desired_state["show_fit"] or desired_state["show_residuals"])
-        if force and not has_plot and not (
-            current_state["show_fit"] or current_state["show_residuals"]
-        ):
-            return True
-        if has_plot:
-            if self._current_model is None or not self._current_model.get("valid"):
-                return False
-            fit_result_name = str(desired_state.get("fit_result_name") or "").strip()
-            if not fit_result_name:
-                return False
-            resolved_root_name = (
-                str(root_name).strip() if root_name is not None else self._preview_target_name
-            )
-            owner_root_names = (
-                self._preview_target_name,
-                current_state.get("fit_result_name"),
-                resolved_root_name,
-            )
-        else:
-            fit_result_name = None
-            resolved_root_name = None
-            owner_root_names = (
-                self._preview_target_name,
-                current_state.get("fit_result_name"),
-            )
+        fit_result_name = (
+            str(desired_state.get("fit_result_name") or "").strip() if has_plot else None
+        )
+        resolved_root_name = (
+            str(root_name).strip() if root_name is not None else fit_result_name
+        )
+        current_display = self._attached_display_state_from_effective(
+            self._applied_effective_state
+        ) or {}
+        owner_root_names = (
+            self._preview_target_name,
+            current_display.get("fit_result_name"),
+            current_display.get("fit_root_name"),
+            current_display.get("residual_root_name"),
+            resolved_root_name,
+        )
         self._figure_session.set_attribute_path_lines(
             fit_result_name,
             subplot_id=desired_state["subplot_id"],
@@ -653,25 +559,234 @@ class CurveFitDialog(HydeDialogWidget):
                 },
             ),
         )
-        should_refresh_visible_traces = force and has_plot and self._figure_session.matches_live_state()
-        if self._figure_session.is_dirty() and not should_refresh_visible_traces:
-            return self._figure_session.apply_live()
-        if not should_refresh_visible_traces:
+        return self._figure_session.current_effective_state()
+
+    def _attached_display_patch_source(self, *, root_name):
+        target_state = self._sync_attached_display_draft(root_name=root_name)
+        refresh_trace_ids = ()
+        resolved_root_name = (
+            str(root_name).strip() if root_name is not None else None
+        )
+        target_display = self._attached_display_state_from_effective(target_state) or {}
+        if resolved_root_name == self._preview_target_name:
+            refresh_ids = []
+            if target_display.get("show_fit") and target_display.get("fit_trace_id"):
+                refresh_ids.append(target_display["fit_trace_id"])
+            if (
+                target_display.get("show_residuals")
+                and target_display.get("residual_trace_id")
+            ):
+                refresh_ids.append(target_display["residual_trace_id"])
+            refresh_trace_ids = tuple(refresh_ids)
+        return (
+            figure_patch_source(
+                self._applied_effective_state,
+                target_state,
+                figure_name=self.figure_context.figure_name(),
+                refresh_trace_ids=refresh_trace_ids,
+            ),
+            target_state,
+        )
+
+    def _execute_attached_display_patch(self, code, *, mode, target_state):
+        if not str(code or "").strip():
             return True
-        refreshed_state = self._attached_display_figure_state() or {}
-        if desired_state["show_fit"] and refreshed_state.get("fit_trace_id"):
-            if not self._figure_session.refresh_trace(
-                refreshed_state["fit_trace_id"],
-                subplot_id=desired_state["subplot_id"],
-            ):
-                return False
-        if desired_state["show_residuals"] and refreshed_state.get("residual_trace_id"):
-            if not self._figure_session.refresh_trace(
-                refreshed_state["residual_trace_id"],
-                subplot_id=desired_state["subplot_id"],
-            ):
-                return False
+        log_hyde_state_debug(
+            "FigurePatchState",
+            {
+                "feature": "figure_patch",
+                "command": "curve_fit_attached_display",
+                "mode": str(mode),
+                "figure_number": int(self.figure_context.figure_number),
+                "figure_name": self.figure_context.figure_name(),
+            },
+            code,
+        )
+        if not self.execute_hidden_command(code):
+            return False
+        self._applied_effective_state = copy.deepcopy(target_state)
         return True
+
+    def _do_it_command_source(self):
+        model = self._current_model or {}
+        if str(model.get("preview_mode") or "Commands") != "Commands":
+            return str(model.get("equation_preview") or "")
+        if not model.get("valid"):
+            return str(model.get("commands_preview") or "")
+        command_lines = []
+        if self.execution_mode() == "suppressed":
+            commit_command = self.state.codec.state_to_commit_python(
+                self.state._state,
+                context=self._context(),
+            )
+            if str(commit_command or "").strip():
+                command_lines.append(str(commit_command))
+        if self.figure_context is not None:
+            patch_code, _ = self._attached_display_patch_source(
+                root_name=model.get("fit_result_name"),
+            )
+            if str(patch_code or "").strip():
+                command_lines.append(str(patch_code))
+        if command_lines:
+            return "\n".join(command_lines)
+        return str(model.get("commands_preview") or "")
+
+    def _run_commit_path(
+        self,
+        command=None,
+        *,
+        success_target_name=None,
+        display_root_name=None,
+    ):
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return False, "Curve Fit requires python_execution_service."
+        target_effective_state = self._applied_effective_state
+        if command is None and self.execution_mode() == "suppressed":
+            command = self.state.codec.state_to_commit_python(
+                self.state._state,
+                context=self._context(),
+            )
+        needs_rollback_snapshot = (
+            bool(str(command or "").strip())
+            and self.figure_context is not None
+            and success_target_name is not None
+            and display_root_name is not None
+        )
+        if needs_rollback_snapshot:
+            snapshot_command = self.state.codec.state_to_store_target_python(
+                success_target_name,
+                restore_store_name=self._live_restore_store_name,
+                missing_sentinel_name=self._live_missing_sentinel_name,
+            )
+            if snapshot_command and not python_execution_service.execute_hidden(
+                snapshot_command
+            ):
+                return False, self._execution_failure_message(python_execution_service)
+        patch_code = ""
+        if display_root_name is not None and self.figure_context is not None:
+            patch_code, target_effective_state = self._attached_display_patch_source(
+                root_name=display_root_name
+            )
+        combined_command = "\n".join(
+            part
+            for part in (str(command or "").strip(), str(patch_code or "").strip())
+            if part
+        )
+        if patch_code:
+            if not self._execute_attached_display_patch(
+                combined_command,
+                mode="do_it",
+                target_state=target_effective_state,
+            ):
+                if needs_rollback_snapshot:
+                    rollback_command = self.state.codec.state_to_restore_target_python(
+                        success_target_name,
+                        restore_store_name=self._live_restore_store_name,
+                        missing_sentinel_name=self._live_missing_sentinel_name,
+                    )
+                    if rollback_command:
+                        python_execution_service.execute_hidden(rollback_command)
+                return False, self._execution_failure_message(python_execution_service)
+        elif str(command or "").strip() and not python_execution_service.execute_hidden(command):
+            return False, self._execution_failure_message(python_execution_service)
+        if success_target_name is not None:
+            self._live_result_target_name = success_target_name
+        return True, ""
+
+    def _run_preview_path(self, *, force=False):
+        if self.figure_context is None or self._current_model is None:
+            return True
+        wants_display = bool(
+            self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()
+        )
+        if wants_display:
+            if not self._current_model.get("valid"):
+                return True
+            if not self._sync_preview_object():
+                return False
+        return self._sync_attached_display(
+            force=force,
+            root_name=self._preview_target_name,
+        )
+
+    def _has_active_attached_preview(self):
+        display_state = self._attached_display_state_from_effective(
+            self._applied_effective_state
+        ) or {}
+        return bool(
+            display_state.get("fit_trace_id") or display_state.get("residual_trace_id")
+        )
+
+    def _sync_preview_object(self):
+        if self._figure_session is None or self._current_model is None:
+            return True
+        if not (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()):
+            return True
+        preview_command = self.state.codec.state_to_preview_python(
+            self.state._state,
+            context=self._context(),
+            preview_target_name=self._preview_target_name,
+        )
+        if not preview_command:
+            return False
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return False
+        return bool(python_execution_service.execute_hidden(preview_command))
+
+    def _sync_attached_display(self, *, force=False, root_name=None):
+        if self._figure_session is None:
+            return True
+        current_state = self._attached_display_state_from_effective(
+            self._applied_effective_state
+        )
+        desired_state = self._current_attached_display_state()
+        if current_state is None or desired_state is None:
+            return True
+        resolved_root_name = (
+            str(root_name).strip()
+            if root_name is not None
+            else str(desired_state.get("fit_result_name") or "").strip() or None
+        )
+        if (
+            not force
+            and current_state["show_fit"] == desired_state["show_fit"]
+            and current_state["show_residuals"] == desired_state["show_residuals"]
+            and current_state.get("fit_result_name") == desired_state.get("fit_result_name")
+            and (
+                not desired_state["show_fit"]
+                or current_state.get("fit_root_name") == resolved_root_name
+            )
+            and (
+                not desired_state["show_residuals"]
+                or current_state.get("residual_root_name") == resolved_root_name
+            )
+        ):
+            return True
+        has_plot = bool(desired_state["show_fit"] or desired_state["show_residuals"])
+        if force and not has_plot and not (
+            current_state["show_fit"] or current_state["show_residuals"]
+        ):
+            return True
+        if has_plot:
+            if self._current_model is None or not self._current_model.get("valid"):
+                return False
+            fit_result_name = str(desired_state.get("fit_result_name") or "").strip()
+            if not fit_result_name:
+                return False
+        else:
+            resolved_root_name = None
+        patch_code, target_effective_state = self._attached_display_patch_source(
+            root_name=resolved_root_name
+        )
+        if not str(patch_code or "").strip():
+            return True
+        return self._execute_attached_display_patch(
+            patch_code,
+            mode="live_update" if self.execution_mode() == "live" else "preview",
+            target_state=target_effective_state,
+        )
 
     def _after_relevant_state_change(self):
         self._refresh_from_state()
@@ -806,12 +921,14 @@ class CurveFitDialog(HydeDialogWidget):
         if self._loading_controls:
             return
         self._run_preview_path(force=True)
+        self.refresh_shell()
 
     def _on_show_residuals_toggled(self, checked):
         del checked
         if self._loading_controls:
             return
         self._run_preview_path(force=True)
+        self.refresh_shell()
 
     def _on_fit_result_target_changed(self, fit_result_name):
         if self._loading_controls:
@@ -862,6 +979,16 @@ class CurveFitDialog(HydeDialogWidget):
             if rollback_command:
                 python_execution_service.execute_hidden(rollback_command)
         self._live_result_target_name = None
-        if self._figure_session is not None:
-            self._figure_session.revert()
+        if self._figure_session is not None and self._opening_effective_state is not None:
+            rollback_code = figure_patch_source(
+                self._applied_effective_state,
+                self._opening_effective_state,
+                figure_name=self.figure_context.figure_name(),
+            )
+            if str(rollback_code or "").strip():
+                self._execute_attached_display_patch(
+                    rollback_code,
+                    mode="cancel",
+                    target_state=self._opening_effective_state,
+                )
         super().reject()

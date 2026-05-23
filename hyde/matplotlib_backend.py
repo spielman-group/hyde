@@ -24,7 +24,6 @@ from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 
 from hyde.features.matplotlib_features import (
-    FigureCodec,
     FigureIRCodec,
     apply_figure_state,
     figure_ir_append_trace,
@@ -664,7 +663,6 @@ def figure_call_source(figure, number):
 
 def figure_snapshot_payload(figure, number):
     figure_ir = getattr(figure, "_hyde_ir", None)
-    live_state = getattr(figure, "_hyde_live_state", None)
     hyde_metadata = dict(getattr(figure, "_hyde_metadata", {}) or {})
     if _is_windowed_figure(figure) and figure_ir is not None:
         normalized_figure_ir = FigureIRCodec.validate_state(figure_ir)
@@ -704,10 +702,6 @@ def figure_snapshot_payload(figure, number):
             "is_first_class": True,
         }
         return payload
-    if live_state is None:
-        live_state = _infer_live_state(figure, sys.modules["__main__"].__dict__)
-        if live_state is not None:
-            figure._hyde_live_state = live_state
     payload = {
         "default_macro_name": _default_figure_title(figure, number),
         "call_source": None,
@@ -720,11 +714,6 @@ def figure_snapshot_payload(figure, number):
         "hyde_metadata": hyde_metadata,
         "is_first_class": False,
     }
-    if live_state is not None:
-        payload["call_source"] = FigureCodec.state_to_python(live_state)
-        payload["tracked_names"] = list(FigureCodec.tracked_names(live_state))
-        payload["live_state"] = live_state
-        return payload
     try:
         payload["call_source"] = figure_call_source(figure, number)
     except Exception as exc:
@@ -734,6 +723,35 @@ def figure_snapshot_payload(figure, number):
 
 def _main_namespace():
     return sys.modules["__main__"].__dict__
+
+
+def _candidate_series_names(namespace):
+    candidates = []
+    for name, value in sorted((namespace or {}).items()):
+        if not name or name.startswith("_"):
+            continue
+        try:
+            array = np.asarray(value)
+        except Exception:
+            continue
+        if array.ndim != 1 or array.dtype.kind not in "biuf":
+            continue
+        candidates.append((name, array))
+    return candidates
+
+
+def _resolve_series_name(values, candidates):
+    array = np.asarray(values)
+    if array.ndim != 1:
+        return None
+    matches = [
+        name
+        for name, candidate in candidates
+        if candidate.shape == array.shape and np.array_equal(candidate, array)
+    ]
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def _resolve_ir_operand_value(operand, namespace, figure=None, use_bound_values=True):
@@ -1426,149 +1444,7 @@ def apply_figure_action(figure, action):
             figure,
             use_bound_values=bool(action.get("use_bound_values", True)),
         )
-
-    figure_ir = getattr(figure, "_hyde_ir", None)
-    if figure_ir is None:
-        raise ValueError("Figure does not support Hyde semantic actions.")
-    figure._hyde_ir = FigureIRCodec.update_state(figure_ir, action)
-
-    if action_type == "set_axis_limits":
-        axis = _resolve_live_axis(figure, action.get("subplot_id"))
-        limits = (action.get("min"), action.get("max"))
-        if action.get("axis") == "x":
-            axis.set_xlim(*limits)
-        else:
-            axis.set_ylim(*limits)
-        figure.canvas.draw_idle()
-        return figure
-    if action_type == "set_axis_label":
-        axis = _resolve_live_axis(figure, action.get("subplot_id"))
-        label = action.get("label")
-        if action.get("axis") == "x":
-            axis.set_xlabel(label)
-            if label not in (None, ""):
-                axis.xaxis.label.set_visible(True)
-        else:
-            axis.set_ylabel(label)
-            if label not in (None, ""):
-                axis.yaxis.label.set_visible(True)
-        figure.canvas.draw_idle()
-        return figure
-    if action_type in {"set_subplot_title", "set_figure_title"}:
-        axis = _resolve_live_axis(figure, action.get("subplot_id"))
-        title = action.get("title")
-        axis.set_title(title)
-        if title:
-            figure.set_label(title)
-        figure.canvas.draw_idle()
-        return figure
-    if action_type == "set_legend_visible":
-        axis = _resolve_live_axis(figure, action.get("subplot_id"))
-        legend = axis.get_legend()
-        if action.get("visible"):
-            axis.legend()
-        elif legend is not None:
-            legend.remove()
-        figure.canvas.draw_idle()
-        return figure
-    if action_type == "set_trace_style":
-        if action.get("replace"):
-            regenerate_figure_from_ir(figure)
-            return figure
-        axis = _resolve_live_axis(figure, action.get("subplot_id"))
-        line = _resolve_live_line(axis, action.get("trace_id"))
-        _apply_line_style(line, dict(action.get("style", {}) or {}))
-        if axis.get_legend() is not None:
-            axis.legend()
-        figure.canvas.draw_idle()
-        return figure
-    if action_type in {
-        "set_axis_state",
-        "set_axis_side_state",
-        "set_subplot_margins",
-        "set_trace",
-    }:
-        return regenerate_figure_from_ir(figure)
     raise ValueError(f"Unsupported figure action: {action_type!r}.")
-
-
-def _candidate_series_names(namespace):
-    candidates = []
-    for name, value in sorted((namespace or {}).items()):
-        if not name or name.startswith("_"):
-            continue
-        try:
-            array = np.asarray(value)
-        except Exception:
-            continue
-        if array.ndim != 1 or array.dtype.kind not in "biuf":
-            continue
-        candidates.append((name, array))
-    return candidates
-
-
-def _resolve_series_name(values, candidates):
-    array = np.asarray(values)
-    if array.ndim != 1:
-        return None
-    matches = [
-        name
-        for name, candidate in candidates
-        if candidate.shape == array.shape and np.array_equal(candidate, array)
-    ]
-    if len(matches) != 1:
-        return None
-    return matches[0]
-
-
-def _infer_live_state(figure, namespace):
-    axes = list(figure.axes)
-    if len(axes) != 1:
-        return None
-
-    axis = axes[0]
-    if axis.images or axis.collections:
-        return None
-
-    lines = list(axis.lines)
-    if not lines:
-        return None
-
-    candidates = _candidate_series_names(namespace)
-    x_name = None
-    y_names = []
-    for line in lines:
-        y_name = _resolve_series_name(line.get_ydata(orig=True), candidates)
-        if y_name is None:
-            return None
-        label = _line_label(line)
-        if label not in (None, y_name):
-            return None
-        y_names.append(y_name)
-        x_values = line.get_xdata(orig=True)
-        if _is_default_xdata(x_values):
-            continue
-        resolved_x_name = _resolve_series_name(x_values, candidates)
-        if resolved_x_name is None:
-            return None
-        if x_name is None:
-            x_name = resolved_x_name
-        elif x_name != resolved_x_name:
-            return None
-
-    title = axis.get_title() or figure.get_label() or None
-    return FigureCodec.validate_state(
-        {
-            "feature": "figure",
-            "settings": {
-                "command": "create",
-                "title": title,
-                "x_name": x_name,
-                "subplot_code": "111",
-            },
-            "items": y_names,
-        }
-    )
 
 
 class FigureManagerHyde(FigureManagerBase):
