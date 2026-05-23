@@ -1,0 +1,3 @@
+display_name: Hyde Dialog Widget
+short_description: Create or normalize HydeDialogWidget plugins around the shared preview-string footer contract.
+default_prompt: Create or normalize a HydeDialogWidget-based Hyde plugin so the dialog follows the standard base-owned footer behavior, with command generation in the feature layer and only meaningful subclass overrides remaining.

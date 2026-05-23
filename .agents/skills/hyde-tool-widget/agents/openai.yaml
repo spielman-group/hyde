@@ -1,0 +1,3 @@
+display_name: Hyde Tool Widget
+short_description: Create or normalize HydeToolWidget plugins around the shared persistent tool-window shell.
+default_prompt: Create or normalize a HydeToolWidget-based Hyde plugin so the tool follows the standard base-owned shell, mounted-child, and close-policy behavior, with domain logic kept in the feature layer when appropriate.
