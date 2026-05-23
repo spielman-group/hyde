@@ -561,7 +561,12 @@ class CurveFitDialog(HydeDialogWidget):
         )
         return self._figure_session.current_effective_state()
 
-    def _attached_display_patch_source(self, *, root_name):
+    def _attached_display_command_source(
+        self,
+        *,
+        root_name,
+        include_preview_object=False,
+    ):
         target_state = self._sync_attached_display_draft(root_name=root_name)
         refresh_trace_ids = ()
         resolved_root_name = (
@@ -578,17 +583,27 @@ class CurveFitDialog(HydeDialogWidget):
             ):
                 refresh_ids.append(target_display["residual_trace_id"])
             refresh_trace_ids = tuple(refresh_ids)
-        return (
-            figure_patch_source(
-                self._applied_effective_state,
-                target_state,
-                figure_name=self.figure_context.figure_name(),
-                refresh_trace_ids=refresh_trace_ids,
-            ),
+        command_parts = []
+        if include_preview_object:
+            preview_command = self.state.codec.state_to_preview_python(
+                self.state._state,
+                context=self._context(),
+                preview_target_name=self._preview_target_name,
+            )
+            if not preview_command:
+                return "", target_state
+            command_parts.append(str(preview_command).strip())
+        patch_code = figure_patch_source(
+            self._applied_effective_state,
             target_state,
+            figure_name=self.figure_context.figure_name(),
+            refresh_trace_ids=refresh_trace_ids,
         )
+        if str(patch_code or "").strip():
+            command_parts.append(str(patch_code).strip())
+        return "\n".join(command_parts), target_state
 
-    def _execute_attached_display_patch(self, code, *, mode, target_state):
+    def _execute_attached_display_command(self, code, *, mode, target_state):
         if not str(code or "").strip():
             return True
         log_hyde_state_debug(
@@ -622,7 +637,7 @@ class CurveFitDialog(HydeDialogWidget):
             if str(commit_command or "").strip():
                 command_lines.append(str(commit_command))
         if self.figure_context is not None:
-            patch_code, _ = self._attached_display_patch_source(
+            patch_code, _ = self._attached_display_command_source(
                 root_name=model.get("fit_result_name"),
             )
             if str(patch_code or "").strip():
@@ -665,7 +680,7 @@ class CurveFitDialog(HydeDialogWidget):
                 return False, self._execution_failure_message(python_execution_service)
         patch_code = ""
         if display_root_name is not None and self.figure_context is not None:
-            patch_code, target_effective_state = self._attached_display_patch_source(
+            patch_code, target_effective_state = self._attached_display_command_source(
                 root_name=display_root_name
             )
         combined_command = "\n".join(
@@ -674,7 +689,7 @@ class CurveFitDialog(HydeDialogWidget):
             if part
         )
         if patch_code:
-            if not self._execute_attached_display_patch(
+            if not self._execute_attached_display_command(
                 combined_command,
                 mode="do_it",
                 target_state=target_effective_state,
@@ -700,14 +715,10 @@ class CurveFitDialog(HydeDialogWidget):
         wants_display = bool(
             self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()
         )
-        if wants_display:
-            if not self._current_model.get("valid"):
-                return True
-            if not self._sync_preview_object():
-                return False
         return self._sync_attached_display(
             force=force,
             root_name=self._preview_target_name,
+            include_preview_object=wants_display,
         )
 
     def _has_active_attached_preview(self):
@@ -718,24 +729,13 @@ class CurveFitDialog(HydeDialogWidget):
             display_state.get("fit_trace_id") or display_state.get("residual_trace_id")
         )
 
-    def _sync_preview_object(self):
-        if self._figure_session is None or self._current_model is None:
-            return True
-        if not (self.show_fit_checkbox.isChecked() or self.show_residuals_checkbox.isChecked()):
-            return True
-        preview_command = self.state.codec.state_to_preview_python(
-            self.state._state,
-            context=self._context(),
-            preview_target_name=self._preview_target_name,
-        )
-        if not preview_command:
-            return False
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False
-        return bool(python_execution_service.execute_hidden(preview_command))
-
-    def _sync_attached_display(self, *, force=False, root_name=None):
+    def _sync_attached_display(
+        self,
+        *,
+        force=False,
+        root_name=None,
+        include_preview_object=False,
+    ):
         if self._figure_session is None:
             return True
         current_state = self._attached_display_state_from_effective(
@@ -777,12 +777,15 @@ class CurveFitDialog(HydeDialogWidget):
                 return False
         else:
             resolved_root_name = None
-        patch_code, target_effective_state = self._attached_display_patch_source(
-            root_name=resolved_root_name
+        if include_preview_object and has_plot:
+            resolved_root_name = self._preview_target_name
+        patch_code, target_effective_state = self._attached_display_command_source(
+            root_name=resolved_root_name,
+            include_preview_object=bool(include_preview_object and has_plot),
         )
         if not str(patch_code or "").strip():
-            return True
-        return self._execute_attached_display_patch(
+            return not bool(include_preview_object and has_plot)
+        return self._execute_attached_display_command(
             patch_code,
             mode="live_update" if self.execution_mode() == "live" else "preview",
             target_state=target_effective_state,
@@ -986,7 +989,7 @@ class CurveFitDialog(HydeDialogWidget):
                 figure_name=self.figure_context.figure_name(),
             )
             if str(rollback_code or "").strip():
-                self._execute_attached_display_patch(
+                self._execute_attached_display_command(
                     rollback_code,
                     mode="cancel",
                     target_state=self._opening_effective_state,

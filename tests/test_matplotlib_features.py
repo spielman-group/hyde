@@ -718,19 +718,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             tuple(int(value * figure.dpi) for value in figure.get_size_inches()),
         )
 
-    def test_snapshot_payload_ignores_stale_hyde_live_state_for_second_class_figures(self):
-        figure = Figure()
-        figure._hyde_live_state = self._live_state()
-        axes = figure.add_subplot(111)
-        axes.set_title("DelayGraph")
-        axes.plot([0, 1, 2], [1, 4, 9], label="fit_delay")
-
-        payload = figure_snapshot_payload(figure, 1)
-
-        self.assertEqual(payload["tracked_names"], [])
-        self.assertIsNone(payload["live_state"])
-        self.assertIn("ax.plot(np.array([1, 4, 9])", payload["call_source"])
-
     def test_snapshot_payload_prefers_figure_ir_for_first_class_decorated_figure(self):
         plt = self._configure_hyde_pyplot()
 
@@ -1172,7 +1159,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             return self.result
 
     def test_figure_window_refreshes_from_same_namespace_signal_as_tables(self):
-        sent = []
         namespace_service = FakeNamespaceViewService(
             {
                 "delay": {"type": "ndarray", "view": "[0 1 2]"},
@@ -1183,18 +1169,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "figure_action_service": type(
-                    "FigureActionService",
-                    (),
-                    {
-                        "request_figure_action": (
-                            lambda _self, figure_number, action: (
-                                sent.append((figure_number, action)) or True
-                            )
-                        )
-                    },
-                )(),
                 "namespace_view_service": namespace_service,
+                "python_execution_service": FakeExecutionService(),
             },
         )
         try:
@@ -1216,13 +1192,17 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(sent, [(1, {"type": "regenerate_from_ir", "use_bound_values": False})])
+            self.assertEqual(len(widget.services["python_execution_service"].hidden_calls), 1)
+            code, silent = widget.services["python_execution_service"].hidden_calls[0]
+            self.assertTrue(silent)
+            self.assertIn("fig = hyde.get_figure('DelayGraph')", code)
+            self.assertIn("hyde.refresh_figure(fig, use_bound_values=False)", code)
         finally:
             widget.close()
 
     def test_figure_window_detects_in_place_namespace_metadata_mutation(self):
-        sent = []
         shared_view = ["[1 4 9]"]
+        execution = FakeExecutionService()
         namespace_service = FakeNamespaceViewService(
             {
                 "delay": {"type": "ndarray", "view": "[0 1 2]"},
@@ -1233,18 +1213,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "figure_action_service": type(
-                    "FigureActionService",
-                    (),
-                    {
-                        "request_figure_action": (
-                            lambda _self, figure_number, action: (
-                                sent.append((figure_number, action)) or True
-                            )
-                        )
-                    },
-                )(),
                 "namespace_view_service": namespace_service,
+                "python_execution_service": execution,
             },
         )
         try:
@@ -1257,7 +1227,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                     },
                 }
             )
-            sent.clear()
             shared_view[0] = "[10 40 90]"
             namespace_service.emit(
                 {
@@ -1267,7 +1236,11 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(sent, [(1, {"type": "regenerate_from_ir", "use_bound_values": False})])
+            self.assertEqual(len(execution.hidden_calls), 1)
+            code, silent = execution.hidden_calls[0]
+            self.assertTrue(silent)
+            self.assertIn("fig = hyde.get_figure('DelayGraph')", code)
+            self.assertIn("hyde.refresh_figure(fig, use_bound_values=False)", code)
         finally:
             widget.close()
 
@@ -1283,7 +1256,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             widget.close()
 
     def test_figure_window_refresh_recovers_after_timed_out_request(self):
-        sent = []
+        execution = FakeExecutionService()
         namespace_service = FakeNamespaceViewService(
             {
                 "delay": {"type": "ndarray", "view": "[0 1 2]"},
@@ -1294,18 +1267,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget = FigureWindow(
             figure_number=1,
             services={
-                "figure_action_service": type(
-                    "FigureActionService",
-                    (),
-                    {
-                        "request_figure_action": (
-                            lambda _self, figure_number, action: (
-                                sent.append((figure_number, action)) or True
-                            )
-                        )
-                    },
-                )(),
                 "namespace_view_service": namespace_service,
+                "python_execution_service": execution,
             },
         )
         try:
@@ -1332,10 +1295,41 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(len(sent), 2)
-            self.assertEqual(sent[1], (1, {"type": "regenerate_from_ir", "use_bound_values": False}))
+            self.assertEqual(len(execution.hidden_calls), 2)
+            code, silent = execution.hidden_calls[1]
+            self.assertTrue(silent)
+            self.assertIn("fig = hyde.get_figure('DelayGraph')", code)
+            self.assertIn("hyde.refresh_figure(fig, use_bound_values=False)", code)
         finally:
             widget.close()
+
+    def test_figure_window_hidden_refresh_logs_through_standard_hyde_debug_channel(self):
+        execution = FakeExecutionService()
+        widget = FigureWindow(
+            figure_number=1,
+            services={"python_execution_service": execution},
+        )
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "live_state": None,
+                    },
+                }
+            )
+
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                self.assertTrue(widget.request_regenerate_from_ir())
+        finally:
+            widget.close()
+
+        output = "\n".join(logs.output)
+        self.assertIn("[Hyde state] FigureRefreshState", output)
+        self.assertIn("python:\n", output)
+        self.assertIn("fig = hyde.get_figure('DelayGraph')", output)
+        self.assertIn("hyde.refresh_figure(fig, use_bound_values=True)", output)
 
     def test_figure_window_context_menu_activates_bound_subwindow(self):
         popup_calls = []
@@ -2297,24 +2291,11 @@ class TestFigureWindowBoundaries(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_figure_window_reports_editable_readiness_from_ir_and_dispatch(self):
-        widget = FigureWindow(
-            figure_number=1,
-            services={
-                "figure_action_service": type(
-                    "FigureActionService",
-                    (),
-                    {
-                        "request_figure_action": (
-                            lambda _self, figure_number, action: True
-                        )
-                    },
-                )(),
-            },
-        )
+    def test_figure_window_reports_editable_readiness_from_ir_without_control_lane(self):
+        widget = FigureWindow(figure_number=1, services={})
         try:
             self.assertFalse(widget.has_figure_ir())
-            self.assertTrue(widget.can_request_figure_actions())
+            self.assertFalse(widget.can_request_figure_actions())
             self.assertFalse(widget.is_editable_figure_ready())
 
             widget.update_payload(
@@ -2326,7 +2307,7 @@ class TestFigureWindowBoundaries(unittest.TestCase):
             )
 
             self.assertTrue(widget.has_figure_ir())
-            self.assertTrue(widget.can_request_figure_actions())
+            self.assertFalse(widget.can_request_figure_actions())
             self.assertTrue(widget.is_editable_figure_ready())
         finally:
             widget.close()
@@ -2348,24 +2329,7 @@ class TestFigureContextService(unittest.TestCase):
 
     def test_active_editable_figure_returns_boundary_context(self):
         mdi_area = QtWidgets.QMdiArea()
-        sent = []
-        widget = FigureWindow(
-            figure_number=1,
-            services={
-                "figure_action_service": type(
-                    "FigureActionService",
-                    (),
-                    {
-                        "request_figure_action": (
-                            lambda _self, figure_number, action: (
-                                sent.append((int(figure_number), dict(action or {})))
-                                or True
-                            )
-                        )
-                    },
-                )(),
-            },
-        )
+        widget = FigureWindow(figure_number=1, services={})
         subwindow = mdi_area.addSubWindow(widget)
         subwindow.show()
         mdi_area.setActiveSubWindow(subwindow)
@@ -2402,33 +2366,13 @@ class TestEditableFigureSession(unittest.TestCase):
         state.set_items(["trace_a"])
         return figure_ir_from_live_state(state.normalized_state())
 
-    def _editable_context(self, sent_actions):
-        widget = FigureWindow(
-            figure_number=1,
-            services={
-                "get_shutting_down": lambda: True,
-                "figure_action_service": type(
-                    "FigureActionService",
-                    (),
-                    {
-                        "request_figure_action": (
-                            lambda _self, figure_number, action: (
-                                sent_actions.append(
-                                    (int(figure_number), dict(action or {}))
-                                )
-                                or True
-                            )
-                        )
-                    },
-                )(),
-            },
-        )
+    def _editable_context(self):
+        widget = FigureWindow(figure_number=1, services={})
         widget.update_payload({"snapshot": {"figure_ir": self._figure_ir()}})
         return EditableFigureContext(widget), widget
 
     def test_open_session_returns_non_qt_boundary_without_raw_ir_contract(self):
-        sent = []
-        context, widget = self._editable_context(sent)
+        context, widget = self._editable_context()
         try:
             session = context.open_session()
             second_session = context.open_session()

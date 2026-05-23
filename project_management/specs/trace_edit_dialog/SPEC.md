@@ -15,7 +15,7 @@ update while working, and can still back out safely with `Cancel`.
 
 This feature therefore needs to be broader than a narrow "edit one style property"
 surface. It should cover most ordinary matplotlib `Line2D` appearance attributes that
-can be changed cleanly through Hyde's existing semantic figure-edit architecture, while
+can be changed cleanly through Hyde's current command-driven figure-edit architecture, while
 explicitly excluding advanced Igor behaviors that Hyde does not yet model.
 
 ## Solution
@@ -43,19 +43,19 @@ matplotlib `Line2D` appearance editing. Supported controls include:
 - marker edge color
 - marker edge width
 
-Edits apply live through Hyde's semantic figure `comm` path against the kernel-owned
-live figure and figure IR. The GUI remains transient. It holds only the information
-needed to seed the dialog, emit bounded semantic edit requests, and restore the opening
-trace appearance if the user clicks `Cancel`.
+Edits apply live through Hyde's ordinary hidden-command Python path against the
+kernel-owned live figure and figure IR. The GUI remains transient. It holds only the
+information needed to seed the dialog, emit bounded matplotlib patch blocks, and
+restore the opening trace appearance if the user clicks `Cancel`.
 
-This dialog belongs to a new `figure_control_dialogs` plugin. That plugin owns the
+This dialog belongs to the `figure_control_dialog` plugin. That plugin owns the
 trace-edit dialog and the reusable dialog-family helpers that later figure control
 dialogs will need, such as:
 
 - validating that a figure window is currently the active MDI window
 - collecting the active figure and trace snapshot needed to seed controls
-- sending semantic figure-edit messages
-- coordinating figure refresh after a kernel-side edit
+- lowering and executing figure-edit command blocks
+- coordinating figure refresh after backend resync
 - supporting live-update plus cancel-revert behavior
 
 The existing `figure` plugin remains the owner of figure windows, figure identity, and
@@ -102,47 +102,48 @@ the figure runtime transport. The new plugin contributes actions through the nor
     styling changes immediately.
 19. As a Hyde user, I want `Cancel` to restore the trace exactly to its opening state,
     so that I can experiment without risk.
-20. As a Hyde user, I want `Apply` to keep the current edited state, so that I can
-    confirm the live changes I have made.
+20. As a Hyde user, I want `Do It` to keep the current edited state and close, so that
+    I can confirm the live changes I have made.
 21. As a Hyde user, I want unsupported advanced trace behaviors to stay out of the
     first version, so that the dialog remains coherent and reliable.
-22. As a Hyde developer, I want the dialog to use semantic figure-edit actions rather
-    than GUI-generated source strings, so that Hyde stays aligned with its first-class
-    figure architecture.
+22. As a Hyde developer, I want the dialog to emit canonical matplotlib patch Python,
+    so that Hyde stays aligned with its command-driven first-class figure
+    architecture.
 23. As a Hyde developer, I want the kernel to remain authoritative for the live figure
     and figure IR, so that the GUI does not become a scientific state owner.
-24. As a Hyde developer, I want this dialog in a dedicated `figure_control_dialogs`
+24. As a Hyde developer, I want this dialog in the dedicated `figure_control_dialog`
     plugin, so that future figure dialogs can reuse common active-window and dispatch
     helpers without tangling the runtime figure plugin.
 25. As a Hyde plugin author, I want the dialog action contributed through the normal
     `Figure` menu system, so that contextual figure tools share one shell contract.
 26. As a Hyde developer, I want the first implementation to stay focused on ordinary
-    `Line2D` traces, so that the initial semantic surface is broad but still
+    `Line2D` traces, so that the initial supported surface is broad but still
     well-bounded.
 
 ## Implementation Decisions
 
-- The feature is implemented as a new `figure_control_dialogs` plugin.
+- The feature is implemented in the existing `figure_control_dialog` plugin.
 - The runtime-owning `figure` plugin remains responsible for figure windows, figure
-  identity, and the figure `comm` transport.
+  identity, the imported figure snapshot, and the bounded remaining figure-window
+  control lane.
 - The new plugin contributes a `Modify Data Appearance` action through the normal
   `Figure` menu registration path.
 - The dialog is modal and uses a two-pane Igor-inspired layout with a trace list on
   the left and grouped property controls on the right.
 - The first deployment supports one supported trace at a time.
 - The first deployment targets ordinary first-class line traces represented as
-  supported matplotlib `Line2D` semantics in Hyde's figure-edit model.
+  supported matplotlib `Line2D` state in Hyde's figure-edit model.
 - The supported appearance surface is intentionally broad for ordinary line styling and
   includes line, marker, visibility, mode, opacity, and draw-style controls.
-- Live edits are sent through Hyde's semantic figure `comm` path rather than through
-  GUI-generated matplotlib source.
+- Live edits execute the same canonical matplotlib patch block family used by `Do It`
+  and `To Cmd Line`.
 - The GUI stores only transient dialog state, including the opening appearance snapshot
   needed for `Cancel` revert behavior.
-- `Cancel` is implemented by sending semantic restore actions for the opening trace
+- `Cancel` is implemented by executing a rollback patch for the opening trace
   appearance rather than by mutating live matplotlib objects directly in the GUI.
-- Shared helper logic for active-figure validation, snapshot seeding, message dispatch,
-  and refresh coordination lives with the dialog plugin so later figure control dialogs
-  can reuse it.
+- Shared helper logic for active-figure validation, snapshot seeding, command
+  emission/logging, and refresh coordination lives with the dialog plugin so later
+  figure control dialogs can reuse it.
 - The first version excludes behaviors that require unsupported semantics, even if they
   appear in Igor's dialog or screenshot family.
 
@@ -154,16 +155,18 @@ the figure runtime transport. The new plugin contributes actions through the nor
   context.
 - Tests should verify that the dialog seeds its controls from the selected trace's
   current appearance.
-- Tests should verify that supported control changes emit semantic live-update actions
-  through the figure-edit path.
-- Tests should verify that `Apply` preserves the current edited live state.
+- Tests should verify that supported control changes execute hidden live-update patch
+  blocks through the ordinary figure-edit command path.
+- Tests should verify that `Do It` preserves the current edited live state.
 - Tests should verify that `Cancel` restores the exact opening appearance snapshot.
+- Tests should verify that `To Cmd Line` emits the same canonical patch block used by
+  hidden execution.
 - Tests should verify that unsupported trace targets do not trigger GUI-side fallback
   behavior.
 - Tests should prefer behavior and contract assertions over incidental Qt signal-order
   assertions.
-- Prior art exists in Hyde's first-class figure tests, figure `comm` tests, and other
-  dialog-focused tests that validate command dispatch and live kernel-backed behavior.
+- Prior art exists in Hyde's first-class figure tests and other dialog-focused tests
+  that validate command dispatch and live kernel-backed behavior.
 
 ## Out of Scope
 

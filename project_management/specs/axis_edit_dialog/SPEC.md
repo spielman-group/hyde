@@ -2,8 +2,8 @@
 
 ## Problem Statement
 
-Hyde has first-class figure windows, figure-scoped menu infrastructure, and an
-existing semantic figure-edit path, but it does not yet provide a broad axis-editing
+Hyde has first-class figure windows, figure-scoped menu infrastructure, and a
+command-driven figure-edit path, but it does not yet provide a broad axis-editing
 workflow for existing first-class figures.
 
 Users currently lack a GUI way to perform the ordinary graph-editing work that Igor's
@@ -27,7 +27,7 @@ directly, without reopening the screenshot folder or the Igor excerpt.
 ## Solution
 
 Hyde adds a `Modify Axis` dialog for first-class figure windows inside the existing
-`figure_control_dialogs` plugin family. The dialog is launched from the active
+`figure_control_dialog` plugin family. The dialog is launched from the active
 `Figure` menu and from the figure right-click menu. The right-click menu is a fresh
 popup render from the shared figure-menu registry, not the same physical `QMenu`
 instance as the hidden menu-bar `Figure` menu.
@@ -48,11 +48,7 @@ The dialog also includes:
 - an `Axis` selector with `left`, `bottom`, `right`, and `top`
 - a `Live Update` checkbox
 - a large lower preview/status pane
-- footer buttons `Do It`, `To Clip`, `Help`, and `Cancel`
-
-`To Cmd Line` is intentionally excluded from the first implementation because routine
-figure editing must stay on Hyde's semantic figure-edit path rather than opening a
-second execution path through the visible terminal.
+- footer buttons `Do It`, `To Cmd Line`, `To Clip`, `Help`, and `Cancel`
 
 The dialog operates on the active first-class figure only. In the current Hyde figure
 deployment, that means one live kernel-owned figure and one subplot. The selected
@@ -69,9 +65,9 @@ Hyde must stay honest here:
 - they are not independent secondary data axes
 - `floating` / free axes are excluded
 
-Edits apply through Hyde's semantic figure `comm` path against kernel-owned figure IR
-and live matplotlib artists. The GUI may keep transient draft form state, but the
-kernel remains authoritative for all durable figure and axis semantics.
+Edits apply through Hyde's ordinary command-driven Python path against kernel-owned
+figure IR and live matplotlib artists. The GUI may keep transient draft form state,
+but the kernel remains authoritative for all durable figure and axis semantics.
 
 ### Tab Contract
 
@@ -213,16 +209,18 @@ Per-end manual/auto is supported as a Hyde-owned resolved-range policy:
 
 ### Live Update And Footer Contract
 
-- `Live Update` on: valid committed changes dispatch immediately as semantic figure
-  actions
-- `Live Update` off: the dialog keeps transient draft state only; nothing is sent until
-  `Do It`
+- `Live Update` on: valid committed changes execute immediately through Hyde's hidden
+  Python command path
+- `Live Update` off: the dialog keeps transient draft state only; nothing is sent
+  until `Do It`
 - switching `Live Update` from off to on applies the current valid draft immediately
-- `Do It`: applies all pending valid edits and closes
+- `Do It`: executes the current valid patch block and closes
+- `To Cmd Line`: emits the same canonical patch block visibly to the terminal
 - `To Clip`: copies the current valid preview source to the clipboard
 - `Help`: disabled or hidden unless Hyde has a real local help target
-- `Cancel`: restores the opening snapshot if live edits were sent during the session,
-  otherwise closes without mutating the figure
+- `Cancel`: if live edits were sent during the session, executes a rollback patch that
+  restores the opening snapshot for the dialog-owned region; otherwise closes without
+  mutating the figure
 
 The lower pane is a read-only draft preview/status surface:
 
@@ -327,8 +325,9 @@ The lower pane is a read-only draft preview/status surface:
     I can see what the saved figure recreation will become.
 46. As a Hyde user, I want `To Clip`, so that I can copy the current preview source
     without executing it.
-47. As a Hyde developer, I want all routine edits to go through semantic figure
-    actions, so that Hyde keeps one authoritative figure-edit path.
+47. As a Hyde developer, I want all routine edits to go through the same
+    command-driven Python path, so that Hyde keeps one authoritative figure-edit
+    path.
 48. As a Hyde developer, I want the kernel to remain authoritative for figure and axis
     state, so that the GUI never becomes the scientific state owner.
 49. As a Hyde developer, I want shared dialog-family code for active-window checks,
@@ -337,12 +336,12 @@ The lower pane is a read-only draft preview/status surface:
 50. As a Hyde developer, I want axis state stored in figure IR and regenerated from
     that IR, so that save/restore, preview, and live redraw all stay consistent.
 51. As a Hyde tester, I want the dialog behavior to be specified in terms of visible
-    outcomes and semantic dispatch, so that tests remain stable as widget wiring
+    outcomes and command emission, so that tests remain stable as widget wiring
     changes.
 
 ## Implementation Decisions
 
-- The feature stays in the existing `figure_control_dialogs` plugin family rather than
+- The feature stays in the existing `figure_control_dialog` plugin family rather than
   creating a second figure-edit plugin.
 - The runtime-owning figure plugin remains responsible for figure windows, identity,
   kernel transport, and base figure refresh behavior.
@@ -362,15 +361,15 @@ The lower pane is a read-only draft preview/status surface:
   truly non-equivalent controls stay out.
 - The feature adds shared reusable modules for:
   - active first-class-figure resolution and gating
-  - common semantic-action dispatch
-  - common edit-session snapshot, `Live Update`, apply, and rollback behavior
+  - common command emission/logging
+  - common edit-session snapshot plus `Live Update`, apply, and rollback behavior
   - preview-pane and clipboard export plumbing
 - The feature adds an axis-specific draft state/codec layer that:
   - normalizes widget values
   - preserves incomplete local-only edits when `Live Update` is off or a field is mid-edit
   - validates numeric and text input
   - resolves side selection honestly against underlying x/y semantics
-  - lowers the draft into semantic axis-edit actions or semantic batches
+  - lowers the draft into minimal matplotlib patch Python for the dialog-owned region
 - Figure IR must grow from the current minimal axis fields into a durable per-subplot
   axis model covering:
   - side presentation for `left`, `bottom`, `right`, `top`
@@ -384,17 +383,17 @@ The lower pane is a read-only draft preview/status surface:
   - grid policy
   - zero-line policy
   - side-specific tick-label presentation state
-- Backend figure-action handling must apply those semantic actions to both kernel-owned
-  IR and live matplotlib artists, and lowering/regeneration must use the same IR.
+- Backend figure resync must import those command-driven edits back into kernel-owned
+  IR, and lowering/regeneration must use the same IR.
 - The lower preview pane is derived from the draft IR and is never authoritative.
 - `Live Update` on:
-  - committed valid control changes dispatch immediately
-  - invalid or partial edits stay local and do not dispatch
+  - committed valid control changes execute immediately through the hidden command path
+  - invalid or partial edits stay local and do not execute
 - `Live Update` off:
   - dialog widgets update only local draft state
-  - `Do It` validates and sends the accumulated semantic batch once
+  - `Do It` validates and executes the accumulated patch once
 - Switching `Live Update` from off to on applies the current valid draft immediately.
-- `Cancel` restores the opening snapshot only if semantic actions were sent during the
+- `Cancel` executes a rollback patch only if edits were already applied during the
   session.
 - Numeric validation rules for range fields:
   - blank text is acceptable only when the endpoint is in auto mode
@@ -414,14 +413,14 @@ The lower pane is a read-only draft preview/status surface:
 - Quick-set controls resolve Python-backed data already visible to Hyde rather than
   Igor waves or Igor scaling metadata.
 - `To Clip` copies preview source only; it never applies edits by itself.
-- `To Cmd Line` is intentionally out of scope because it would create a second routine
-  edit path through visible execution.
+- `To Cmd Line` emits the same canonical patch block used by hidden execution; it does
+  not invent a second lowering path.
 - `Help` remains disabled or hidden unless Hyde gains a real user-facing local help
   target for this dialog.
 
 ## Testing Decisions
 
-- Good tests verify visible behavior, semantic dispatch, regeneration, and save/restore
+- Good tests verify visible behavior, command emission, regeneration, and save/restore
   effects rather than incidental Qt wiring details.
 - Tests should verify that the dialog opens only for an active first-class figure
   window and uses the shared figure-control-dialog gating path.
@@ -430,14 +429,14 @@ The lower pane is a read-only draft preview/status surface:
 - Tests should verify that the dialog seeds controls from the active figure's current
   axis state.
 - Tests should verify `Live Update` behavior:
-  - valid committed changes dispatch immediately when enabled
-  - incomplete or invalid edits do not dispatch
+  - valid committed changes execute immediately when enabled
+  - incomplete or invalid edits do not execute
   - turning `Live Update` on applies the current valid draft
 - Tests should verify non-live behavior:
   - draft-only edits remain local until `Do It`
-  - `Do It` sends a complete semantic batch and closes
+  - `Do It` executes the same canonical patch block previewed by the dialog and closes
 - Tests should verify `Cancel` behavior:
-  - restores the exact opening snapshot when live actions were sent
+  - restores the exact opening snapshot when live edits were sent
   - leaves the live figure untouched when nothing was applied
 - Tests should verify that the preview pane and clipboard export reflect draft IR and do
   not mutate the figure by themselves.
@@ -448,6 +447,8 @@ The lower pane is a read-only draft preview/status surface:
   survive redraw/regeneration from figure IR.
 - Tests should verify that save/restore lowers the expanded axis semantics back to
   ordinary matplotlib recreation source deterministically.
+- Tests should verify that `To Cmd Line` emits the same canonical patch block as
+  hidden execution.
 - Tests should verify that quick-set controls resolve Python-backed data sources rather
   than Igor-specific objects.
 - Tests should verify locator/formatter policy behavior at the contract level:
@@ -472,7 +473,6 @@ The lower pane is a read-only draft preview/status surface:
 - Igor text-info variables and other Igor-only inline text machinery
 - unit-bearing tick-label semantics without a real Hyde units model
 - extra tick tiers beyond major and minor as durable first-class semantics
-- command-line execution export via `To Cmd Line`
 - help-button wiring without a real local help target
 - any GUI-owned scientific mirror of axis state beyond transient draft form state
 
@@ -488,4 +488,5 @@ The lower pane is a read-only draft preview/status surface:
 - The core design bias remains the Hyde architecture bias:
   - GUI stays transient
   - kernel-owned figure IR stays authoritative
-  - routine figure edits use semantic figure actions, not GUI-generated ad hoc source
+  - routine figure edits emit canonical matplotlib patch Python through Hyde's
+    ordinary command path

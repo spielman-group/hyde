@@ -88,7 +88,7 @@ class TestFigureCommActions(unittest.TestCase):
                 },
             )
 
-    def test_apply_figure_action_regenerates_live_figure_from_ir(self):
+    def test_apply_figure_action_rejects_regenerate_from_ir_after_refresh_moves_to_command_path(self):
         plt = self._configure_pyplot()
 
         @hyde.figure
@@ -99,26 +99,27 @@ class TestFigureCommActions(unittest.TestCase):
             return fig
 
         figure = Graph0([0, 1, 2], [1, 4, 9])
-        figure._hyde_ir["layout"]["subplots"][0]["legend"] = True
-        figure.clear()
+        with self.assertRaisesRegex(ValueError, "Unsupported figure action"):
+            apply_figure_action(figure, {"type": "regenerate_from_ir"})
 
-        apply_figure_action(figure, {"type": "regenerate_from_ir"})
-
-        self.assertEqual(len(figure.axes), 1)
-        self.assertEqual(len(figure.axes[0].lines), 1)
-        self.assertEqual(figure.axes[0].lines[0].get_label(), "y")
-        self.assertIsNotNone(figure.axes[0].get_legend())
-        self.assertEqual(
-            [text.get_text() for text in figure.axes[0].get_legend().texts],
-            ["y"],
-        )
-
-    def test_figure_window_requests_resize_and_regenerate_actions(self):
+    def test_figure_window_routes_resize_as_action_and_regenerate_as_hidden_python(self):
         sent = []
+        hidden = []
         window = FigureWindow(
             figure_number=7,
             services={
                 "get_shutting_down": lambda: True,
+                "python_execution_service": type(
+                    "PythonExecutionService",
+                    (),
+                    {
+                        "execute_hidden": (
+                            lambda _self, code, silent=True: (
+                                hidden.append((code, silent)) or True
+                            )
+                        )
+                    },
+                )(),
                 "figure_action_service": type(
                     "FigureActionService",
                     (),
@@ -147,15 +148,18 @@ class TestFigureCommActions(unittest.TestCase):
             )
 
             self.assertTrue(window.request_resize_redraw(width=800, height=600))
-            self.assertTrue(window.request_regenerate_from_ir())
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                self.assertTrue(window.request_regenerate_from_ir())
 
-            self.assertEqual(
-                sent,
-                [
-                    (7, {"type": "resize_redraw", "width": 800, "height": 600}),
-                    (7, {"type": "regenerate_from_ir"}),
-                ],
-            )
+            self.assertEqual(sent, [(7, {"type": "resize_redraw", "width": 800, "height": 600})])
+            self.assertEqual(len(hidden), 1)
+            self.assertTrue(hidden[0][1])
+            self.assertIn("fig = hyde.get_figure('Figure0')", hidden[0][0])
+            self.assertIn("hyde.refresh_figure(fig, use_bound_values=True)", hidden[0][0])
+            output = "\n".join(logs.output)
+            self.assertIn("[Hyde state] FigureRefreshState", output)
+            self.assertIn("python:\n", output)
+            self.assertIn("hyde.refresh_figure(fig, use_bound_values=True)", output)
         finally:
             window.force_close()
 

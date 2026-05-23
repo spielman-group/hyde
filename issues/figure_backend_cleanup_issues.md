@@ -2,10 +2,10 @@
 
 ## Checklist
 
-- [ ] Slice 1: Move explicit figure regenerate and refresh onto the command path
-- [ ] Slice 2: Unify Curve Fit live and preview attached-display command emission
-- [ ] Slice 3: Retire stale figure-action test scaffolding and assertions
-- [ ] Slice 4: Rewrite stale figure specs around the final one-path model
+- [x] Slice 1: Move explicit figure regenerate and refresh onto the command path
+- [x] Slice 2: Unify Curve Fit live and preview attached-display command emission
+- [x] Slice 3: Retire stale figure-action test scaffolding and assertions
+- [x] Slice 4: Rewrite stale figure specs around the final one-path model
 
 ## Notes
 
@@ -30,11 +30,11 @@ already approved.
 
 ### Acceptance criteria
 
-- [ ] `hyde.refresh_figure(...)` no longer mutates first-class figures through direct backend action dispatch.
-- [ ] Figure-window explicit regenerate/refresh requests no longer depend on the private figure-action transport.
-- [ ] Hidden refresh/regenerate commands route through Hyde's existing hidden Python execution path.
-- [ ] Hidden refresh/regenerate commands appear in the standard `[Hyde state] ... / python:` debug log channel.
-- [ ] If `resize_redraw` stays on backend control traffic, the remaining control lane is documented as a narrow exception rather than a general second figure-edit path.
+- [x] `hyde.refresh_figure(...)` no longer mutates first-class figures through direct backend action dispatch.
+- [x] Figure-window explicit regenerate/refresh requests no longer depend on the private figure-action transport.
+- [x] Hidden refresh/regenerate commands route through Hyde's existing hidden Python execution path.
+- [x] Hidden refresh/regenerate commands appear in the standard `[Hyde state] ... / python:` debug log channel.
+- [x] If `resize_redraw` stays on backend control traffic, the remaining control lane is documented as a narrow exception rather than a general second figure-edit path.
 
 ### Blocked by
 
@@ -58,10 +58,10 @@ canonical command-generation model with one standard hidden-command logging path
 
 ### Acceptance criteria
 
-- [ ] Curve Fit attached-display live behavior no longer uses a distinct command path from `Do It` / `To Cmd Line`.
-- [ ] Preview-style attached-display figure commands use the same command-generation model as the committed attached-display path.
-- [ ] Preview-related hidden Curve Fit figure commands appear in Hyde's standard `[Hyde state] ... / python:` debug log channel.
-- [ ] Focused Curve Fit tests verify one canonical attached-display command path across live update, preview, `Do It`, and `To Cmd Line`.
+- [x] Curve Fit attached-display live behavior no longer uses a distinct command path from `Do It` / `To Cmd Line`.
+- [x] Preview-style attached-display figure commands use the same command-generation model as the committed attached-display path.
+- [x] Preview-related hidden Curve Fit figure commands appear in Hyde's standard `[Hyde state] ... / python:` debug log channel.
+- [x] Focused Curve Fit tests verify one canonical attached-display command path across live update, preview, `Do It`, and `To Cmd Line`.
 
 ### Blocked by
 
@@ -88,10 +88,10 @@ remaining assertions no longer match the production contract.
 
 ### Acceptance criteria
 
-- [ ] Tests no longer defend routine semantic figure-edit actions for axis, trace, or Curve Fit attached display.
-- [ ] Stale `_hyde_live_state` terminology or fixtures are removed from figure tests unless they still prove a current product contract.
-- [ ] Figure-control test scaffolding reflects the remaining real transport split, if any, instead of the removed general semantic-edit path.
-- [ ] The focused figure test suite verifies the current one-path command model plus any explicitly accepted narrow exceptions.
+- [x] Tests no longer defend routine semantic figure-edit actions for axis, trace, or Curve Fit attached display.
+- [x] Stale `_hyde_live_state` terminology or fixtures are removed from figure tests unless they still prove a current product contract.
+- [x] Figure-control test scaffolding reflects the remaining real transport split, if any, instead of the removed general semantic-edit path.
+- [x] The focused figure test suite verifies the current one-path command model plus any explicitly accepted narrow exceptions.
 
 ### Blocked by
 
@@ -120,11 +120,11 @@ The updated specs should clearly distinguish:
 
 ### Acceptance criteria
 
-- [ ] `IPC_PROTOCOL.md` no longer describes routine figure editing as a semantic `comm` lane.
-- [ ] `figure_window/SPEC.md` no longer describes routine dialog editing through session `live apply / commit / revert` transport or semantic figure actions.
-- [ ] `axis_edit_dialog/SPEC.md` and `trace_edit_dialog/SPEC.md` describe emitted command-driven figure control rather than semantic figure actions.
-- [ ] `remove_from_graph/SPEC.md` is either updated to the command-driven model or clearly marked as stale/not implemented instead of documenting the superseded action path as complete.
-- [ ] Specs describe `resize_redraw` accurately if it remains a bounded non-command exception.
+- [x] `IPC_PROTOCOL.md` no longer describes routine figure editing as a semantic `comm` lane.
+- [x] `figure_window/SPEC.md` no longer describes routine dialog editing through session `live apply / commit / revert` transport or semantic figure actions.
+- [x] `axis_edit_dialog/SPEC.md` and `trace_edit_dialog/SPEC.md` describe emitted command-driven figure control rather than semantic figure actions.
+- [x] `remove_from_graph/SPEC.md` is either updated to the command-driven model or clearly marked as stale/not implemented instead of documenting the superseded action path as complete.
+- [x] Specs describe `resize_redraw` accurately if it remains a bounded non-command exception.
 
 ### Blocked by
 

@@ -7,10 +7,10 @@
 - [x] Treat a kernel-owned IR attached to the live figure as the recreation and
   editability authority for first-class figures.
 - [x] Keep first-class editable and recreatable figures on the `@hyde.figure` path.
-- [x] Route figure-edit actions over Jupyter `comm` as semantic kernel actions.
+- [x] Route routine figure edits through Hyde's command-driven hidden Python path.
 - [x] Support save-on-close figure macro prompts through the generic save-window
   pattern.
-- [x] Support regenerate-from-IR as an explicit debug action.
+- [x] Support explicit refresh/regenerate through Hyde's ordinary hidden command path.
 - [ ] Support GridSpec multi-subplot figure editing.
 - [ ] Define any future explicit promotion/import workflow for non-decorated figures.
 
@@ -72,12 +72,12 @@ It includes:
 - export from the live kernel `Figure`
 - save-on-close recreation macro prompts for first-class figures
 - `Windows -> Graph Macros` integration for saved recreation macros
-- explicit regenerate-from-IR debug support
-- first-class recreation and semantic GUI editing for figures created through
+- explicit refresh/regenerate debug support
+- first-class recreation and command-driven GUI editing for figures created through
   `@hyde.figure`
-- a first-class semantic surface shaped as `FigureIR -> LayoutIR -> SubplotIR[] ->
+- a first-class figure-edit surface shaped as `FigureIR -> LayoutIR -> SubplotIR[] ->
   TraceIR[]`, with v1 constrained to exactly one subplot
-- v1 semantic support for:
+- v1 supported edit/import surface for:
   - one subplot
   - zero or more line traces
   - subplot title
@@ -94,7 +94,7 @@ It does not include:
 - GUI-side source rewriting for figure edits
 - Hyde MDI figure windows for non-`@hyde.figure` figures
 - multi-subplot GUI editing in the initial deployment
-- arbitrary artist editing beyond the supported v1 semantic surface
+- arbitrary artist editing beyond the supported v1 figure-edit surface
 
 ## Window Layout
 
@@ -145,10 +145,10 @@ The Figure window itself is primarily a viewport. Supported live edits in the in
 deployment are launched from figure-related dialogs and target the kernel-owned IR for
 first-class figures.
 
-Those dialogs do not own raw figure-semantic draft dictionaries. They open one
-consumer-agnostic figure edit session from the active figure context and work through
-that session's getters, mutators, preview/source, live apply, commit, and revert
-operations.
+Those dialogs do not own raw figure draft dictionaries. They open one
+consumer-agnostic figure edit session from the active figure context and use that
+session's getters, mutators, and preview/source helpers to build canonical
+matplotlib patch Python.
 
 Those edits target:
 
@@ -183,14 +183,19 @@ active runtime figure through the current matplotlib registry identity.
 
 ## Command Generation
 
-The Figure window does not regenerate Python in the GUI for routine figure editing.
+The Figure window does not own figure mutation logic, but Hyde does regenerate Python
+in the GUI for routine figure editing.
 
-Its command responsibilities are split in two:
+Its command responsibilities are:
 
-- figure creation and saved macro publication still lower bounded internal state into
+- figure creation and saved macro publication lower bounded internal state into
   explicit matplotlib Python source
-- live figure edits send semantic `comm` actions to the kernel rather than rewriting
-  source in the GUI
+- routine figure-edit dialogs lower imported figure state plus current dialog draft
+  into minimal matplotlib patch Python
+- `Do It`, live update, `Cancel` rollback, and `To Cmd Line` all use that same
+  command-generation model for the dialog-owned region
+- explicit refresh/regenerate lowers to Hyde's ordinary hidden command path instead of
+  using a private routine figure-action transport
 
 The figure-specific meaning of `IR` should stay aligned with Hyde's existing
 state-control language:
@@ -199,7 +204,7 @@ state-control language:
   state/codec pair to generate Python
 - for figures, "IR" is the same kind of canonical internal state representation, but
   it is authoritative in the kernel on the live figure because figures must remain
-  synchronized with live matplotlib objects and future semantic editors
+  synchronized with live matplotlib objects and future figure editors
 
 Saved figure macros are generated from `fig._hyde_ir` only. They lower to ordinary
 object-oriented matplotlib Python source and are written into the project's bounded
@@ -218,7 +223,7 @@ activation so first-class figures reopen through the same figure-building path.
 
 First-class figures carry two distinct kernel-owned figure-edit artifacts:
 
-- `fig._hyde_ir`: the canonical semantic figure state used for editing and regeneration
+- `fig._hyde_ir`: the canonical figure state used for editing and regeneration
 - `fig._hyde_defaults`: a snapshot of the effective matplotlib defaults that were
   current in the kernel for this figure family when the figure was built or refreshed
 
@@ -270,15 +275,14 @@ That session:
 - is plain Python, not a Qt object
 - owns current/opening/revert figure edit state
 - exposes fine-grained getters over first-class figure state
-- exposes generic semantic figure mutators, including trace and attribute-path line
+- exposes generic figure mutators, including trace and attribute-path line
   operations needed by current figure consumers
 - owns preview/source generation
-- owns semantic action construction and dispatch
-- owns live apply, commit, and revert behavior
+- does not own a second transport lifecycle; dialogs execute the emitted hidden or
+  visible Python through Hyde's ordinary command interfaces
 
 Consumer dialogs may wrap those fine-grained getters into higher-level local helpers,
-but they do not treat raw `figure_ir` dictionaries or raw `comm` payloads as their
-edit contract.
+but they do not treat raw `figure_ir` dictionaries as their edit contract.
 
 ## Synchronization
 
@@ -304,13 +308,11 @@ Resize behavior follows this sequence:
 
 Edit behavior follows this sequence:
 
-1. the GUI sends a semantic `comm` action targeting the active figure and supported IR
-   node
-2. the kernel resolves the target figure from registry identity
-3. the kernel mutates `fig._hyde_ir`
-4. the kernel either applies a direct live matplotlib patch or regenerates the figure
-   from IR
-5. the kernel redraws and publishes updated render metadata
+1. the dialog reads imported figure state through the active edit session
+2. the dialog lowers its current draft into a minimal matplotlib patch block
+3. Hyde executes that block through the ordinary hidden or visible command path
+4. the backend resyncs dirty first-class figures from the live matplotlib object graph
+5. the kernel publishes updated render metadata and imported figure snapshot state
 
 Close behavior follows this sequence:
 
@@ -327,6 +329,7 @@ stable subwindow `objectName()` across tool windows, tables, and figures.
 
 - GUI-owned canonical figure state
 - GUI-side parsing or rewriting of figure source for live edits
+- a routine semantic figure-edit `comm` protocol
 - `ProcessTree` as the normal transport for figure edits
 - automatic Hyde figure-window creation for arbitrary non-decorated matplotlib figures
 - a general matplotlib decompiler in the initial deployment

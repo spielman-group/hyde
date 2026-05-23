@@ -9,10 +9,11 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 from hyde.features.matplotlib_features import (
     FigureCodec,
     FigureIRCodec,
+    figure_refresh_command_source,
     figure_ir_apply_title,
 )
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
-from hyde.user_interface.shared.core import HydeGuiState
+from hyde.user_interface.shared.core import HydeGuiState, log_hyde_state_debug
 from hyde.user_interface.shared.figure import (
     FigureEditSession,
     supported_trace_records_from_figure_ir,
@@ -493,7 +494,7 @@ class FigureWindow(HydeInteractiveWidget):
     def request_regenerate_from_ir(self):
         if not self.has_figure_ir():
             return False
-        return self.request_figure_action({"type": "regenerate_from_ir"})
+        return self._execute_refresh_command(use_bound_values=True)
 
     @inmain_decorator()
     def _on_resize_redraw_timeout(self):
@@ -518,14 +519,29 @@ class FigureWindow(HydeInteractiveWidget):
             return False
         self._refresh_in_flight = True
         self._refresh_requested = False
-        requested = self.request_figure_action(
-            {"type": "regenerate_from_ir", "use_bound_values": False}
-        )
+        requested = self._execute_refresh_command(use_bound_values=False)
         if requested:
             self._refresh_timeout_timer.start(self.REFRESH_TIMEOUT_MS)
             return True
         self._clear_refresh_in_flight()
         return False
+
+    def _execute_refresh_command(self, *, use_bound_values):
+        figure_name = self.snapshot_state.default_macro_name() or self.window_handle()
+        command = figure_refresh_command_source(
+            figure_name,
+            use_bound_values=use_bound_values,
+        )
+        log_hyde_state_debug(
+            "FigureRefreshState",
+            {
+                "figure_name": figure_name,
+                "type": "refresh_figure",
+                "use_bound_values": bool(use_bound_values),
+            },
+            command,
+        )
+        return self.execute_hidden_command(command)
 
     def _clear_refresh_in_flight(self):
         self._refresh_timeout_timer.stop()

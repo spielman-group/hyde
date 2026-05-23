@@ -22,7 +22,6 @@ from hyde import project_tools
 from hyde.features.lmfit_features import CALCULATED_X_NAME, LmfitCodec
 from hyde.matplotlib_backend import (
     _import_first_class_figure_ir,
-    apply_figure_action,
     figure_snapshot_payload,
 )
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
@@ -362,25 +361,12 @@ def attach_namespace_view_service(manager, view):
     return service
 
 
-class FakeFigureActionService:
-    def __init__(self, callback=None):
-        self._callback = callback or (lambda figure_number, action: True)
-
-    def request_figure_action(self, figure_number, action):
-        return bool(self._callback(figure_number, action))
-
-
-def make_figure_action_service(callback=None):
-    return FakeFigureActionService(callback)
-
-
 class FakeEditableFigureContext:
-    def __init__(self, *, figure_number=7, figure_ir=None, request_action=None):
+    def __init__(self, *, figure_number=7, figure_ir=None):
         self.figure_number = int(figure_number)
         self._figure_ir = (
             copy.deepcopy(figure_ir_without_traces() if figure_ir is None else figure_ir)
         )
-        self._request_action = request_action or (lambda action: True)
         self._session = FigureEditSession(
             figure_number=self.figure_number,
             figure_ir=self._figure_ir,
@@ -394,9 +380,6 @@ class FakeEditableFigureContext:
 
     def figure_ir(self):
         return copy.deepcopy(self._figure_ir)
-
-    def request_figure_action(self, action):
-        return bool(self._request_action(dict(action or {})))
 
 
 class OpenSessionOnlyFigureContext:
@@ -430,12 +413,7 @@ def attach_figure_context_service(manager, figure_context):
 
 
 def make_figure_window(figure_ir):
-    services = {
-        "figure_action_service": make_figure_action_service(
-            lambda figure_number, action: True
-        )
-    }
-    figure_window = FigureWindow(figure_number=7, services=services)
+    figure_window = FigureWindow(figure_number=7, services={})
 
     class MockSnapshotState:
         def figure_ir(self):
@@ -498,7 +476,6 @@ class AttachedFigureHarness:
         import matplotlib.pyplot as plt
 
         self._pyplot = plt
-        self.action_log = []
         self.namespace = {
             "time": np.array(x_values, copy=True),
             "signal": np.array(y_values, copy=True),
@@ -518,14 +495,7 @@ class AttachedFigureHarness:
             self.namespace["time"],
             self.namespace["signal"],
         )
-        self.figure_window = FigureWindow(
-            figure_number=self.figure.number,
-            services={
-                "figure_action_service": make_figure_action_service(
-                    self._send_figure_action
-                )
-            },
-        )
+        self.figure_window = FigureWindow(figure_number=self.figure.number, services={})
         ATTACHED_FIGURE_HARNESSES.append(self)
         self.refresh_snapshot()
 
@@ -539,17 +509,6 @@ class AttachedFigureHarness:
                 "snapshot": figure_snapshot_payload(self.figure, self.figure.number),
             }
         )
-
-    def _send_figure_action(self, figure_number, action):
-        self.action_log.append(
-            {
-                "figure_number": int(figure_number),
-                "action": dict(action or {}),
-            }
-        )
-        apply_figure_action(self.figure, action)
-        self.refresh_snapshot()
-        return True
 
     def close(self):
         if self in ATTACHED_FIGURE_HARNESSES:
@@ -2179,12 +2138,10 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.suppress_screen_updates_checkbox.setChecked(False)
             QtWidgets.QApplication.processEvents()
             harness.execution_service.calls.clear()
-            attached_figure.action_log.clear()
 
             dialog.show_residuals_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
 
-            self.assertEqual(attached_figure.action_log, [])
             self.assertTrue(harness.execution_service.calls)
             command = harness.execution_service.calls[-1]["code"]
             self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", command)
@@ -2523,6 +2480,75 @@ class TestCurveFitPlugin(unittest.TestCase):
         self.assertIn("curve_fit_attached_display", output)
         self.assertIn("python:", output)
 
+    def test_curve_fit_dialog_attached_preview_edit_uses_one_hidden_logged_command_block(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            self.assertEqual(dialog.execution_mode(), "suppressed")
+            harness.execution_service.calls.clear()
+
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                finish_line_edit(
+                    coefficient_row_widgets(dialog, "offset")["initial"],
+                    "0.5",
+                )
+
+            self.assertEqual(len(harness.execution_service.calls), 1)
+            command = harness.execution_service.calls[-1]["code"]
+            self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", command)
+            self.assertIn(".best_fit = line_fit(", command)
+            self.assertIn(".residual = signal - ", command)
+
+            output = "\n".join(logs.output)
+            self.assertIn("[Hyde state] FigurePatchState", output)
+            self.assertIn("curve_fit_attached_display", output)
+            self.assertIn(".best_fit = line_fit(", output)
+            self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", output)
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_attached_live_update_uses_one_attached_display_command_block(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            harness.execution_service.calls.clear()
+
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(dialog.execution_mode(), "live")
+            self.assertEqual(len(harness.execution_service.calls), 2)
+            self.assertNotIn(
+                "fig = hyde.get_figure('CurveFitAttachedFigure')",
+                harness.execution_service.calls[0]["code"],
+            )
+            self.assertIn(
+                "fig = hyde.get_figure('CurveFitAttachedFigure')",
+                harness.execution_service.calls[1]["code"],
+            )
+            self.assertIn(".best_fit = line_fit(", harness.execution_service.calls[1]["code"])
+            self.assertIn(".residual = signal - ", harness.execution_service.calls[1]["code"])
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
     def test_curve_fit_dialog_cancel_from_blank_opening_state_removes_introduced_attached_display_for_implicit_x(
         self,
     ):
@@ -2652,7 +2678,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_curve_fit_dialog_reopen_with_hidden_legend_preserves_hidden_legend_state(
+    def test_curve_fit_dialog_reopen_after_hidden_command_legend_change_preserves_hidden_legend_state(
         self,
     ):
         attached_figure = AttachedFigureHarness(
@@ -2671,12 +2697,13 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.accept()
             dialog.close()
 
-            attached_figure.figure_window.request_figure_action(
-                {
-                    "type": "set_legend_visible",
-                    "subplot_id": "subplot0",
-                    "visible": False,
-                }
+            self.assertTrue(
+                harness.execution_service.execute_hidden(
+                    "fig = hyde.get_figure('CurveFitAttachedFigure')\n"
+                    "legend = fig.axes[0].get_legend()\n"
+                    "if legend is not None:\n"
+                    "    legend.set_visible(False)"
+                )
             )
             hidden_legend_subplot = attached_figure.figure_window.snapshot_state.figure_ir()[
                 "layout"

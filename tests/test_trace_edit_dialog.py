@@ -21,14 +21,6 @@ from hyde.user_interface.shared.plugin import HydePluginManager
 _DEFAULT_FIGURE_IR = object()
 
 
-class FakeFigureActionService:
-    def __init__(self, callback=None):
-        self._callback = callback or (lambda figure_number, action: True)
-
-    def request_figure_action(self, figure_number, action):
-        return bool(self._callback(figure_number, action))
-
-
 class FakeExecutionService:
     def __init__(self):
         self.hidden_calls = []
@@ -45,11 +37,6 @@ class FakeVisibleTerminalService:
     def execute_visible(self, code):
         self.visible_calls.append(str(code))
         return True
-
-
-def make_figure_action_service(callback=None):
-    return FakeFigureActionService(callback)
-
 
 def make_plugin_host(plugin_manager):
     main_window = QtWidgets.QMainWindow()
@@ -165,9 +152,6 @@ def make_active_figure_window(
     figure_defaults=None,
 ):
     services = dict(services)
-    if "figure_action_service" not in services:
-        send_figure_action = services.pop("send_figure_action", None)
-        services["figure_action_service"] = make_figure_action_service(send_figure_action)
     figure = FigureWindow(figure_number=7, services=services)
     subwindow = mdi_area.addSubWindow(figure)
     figure.bind_subwindow(subwindow)

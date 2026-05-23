@@ -1439,11 +1439,6 @@ def apply_figure_action(figure, action):
         figure.set_size_inches(width / figure.dpi, height / figure.dpi, forward=False)
         figure.canvas.draw_idle()
         return figure
-    if action_type == "regenerate_from_ir":
-        return regenerate_figure_from_ir(
-            figure,
-            use_bound_values=bool(action.get("use_bound_values", True)),
-        )
     raise ValueError(f"Unsupported figure action: {action_type!r}.")
 
 

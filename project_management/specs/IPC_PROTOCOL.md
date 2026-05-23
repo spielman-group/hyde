@@ -316,8 +316,10 @@ This is the user's visible interactive console session.
 ### Important boundary
 - Hyde should not inject kernel-runtime-controlled background execution through this session
 - the Python Terminal is for visible user interaction, not for replaying `procedures/__init__.py`
-- routine figure GUI edits do not travel through this session; they use semantic Jupyter
-  `comm` actions against kernel-owned figure state
+- routine figure GUI edits are not dispatched through the visible terminal session
+- `To Cmd Line` may emit the same canonical figure-edit block visibly, but hidden GUI
+  figure edits execute through Lane 2B rather than through the user's interactive
+  prompt
 
 ## Lane 2B: Kernel Runtime -> Kernel (Background Control Session)
 
@@ -348,11 +350,12 @@ and `hyde.save_project(...)` command paths. `hyde.load_project(...)` emits
 `ENTER_NO_PROJECT_STATE`, `ACTIVATE_PROJECT`, and `PROJECT_STATE_RESULT` messages as
 needed.
 
-## Lane 2C: GUI Figure Windows <-> Kernel (Semantic Figure `comm` Session)
+## Lane 2C: GUI Figure Windows <-> Kernel (Figure Metadata And Narrow Control `comm`)
 
 ### Purpose
-This lane carries figure metadata publication and semantic figure edit actions for Hyde
-figure windows. Only first-class `@hyde.figure` figures participate in this lane.
+This lane carries figure metadata publication plus the remaining narrow non-command
+figure-window control traffic for Hyde figure windows. Only first-class
+`@hyde.figure` figures participate in this lane.
 
 ### Authority model
 - the live kernel matplotlib `Figure` is the runtime truth
@@ -365,8 +368,9 @@ figure windows. Only first-class `@hyde.figure` figures participate in this lane
 - a first-class figure is guaranteed to have a kernel-owned figure IR and associated
   figure-local artifacts
 - non-decorated figures do not open Hyde GUI figure windows in this deployment
-- non-decorated figures therefore do not participate in semantic figure editing or
-  IR-driven graph-macro generation through the GUI figure-window path
+- non-decorated figures therefore do not participate in first-class command-driven
+  figure editing or IR-driven graph-macro generation through the GUI figure-window
+  path
 
 ### Figure-local kernel artifacts
 First-class figures may carry artifacts such as:
@@ -380,26 +384,28 @@ captured artifacts are auxiliary and do not outrank the IR once the figure exist
 
 ### Responsibilities
 - publish figure metadata and rendered-image updates from the kernel to the GUI
-- accept semantic figure edit actions from the GUI over Jupyter `comm`
-- resolve target figures through the matplotlib global registry identity
-- mutate the authoritative figure IR and the live figure transactionally
-- redraw the live figure after accepted edits
-- support explicit regenerate-from-IR requests as a debug path
+- accept only bounded figure-window control requests that are still allowed to bypass
+  the command path
+- resolve target figures through the matplotlib global registry identity when those
+  bounded control requests arrive
+- redraw the live figure after accepted bounded control requests
 
-### Semantic action examples
-Routine GUI figure edits are semantic actions rather than ad hoc Python snippets. The
-action vocabulary includes operations such as:
-- set axis limits
-- set axis labels
-- set figure or subplot title
-- mutate trace styling
-- toggle legend
-- request explicit regenerate-from-IR
+### Current bounded control examples
+The accepted scope of this lane is intentionally narrow:
+- publish figure snapshot metadata and rendered-image updates
+- handle `resize_redraw` so viewport-driven resize feedback does not require emitted
+  Python
+
+Routine GUI figure edits do not use this lane. Axis editing, trace appearance
+editing, Curve Fit attached display, and explicit refresh/regenerate all emit hidden
+Python through Lane 2B using standard matplotlib calls after `hyde.get_figure(...)`
+or bounded Hyde figure helpers such as `hyde.refresh_figure(...)`.
 
 ### Important boundary
-- figure edit actions are a private Hyde protocol in this deployment, not a public
-  user-facing kernel API
-- routine figure editing does not use `ProcessTree`
+- this is not a general-purpose figure edit lane
+- `resize_redraw` is a bounded exception, not evidence of a second routine figure
+  mutation architecture
+- routine figure editing still does not use `ProcessTree`
 - routine figure editing does not depend on the GUI owning canonical plot state
 - saved graph macros are generated from the authoritative figure IR and exposed back to
   the GUI through the existing window-macro registry path

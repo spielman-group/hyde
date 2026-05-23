@@ -38,7 +38,11 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   subset in `session.py`, so the window reopens instead of disappearing entirely.
 - Axis, trace, and Curve Fit attached-display dialogs now mutate first-class figures
   through hidden matplotlib patch Python routed over Hyde's standard hidden-command
-  execution/logging path.
+  execution/logging path, and Curve Fit attached live/preview uses the same
+  command-generation model as `Do It` / `To Cmd Line`.
+- Explicit first-class figure refresh/regenerate now uses the same hidden
+  command-driven path; only viewport `resize_redraw` stays on the narrow backend
+  control lane.
 - For detailed figure ownership and transport rules, see `ARCHITECTURE.md`.
 
 ### Curve Fit
@@ -49,7 +53,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - `New Fit Function...` appends a minimal valid scaffold to `procedures/__init__.py`,
   reloads procedures, refreshes the catalog, and keeps the dialog open on success.
 - Curve Fit preview/commit uses one GUI-side coefficient model over kernel-owned fit
-  results and attached figure state.
+  results and attached figure state, with attached-display preview/live logging
+  routed through Hyde's ordinary hidden-command debug path.
 
 ### Project persistence
 - Kernel objects save to `manifest.toml` + `data/`.

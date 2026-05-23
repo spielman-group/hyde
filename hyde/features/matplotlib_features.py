@@ -99,6 +99,19 @@ def _macro_ready_lines(lines):
     return [line for line in lines if line.strip() != "fig.canvas.draw_idle()"]
 
 
+def figure_refresh_command_source(figure_name, *, use_bound_values=False):
+    normalized_name = str(figure_name or "").strip()
+    if not normalized_name:
+        raise ValueError("Figure refresh requires a stable first-class figure name.")
+    return "\n".join(
+        [
+            "import hyde",
+            f"fig = hyde.get_figure({normalized_name!r})",
+            f"hyde.refresh_figure(fig, use_bound_values={bool(use_bound_values)!r})",
+        ]
+    )
+
+
 class FigureCodec(FeatureCodec):
     feature_name = "figure"
     state_version = 1

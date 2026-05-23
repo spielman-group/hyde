@@ -1,11 +1,11 @@
 # Remove from Graph Dialog Specification
 
 ## Feature Checklist
-- [x] Present a Hyde-native modal `Remove from Graph` dialog for the active figure.
-- [x] Remove one or more supported plotted traces from the authoritative live kernel
+- [ ] Present a Hyde-native modal `Remove from Graph` dialog for the active figure.
+- [ ] Remove one or more supported plotted traces from the authoritative live kernel
   figure.
-- [x] Support list filtering and multi-selection before confirmation.
-- [x] Preserve the broad Igor-style shell with type selector, candidate list, lower
+- [ ] Support list filtering and multi-selection before confirmation.
+- [ ] Preserve the broad Igor-style shell with type selector, candidate list, lower
   preview/status pane, and footer actions.
 - [ ] Support image-plot removal.
 - [ ] Support contour-plot removal.
@@ -13,12 +13,12 @@
 
 ## Purpose
 
-The `Remove from Graph` dialog removes supported plotted objects from the active
-first-class Hyde figure.
+This document describes the intended command-driven `Remove from Graph` dialog for the
+active first-class Hyde figure. Hyde does not currently ship this dialog.
 
-In the initial deployment, "supported plotted objects" means supported line traces from
-the current first-class figure IR. The dialog is a confirmed destructive action
-surface, not a live-update editor and not a visible-terminal command surface.
+In the intended initial deployment, "supported plotted objects" means supported line
+traces from the current first-class figure IR. The dialog is a confirmed destructive
+action surface, not a live-update editor.
 
 The authoritative removal target is always the active live kernel `Figure` plus its
 kernel-owned `fig._hyde_ir`. The GUI owns only transient list state, filtering state,
@@ -32,15 +32,16 @@ The initial deployment includes:
 - listing supported removable trace targets from the active figure IR
 - filtering the candidate list by displayed trace metadata
 - selecting one or more supported traces
-- previewing the pending removal as Hyde-native read-only status text
+- previewing the pending removal as Hyde-generated read-only matplotlib patch source or
+  validation text
 - confirming removal through `Do It`
+- emitting the same removal patch through `To Cmd Line`
 - copying the current preview/status text through `To Clip`
 
 The initial deployment does not include:
 
 - removing image plots
 - removing contour plots or contour sub-traces
-- direct execution through the visible Python terminal
 - automatic removal of axis structure when the final trace is removed
 - arbitrary matplotlib artist removal outside Hyde's supported trace surface
 
@@ -71,7 +72,7 @@ ASCII layout sketch:
 | | Remove 1 trace: fracneg1_9                                         | |
 | +--------------------------------------------------------------------+ |
 |                                                                        |
-| [Do It] [To Cmd Line disabled] [To Clip] [Help]             [Cancel]   |
+| [Do It] [To Cmd Line] [To Clip] [Help]                      [Cancel]   |
 +------------------------------------------------------------------------+
 ```
 
@@ -96,8 +97,7 @@ pane as an executable command editor.
 - lower preview/status pane: `active`
   - read-only only
 - `Do It`: `active`
-- `To Cmd Line`: `inert-but-visible`
-  - disabled in the initial deployment
+- `To Cmd Line`: `active`
 - `To Clip`: `active`
 - `Help`: `inert-but-visible`
 - `Cancel`: `active`
@@ -137,7 +137,7 @@ Initial live operations are:
   - is confirmed, not live-on-selection
 
 The Python-level effect of a successful removal is that the corresponding supported
-trace entries disappear from the active first-class figure's semantic trace list and
+trace entries disappear from the active first-class figure's trace list and
 their live matplotlib line artists are removed from the rendered figure.
 
 Invalid or unsupported states behave as follows:
@@ -151,24 +151,27 @@ Invalid or unsupported states behave as follows:
 
 ## Command Generation
 
-The dialog does not generate visible-terminal commands for routine figure removal.
+If Hyde implements this dialog, routine figure removal should follow the same
+command-driven model as the shipped axis, trace, and Curve Fit attached-display
+surfaces.
 
-On `Do It`, the GUI resolves the selected stable trace IDs from the active figure
-context and dispatches bounded semantic figure-removal actions through Hyde's existing
-figure `comm` path. The implementation may send one action per selected trace or a
-single bounded batch action, but it must identify targets by stable Hyde trace IDs and
-must not fall back to GUI-generated matplotlib source.
+On `Do It`, the GUI should resolve the selected stable trace IDs from the active
+figure context and emit one bounded matplotlib patch block against
+`hyde.get_figure(...)`. `To Cmd Line` should emit that same canonical block visibly.
+The implementation may remove one selected trace per line or generate one bounded
+block for the full selection, but it should not invent a second figure-edit
+transport.
 
 The lower pane shows Hyde-native preview/status text only:
 
-- when the selection is valid, it summarizes which supported targets will be removed
+- when the selection is valid, it shows the current removal patch block
 - when the state is invalid or unsupported, it shows validation/status text
 - it is never authoritative state
 - it is never a command log
 - it is never executed directly
 
-`To Clip` copies the current preview/status text only. `To Cmd Line` remains disabled
-and does not dispatch any action.
+`To Clip` copies the current preview/status text only. `To Cmd Line` emits the same
+canonical removal block shown in the lower pane.
 
 ## Synchronization
 
@@ -183,8 +186,8 @@ Synchronization rules are:
 - list rows are keyed by stable Hyde trace IDs rather than by row position
 - when the live figure changes while the dialog is open, the dialog refreshes from the
   current figure state before applying removal and drops stale selections
-- successful removal triggers the ordinary figure refresh/redraw path for the active
-  figure window
+- successful removal triggers the ordinary figure redraw plus backend resync path for
+  the active figure window
 
 The GUI never becomes the owner of plotted data arrays, live matplotlib artists, or the
 canonical list of plotted objects.
@@ -194,8 +197,8 @@ canonical list of plotted objects.
 - removing image plots in the initial deployment
 - removing contour plots or contour levels in the initial deployment
 - automatic axis deletion when the final plotted item on an axis is removed
-- visible-terminal execution through `To Cmd Line`
-- GUI-side direct mutation of live matplotlib artists without the semantic figure path
+- GUI-side direct mutation of live matplotlib artists without the command-driven
+  figure-edit path
 - support for non-first-class figures outside Hyde's figure-window system
 - direct hit-testing or canvas-click removal entry points in the initial deployment
 

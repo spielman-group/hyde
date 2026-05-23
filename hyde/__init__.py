@@ -699,14 +699,27 @@ def get_figure(name):
     return get_first_class_figure(name)
 
 
-def refresh_figure(figure):
-    from .matplotlib_backend import apply_figure_action
+def refresh_figure(figure, *, use_bound_values=False):
+    """
+    Regenerate a first-class Hyde figure from its kernel-owned figure IR.
+
+    Parameters
+    ----------
+    figure:
+        A live matplotlib figure object or a figure manager number resolvable to
+        a live figure.
+    use_bound_values:
+        When true, prefer the currently bound runtime operand values already stored
+        on the live figure IR. When false, re-resolve operands from the current
+        kernel namespace where possible.
+    """
+    from .matplotlib_backend import regenerate_figure_from_ir
 
     resolved_figure = _resolve_matplotlib_figure(figure)
     if getattr(resolved_figure, "_hyde_is_first_class", False):
-        apply_figure_action(
+        regenerate_figure_from_ir(
             resolved_figure,
-            {"type": "regenerate_from_ir", "use_bound_values": False},
+            use_bound_values=bool(use_bound_values),
         )
         return resolved_figure
     return None
