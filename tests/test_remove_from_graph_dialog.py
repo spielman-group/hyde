@@ -18,6 +18,9 @@ from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live
 from hyde.matplotlib_backend import figure_snapshot_payload
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
+from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
+    TraceAppearanceDialog,
+)
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
@@ -308,8 +311,11 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             preview = dialog.preview_string()
             self.assertEqual(dialog.lower_text_edit.toPlainText(), preview)
             self.assertIn("fig = hyde.get_figure('Figure0')", preview)
-            self.assertIn("_hyde_trace_id', None) == 'trace0'", preview)
-            self.assertIn("_hyde_trace_id', None) == 'trace1'", preview)
+            self.assertIn("hyde.remove_traces(fig, 'trace0', 'trace1')", preview)
+            self.assertNotIn("fig._hyde_ir", preview)
+            self.assertNotIn("_figure_defaults_snapshot", preview)
+            self.assertNotIn("ax.legend()", preview)
+            self.assertNotIn("ax.get_legend()", preview)
             self.assertTrue(dialog.do_it_button.isEnabled())
             self.assertTrue(dialog.to_cmd_line_button.isEnabled())
             self.assertTrue(dialog.to_clip_button.isEnabled())
@@ -373,6 +379,126 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
                 [getattr(line, "_hyde_trace_id", None) for line in live_figure.axes[0].lines],
                 ["trace1"],
             )
+            self.assertEqual(
+                tuple(
+                    trace["id"]
+                    for trace in live_figure._hyde_ir["layout"]["subplots"][0]["traces"]
+                ),
+                ("trace1",),
+            )
+            self.assertEqual(
+                tuple(
+                    trace["id"]
+                    for trace in figure_snapshot_payload(live_figure, 7)["figure_ir"][
+                        "layout"
+                    ]["subplots"][0]["traces"]
+                ),
+                ("trace1",),
+            )
+        finally:
+            dialog.close()
+            live_figure.canvas.manager.destroy()
+
+    def test_backend_payload_after_remove_unblocks_next_trace_dialog(self):
+        live_figure, snapshot = make_live_first_class_figure()
+        execution = EvaluatingExecutionService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure_window = FigureWindow(
+            figure_number=7,
+            services={
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+        subwindow = mdi_area.addSubWindow(figure_window)
+        figure_window.bind_subwindow(subwindow)
+        subwindow.show()
+        figure_window.update_payload(
+            {
+                "figure_number": 7,
+                "title": "Figure0",
+                "snapshot": snapshot,
+            }
+        )
+
+        dialog = RemoveFromGraphDialog(
+            EditableFigureContext(figure_window),
+            services=figure_window.services,
+            parent=mdi_area,
+        )
+        try:
+            dialog.ui.trace_list.item(0).setSelected(True)
+            self.qapp.processEvents()
+            dialog.do_it_button.click()
+
+            figure_window.update_payload(
+                {
+                    "figure_number": 7,
+                    "title": "Figure0",
+                    "snapshot": figure_snapshot_payload(live_figure, 7),
+                }
+            )
+
+            trace_dialog = TraceAppearanceDialog(
+                EditableFigureContext(figure_window),
+                services=figure_window.services,
+                parent=mdi_area,
+            )
+            try:
+                self.assertEqual(trace_dialog.ui.trace_list.count(), 1)
+                self.assertEqual(
+                    trace_dialog.ui.trace_list.item(0).text(),
+                    "trace_b: trace_b vs x",
+                )
+                self.assertEqual(
+                    trace_dialog.supported_trace_records()[0]["trace_id"],
+                    "trace1",
+                )
+            finally:
+                trace_dialog.close()
+        finally:
+            dialog.close()
+            live_figure.canvas.manager.destroy()
+
+    def test_do_it_does_not_remove_existing_live_legend(self):
+        live_figure, snapshot = make_live_first_class_figure()
+        live_figure.axes[0].legend()
+        execution = EvaluatingExecutionService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure_window = FigureWindow(
+            figure_number=7,
+            services={
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+        subwindow = mdi_area.addSubWindow(figure_window)
+        figure_window.bind_subwindow(subwindow)
+        subwindow.show()
+        figure_window.update_payload(
+            {
+                "figure_number": 7,
+                "title": "Figure0",
+                "snapshot": snapshot,
+            }
+        )
+
+        dialog = RemoveFromGraphDialog(
+            EditableFigureContext(figure_window),
+            services=figure_window.services,
+            parent=mdi_area,
+        )
+        try:
+            self.assertIsNotNone(live_figure.axes[0].get_legend())
+            dialog.ui.trace_list.item(0).setSelected(True)
+            self.qapp.processEvents()
+
+            dialog.do_it_button.click()
+
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+            self.assertIsNotNone(live_figure.axes[0].get_legend())
         finally:
             dialog.close()
             live_figure.canvas.manager.destroy()
@@ -507,7 +633,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
                 dialog.selected_supported_trace_ids(dialog.ui.trace_list),
                 ("trace1",),
             )
-            self.assertNotIn("_hyde_trace_id', None) == 'trace0'", dialog.preview_string())
-            self.assertIn("_hyde_trace_id', None) == 'trace1'", dialog.preview_string())
+            self.assertNotIn("'trace0'", dialog.preview_string())
+            self.assertIn("hyde.remove_traces(fig, 'trace1')", dialog.preview_string())
         finally:
             dialog.close()

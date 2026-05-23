@@ -1,78 +1,151 @@
 ---
 name: hyde-code-review
-description: Review Hyde diffs, pull requests, and local changes using Hyde-specific architectural standards in addition to normal code review behavior. Use when Codex reviews Hyde application code, tests, or specs and must enforce the smallest clear patch rule, the `features/..._features.py` command-generation boundary, Hyde's kernel-authoritative command-driven model, and concise contract-focused tests.
+description: Audit finished Hyde work for runtime design-document violations, missed reuse and refactor seams, and a PRD-ready path forward. Use at the end of a feature, refactor, or bugfix when Codex should inspect the changed area against Hyde docs, prefer runtime evidence where possible, and optionally hand off the resulting path forward to to-prd.
 ---
 
 # Hyde Code Review
 
-Use this skill to add Hyde architectural enforcement on top of the default review behavior.
+Use this skill at the end of Hyde development work.
 
-Keep the normal review structure: findings first, ordered by severity, with file/line references where available. Treat Hyde-compliance failures as real findings even when the patch appears functionally correct.
+This is a report-only audit skill. It does not instruct the agent to make fixes. Its
+job is to:
+
+1. find runtime design-document violations first
+2. find missed reuse and refactor opportunities second
+3. design a PRD-ready path forward
+
+If the task is to shrink a plan or patch rather than audit it, use `hyde-simplify`
+instead.
 
 ## Required Context
 
-Read these Markdown sources before finalizing a review:
+Read these Markdown sources every time:
 
 1. `AGENTS.md`
 2. `project_management/ARCHITECTURE.md`
-3. `project_management/STYLE.md`
-4. `project_management/PLAN.md`
-5. `project_management/STATUS.md`
-6. [references/hyde-review-standards.md](references/hyde-review-standards.md)
+3. `project_management/IR-CONTROL.md`
+4. `project_management/STYLE.md`
+5. `project_management/PLAN.md`
+6. `project_management/STATUS.md`
+7. [references/hyde-review-standards.md](references/hyde-review-standards.md)
 
-Then read only the relevant feature/spec Markdown files for the patch under review. Prioritize:
+Then read the feature/spec docs for the changed area only. Expand to nearby features
+only when the audit reveals a real cross-feature seam.
 
-- `project_management/specs/IPC_PROTOCOL.md`
-- `project_management/specs/python_terminal/SPEC.md`
-- `project_management/specs/project_save_load/SPEC.md`
-- `project_management/specs/new_table_dialog/SPEC.md`
-- `project_management/specs/data_browser/SPEC.md`
-- `project_management/specs/table/SPEC.md`
+Do not restate Hyde policy from memory when the Markdown docs can be cited directly.
 
-Prefer Hyde's Markdown architecture and spec files over legacy implementation details. Do not excuse a patch by appealing to existing non-compliant code.
+## Default Scope
 
-## Review Posture
+Start with the changed area plus nearby impacted code.
 
-- Start from the normal code review posture: find bugs, regressions, architectural risks, and missing tests.
-- Elevate over-complexity, command-path violations, split ownership, and non-minimal design to the same level as correctness issues.
-- Review tests with the same rigor as application code.
-- Bias toward narrow, local fixes that preserve Hyde's documented architecture.
+Do a broader sweep only when:
 
-## Hyde Review Questions
+- the user asks for one
+- the first pass reveals a repeated runtime violation pattern
+- the first pass reveals a repeated missed shared seam
 
-Ask these questions explicitly while reviewing:
+## Evidence First
 
-- Is this the smallest clear change?
-- Has the patch kept static dialog/window structure in `.ui` files where Hyde expects
-  `.ui`-first layout ownership?
-- Does the GUI only generate command strings and react to kernel results?
-- Are GUI-triggered kernel command strings generated in `features/..._features.py` rather than in GUI widgets, dialogs, or runtime helpers?
-- Is there exactly one authoritative implementation path?
-- Does the patch follow the ownership, identity, and presentation rules already
-  established in the docs and active spec instead of inventing local exceptions?
-- Does the patch preserve Hyde's two-process, command-driven model?
-- Are the tests concise and aligned with intended behavior rather than incidental structure?
+Prefer runtime evidence over static suspicion whenever practical:
 
-## Findings To Raise
+- run targeted tests
+- inspect emitted command strings
+- trace the live execution path
+- verify actual GUI or backend behavior when that is the contract
 
-Raise findings for any of the following:
+Use static code inspection to explain or extend a finding, not to replace available
+runtime evidence.
 
-- unnecessary abstractions, speculative refactors, broad cleanups, extra state machines, or single-use helpers that are not required for the task
-- large static dialog or tool-window layouts hand-built in Python when they should be
-  defined in `.ui` files, unless there is a clear runtime-widget exception
-- GUI-built kernel command strings outside the `features/..._features.py` translation layer
-- direct imperative GUI-to-backend behavior where Hyde should have used a visible or deliberate kernel command path
-- patches that create separate GUI and non-GUI implementations of the same feature
-- patches that restate or locally override feature policy already settled in the docs
-  or active spec without a deliberate documented contract change
-- backend or kernel ownership drifting into the GUI layer
-- redundant state, compatibility shims, defensive policy, or fallback behavior that Hyde did not request
-- tests that are verbose, brittle, tightly coupled to helper structure, or written around workaround behavior instead of Hyde's intended contract
+## Audit Workflow
+
+### 1. Runtime Boundary Violations
+
+Inspect the changed area first for live Hyde seam violations.
+
+Priorities:
+
+- runtime ownership violations
+- command-path violations
+- translation-boundary violations
+- split authoritative paths
+- GUI/kernel drift that is visible in running behavior
+
+Order this section by runtime severity. For each item, include:
+
+- the concrete problem
+- the evidence
+- the file reference
+- the governing Hyde doc, to the extent possible
+
+### 2. Reuse And Refactor Opportunities
+
+After the runtime pass, do a second deliberate pass for duplicated behavior and missed
+shared seams, even when the code is otherwise legal.
+
+Focus first on clear, near-term consolidations justified by the changed area.
+
+If the local audit exposes a deeper architectural opportunity, include it here or in
+the next section, but keep it separate from the immediate cleanup path.
+
+For this section, and for the deeper architecture part of the next section, use the
+shared vocabulary from:
+
+- `/Users/ispielma/.agents/skills/improve-codebase-architecture/LANGUAGE.md`
+
+Use that vocabulary only when discussing reuse, refactoring, seams, leverage, depth,
+and locality. Use plain Hyde language for runtime violations.
+
+### 3. Path Forward
+
+Produce a PRD-ready path forward, not just a generic recommendation.
+
+Each path-forward item should make clear:
+
+- what seam or ownership location should change
+- what should consolidate
+- what should stay where it is
+- what the narrow next step is
+- whether the item is near-term cleanup or a deeper follow-on opportunity
+
+Keep this section shaped so it can hand off cleanly into `to-prd` and then
+`to-issues`.
+
+## Parallel Exploration
+
+When subagents are available, parallelize only across distinct audit surfaces such as:
+
+- runtime evidence gathering
+- nearby-code reuse and refactor exploration
+
+Do not split one tight reasoning thread across multiple subagents for no gain.
+
+## Output Structure
+
+Always use these three sections in this order:
+
+1. `Runtime Boundary Violations`
+2. `Reuse And Refactor Opportunities`
+3. `Path Forward`
+
+If a section has no items, say so explicitly.
 
 ## Output Rules
 
-- Present findings first.
-- Keep summaries brief and secondary.
-- If no findings are discovered, say so explicitly and note any residual risk or testing gaps.
-- When a review concern is architectural rather than purely functional, say that directly.
-- When appropriate, cite the Hyde Markdown document that establishes the requirement.
+- In `Runtime Boundary Violations`, order items by runtime severity.
+- Prefer concrete evidence and file references.
+- Cite the governing Hyde Markdown doc for each item to the extent possible.
+- Do not restate Hyde design-document content when a direct document reference is
+  enough.
+- Treat architecturally wrong live behavior as a real finding even if tests happen to
+  pass.
+- Keep the report concise and actionable.
+- End by asking whether to turn the `Path Forward` section into a PRD with `to-prd`.
+
+## Boundaries
+
+- This skill is report-only.
+- Do not silently broaden into a repo-wide architecture survey unless the user asks or
+  the local audit clearly justifies it.
+- Do not turn the report into a rewrite plan for every possible improvement.
+- Do not duplicate Hyde document content inside the audit when citing the doc is
+  sufficient.

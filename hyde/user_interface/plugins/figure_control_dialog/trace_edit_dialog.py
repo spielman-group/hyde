@@ -41,6 +41,7 @@ MARKER_CHOICES = [
 
 class TraceAppearanceDialog(HydeFigureDialogWidget):
     figure_patch_command_name = "trace_style_edit"
+    live_update_always_enabled = True
 
     def __init__(self, figure_context, services=None, parent=None):
         self._loading_controls = False
@@ -186,7 +187,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
             replace=replace,
             style=dict(patch),
         )
-        if not self.apply_current_figure_patch(mode="live_update"):
+        if not self.apply_live_update_figure_patch(mode="live_update"):
             return False
         if trace_id == self._current_trace_id():
             self._update_color_field_previews(trace_id)

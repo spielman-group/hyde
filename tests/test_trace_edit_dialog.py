@@ -409,7 +409,44 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             remove_dialog.close()
             trace_dialog.close()
 
-    def test_live_applied_trace_state_clears_preview_and_send_to_cmd_line(self):
+    def test_live_applied_trace_state_keeps_last_patch_preview_and_do_it_only_closes(self):
+        execution = FakeExecutionService()
+        terminal = FakeVisibleTerminalService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": terminal,
+            },
+        )
+
+        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
+        try:
+            dialog.ui.line_color_edit.setText("#abcdef")
+            dialog.ui.line_color_edit.editingFinished.emit()
+
+            preview = dialog.lower_text_edit.toPlainText()
+            self.assertIn("line.set_color('#abcdef')", preview)
+            self.assertNotIn("fig._hyde_ir", preview)
+            self.assertNotIn("_figure_defaults_snapshot", preview)
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+
+            dialog.to_cmd_line_button.click()
+            self.assertEqual(terminal.visible_calls[-1], preview)
+
+            hidden_count = len(execution.hidden_calls)
+            dialog.do_it_button.click()
+            self.assertEqual(len(execution.hidden_calls), hidden_count)
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+        finally:
+            dialog.close()
+
+        self.assertTrue(execution.hidden_calls)
+        self.assertIn("line.set_color('#abcdef')", execution.hidden_calls[-1][0])
+
+    def test_live_update_reverting_trace_to_opening_state_clears_preview(self):
         execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
@@ -421,23 +458,55 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             },
         )
 
-        dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
+        dialog = TraceAppearanceDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            dialog.ui.line_color_edit.setText("#abcdef")
+            dialog.ui.line_color_edit.editingFinished.emit()
+            preview = dialog.lower_text_edit.toPlainText()
+            self.assertIn("line.set_color('#abcdef')", preview)
+
+            dialog.ui.line_color_edit.setText("#123456")
+            dialog.ui.line_color_edit.editingFinished.emit()
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), "")
+            self.assertEqual(dialog.preview_string(), "")
+        finally:
+            dialog.close()
+
+    def test_trace_preview_does_not_remove_hidden_legend_for_style_only_edit(self):
+        execution = FakeExecutionService()
+        terminal = FakeVisibleTerminalService()
+        mdi_area = QtWidgets.QMdiArea()
+        single_trace_ir = figure_ir_from_live_state(make_live_state(items=("trace_a",)))
+        single_trace_ir = FigureIRCodec.validate_state(single_trace_ir)
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": terminal,
+            },
+            figure_ir=single_trace_ir,
+        )
+
+        dialog = TraceAppearanceDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
         try:
             dialog.ui.line_color_edit.setText("#abcdef")
             dialog.ui.line_color_edit.editingFinished.emit()
 
             preview = dialog.lower_text_edit.toPlainText()
-            self.assertEqual(preview, "")
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-
-            hidden_count = len(execution.hidden_calls)
-            dialog.do_it_button.click()
-            self.assertEqual(len(execution.hidden_calls), hidden_count)
+            self.assertIn("line.set_color('#abcdef')", preview)
+            self.assertNotIn("ax.legend()", preview)
+            self.assertNotIn("ax.get_legend()", preview)
         finally:
             dialog.close()
-
-        self.assertTrue(execution.hidden_calls)
-        self.assertIn("line.set_color('#abcdef')", execution.hidden_calls[-1][0])
 
     def test_trace_dialog_seeds_from_figure_defaults(self):
         mdi_area = QtWidgets.QMdiArea()

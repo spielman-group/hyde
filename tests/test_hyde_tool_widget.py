@@ -360,6 +360,7 @@ class TestHydeToolWidget(unittest.TestCase):
             figure_context=figure_context,
             services={"python_execution_service": execution_service},
         )
+        dialog.live_update_always_enabled = True
 
         try:
             expected_patch = dialog.figure_patch_source(
@@ -379,11 +380,15 @@ class TestHydeToolWidget(unittest.TestCase):
 
             self.assertEqual(dialog.preview_string(), expected_patch)
             self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_patch)
-            self.assertTrue(dialog.apply_current_figure_patch(mode="live_update"))
+            self.assertTrue(dialog.apply_live_update_figure_patch(mode="live_update"))
             self.assertEqual(
                 execution_service.hidden_calls[-1],
                 (expected_patch, True),
             )
+            self.assertEqual(dialog.preview_string(), expected_patch)
+
+            session.set_current_effective_state(opening_state)
+            self.assertTrue(dialog.apply_live_update_figure_patch(mode="live_update"))
             self.assertEqual(dialog.preview_string(), "")
 
             dialog.reject()

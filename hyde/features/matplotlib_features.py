@@ -1964,7 +1964,14 @@ def _figure_patch_add_trace_lines(trace):
     ]
 
 
-def figure_patch_source(source_state, target_state, *, figure_name, refresh_trace_ids=()):
+def figure_patch_source(
+    source_state,
+    target_state,
+    *,
+    figure_name,
+    refresh_trace_ids=(),
+    refresh_legend=True,
+):
     source = FigureIRCodec.validate_state(source_state)
     target = FigureIRCodec.validate_state(target_state)
     source_subplot = _figure_patch_subplot(source, None)
@@ -2018,27 +2025,27 @@ def figure_patch_source(source_state, target_state, *, figure_name, refresh_trac
         lines.extend(_figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state))
 
     trace_lines = []
-    refresh_legend = source_subplot["legend"] != target_subplot["legend"]
+    legend_changed = source_subplot["legend"] != target_subplot["legend"]
     source_traces = {trace["id"]: trace for trace in source_subplot.get("traces", [])}
     target_traces = {trace["id"]: trace for trace in target_subplot.get("traces", [])}
     for source_trace in source_subplot.get("traces", []):
         if source_trace["id"] in target_traces:
             continue
-        refresh_legend = True
+        legend_changed = True
         trace_lines.extend(_figure_patch_remove_trace_lines(source_trace["id"]))
     for index, target_trace in enumerate(target_subplot.get("traces", [])):
         source_trace = source_traces.get(target_trace["id"])
         if source_trace is None:
-            refresh_legend = True
+            legend_changed = True
             trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
             continue
         lowered = _figure_patch_trace_lines(source_trace, target_trace, trace_index=index)
         if lowered:
-            refresh_legend = True
+            legend_changed = True
             trace_lines.extend(lowered)
             continue
         if source_trace != target_trace:
-            refresh_legend = True
+            legend_changed = True
             trace_lines.extend(_figure_patch_remove_trace_lines(target_trace["id"]))
             trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
             continue
@@ -2046,10 +2053,11 @@ def figure_patch_source(source_state, target_state, *, figure_name, refresh_trac
             trace_lines.extend(_figure_patch_remove_trace_lines(target_trace["id"]))
             trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
     lines.extend(trace_lines)
-    if refresh_legend:
+    legend_visibility_changed = source_subplot["legend"] != target_subplot["legend"]
+    if refresh_legend and legend_changed:
         if target_subplot["legend"]:
             lines.append("ax.legend()")
-        else:
+        elif legend_visibility_changed:
             lines.append("if ax.get_legend() is not None:")
             lines.append("    ax.get_legend().remove()")
     if not lines:

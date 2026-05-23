@@ -156,11 +156,11 @@ command-driven model as the shipped axis, trace, and Curve Fit attached-display
 surfaces.
 
 On `Do It`, the GUI should resolve the selected stable trace IDs from the active
-figure context and emit one bounded matplotlib patch block against
-`hyde.get_figure(...)`. `To Cmd Line` should emit that same canonical block visibly.
-The implementation may remove one selected trace per line or generate one bounded
-block for the full selection, but it should not invent a second figure-edit
-transport.
+figure context and emit one bounded command block against `hyde.get_figure(...)`.
+Because stable trace identity is Hyde-owned rather than ordinary matplotlib state, the
+canonical emitted command for this dialog should use Hyde's public
+`hyde.remove_traces(...)` helper instead of exposing `_hyde_trace_id` lookup code
+directly. `To Cmd Line` should emit that same canonical block visibly.
 
 The lower pane shows Hyde-native preview/status text only:
 

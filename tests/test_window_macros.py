@@ -335,6 +335,34 @@ class TestFigureDecorator(unittest.TestCase):
 
         self.assertIs(hyde.get_figure("Figure0"), figure)
 
+    def test_remove_traces_removes_hyde_managed_lines_and_updates_live_ir(self):
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Figure0(x, a, b):
+            fig = plt.figure("Figure0")
+            ax = fig.add_subplot(111)
+            ax.plot(x, a, label="a")
+            ax.plot(x, b, label="b")
+            return fig
+
+        figure = Figure0([0, 1, 2], [1, 4, 9], [9, 4, 1])
+
+        returned = hyde.remove_traces(figure, "trace0", "missing")
+
+        self.assertIs(returned, figure)
+        self.assertEqual(
+            [line.get_label() for line in figure.axes[0].lines],
+            ["b"],
+        )
+        self.assertEqual(
+            tuple(
+                trace["id"]
+                for trace in figure._hyde_ir["layout"]["subplots"][0]["traces"]
+            ),
+            ("trace1",),
+        )
+
     def test_first_class_figure_rename_updates_canonical_lookup_and_ir_title(self):
         plt = self._configure_pyplot()
 

@@ -7,21 +7,16 @@ description: Simplify Hyde patches, plans, and local changes to the smallest cle
 
 Use this skill for a narrow simplification pass, not for a full code review.
 
-The goal is to reduce a Hyde change to the smallest clear shape that preserves the documented architecture, command path, and user-visible behavior.
+The goal is to reduce a Hyde change to the smallest clear shape that preserves the
+documented architecture, command path, and user-visible behavior.
 
-This skill is used in two common places:
+Use it in two common places:
 
 - after `to-issues`, to simplify the planned slices before implementation starts
 - after implementation, to simplify the resulting code patch
 
-In the standard dialog workflow that means:
-
-1. `add-hyde-ui-feature`
-2. `grill-me`
-3. `to-prd`
-4. widget-shape skill plus `to-issues`
-5. `hyde-simplify`
-6. implementation with `tdd` plus the widget-shape skill
+If you are reviewing a patch for findings, use `hyde-code-review` instead. If you are
+reshaping a plan or patch into a smaller, cleaner implementation, use this skill.
 
 ## Required Context
 
@@ -34,16 +29,10 @@ Read these Markdown sources before simplifying:
 5. `project_management/STATUS.md`
 6. [references/hyde-simplification-rules.md](references/hyde-simplification-rules.md)
 
-Then read only the feature/spec Markdown files relevant to the change. Prioritize:
+Then read only the feature/spec Markdown files relevant to the change.
 
-- `project_management/specs/IPC_PROTOCOL.md`
-- `project_management/specs/python_terminal/SPEC.md`
-- `project_management/specs/project_save_load/SPEC.md`
-- `project_management/specs/new_table_dialog/SPEC.md`
-- `project_management/specs/data_browser/SPEC.md`
-- `project_management/specs/table/SPEC.md`
-
-Prefer Hyde's Markdown docs over inherited implementation shape. Existing code is not a justification for keeping non-essential complexity.
+Prefer Hyde's Markdown docs over inherited implementation shape. Existing code is not a
+justification for keeping non-essential complexity.
 
 ## Simplification Workflow
 
@@ -56,6 +45,25 @@ Prefer Hyde's Markdown docs over inherited implementation shape. Existing code i
 7. If you are simplifying an issue file or implementation plan, delete slices that
    only preserve base-class shims, duplicate launcher dispatch, or split one dialog
    command path into multiple near-identical variants.
+8. Treat architectural violations as simplification targets even when the code appears
+   to work.
+
+## Architectural Checks
+
+Reuse these review questions during simplification:
+
+- Has the patch kept static dialog/window structure in `.ui` files where Hyde expects
+  `.ui`-first layout ownership?
+- Does the GUI do only UI work: collect state, generate command strings, and react to
+  kernel results?
+- Are GUI-triggered kernel command strings generated in `features/..._features.py`
+  rather than in widgets, dialogs, or runtime helpers, unless the docs/spec define an
+  exception?
+- Is there exactly one authoritative implementation path?
+- Does the patch follow ownership, identity, and presentation rules already decided in
+  the docs and active spec instead of inventing local exceptions?
+- Does the patch preserve Hyde's two-process, command-driven model?
+- Do the tests prove intended behavior instead of incidental structure?
 
 ## What To Simplify
 
@@ -70,7 +78,11 @@ Simplify aggressively when you see:
   into `.ui` files
 - extra state variables, flags, or policy branches
 - GUI-side behavior that should be a command string plus kernel-owned execution
+- GUI-built kernel command strings outside the `features/..._features.py`
+  translation layer when Hyde expects that boundary
 - separate GUI and non-GUI implementations of the same user-visible behavior
+- direct imperative GUI-to-backend behavior where Hyde should have used a visible or
+  deliberate kernel command path
 - verbose tests that mirror plumbing rather than contract
 - dialog plans that fail to use the standard `HydeDialogWidget` footer contract when
   the spec does not require an exception
@@ -78,6 +90,8 @@ Simplify aggressively when you see:
   docs or active spec
 - new abstractions whose main effect is to restate feature policy already documented
   elsewhere
+- local exceptions to documented ownership, identity, or presentation rules that do
+  not come from a deliberate contract change
 
 ## Hyde Simplification Questions
 
@@ -91,8 +105,11 @@ Ask these questions explicitly:
 - Has the patch created two implementation paths where Hyde should have one?
 - Does this dialog really need an exception to the shared `HydeDialogWidget` footer
   contract, or is the plan keeping a subclass shim for no reason?
+- Is this violating Hyde's documented translation boundary by building command strings
+  in the GUI layer?
 - Am I restating feature policy in code, issue slices, or new abstractions when the
   governing docs/spec already answer it?
+- Is backend or kernel ownership drifting into the GUI layer?
 - If I remove this wrapper, does the total code actually get shorter or clearer, or am I just pushing the same lines outward into call sites?
 - Would one small wrapper make the total code shorter or clearer by collapsing repeated call-site logic?
 - Do the tests prove the contract with less structure and fewer incidental assertions?
@@ -108,5 +125,7 @@ Ask these questions explicitly:
 
 - If you are simplifying a proposal or patch, present the smaller shape first.
 - Name what should be deleted, inlined, merged, or moved.
+- When useful, call out architectural violations that should be removed even if they
+  appear functionally correct.
 - Call out any complexity that is architecturally wrong even if it appears to work.
 - When useful, cite the Hyde Markdown document that makes the simpler path possible or required.

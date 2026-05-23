@@ -159,8 +159,13 @@ when a project is loaded.
   part Hyde can still represent.
 - Axis, trace, and Curve Fit attached-display edits emit hidden matplotlib patch
   Python using `hyde.get_figure(...)`, and those hidden commands flow through Hyde's
-  ordinary hidden-command logging path. Curve Fit attached live update, preview,
-  `Do It`, and `To Cmd Line` now share one attached-display command-generation model.
+  ordinary hidden-command logging path. When emitted strings would plausibly be used
+  outside Hyde, Hyde prefers standard matplotlib/Python. Hyde figure helpers are
+  allowed in emitted update strings only when no standard matplotlib equivalent exists
+  or when the Hyde helper is the clearer contract for a Hyde-owned operation, such as
+  `hyde.refresh_figure(...)` or `hyde.remove_traces(...)`. Curve Fit attached live
+  update, preview, `Do It`, and `To Cmd Line` now share one attached-display
+  command-generation model.
 - Explicit first-class figure refresh/regenerate also emits hidden Python through
   Hyde's normal command path using `hyde.refresh_figure(...)`. `resize_redraw`
   remains the narrow accepted backend control-traffic exception for viewport-driven

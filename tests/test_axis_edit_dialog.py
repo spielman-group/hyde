@@ -460,6 +460,8 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertIn("fig = hyde.get_figure('Figure0')", preview)
             self.assertIn("ax = fig.axes[0]", preview)
             self.assertIn("ax.set_xlabel('Delay [s]')", preview)
+            self.assertNotIn("fig._hyde_ir", preview)
+            self.assertNotIn("_figure_defaults_snapshot", preview)
             self.assertTrue(dialog.to_cmd_line_button.isEnabled())
 
             dialog.to_cmd_line_button.click()
@@ -505,15 +507,16 @@ class TestAxisEditDialog(unittest.TestCase):
 
         self.assertEqual(execution.hidden_calls[-1][0], preview)
 
-    def test_live_applied_axis_state_clears_preview_and_send_to_cmd_line(self):
+    def test_live_applied_axis_state_keeps_last_patch_preview_and_do_it_only_closes(self):
         execution = FakeExecutionService()
+        terminal = FakeVisibleTerminalService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
             mdi_area,
             {
                 "mdi_area": mdi_area,
                 "python_execution_service": execution,
-                "visible_terminal_service": FakeVisibleTerminalService(),
+                "visible_terminal_service": terminal,
             },
         )
 
@@ -523,17 +526,54 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.ui.axis_label_edit.editingFinished.emit()
 
             preview = dialog.lower_text_edit.toPlainText()
-            self.assertEqual(preview, "")
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+            self.assertIn("ax.set_xlabel('Delay [ms]')", preview)
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+
+            dialog.to_cmd_line_button.click()
+            self.assertEqual(terminal.visible_calls[-1], preview)
 
             hidden_count = len(execution.hidden_calls)
             dialog.do_it_button.click()
             self.assertEqual(len(execution.hidden_calls), hidden_count)
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
         finally:
             dialog.close()
 
         self.assertTrue(execution.hidden_calls)
         self.assertIn("ax.set_xlabel('Delay [ms]')", execution.hidden_calls[-1][0])
+
+    def test_unsupported_log_tick_mode_change_shows_message_instead_of_blank_preview(self):
+        execution = FakeExecutionService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+            figure_ir=make_figure_ir(),
+        )
+
+        dialog = AxisEditDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            self.assertEqual(dialog.ui.log_tick_mode_combo.currentData(), "loglin")
+
+            dialog.ui.log_tick_mode_combo.setCurrentIndex(
+                dialog.ui.log_tick_mode_combo.findData("plain")
+            )
+
+            self.assertEqual(
+                dialog.lower_text_edit.toPlainText(),
+                "Current changes are not yet representable as a Hyde figure command.",
+            )
+            self.assertEqual(execution.hidden_calls, [])
+        finally:
+            dialog.close()
 
     def test_live_update_executes_hidden_python_patch(self):
         execution = FakeExecutionService()

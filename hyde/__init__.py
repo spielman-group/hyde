@@ -723,3 +723,32 @@ def refresh_figure(figure, *, use_bound_values=False):
         )
         return resolved_figure
     return None
+
+
+def remove_traces(figure, *trace_ids):
+    """
+    Remove one or more Hyde-managed traces from a live first-class figure.
+
+    Parameters
+    ----------
+    figure:
+        A live matplotlib figure object or a figure manager number resolvable to
+        a live figure.
+    *trace_ids:
+        One or more stable Hyde trace identifiers to remove. Missing trace IDs are
+        ignored.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The live figure after the requested trace removals have been applied.
+
+    Raises
+    ------
+    ValueError
+        If ``figure`` does not resolve to a first-class Hyde figure.
+    """
+    from .matplotlib_backend import remove_traces_from_figure
+
+    resolved_figure = _resolve_matplotlib_figure(figure)
+    return remove_traces_from_figure(resolved_figure, trace_ids)

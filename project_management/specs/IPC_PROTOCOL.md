@@ -78,6 +78,15 @@ helper API. First-class figures are created through `@hyde.figure`. Those figure
 - a kernel-owned figure IR as recreation/editability truth
 - a parallel figure-local command log and optional source/AST artifacts for diagnostics
 
+Hyde also exposes narrow first-class figure runtime helpers where the operation is
+explicitly Hyde-owned rather than ordinary matplotlib construction. Current examples
+are:
+
+- `hyde.get_figure(...)` for stable first-class figure lookup
+- `hyde.refresh_figure(...)` for explicit regeneration from kernel-owned figure IR
+- `hyde.remove_traces(...)` for removing one or more Hyde-managed traces by stable
+  trace ID
+
 Non-decorated figures remain ordinary kernel-side matplotlib figures in this
 deployment. They do not open Hyde GUI figure windows and do not participate in the
 private figure-window `comm` service unless a future explicit promotion path is

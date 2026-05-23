@@ -22,7 +22,11 @@ from hyde.matplotlib_backend import (
     _figure_defaults_snapshot,
     figure_snapshot_payload,
 )
-from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
+from hyde.features.matplotlib_features import (
+    FigureIRCodec,
+    figure_ir_from_live_state,
+    figure_patch_source,
+)
 from hyde.project_tools import (
     HYDE_MATPLOTLIB_BACKEND,
     configure_gui_matplotlib_backend,
@@ -379,6 +383,36 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIn("markerfacecolor='red'", source)
         self.assertIn("markeredgecolor='black'", source)
         self.assertIn("markeredgewidth=2.0", source)
+
+    def test_trace_style_patch_does_not_remove_hidden_legend_when_visibility_is_unchanged(self):
+        source_ir = figure_ir_from_live_state(
+            self._live_state_with_title("FigureA")
+        )
+        source_ir["layout"]["subplots"][0]["traces"] = [
+            source_ir["layout"]["subplots"][0]["traces"][0]
+        ]
+        source_ir["layout"]["subplots"][0]["legend"] = False
+        source_ir = FigureIRCodec.validate_state(source_ir)
+
+        target_ir = FigureIRCodec.update_state(
+            source_ir,
+            {
+                "type": "set_trace_style",
+                "subplot_id": "subplot0",
+                "trace_id": "trace0",
+                "style": {
+                    "linestyle": "None",
+                    "marker": "o",
+                },
+            },
+        )
+
+        source = figure_patch_source(source_ir, target_ir, figure_name="FigureA")
+
+        self.assertIn("line.set_linestyle('None')", source)
+        self.assertIn("line.set_marker('o')", source)
+        self.assertNotIn("ax.legend()", source)
+        self.assertNotIn("ax.get_legend()", source)
 
     def test_figure_ir_axis_edit_surface_lowers_axis_state_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))

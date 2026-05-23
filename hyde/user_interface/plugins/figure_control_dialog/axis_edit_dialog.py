@@ -1169,7 +1169,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
         if not result["valid"]:
             return
         if self.ui.live_update_checkbox.isChecked():
-            self.apply_current_figure_patch(mode="live_update")
+            self.apply_live_update_figure_patch(mode="live_update")
 
     def _on_live_update_toggled(self, checked):
         if self._loading_controls or not checked:
@@ -1177,7 +1177,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
         result = self._apply_current_controls_to_session()
         self.refresh_figure_preview(result["message"])
         if result["valid"]:
-            self.apply_current_figure_patch(mode="live_update_enable")
+            self.apply_live_update_figure_patch(mode="live_update_enable")
 
     def _set_auto_tick_values(self):
         self.ui.major_tick_mode_combo.setCurrentIndex(self.ui.major_tick_mode_combo.findData("auto"))

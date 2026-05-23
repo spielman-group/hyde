@@ -773,6 +773,10 @@ class EditableFigureContext:
 
 class HydeFigureDialogWidget(HydeDialogWidget):
     figure_patch_command_name = "figure_edit"
+    live_update_always_enabled = False
+    unsupported_figure_patch_message = (
+        "Current changes are not yet representable as a Hyde figure command."
+    )
 
     def __init__(self, *args, figure_context=None, services=None, **kwargs):
         self.figure_context = figure_context
@@ -786,7 +790,11 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         if self.figure_context is None:
             return
         self._session = self.figure_context.open_session()
-        self.figure_display_helper = self._session.figure_display_helper
+        self.figure_display_helper = getattr(
+            self._session,
+            "figure_display_helper",
+            self.figure_display_helper,
+        )
         self._opening_effective_state = self._session.opening_effective_state()
         self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
         self._reload_supported_trace_rows()
@@ -819,6 +827,24 @@ class HydeFigureDialogWidget(HydeDialogWidget):
             refresh_trace_ids=refresh_trace_ids,
         )
 
+    def resolved_figure_patch_preview(
+        self,
+        source_state,
+        target_state,
+        *,
+        refresh_trace_ids=(),
+    ):
+        code = self.figure_patch_source(
+            source_state,
+            target_state,
+            refresh_trace_ids=refresh_trace_ids,
+        )
+        if str(code or "").strip():
+            return str(code), ""
+        if source_state != target_state:
+            return "", str(self.unsupported_figure_patch_message)
+        return "", ""
+
     def refresh_figure_preview(self, error_message=""):
         message = str(error_message or "")
         if message:
@@ -826,17 +852,20 @@ class HydeFigureDialogWidget(HydeDialogWidget):
             self.refresh_shell()
             return self.preview_display_text()
         target_state = self.current_effective_state()
-        if self._applied_effective_state is None or target_state is None:
+        preview_source_state = self.preview_source_state()
+        if preview_source_state is None or target_state is None:
             self.set_preview_string("")
             self.refresh_shell()
             return self.preview_string()
         try:
-            self.set_preview_string(
-                self.figure_patch_source(
-                    self._applied_effective_state,
-                    target_state,
-                )
+            code, preview_message = self.resolved_figure_patch_preview(
+                preview_source_state,
+                target_state,
             )
+            if preview_message:
+                self.set_preview_message(preview_message)
+            else:
+                self.set_preview_string(code)
         except Exception as exc:
             self.set_preview_message(str(exc))
         self.refresh_shell()
@@ -896,6 +925,41 @@ class HydeFigureDialogWidget(HydeDialogWidget):
             refresh_preview=refresh_preview,
         )
 
+    def preview_source_state(self):
+        if self.live_update_is_enabled():
+            return self.opening_effective_state()
+        return self.applied_effective_state()
+
+    def apply_live_update_figure_patch(self, *, mode):
+        target_state = self.current_effective_state()
+        applied_state = self.applied_effective_state()
+        code, preview_message = self.resolved_figure_patch_preview(
+            applied_state,
+            target_state,
+        )
+        if preview_message:
+            self.set_preview_message(preview_message)
+            self.refresh_shell()
+            return False
+        if not str(code or "").strip():
+            self.refresh_figure_preview()
+            return True
+        if not self.apply_figure_patch_command(
+            code,
+            mode=mode,
+            target_state=target_state,
+            refresh_preview=False,
+        ):
+            return False
+        self.refresh_figure_preview()
+        return True
+
+    def live_update_is_enabled(self):
+        if self.live_update_always_enabled:
+            return True
+        checkbox = getattr(getattr(self, "ui", None), "live_update_checkbox", None)
+        return bool(checkbox is not None and checkbox.isChecked())
+
     def commit_current_figure_patch(self, *, mode="do_it"):
         target_state = self.current_effective_state()
         if self.dispatch_do_it_payload(
@@ -910,6 +974,9 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         return False
 
     def handle_do_it(self):
+        if self.live_update_is_enabled():
+            self.accept()
+            return
         self.commit_current_figure_patch()
 
     def rollback_figure_patch(self):

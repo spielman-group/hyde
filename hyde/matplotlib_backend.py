@@ -109,6 +109,39 @@ def get_first_class_figure(name):
     raise ValueError(f"Could not resolve first-class figure {name!r}.")
 
 
+def remove_traces_from_figure(figure, trace_ids):
+    if not getattr(figure, "_hyde_is_first_class", False):
+        raise ValueError("Hyde trace removal requires a first-class Hyde figure.")
+    normalized_ids = []
+    seen = set()
+    for trace_id in tuple(trace_ids or ()):
+        normalized = str(trace_id)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        normalized_ids.append(normalized)
+    if not normalized_ids:
+        return figure
+    axes = list(getattr(figure, "axes", ()) or ())
+    if not axes:
+        return figure
+    axis = axes[0]
+    for trace_id in normalized_ids:
+        line = next(
+            (
+                candidate
+                for candidate in list(axis.lines)
+                if getattr(candidate, "_hyde_trace_id", None) == trace_id
+            ),
+            None,
+        )
+        if line is not None:
+            line.remove()
+    _refresh_first_class_figure_metadata(figure)
+    figure.canvas.draw_idle()
+    return figure
+
+
 def _mark_first_class_figure_dirty(figure):
     if getattr(figure, "_hyde_is_first_class", False):
         _DIRTY_FIRST_CLASS_FIGURES.add(figure)
@@ -128,19 +161,32 @@ def _resync_dirty_first_class_figures(result=None):
         if canvas is None or getattr(canvas, "manager", None) is None:
             _clear_first_class_figure_dirty(figure)
             continue
-        try:
-            imported_ir, import_warning = _import_first_class_figure_ir(figure)
-            figure._hyde_ir = imported_ir
-            figure._hyde_import_warning = import_warning
+        if _refresh_first_class_figure_metadata(figure, log_errors=True):
             canvas.draw()
-        except Exception:
-            figure._hyde_import_warning = (
-                "unsupported live figure features were omitted during Hyde import"
-            )
+
+
+def _refresh_first_class_figure_metadata(figure, *, log_errors=False):
+    if not getattr(figure, "_hyde_is_first_class", False):
+        return False
+    try:
+        imported_ir, import_warning = _import_first_class_figure_ir(figure)
+    except Exception:
+        figure._hyde_import_warning = (
+            "unsupported live figure features were omitted during Hyde import"
+        )
+        if log_errors:
+            canvas = getattr(figure, "canvas", None)
+            manager = None if canvas is None else getattr(canvas, "manager", None)
             LOGGER.exception(
                 "Figure backend failed to resync dirty first-class figure %r.",
-                _default_figure_title(figure, getattr(canvas.manager, "num", 0)),
+                _default_figure_title(figure, getattr(manager, "num", 0)),
             )
+        return False
+    figure._hyde_ir = imported_ir
+    figure._hyde_import_warning = import_warning
+    if getattr(figure, "_hyde_defaults", None) is None:
+        figure._hyde_defaults = _figure_defaults_snapshot(imported_ir)
+    return True
 
 
 def _install_first_class_figure_resync_hook(shell=None):
@@ -664,6 +710,9 @@ def figure_call_source(figure, number):
 def figure_snapshot_payload(figure, number):
     figure_ir = getattr(figure, "_hyde_ir", None)
     hyde_metadata = dict(getattr(figure, "_hyde_metadata", {}) or {})
+    if getattr(figure, "_hyde_is_first_class", False):
+        _refresh_first_class_figure_metadata(figure)
+        figure_ir = getattr(figure, "_hyde_ir", None)
     if _is_windowed_figure(figure) and figure_ir is not None:
         normalized_figure_ir = FigureIRCodec.validate_state(figure_ir)
         figure_defaults = getattr(figure, "_hyde_defaults", None)

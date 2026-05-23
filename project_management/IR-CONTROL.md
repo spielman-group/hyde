@@ -133,6 +133,11 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - Figure axis, trace, and Curve Fit attached-display dialogs now emit matplotlib
   patch Python from imported figure IR rather than using a separate semantic
   figure-action transport.
+- Emitted strings that could plausibly be reused outside Hyde should prefer standard
+  matplotlib/Python. Hyde public helpers are acceptable in emitted update strings only
+  when they are the necessary or clearer contract for a Hyde-owned operation, not as a
+  substitute for normal matplotlib when normal matplotlib would express the same edit
+  cleanly.
 - Canonical user-facing trace identification is separate from raw plotted `label`
   metadata. Figure-working surfaces should consume the shared figure helper's
   canonical `display_name` rather than inferring their own fallback strings.
