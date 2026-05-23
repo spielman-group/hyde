@@ -3,13 +3,19 @@ import sys
 
 from qtutils import UiLoader
 from qtutils.qt import QtCore, QtWidgets
+from qtutils.qt.QtCore import QUrl
+from qtutils.qt.QtGui import QDesktopServices
 
 
-def load_ui_for_owner(owner, ui_filename, *, module_name=None):
+def resolve_owner_path(owner, filename, *, module_name=None):
     resolved_module_name = module_name or type(owner).__module__
     module = sys.modules[resolved_module_name]
     module_file = module.__file__
-    ui_path = os.path.join(os.path.dirname(module_file), ui_filename)
+    return os.path.join(os.path.dirname(module_file), filename)
+
+
+def load_ui_for_owner(owner, ui_filename, *, module_name=None):
+    ui_path = resolve_owner_path(owner, ui_filename, module_name=module_name)
     loader = UiLoader()
     return loader.load(ui_path, owner)
 
@@ -163,6 +169,7 @@ class HydeDialog(QtWidgets.QDialog):
 
 class HydeDialogWidget(HydeDialog):
     ui_filename = "hyde_dialog_widget.ui"
+    help_filename = None
 
     def __init__(self, *args, services=None, **kwargs):
         super().__init__(*args, services=services, **kwargs)
@@ -172,6 +179,8 @@ class HydeDialogWidget(HydeDialog):
             module_name="hyde.user_interface",
         )
         self.mounted_child = None
+        self._preview_string = ""
+        self._preview_display_text = None
         self.lower_text_edit.setReadOnly(True)
         self.do_it_button.clicked.connect(self.handle_do_it)
         self.to_cmd_line_button.clicked.connect(self.send_to_cmd_line)
@@ -200,26 +209,82 @@ class HydeDialogWidget(HydeDialog):
         self.mount_content_widget(content)
         return content
 
-    def canonical_text_payload(self):
-        return ""
+    def preview_string(self):
+        return self._preview_string
+
+    def preview_display_text(self):
+        if self._preview_display_text is None:
+            return self.preview_string()
+        return self._preview_display_text
+
+    def set_preview_string(self, payload, *, display_text=None):
+        self._preview_string = str(payload or "")
+        self._preview_display_text = (
+            None if display_text is None else str(display_text or "")
+        )
+        return self.preview_string()
+
+    def set_preview_message(self, message):
+        self.set_preview_string("", display_text=message)
+        return self.preview_display_text()
 
     def can_do_it(self):
-        return True
+        return bool(self.preview_string())
 
     def can_send_to_cmd_line(self):
-        return False
+        return self.service("visible_terminal_service") is not None
 
     def can_show_help(self):
-        return False
+        return self.resolved_help_path() is not None
+
+    def do_it_dispatch_mode(self):
+        return "hidden"
+
+    def execute_do_it_payload(self, payload):
+        python_execution_service = self.service("python_execution_service")
+        if python_execution_service is None:
+            return False
+        if self.do_it_dispatch_mode() == "visible":
+            return bool(python_execution_service.execute_visible(payload))
+        return bool(python_execution_service.execute_hidden(payload))
+
+    def dispatch_do_it_payload(
+        self,
+        payload=None,
+        *,
+        executor=None,
+        accept_on_success=True,
+    ):
+        resolved_payload = self.preview_string() if payload is None else payload
+        if not str(resolved_payload or "").strip():
+            return False
+        dispatch = self.execute_do_it_payload if executor is None else executor
+        if not dispatch(resolved_payload):
+            return False
+        if accept_on_success:
+            self.accept()
+        return True
+
+    def resolved_help_path(self):
+        help_filename = str(self.help_filename or "").strip()
+        if not help_filename:
+            return None
+        help_path = resolve_owner_path(self, help_filename)
+        if not os.path.isfile(help_path):
+            return None
+        return help_path
 
     def handle_do_it(self):
-        self.accept()
+        self.dispatch_do_it_payload()
 
     def handle_help(self):
-        return None
+        help_path = self.resolved_help_path()
+        if help_path is None:
+            return False
+        return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(help_path)))
 
     def copy_to_clip(self):
-        payload = self.canonical_text_payload() or ""
+        payload = self.preview_string()
         if not payload:
             return
         clipboard = QtWidgets.QApplication.clipboard()
@@ -228,7 +293,7 @@ class HydeDialogWidget(HydeDialog):
         clipboard.setText(payload)
 
     def send_to_cmd_line(self):
-        payload = self.canonical_text_payload() or ""
+        payload = self.preview_string()
         if not payload:
             return
         visible_terminal_service = self.service("visible_terminal_service")
@@ -237,8 +302,8 @@ class HydeDialogWidget(HydeDialog):
         visible_terminal_service.execute_visible(payload)
 
     def refresh_shell(self):
-        payload = self.canonical_text_payload() or ""
-        self.lower_text_edit.setPlainText(payload)
+        payload = self.preview_string()
+        self.lower_text_edit.setPlainText(self.preview_display_text())
         self.do_it_button.setEnabled(self.can_do_it())
         self.to_cmd_line_button.setEnabled(bool(payload) and self.can_send_to_cmd_line())
         self.to_clip_button.setEnabled(bool(payload))

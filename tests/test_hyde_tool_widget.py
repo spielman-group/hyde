@@ -1,5 +1,8 @@
 import os
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -29,26 +32,39 @@ class DemoDialog(HydeDialog):
 class HookedDialogWidget(HydeDialogWidget):
     def __init__(self, *args, **kwargs):
         self.do_it_calls = 0
-        self.help_calls = 0
         self.payload = "print('dialog payload')"
+        self.preview_text = "Equation preview"
         super().__init__(*args, **kwargs)
         self.mount_content_widget(QtWidgets.QLabel("Upper content"))
+        self.set_preview_string(self.payload, display_text=self.preview_text)
         self.refresh_shell()
-
-    def canonical_text_payload(self):
-        return self.payload
-
-    def can_send_to_cmd_line(self):
-        return True
-
-    def can_show_help(self):
-        return True
 
     def handle_do_it(self):
         self.do_it_calls += 1
 
-    def handle_help(self):
-        self.help_calls += 1
+
+class DispatchingDialogWidget(HydeDialogWidget):
+    def __init__(self, *args, **kwargs):
+        self.payload = "print('dispatch payload')"
+        self.preview_text = "Displayed preview"
+        super().__init__(*args, **kwargs)
+        self.mount_content_widget(QtWidgets.QLabel("Upper content"))
+        self.set_preview_string(self.payload, display_text=self.preview_text)
+        self.refresh_shell()
+
+
+class VisibleDispatchDialogWidget(DispatchingDialogWidget):
+    def do_it_dispatch_mode(self):
+        return "visible"
+
+
+class HelpFileDialogWidget(HydeDialogWidget):
+    help_filename = "dialog_help.txt"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mount_content_widget(QtWidgets.QLabel("Upper content"))
+        self.refresh_shell()
 
 
 class ShutdownAwareToolWidget(HydeToolWidget):
@@ -91,6 +107,20 @@ class RecordingVisibleTerminalService:
 
     def execute_visible(self, code):
         self.executed.append(code)
+
+
+class RecordingExecutionService:
+    def __init__(self):
+        self.hidden_calls = []
+        self.visible_calls = []
+
+    def execute_hidden(self, code, silent=True):
+        self.hidden_calls.append((code, silent))
+        return True
+
+    def execute_visible(self, code):
+        self.visible_calls.append(code)
+        return True
 
 
 class TestHydeToolWidget(unittest.TestCase):
@@ -154,6 +184,7 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertEqual(dialog.to_clip_button.text(), "To Clip")
         self.assertEqual(dialog.help_button.text(), "Help")
         self.assertEqual(dialog.cancel_button.text(), "Cancel")
+        self.assertFalse(dialog.do_it_button.isEnabled())
         self.assertFalse(dialog.to_cmd_line_button.isEnabled())
         self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
         self.assertFalse(dialog.help_button.isEnabled())
@@ -161,7 +192,7 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertGreater(dialog.shell_ui.left_button_layout.count(), 0)
         self.assertGreater(dialog.shell_ui.right_button_layout.count(), 0)
 
-    def test_tool_dialog_shell_uses_hooks_for_canonical_text_actions(self):
+    def test_tool_dialog_shell_uses_preview_string_backing_for_base_footer_actions(self):
         clipboard = QtWidgets.QApplication.clipboard()
         terminal_service = RecordingVisibleTerminalService()
         dialog = HookedDialogWidget(
@@ -173,16 +204,80 @@ class TestHydeToolWidget(unittest.TestCase):
         dialog.do_it_button.click()
         dialog.to_clip_button.click()
         dialog.to_cmd_line_button.click()
-        dialog.help_button.click()
 
-        self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.payload)
+        self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.preview_text)
+        self.assertEqual(dialog.preview_string(), dialog.payload)
         self.assertEqual(clipboard.text(), dialog.payload)
         self.assertEqual(terminal_service.executed, [dialog.payload])
         self.assertEqual(dialog.do_it_calls, 1)
-        self.assertEqual(dialog.help_calls, 1)
         self.assertTrue(dialog.to_cmd_line_button.isEnabled())
         self.assertTrue(dialog.to_clip_button.isEnabled())
-        self.assertTrue(dialog.help_button.isEnabled())
+        self.assertFalse(dialog.help_button.isEnabled())
+
+    def test_tool_dialog_shell_can_show_message_without_enabling_footer_payload_actions(self):
+        terminal_service = RecordingVisibleTerminalService()
+        dialog = DemoDialogWidget(services={"visible_terminal_service": terminal_service})
+        dialog.mount_content_widget(QtWidgets.QLabel("Upper content"))
+        dialog.set_preview_message("Validation failed")
+        dialog.refresh_shell()
+
+        self.assertEqual(dialog.preview_string(), "")
+        self.assertEqual(dialog.lower_text_edit.toPlainText(), "Validation failed")
+        self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+        self.assertFalse(dialog.to_clip_button.isEnabled())
+
+    def test_dialog_base_do_it_dispatches_hidden_canonical_payload_and_accepts(self):
+        execution_service = RecordingExecutionService()
+        dialog = DispatchingDialogWidget(
+            services={"python_execution_service": execution_service}
+        )
+
+        dialog.show()
+        self.qapp.processEvents()
+        dialog.do_it_button.click()
+
+        self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.preview_text)
+        self.assertEqual(
+            execution_service.hidden_calls,
+            [(dialog.payload, True)],
+        )
+        self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+
+    def test_dialog_base_do_it_can_dispatch_visible_payload(self):
+        execution_service = RecordingExecutionService()
+        dialog = VisibleDispatchDialogWidget(
+            services={"python_execution_service": execution_service}
+        )
+
+        dialog.show()
+        self.qapp.processEvents()
+        dialog.do_it_button.click()
+
+        self.assertEqual(execution_service.visible_calls, [dialog.payload])
+        self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+
+    def test_dialog_base_help_opens_declared_module_relative_file(self):
+        dialog = HelpFileDialogWidget()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            help_path = os.path.join(tmpdir, "dialog_help.txt")
+            with open(help_path, "w", encoding="utf-8") as handle:
+                handle.write("dialog help")
+            module_file = os.path.join(tmpdir, "dialog_owner.py")
+
+            with patch.object(
+                sys.modules[type(dialog).__module__],
+                "__file__",
+                module_file,
+            ), patch(
+                "hyde.user_interface.base_hyde_widgets.QDesktopServices.openUrl"
+            ) as open_url:
+                dialog.refresh_shell()
+
+                self.assertTrue(dialog.help_button.isEnabled())
+                dialog.help_button.click()
+
+        opened_url = open_url.call_args.args[0]
+        self.assertEqual(opened_url.toLocalFile(), help_path)
 
     def test_bind_subwindow_uses_window_identifier_as_default_object_name(self):
         mdi_area = QtWidgets.QMdiArea()

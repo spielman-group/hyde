@@ -39,25 +39,11 @@ class NewTableDialog(HydeDialogWidget):
 
     def _refresh_from_widgets(self):
         self._sync_state_from_widgets()
+        payload = ""
+        if self.table_state.normalized_state()["items"]:
+            payload = self.table_state.python_source()
+        self.set_preview_string(payload)
         self.refresh_shell()
 
-    def canonical_text_payload(self):
-        self._sync_state_from_widgets()
-        if not self.table_state.normalized_state()["items"]:
-            return ""
-        return self.table_state.python_source()
-
-    def can_do_it(self):
-        self._sync_state_from_widgets()
-        return bool(self.table_state.normalized_state()["items"])
-
-    def can_send_to_cmd_line(self):
-        return True
-
-    def handle_do_it(self):
-        if self.can_do_it():
-            self.accept()
-
-    def get_command(self):
-        payload = self.canonical_text_payload()
-        return payload or None
+    def do_it_dispatch_mode(self):
+        return "visible"

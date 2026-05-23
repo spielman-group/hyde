@@ -113,7 +113,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
             self.ui.trace_list.addItem(record["label"])
         if self.ui.trace_list.count():
             self.ui.trace_list.setCurrentRow(0)
-        self.refresh_shell()
+        self._update_preview()
 
     def _current_record(self):
         row = self.ui.trace_list.currentRow()
@@ -228,18 +228,18 @@ class TraceAppearanceDialog(HydeDialogWidget):
             self._update_color_field_previews(trace_id)
         if reload_controls and trace_id == self._current_trace_id():
             self._load_controls_for_trace(trace_id)
-        self.refresh_shell()
+        self._update_preview()
         return True
 
-    def canonical_text_payload(self):
-        return figure_patch_source(
-            self._applied_effective_state,
-            self._session.current_effective_state(),
-            figure_name=self.figure_context.figure_name(),
+    def _update_preview(self):
+        self.set_preview_string(
+            figure_patch_source(
+                self._applied_effective_state,
+                self._session.current_effective_state(),
+                figure_name=self.figure_context.figure_name(),
+            )
         )
-
-    def can_send_to_cmd_line(self):
-        return self.service("visible_terminal_service") is not None
+        self.refresh_shell()
 
     def _execute_patch(self, code, *, mode):
         if not str(code or "").strip():
@@ -411,16 +411,11 @@ class TraceAppearanceDialog(HydeDialogWidget):
         )
 
     def handle_do_it(self):
-        target_state = self._session.current_effective_state()
-        if self._execute_patch(
-            figure_patch_source(
-                self._applied_effective_state,
-                target_state,
-                figure_name=self.figure_context.figure_name(),
-            ),
-            mode="do_it",
+        if self.dispatch_do_it_payload(
+            executor=lambda code: self._execute_patch(code, mode="do_it"),
+            accept_on_success=False,
         ):
-            self._applied_effective_state = copy.deepcopy(target_state)
+            self._applied_effective_state = copy.deepcopy(self._session.current_effective_state())
             self.accept()
 
     def _on_marker_edge_width_changed(self, value):

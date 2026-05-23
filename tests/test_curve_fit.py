@@ -1382,7 +1382,11 @@ class TestCurveFitPlugin(unittest.TestCase):
                 )
 
                 dialog.to_clip_button.click()
-                self.assertEqual(clipboard.text(), dialog.lower_text_edit.toPlainText())
+                self.assertEqual(clipboard.text(), dialog.preview_string())
+                self.assertNotEqual(
+                    clipboard.text(),
+                    dialog.lower_text_edit.toPlainText(),
+                )
             finally:
                 dialog.close()
         finally:
@@ -1627,6 +1631,25 @@ class TestCurveFitPlugin(unittest.TestCase):
                 "signal_fit_result = signal_fit_model.fit(",
                 dialog.lower_text_edit.toPlainText(),
             )
+        finally:
+            dialog.close()
+            harness.close()
+
+    def test_curve_fit_equation_preview_keeps_to_cmd_line_disabled_but_do_it_available(self):
+        _, _, harness, dialog = create_configured_line_fit_dialog()
+        try:
+            clipboard = QtWidgets.QApplication.clipboard()
+            dialog.preview_mode_combo.setCurrentText("Equation")
+            QtWidgets.QApplication.processEvents()
+
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertIn("def line_fit(", dialog.lower_text_edit.toPlainText())
+
+            dialog.to_clip_button.click()
+            self.assertEqual(clipboard.text(), dialog.preview_string())
+            self.assertIn("signal_fit_result = signal_fit_model.fit(", clipboard.text())
+            self.assertNotEqual(clipboard.text(), dialog.lower_text_edit.toPlainText())
         finally:
             dialog.close()
             harness.close()

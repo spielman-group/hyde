@@ -18,6 +18,7 @@ from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget, HydeToo
 from hyde.user_interface.shared.core import MutationState
 from hyde.user_interface.plugins.table_interactive import (
     Plugin,
+    TableFeatureService,
     TableWorkspaceService,
 )
 from hyde.user_interface.plugins.table_interactive.dialogs import NewTableDialog
@@ -444,7 +445,7 @@ class TestNewTableDialog(unittest.TestCase):
                 dialog.lower_text_edit.toPlainText(),
                 "hyde.create_table(alpha)",
             )
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
             self.assertTrue(dialog.to_clip_button.isEnabled())
 
             dialog.ui.titleEdit.setText("My Table")
@@ -454,12 +455,99 @@ class TestNewTableDialog(unittest.TestCase):
                 dialog.lower_text_edit.toPlainText(),
                 "hyde.create_table(alpha, name='My Table')",
             )
-            self.assertEqual(
-                dialog.get_command(),
-                "hyde.create_table(alpha, name='My Table')",
-            )
         finally:
             dialog.close()
+
+    def test_new_table_dialog_disables_do_it_until_preview_exists(self):
+        dialog = NewTableDialog(
+            {
+                "alpha": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "numpy_kind": "f",
+                    "ndim": 1,
+                },
+            }
+        )
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertEqual(dialog.preview_string(), "")
+            self.assertFalse(dialog.do_it_button.isEnabled())
+
+            dialog.ui.objectList.item(0).setSelected(True)
+            self.qapp.processEvents()
+
+            self.assertTrue(dialog.preview_string())
+            self.assertTrue(dialog.do_it_button.isEnabled())
+        finally:
+            dialog.close()
+
+    def test_new_table_dialog_do_it_uses_visible_dispatch_and_accepts(self):
+        execution = FakeExecutionService()
+        terminal = FakeExecutionService()
+        dialog = NewTableDialog(
+            {
+                "alpha": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "numpy_kind": "f",
+                    "ndim": 1,
+                },
+            },
+            preselection=["alpha"],
+            services={
+                "python_execution_service": execution,
+                "visible_terminal_service": terminal,
+            },
+        )
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            payload = dialog.preview_string()
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            dialog.to_cmd_line_button.click()
+            self.assertEqual(terminal.visible_calls, [payload])
+
+            dialog.do_it_button.click()
+            self.assertEqual(execution.visible_calls, [payload])
+            self.assertEqual(execution.hidden_calls, [])
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+        finally:
+            dialog.close()
+
+
+class TestTableFeatureService(unittest.TestCase):
+    def test_show_new_table_dialog_passes_services_and_skips_post_exec_dispatch(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = FakeTablePlugin(mdi_area)
+        service = TableFeatureService(plugin)
+        captured = {}
+
+        class FakeDialog:
+            def __init__(
+                self,
+                objects_metadata,
+                preselection=None,
+                services=None,
+                parent=None,
+            ):
+                del objects_metadata, preselection, parent
+                captured["services"] = services
+
+            def exec_(self):
+                return True
+
+        with patch(
+            "hyde.user_interface.plugins.table_interactive.dialogs.NewTableDialog",
+            FakeDialog,
+        ):
+            self.assertTrue(service.show_new_table_dialog({"alpha": {}}, parent=None))
+
+        self.assertIs(captured["services"], plugin.services)
+        self.assertEqual(plugin.services["python_execution_service"].visible_calls, [])
 
 
 class TestTableWidget(unittest.TestCase):

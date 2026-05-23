@@ -103,13 +103,15 @@ It contains:
 - a preview mode switch for `Commands` and `Equation`
 - a large preview pane
 - a one-line status/error strip
-- footer buttons for `Do It`, `To Clip`, and `Cancel`
+- footer buttons for `Do It`, `To Cmd Line`, `To Clip`, and `Cancel`
 
 The first implementation follows the existing figure-control-dialog family behavior:
 
 - live changes rerun immediately when screen updates are enabled
 - `Cancel` restores the opening state for any target the dialog changed
 - `Do It` accepts the current state rather than triggering an extra rerun in live mode
+- `To Cmd Line` is enabled only in `Commands` preview mode because `Equation` preview
+  is not the executable commit payload
 
 ## Fit Function Discovery
 
@@ -296,7 +298,9 @@ Execution rules:
   guessed attached previews may still update
 - `Do It` in suppressed mode performs the one hidden fit/update execution
 
-`To Clip` copies the current command preview.
+`To Clip` copies the backing command preview string. In `Equation` mode the lower
+preview pane may show equation text instead, but `To Clip` still copies the command
+block the dialog would execute.
 
 `To Cmd Line` emits the same canonical command block the dialog would execute through
 Hyde's hidden-command path.

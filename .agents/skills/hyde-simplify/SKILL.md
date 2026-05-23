@@ -9,6 +9,20 @@ Use this skill for a narrow simplification pass, not for a full code review.
 
 The goal is to reduce a Hyde change to the smallest clear shape that preserves the documented architecture, command path, and user-visible behavior.
 
+This skill is used in two common places:
+
+- after `to-issues`, to simplify the planned slices before implementation starts
+- after implementation, to simplify the resulting code patch
+
+In the standard dialog workflow that means:
+
+1. `add-hyde-ui-feature`
+2. `grill-me`
+3. `to-prd`
+4. widget-shape skill plus `to-issues`
+5. `hyde-simplify`
+6. implementation with `tdd` plus the widget-shape skill
+
 ## Required Context
 
 Read these Markdown sources before simplifying:
@@ -39,6 +53,9 @@ Prefer Hyde's Markdown docs over inherited implementation shape. Existing code i
 4. Prefer editing an existing function, module, queue, thread, or command path over adding a new one.
 5. Collapse duplicated or split ownership until one clear authoritative path remains.
 6. Keep only the tests needed to prove the intended contract.
+7. If you are simplifying an issue file or implementation plan, delete slices that
+   only preserve base-class shims, duplicate launcher dispatch, or split one dialog
+   command path into multiple near-identical variants.
 
 ## What To Simplify
 
@@ -55,6 +72,8 @@ Simplify aggressively when you see:
 - GUI-side behavior that should be a command string plus kernel-owned execution
 - separate GUI and non-GUI implementations of the same user-visible behavior
 - verbose tests that mirror plumbing rather than contract
+- dialog plans that fail to use the standard `HydeDialogWidget` footer contract when
+  the spec does not require an exception
 
 ## Hyde Simplification Questions
 
@@ -66,6 +85,8 @@ Ask these questions explicitly:
 - Can an existing queue, thread, IPC path, or public command carry this behavior?
 - Is the GUI doing anything beyond collecting UI state, generating a command string, and reacting to kernel results?
 - Has the patch created two implementation paths where Hyde should have one?
+- Does this dialog really need an exception to the shared `HydeDialogWidget` footer
+  contract, or is the plan keeping a subclass shim for no reason?
 - If I remove this wrapper, does the total code actually get shorter or clearer, or am I just pushing the same lines outward into call sites?
 - Would one small wrapper make the total code shorter or clearer by collapsing repeated call-site logic?
 - Do the tests prove the contract with less structure and fewer incidental assertions?

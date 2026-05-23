@@ -153,12 +153,6 @@ class CurveFitDialog(HydeDialogWidget):
             self._catalog_service.refresh()
         self._refresh_from_state()
 
-    def canonical_text_payload(self):
-        model = self._current_model or {}
-        if str(model.get("preview_mode") or "Commands") == "Equation":
-            return str(model.get("equation_preview") or "")
-        return self._do_it_command_source()
-
     def can_do_it(self):
         model = self._current_model or {}
         return bool(model.get("valid")) and not bool(self._live_error_message)
@@ -622,10 +616,8 @@ class CurveFitDialog(HydeDialogWidget):
         self._applied_effective_state = copy.deepcopy(target_state)
         return True
 
-    def _do_it_command_source(self):
+    def _backing_command_source(self):
         model = self._current_model or {}
-        if str(model.get("preview_mode") or "Commands") != "Commands":
-            return str(model.get("equation_preview") or "")
         if not model.get("valid"):
             return str(model.get("commands_preview") or "")
         command_lines = []
@@ -645,6 +637,21 @@ class CurveFitDialog(HydeDialogWidget):
         if command_lines:
             return "\n".join(command_lines)
         return str(model.get("commands_preview") or "")
+
+    def _sync_preview_strings(self):
+        model = self._current_model or {}
+        preview_mode = str(model.get("preview_mode") or "Commands")
+        display_text = self._backing_command_source()
+        if preview_mode == "Equation":
+            display_text = str(model.get("equation_preview") or "")
+        self.set_preview_string(
+            self._backing_command_source(),
+            display_text=display_text,
+        )
+
+    def refresh_shell(self):
+        self._sync_preview_strings()
+        super().refresh_shell()
 
     def _run_commit_path(
         self,

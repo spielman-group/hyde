@@ -177,8 +177,9 @@ class TestFigurePluginDispatch(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
-    def test_new_figure_dialog_dispatches_muted_command(self):
+    def test_new_figure_dialog_launcher_passes_services_and_stops_post_exec_dispatch(self):
         executed = []
+        captured = {}
 
         plugin = type("FakePlugin", (), {})()
         plugin.workspace = type(
@@ -193,78 +194,24 @@ class TestFigurePluginDispatch(unittest.TestCase):
         service = FigureFeatureService(plugin)
 
         class FakeDialog:
-            def __init__(self, objects_metadata, preselection=None, parent=None):
+            def __init__(
+                self,
+                objects_metadata,
+                preselection=None,
+                services=None,
+                parent=None,
+            ):
                 del objects_metadata, preselection, parent
+                captured["services"] = services
 
             def exec_(self):
                 return True
 
-            def get_command(self, default_title=None):
-                del default_title
-                return (
-                    "@hyde.figure(register=False)\n"
-                    "def _hyde_figure(arr):\n"
-                    "    fig = plt.figure('Figure0')\n"
-                    "    ax = fig.add_subplot(111)\n"
-                    "    ax.set_title('Figure0')\n"
-                    "    ax.plot(arr, label='arr')\n"
-                    "    fig.show()\n\n"
-                    "_hyde_figure(arr)\n"
-                    "del _hyde_figure"
-                )
-
         with patch("hyde.user_interface.plugins.figure_interactive.NewFigureDialog", FakeDialog):
             self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
 
-        self.assertEqual(len(executed), 1)
-        self.assertTrue(executed[0][1])
-        self.assertIn("@hyde.figure(register=False)", executed[0][0])
-        self.assertIn("def _hyde_figure(arr):", executed[0][0])
-        self.assertIn("_hyde_figure(arr)", executed[0][0])
-        self.assertIn("fig = plt.figure('Figure0')", executed[0][0])
-
-    def test_new_figure_dialog_dispatches_requested_figure_size(self):
-        executed = []
-
-        plugin = type("FakePlugin", (), {})()
-        plugin.workspace = type(
-            "FakeWorkspace",
-            (),
-            {"next_generated_title": lambda self: "Figure0"},
-        )()
-        plugin.services = {
-            "python_execution_service": FakeExecutionService(executed),
-        }
-
-        service = FigureFeatureService(plugin)
-
-        class FakeDialog:
-            def __init__(self, objects_metadata, preselection=None, parent=None):
-                del objects_metadata, preselection, parent
-
-            def exec_(self):
-                return True
-
-            def get_command(self, default_title=None):
-                del default_title
-                return (
-                    "@hyde.figure(register=False)\n"
-                    "def _hyde_figure(arr):\n"
-                    "    fig = plt.figure('Figure0', figsize=(5.0, 3.0))\n"
-                    "    ax = fig.add_subplot(111)\n"
-                    "    ax.set_title('Figure0')\n"
-                    "    ax.plot(arr, label='arr')\n"
-                    "    fig.show()\n\n"
-                    "_hyde_figure(arr)\n"
-                    "del _hyde_figure"
-                )
-
-        with patch("hyde.user_interface.plugins.figure_interactive.NewFigureDialog", FakeDialog):
-            self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
-
-        self.assertEqual(len(executed), 1)
-        self.assertIn("@hyde.figure(register=False)", executed[0][0])
-        self.assertIn("fig = plt.figure('Figure0', figsize=(5.0, 3.0))", executed[0][0])
+        self.assertIs(captured["services"], plugin.services)
+        self.assertEqual(executed, [])
 
     def test_new_figure_dialog_defaults_to_reasonable_figure_size(self):
         dialog = NewFigureDialog({"arr": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "f"}})
@@ -297,9 +244,10 @@ class TestFigurePluginDispatch(unittest.TestCase):
             self.assertFalse(hasattr(dialog.ui, "buttonBox"))
             self.assertEqual(
                 dialog.lower_text_edit.toPlainText(),
-                dialog.get_command(),
+                dialog.preview_string(),
             )
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
             self.assertTrue(dialog.to_clip_button.isEnabled())
 
             dialog.ui.titleEdit.setText("Delay Graph")
@@ -307,53 +255,44 @@ class TestFigurePluginDispatch(unittest.TestCase):
 
             self.assertEqual(
                 dialog.lower_text_edit.toPlainText(),
-                dialog.get_command(),
+                dialog.preview_string(),
             )
-            self.assertIn("fig = plt.figure('Delay Graph'", dialog.get_command())
+            self.assertIn("fig = plt.figure('Delay Graph'", dialog.preview_string())
         finally:
             dialog.close()
 
-    def test_new_figure_dialog_dispatches_empty_figure_when_no_data_selected(self):
-        executed = []
+    def test_new_figure_dialog_do_it_dispatches_hidden_python_and_accepts(self):
+        execution = FakeExecutionService()
+        terminal = FakeExecutionService()
+        dialog = NewFigureDialog(
+            {
+                "arr": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "ndim": 1,
+                    "numpy_kind": "f",
+                }
+            },
+            preselection=["arr"],
+            services={
+                "python_execution_service": execution,
+                "visible_terminal_service": terminal,
+            },
+        )
+        try:
+            dialog.show()
+            self.qapp.processEvents()
 
-        plugin = type("FakePlugin", (), {})()
-        plugin.workspace = type(
-            "FakeWorkspace",
-            (),
-            {"next_generated_title": lambda self: "Figure0"},
-        )()
-        plugin.services = {
-            "python_execution_service": FakeExecutionService(executed),
-        }
+            payload = dialog.preview_string()
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            dialog.to_cmd_line_button.click()
+            self.assertEqual(terminal.visible_calls, [payload])
 
-        service = FigureFeatureService(plugin)
-
-        class FakeDialog:
-            def __init__(self, objects_metadata, preselection=None, parent=None):
-                del objects_metadata, preselection, parent
-
-            def exec_(self):
-                return True
-
-            def get_command(self, default_title=None):
-                del default_title
-                return (
-                    "@hyde.figure(register=False)\n"
-                    "def _hyde_figure():\n"
-                    "    fig = plt.figure('Figure0')\n"
-                    "    ax = fig.add_subplot(111)\n"
-                    "    fig.show()\n\n"
-                    "_hyde_figure()\n"
-                    "del _hyde_figure"
-                )
-
-        with patch("hyde.user_interface.plugins.figure_interactive.NewFigureDialog", FakeDialog):
-            self.assertTrue(service.show_new_figure_dialog({}, parent=None))
-
-        self.assertEqual(len(executed), 1)
-        self.assertIn("def _hyde_figure():", executed[0][0])
-        self.assertIn("ax = fig.add_subplot(111)", executed[0][0])
-        self.assertNotIn("ax.plot(", executed[0][0])
+            dialog.do_it_button.click()
+            self.assertEqual(execution.hidden_calls, [(payload, True)])
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+        finally:
+            dialog.close()
 
     def test_figure_macro_dispatch_uses_shared_callable_invocation(self):
         executed = []

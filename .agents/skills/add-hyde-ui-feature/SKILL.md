@@ -12,6 +12,21 @@ Treat screenshots and drawings as evidence of visible UI behavior. Treat `SPEC.m
 
 For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md](references/hyde-ui-spec-patterns.md) before drafting or revising the final spec.
 
+This skill is the front end of the workflow. The normal path is:
+
+1. `add-hyde-ui-feature`
+2. `grill-me`
+3. `to-prd`
+4. use the widget-shape skill plus `to-issues`
+5. `hyde-simplify`
+6. implementation with `tdd` plus the widget-shape skill
+
+Widget-shape mapping:
+
+- `hyde-dialog-widget` for `HydeDialogWidget` surfaces
+- `hyde-tool-widget` for `HydeToolWidget` surfaces
+- `hyde-interactive-widget` for `HydeInteractiveWidget` surfaces
+
 ## Workflow
 1. Inspect the feature spec folder first.
    Look for image assets, `SPEC.md`, and `IGOR.md`.
@@ -31,6 +46,18 @@ For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md
    Ask when artifacts conflict, when a screenshot implies behavior missing from prose, when an Igor concept has no clear Hyde/Python equivalent, or when a visible control might be kept, disabled, or removed.
 8. Write or revise `SPEC.md` in present-tense specification language.
    Describe the intended Hyde behavior, not project history.
+9. Leave the spec in a shape that a follow-on widget skill can implement directly.
+   For dialog surfaces, make the preview pane, footer behavior, command-generation
+   contract, and exceptions explicit so `hyde-dialog-widget` can normalize the code
+   without rediscovering product decisions.
+10. Leave explicit handoff answers for the next skills.
+   A follow-on `grill-me`, `to-prd`, and widget-shape pass should not need to infer:
+   - whether the surface is really a dialog, tool, or interactive widget
+   - whether the lower pane shows the executable backing string directly or may show
+     alternate status/help/preview text
+   - whether `Do It`, `To Cmd Line`, and `To Clip` all use the same backing string
+   - whether the dialog owns its domain package or calls a feature owner elsewhere
+   - which visible controls are intentionally inert in the initial deployment
 
 ## Interpretation Rules
 - Prioritize sources in this order: explicit user direction, Hyde architecture and AGENTS constraints, existing Hyde `SPEC.md`, screenshot evidence, then `IGOR.md`.
@@ -69,6 +96,13 @@ For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md
   - `Command Generation`
   - `Synchronization`
   - `Explicit Exclusions`
+- When the feature is expected to be a `HydeDialogWidget`, state whether the lower
+  preview pane shows the executable backing string directly or may display alternate
+  text while `Do It` / `To Cmd Line` / `To Clip` still use the backing string.
+- For confirmed destructive dialogs, be explicit about whether the lower pane is a
+  command preview, a status/validation surface, or both. A `remove_from_graph`-style
+  dialog still needs one canonical backing command string whenever the selection is
+  valid.
 - In `Editable Operations`, state:
   - which edits are live in the initial deployment
   - what objects those edits target

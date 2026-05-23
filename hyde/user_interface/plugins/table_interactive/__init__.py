@@ -147,16 +147,11 @@ class TableFeatureService:
         dialog = NewTableDialog(
             objects_metadata,
             preselection=preselection,
+            services=self.plugin.services,
             parent=parent,
         )
         if not dialog.exec_():
             return False
-
-        command = dialog.get_command()
-        if not command:
-            return False
-
-        self.plugin.services["python_execution_service"].execute_visible(command)
         return True
 
     def append_to_active_table(self, names):

@@ -54,20 +54,8 @@ class NewFigureDialog(HydeDialogWidget):
 
     def _refresh_from_widgets(self):
         self._sync_state_from_widgets()
+        self.set_preview_string(self.figure_state.source_for_command("create"))
         self.refresh_shell()
-
-    def canonical_text_payload(self):
-        self._sync_state_from_widgets()
-        return self.figure_state.source_for_command("create")
-
-    def can_send_to_cmd_line(self):
-        return True
-
-    def handle_do_it(self):
-        self.accept()
-
-    def get_command(self):
-        return self.canonical_text_payload()
 
     def normalized_state(self):
         self._sync_state_from_widgets()
