@@ -1140,6 +1140,13 @@ class FigureEditSession:
             self._figure_defaults,
         )
 
+    def reset_current_state(self):
+        self._current_state = copy.deepcopy(self._opening_state)
+        self._current_trace_style_states = copy.deepcopy(
+            self._opening_trace_style_states
+        )
+        return copy.deepcopy(self._current_state)
+
     def set_figure_title(self, title, *, subplot_id=None):
         return self._update_current_state(
             {
@@ -1296,6 +1303,22 @@ class FigureEditSession:
             subplot_id=resolved_subplot_id,
         )
         return updated_state
+
+    def remove_trace(self, trace_id, *, subplot_id=None):
+        return self.set_trace(trace_id, None, subplot_id=subplot_id)
+
+    def remove_traces(self, trace_ids, *, subplot_id=None):
+        resolved_subplot_id = self._resolve_subplot_id(subplot_id)
+        normalized_ids = {
+            str(trace_id)
+            for trace_id in tuple(trace_ids or ())
+            if str(trace_id or "").strip()
+        }
+        for trace_id in tuple(self.trace_ids(resolved_subplot_id)):
+            if trace_id not in normalized_ids:
+                continue
+            self.remove_trace(trace_id, subplot_id=resolved_subplot_id)
+        return copy.deepcopy(self._current_state)
 
     def attribute_path_trace(
         self,

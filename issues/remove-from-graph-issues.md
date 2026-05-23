@@ -1,6 +1,6 @@
 - [x] Slice 1: Normalize the Figure Dialog Family on `HydeFigureDialogWidget`
 - [x] Slice 2: Canonicalize Shared Figure Trace Lists
-- [ ] Slice 3: Ship the `Remove from Graph` Core Flow
+- [x] Slice 3: Ship the `Remove from Graph` Core Flow
 - [ ] Slice 4: Complete Regex Filter Behavior for `Remove from Graph`
 
 This breakdown is sized for delegated implementation work. Slices are listed in
@@ -109,17 +109,17 @@ directly.
 
 ### Acceptance criteria
 
-- [ ] `Remove from Graph...` launches as the first action in the active `Figure` menu.
-- [ ] The dialog is modal, opens against the active first-class figure, and may open
+- [x] `Remove from Graph...` launches as the first action in the active `Figure` menu.
+- [x] The dialog is modal, opens against the active first-class figure, and may open
       with an empty removable-trace list.
-- [ ] The dialog opens with no initial trace selection and supports arbitrary
+- [x] The dialog opens with no initial trace selection and supports arbitrary
       multi-selection.
-- [ ] When the selection is valid, the lower pane shows the canonical removal command
+- [x] When the selection is valid, the lower pane shows the canonical removal command
       string and `Do It`, `To Cmd Line`, and `To Clip` all use that same backing
       string.
-- [ ] `Do It` removes the selected traces from the authoritative live kernel figure
+- [x] `Do It` removes the selected traces from the authoritative live kernel figure
       through the normal hidden figure patch path and closes the dialog on success.
-- [ ] Behavior tests cover empty-list behavior, no-selection behavior, preview-backed
+- [x] Behavior tests cover empty-list behavior, no-selection behavior, preview-backed
       footer behavior, committed removal, and the figure-session removal contract.
 
 ### Blocked by
