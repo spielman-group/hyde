@@ -48,9 +48,8 @@ Ask these questions explicitly while reviewing:
 - Does the GUI only generate command strings and react to kernel results?
 - Are GUI-triggered kernel command strings generated in `features/..._features.py` rather than in GUI widgets, dialogs, or runtime helpers?
 - Is there exactly one authoritative implementation path?
-- For figure-facing surfaces, is there exactly one authoritative naming path through
-  shared figure helper tooling rather than duplicated widget-local formatters?
-- Does the patch keep stable window identity separate from visible title chrome?
+- Does the patch follow the ownership, identity, and presentation rules already
+  established in the docs and active spec instead of inventing local exceptions?
 - Does the patch preserve Hyde's two-process, command-driven model?
 - Are the tests concise and aligned with intended behavior rather than incidental structure?
 
@@ -64,10 +63,8 @@ Raise findings for any of the following:
 - GUI-built kernel command strings outside the `features/..._features.py` translation layer
 - direct imperative GUI-to-backend behavior where Hyde should have used a visible or deliberate kernel command path
 - patches that create separate GUI and non-GUI implementations of the same feature
-- figure-facing patches that invent widget-local trace/element naming or a
-  standalone display-only abstraction instead of extending shared figure helper
-  ownership
-- patches that conflate stable save/restore identity with visible window-title text
+- patches that restate or locally override feature policy already settled in the docs
+  or active spec without a deliberate documented contract change
 - backend or kernel ownership drifting into the GUI layer
 - redundant state, compatibility shims, defensive policy, or fallback behavior that Hyde did not request
 - tests that are verbose, brittle, tightly coupled to helper structure, or written around workaround behavior instead of Hyde's intended contract

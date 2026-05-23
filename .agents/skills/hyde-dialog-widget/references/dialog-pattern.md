@@ -117,18 +117,9 @@ and issue file rather than burying it in implementation.
 - verify `Do It`, `To Cmd Line`, and `To Clip` all use the same backing command
   string unless the spec explicitly says otherwise
 
-## Forcing Example: Remove from Graph
+## Feature-Specific Policy
 
-`project_management/specs/remove_from_graph/SPEC.md` is a good standard-dialog
-example:
-
-- modal dialog
-- confirmed destructive action
-- valid selections produce one canonical backing command string
-- invalid selections produce status/validation text
-- `To Cmd Line` uses the canonical command block
-- `To Clip` uses the backing preview string
-- no second launcher dispatch path
-
-That example should normally plan as a standard `HydeDialogWidget`, not as a special
-footer exception.
+Do not copy feature-specific dialog contracts into this reference. When a dialog has
+feature-specific ownership, preview, identity, or dispatch rules, read the active
+spec, PRD, issue file, and Hyde docs directly and apply this pattern around those
+sources.

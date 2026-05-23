@@ -74,10 +74,10 @@ Simplify aggressively when you see:
 - verbose tests that mirror plumbing rather than contract
 - dialog plans that fail to use the standard `HydeDialogWidget` footer contract when
   the spec does not require an exception
-- duplicated figure-element naming or title assembly that should live in shared
-  figure helper tooling through composition
-- standalone display-only abstractions where Hyde really wants shared helper-class
-  ownership inside an existing widget family
+- duplicate ownership or presentation-policy paths that are already decided in the
+  docs or active spec
+- new abstractions whose main effect is to restate feature policy already documented
+  elsewhere
 
 ## Hyde Simplification Questions
 
@@ -89,13 +89,10 @@ Ask these questions explicitly:
 - Can an existing queue, thread, IPC path, or public command carry this behavior?
 - Is the GUI doing anything beyond collecting UI state, generating a command string, and reacting to kernel results?
 - Has the patch created two implementation paths where Hyde should have one?
-- Has the patch created two naming authorities where Hyde should have one shared
-  figure helper?
 - Does this dialog really need an exception to the shared `HydeDialogWidget` footer
   contract, or is the plan keeping a subclass shim for no reason?
-- Is this figure-facing naming behavior better expressed as shared helper-class
-  tooling with a has-a relationship rather than as a new standalone class or
-  widget-local formatter?
+- Am I restating feature policy in code, issue slices, or new abstractions when the
+  governing docs/spec already answer it?
 - If I remove this wrapper, does the total code actually get shorter or clearer, or am I just pushing the same lines outward into call sites?
 - Would one small wrapper make the total code shorter or clearer by collapsing repeated call-site logic?
 - Do the tests prove the contract with less structure and fewer incidental assertions?

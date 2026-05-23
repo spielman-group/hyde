@@ -85,11 +85,10 @@ contract, preview contract, package ownership, or legitimate exceptions.
    If the dialog owns a Python package or domain, lowering/validation belongs in the
    matching `hyde/features/..._features.py` module. If it uses a package owned
    elsewhere, call that existing feature module instead of duplicating logic.
-7. For figure-working dialogs, reuse the shared figure family.
-   Prefer `HydeFigureDialogWidget` plus shared figure helper tooling through
-   composition when the dialog needs canonical trace or figure-element naming.
-   Do not invent dialog-local naming rules or a standalone display-only abstraction
-   when the figure family should own that behavior.
+7. Reuse any documented family-specific ownership seam.
+   If the dialog belongs to an existing widget family with shared ownership or
+   lifecycle rules, follow the docs and spec rather than inventing dialog-local
+   policy or a new abstraction inside the plugin.
 8. Validate the footer contract with behavior tests.
    Prefer tests that prove what the user sees and what gets executed or copied, not
    helper wiring.
@@ -103,19 +102,10 @@ When this skill is paired with `to-issues`, make sure the implementation plan sa
 - whether `Do It`, `To Cmd Line`, and `To Clip` all use the same backing string
 - whether `Help` should be base-owned through `help_filename`
 - whether the plugin owns its domain package or calls a feature owner elsewhere
-- for figure-working dialogs, whether canonical element naming comes from shared
-  figure helper tooling rather than dialog-local formatting
+- whether any family-specific ownership or lifecycle rule from the docs/spec must be
+  reused
 - whether launcher code only opens the dialog or still has a second dispatch path
 - which tests must prove the shared footer contract
-
-For `project_management/specs/remove_from_graph/SPEC.md`, the intended answer is:
-
-- standard `HydeDialogWidget`
-- confirmed, not live
-- one canonical backing command string for valid selections
-- lower pane may show validation/status text when invalid
-- no second launcher-side dispatch path
-- feature-layer lowering for the removal patch
 
 ## New Plugin Shape
 
@@ -141,8 +131,8 @@ When normalizing an existing plugin, prefer these end states:
 - no duplicated preview string and lower-text-edit state
 - no separate payload getter when `preview_string()` already is the real backing
   command contract
-- no dialog-local figure-element naming rules when shared figure helper tooling
-  already owns the canonical `display_name`
+- no dialog-local policy that duplicates a documented family-level ownership or
+  lifecycle rule
 
 ## Output Rules
 
