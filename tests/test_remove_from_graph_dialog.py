@@ -403,3 +403,111 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             [trace["id"] for trace in opening_state["layout"]["subplots"][0]["traces"]],
             ["trace0", "trace1"],
         )
+
+    def test_valid_regex_filter_updates_visible_trace_list_live(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = RemoveFromGraphDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            self.assertEqual(dialog.ui.trace_list.count(), 2)
+
+            dialog.ui.filter_edit.setText("trace_b")
+            self.qapp.processEvents()
+
+            self.assertEqual(dialog.ui.trace_list.count(), 1)
+            self.assertEqual(
+                dialog.ui.trace_list.item(0).text(),
+                "trace_b | trace_b vs x",
+            )
+            self.assertEqual(
+                dialog.lower_text_edit.toPlainText(),
+                "Select one or more traces to remove.",
+            )
+        finally:
+            dialog.close()
+
+    def test_invalid_regex_shows_error_and_leaves_current_filtered_list_unchanged(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = RemoveFromGraphDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            dialog.ui.trace_list.item(0).setSelected(True)
+            dialog.ui.filter_edit.setText("trace_a")
+            self.qapp.processEvents()
+
+            expected_preview = dialog.preview_string()
+            expected_row_text = dialog.ui.trace_list.item(0).text()
+
+            dialog.ui.filter_edit.setText("[")
+            self.qapp.processEvents()
+
+            self.assertEqual(dialog.ui.trace_list.count(), 1)
+            self.assertEqual(dialog.ui.trace_list.item(0).text(), expected_row_text)
+            self.assertEqual(dialog.preview_string(), expected_preview)
+            self.assertIn(
+                "Invalid regex:",
+                dialog.lower_text_edit.toPlainText(),
+            )
+            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_clip_button.isEnabled())
+        finally:
+            dialog.close()
+
+    def test_valid_filter_drops_hidden_selection_and_preserves_visible_selection(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = RemoveFromGraphDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            dialog.ui.trace_list.item(0).setSelected(True)
+            dialog.ui.trace_list.item(1).setSelected(True)
+            self.qapp.processEvents()
+
+            dialog.ui.filter_edit.setText("trace_b")
+            self.qapp.processEvents()
+
+            self.assertEqual(dialog.ui.trace_list.count(), 1)
+            self.assertEqual(
+                dialog.selected_supported_trace_ids(dialog.ui.trace_list),
+                ("trace1",),
+            )
+            self.assertNotIn("_hyde_trace_id', None) == 'trace0'", dialog.preview_string())
+            self.assertIn("_hyde_trace_id', None) == 'trace1'", dialog.preview_string())
+        finally:
+            dialog.close()

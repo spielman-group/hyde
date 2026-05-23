@@ -928,9 +928,13 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         self,
         list_widget,
         *,
+        rows=None,
         selected_trace_ids=(),
         current_trace_id=None,
     ):
+        rendered_rows = self.supported_trace_records() if rows is None else tuple(
+            copy.deepcopy(rows)
+        )
         normalized_selected = {str(trace_id) for trace_id in selected_trace_ids}
         normalized_current = (
             None if current_trace_id is None else str(current_trace_id)
@@ -938,7 +942,7 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         blocker = QtCore.QSignalBlocker(list_widget)
         try:
             list_widget.clear()
-            for row in self._supported_trace_rows:
+            for row in rendered_rows:
                 item = QtWidgets.QListWidgetItem(row["row_text"])
                 item.setData(QtCore.Qt.UserRole, row["trace_id"])
                 list_widget.addItem(item)
@@ -946,9 +950,11 @@ class HydeFigureDialogWidget(HydeDialogWidget):
                     item.setSelected(True)
                 if row["trace_id"] == normalized_current:
                     list_widget.setCurrentItem(item)
+            if normalized_current is None and not normalized_selected:
+                list_widget.setCurrentRow(-1)
         finally:
             del blocker
-        return self.supported_trace_records()
+        return rendered_rows
 
     def current_supported_trace_id(self, list_widget):
         item = list_widget.currentItem()

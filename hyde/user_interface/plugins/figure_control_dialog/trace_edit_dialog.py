@@ -2,22 +2,9 @@ from qtutils.qt import QtWidgets
 
 from hyde.user_interface.shared.figure import (
     HydeFigureDialogWidget,
-    MatplotlibColorLineEdit,
+    SUPPORTED_TRACE_STYLE_DEFAULTS,
     default_trace_color,
 )
-
-SUPPORTED_STYLE_DEFAULTS = {
-    "visible": True,
-    "linestyle": "-",
-    "linewidth": 1.5,
-    "alpha": 1.0,
-    "drawstyle": "default",
-    "marker": "None",
-    "markersize": 6.0,
-    "markerfacecolor": "auto",
-    "markeredgecolor": "auto",
-    "markeredgewidth": 1.0,
-}
 
 LINE_STYLE_CHOICES = [
     ("Solid", "-"),
@@ -114,7 +101,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         return None if record is None else record["trace_id"]
 
     def _style_for_trace(self, trace_id, subplot_id=None):
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         index = 0 if record is None else int(record.get("trace_index", 0))
         style = {
             "color": self._session.trace_style(
@@ -132,13 +119,13 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
                     subplot_id=subplot_id,
                     default=default,
                 )
-                for name, default in SUPPORTED_STYLE_DEFAULTS.items()
+                for name, default in SUPPORTED_TRACE_STYLE_DEFAULTS.items()
             }
         )
         return style
 
     def _load_controls_for_trace(self, trace_id):
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         if record is None:
             return
         style = self._style_for_trace(trace_id, subplot_id=record["subplot_id"])
@@ -177,11 +164,8 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
             return "markers"
         return "lines"
 
-    def _record_for_trace(self, trace_id):
-        return self.supported_trace_record(trace_id)
-
     def _update_color_field_previews(self, trace_id):
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         if record is None:
             return
         style = self._style_for_trace(trace_id, subplot_id=record["subplot_id"])
@@ -193,7 +177,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         trace_id = str(trace_id)
         if not patch:
             return False
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         if record is None:
             return False
         self._session.set_trace_style(
@@ -232,7 +216,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         trace_id = self._current_trace_id()
         if trace_id is None:
             return
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         if record is None:
             return
         style = self._style_for_trace(trace_id, subplot_id=record["subplot_id"])
@@ -256,7 +240,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         if trace_id is None:
             return
         color = self.ui.line_color_edit.text().strip()
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         if record is None:
             return
         if color == self._style_for_trace(trace_id, subplot_id=record["subplot_id"])["color"]:
@@ -329,7 +313,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         if trace_id is None:
             return
         color = self.ui.marker_face_color_edit.text().strip()
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         if record is None:
             return
         if (
@@ -351,7 +335,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         if trace_id is None:
             return
         color = self.ui.marker_edge_color_edit.text().strip()
-        record = self._record_for_trace(trace_id)
+        record = self.supported_trace_record(trace_id)
         if record is None:
             return
         if (

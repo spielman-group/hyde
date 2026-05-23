@@ -1,7 +1,7 @@
 - [x] Slice 1: Normalize the Figure Dialog Family on `HydeFigureDialogWidget`
 - [x] Slice 2: Canonicalize Shared Figure Trace Lists
 - [x] Slice 3: Ship the `Remove from Graph` Core Flow
-- [ ] Slice 4: Complete Regex Filter Behavior for `Remove from Graph`
+- [x] Slice 4: Complete Regex Filter Behavior for `Remove from Graph`
 
 This breakdown is sized for delegated implementation work. Slices are listed in
 dependency order so subagents can pick up unblocked work without rediscovering the
@@ -151,13 +151,13 @@ remove-from-graph path already exists.
 
 ### Acceptance criteria
 
-- [ ] The dialog exposes a fully implemented regex text filter using standard regex
+- [x] The dialog exposes a fully implemented regex text filter using standard regex
       syntax with no Hyde-specific matching rules.
-- [ ] Valid regex input updates the visible trace list live.
-- [ ] Invalid regex input shows an error state and leaves the current filtered list
+- [x] Valid regex input updates the visible trace list live.
+- [x] Invalid regex input shows an error state and leaves the current filtered list
       unchanged.
-- [ ] Selections hidden by a valid filter change are dropped.
-- [ ] Behavior tests cover valid filtering, invalid-regex handling, preserved visible
+- [x] Selections hidden by a valid filter change are dropped.
+- [x] Behavior tests cover valid filtering, invalid-regex handling, preserved visible
       selections, and dropped hidden selections.
 
 ### Blocked by

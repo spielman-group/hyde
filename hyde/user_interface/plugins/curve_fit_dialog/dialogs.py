@@ -288,6 +288,19 @@ class CurveFitDialog(HydeFigureDialogWidget):
             self.x_data_form.addRow(row["name"], combo)
             self.x_data_rows.append({"name": row["name"], "combo": combo})
 
+    def _coefficient_text_edit(self, row, field_name, *, enabled=True):
+        edit = QtWidgets.QLineEdit(self.coefficients_table)
+        edit.setText(row[field_name])
+        edit.setEnabled(bool(enabled))
+        edit.editingFinished.connect(
+            lambda name=row["name"], edit=edit, field_name=field_name: self._on_coefficient_text_changed(
+                name,
+                field_name,
+                edit.text(),
+            )
+        )
+        return edit
+
     def _rebuild_coefficient_rows(self, model):
         self.coefficients_table.setRowCount(0)
         for row_index, row in enumerate(model["coefficient_rows"]):
@@ -295,22 +308,20 @@ class CurveFitDialog(HydeFigureDialogWidget):
             name_item = QtWidgets.QTableWidgetItem(row["name"])
             name_item.setFlags(name_item.flags() & ~QtCore.Qt.ItemIsEditable)
             self.coefficients_table.setItem(row_index, 0, name_item)
-
-            initial_edit = QtWidgets.QLineEdit(self.coefficients_table)
-            initial_edit.setText(row["initial_value"])
-            initial_edit.setEnabled(not row["expression_owned"])
-            initial_edit.editingFinished.connect(
-                lambda name=row["name"], edit=initial_edit: self._on_coefficient_text_changed(
-                    name,
+            text_edit_enabled = not row["expression_owned"]
+            self.coefficients_table.setCellWidget(
+                row_index,
+                1,
+                self._coefficient_text_edit(
+                    row,
                     "initial_value",
-                    edit.text(),
-                )
+                    enabled=text_edit_enabled,
+                ),
             )
-            self.coefficients_table.setCellWidget(row_index, 1, initial_edit)
 
             vary_checkbox = QtWidgets.QCheckBox(self.coefficients_table)
             vary_checkbox.setChecked(bool(row["vary"]))
-            vary_checkbox.setEnabled(not row["expression_owned"])
+            vary_checkbox.setEnabled(text_edit_enabled)
             vary_checkbox.toggled.connect(
                 lambda checked, name=row["name"]: self._on_coefficient_vary_changed(
                     name,
@@ -318,41 +329,29 @@ class CurveFitDialog(HydeFigureDialogWidget):
                 )
             )
             self.coefficients_table.setCellWidget(row_index, 2, vary_checkbox)
-
-            lower_edit = QtWidgets.QLineEdit(self.coefficients_table)
-            lower_edit.setText(row["lower_bound"])
-            lower_edit.setEnabled(not row["expression_owned"])
-            lower_edit.editingFinished.connect(
-                lambda name=row["name"], edit=lower_edit: self._on_coefficient_text_changed(
-                    name,
+            self.coefficients_table.setCellWidget(
+                row_index,
+                3,
+                self._coefficient_text_edit(
+                    row,
                     "lower_bound",
-                    edit.text(),
-                )
+                    enabled=text_edit_enabled,
+                ),
             )
-            self.coefficients_table.setCellWidget(row_index, 3, lower_edit)
-
-            upper_edit = QtWidgets.QLineEdit(self.coefficients_table)
-            upper_edit.setText(row["upper_bound"])
-            upper_edit.setEnabled(not row["expression_owned"])
-            upper_edit.editingFinished.connect(
-                lambda name=row["name"], edit=upper_edit: self._on_coefficient_text_changed(
-                    name,
+            self.coefficients_table.setCellWidget(
+                row_index,
+                4,
+                self._coefficient_text_edit(
+                    row,
                     "upper_bound",
-                    edit.text(),
-                )
+                    enabled=text_edit_enabled,
+                ),
             )
-            self.coefficients_table.setCellWidget(row_index, 4, upper_edit)
-
-            expr_edit = QtWidgets.QLineEdit(self.coefficients_table)
-            expr_edit.setText(row["expr"])
-            expr_edit.editingFinished.connect(
-                lambda name=row["name"], edit=expr_edit: self._on_coefficient_text_changed(
-                    name,
-                    "expr",
-                    edit.text(),
-                )
+            self.coefficients_table.setCellWidget(
+                row_index,
+                5,
+                self._coefficient_text_edit(row, "expr"),
             )
-            self.coefficients_table.setCellWidget(row_index, 5, expr_edit)
 
     def _refresh_from_state(self):
         model = self.state.codec.present_state(self.state._state, context=self._context())
