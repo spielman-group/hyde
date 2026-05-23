@@ -14,6 +14,9 @@ from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import 
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
+    RemoveFromGraphDialog,
+)
 from hyde.user_interface.shared.figure import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
 
@@ -279,7 +282,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             self.assertEqual(dialog.ui.trace_list.count(), 2)
             self.assertEqual(
                 dialog.ui.trace_list.currentItem().text(),
-                "trace_a | trace_a vs x",
+                "trace_a: trace_a vs x",
             )
             self.assertEqual(dialog.ui.line_color_edit.text(), "#123456")
             self.assertEqual(dialog.ui.line_style_combo.currentData(), "--")
@@ -316,7 +319,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
             self.assertEqual(
                 [extra_list.item(index).text() for index in range(extra_list.count())],
-                ["trace_a | trace_a vs x", "trace_b | trace_b vs x"],
+                ["trace_a: trace_a vs x", "trace_b: trace_b vs x"],
             )
             self.assertEqual(
                 dialog.selected_supported_trace_ids(extra_list),
@@ -350,7 +353,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             expected_rows = dialog.supported_trace_records()
             self.assertEqual(
                 [dialog.ui.trace_list.item(index).text() for index in range(dialog.ui.trace_list.count())],
-                [row["row_text"] for row in expected_rows],
+                [row["display_name"] for row in expected_rows],
             )
             self.assertEqual(
                 [
@@ -361,6 +364,50 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             )
         finally:
             dialog.close()
+
+    def test_trace_selection_surfaces_share_canonical_display_names(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        trace_dialog = TraceAppearanceDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        remove_dialog = RemoveFromGraphDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            expected_names = [
+                record["display_name"] for record in trace_dialog.supported_trace_records()
+            ]
+
+            self.assertEqual(
+                [
+                    trace_dialog.ui.trace_list.item(index).text()
+                    for index in range(trace_dialog.ui.trace_list.count())
+                ],
+                expected_names,
+            )
+            self.assertEqual(
+                [
+                    remove_dialog.ui.trace_list.item(index).text()
+                    for index in range(remove_dialog.ui.trace_list.count())
+                ],
+                expected_names,
+            )
+        finally:
+            remove_dialog.close()
+            trace_dialog.close()
 
     def test_live_applied_trace_state_clears_preview_and_send_to_cmd_line(self):
         execution = FakeExecutionService()

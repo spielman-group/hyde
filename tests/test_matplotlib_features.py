@@ -1591,7 +1591,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure = workspace.figures[1]
         self.assertEqual(figure.window_handle(), "FigureA")
         self.assertEqual(figure.parentWidget().objectName(), "FigureA")
-        self.assertEqual(figure.parentWidget().windowTitle(), "FigureA")
+        self.assertEqual(
+            figure.parentWidget().windowTitle(),
+            "FigureA: fit_delay: fit_delay vs delay, raw_delay: raw_delay vs delay",
+        )
         self.assertEqual(figure.snapshot_state.figure_ir()["settings"]["title"], "FigureA")
         workspace.clear()
         mdi_area.close()
@@ -2060,7 +2063,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             figure = plugin.workspace.figures[1]
             self.assertEqual(
                 figure.parentWidget().windowTitle(),
-                "FigureA [Unsupported Feature]",
+                "FigureA: fit_delay: fit_delay vs delay, raw_delay: raw_delay vs delay [Unsupported Feature]",
             )
             self.assertFalse(figure.warning_label.isHidden())
             self.assertIn("unsupported trace source", figure.warning_label.text().lower())
@@ -2200,6 +2203,7 @@ class TestFigureWindowBoundaries(unittest.TestCase):
                         "subplot_id": "subplot0",
                         "trace_id": "trace0",
                         "label": "trace_a",
+                        "display_name": "trace_a: trace_a vs x",
                         "x_name": "x",
                         "y_name": "trace_a",
                         "trace": {
@@ -2214,6 +2218,7 @@ class TestFigureWindowBoundaries(unittest.TestCase):
                         "subplot_id": "subplot0",
                         "trace_id": "trace1",
                         "label": "trace_b",
+                        "display_name": "trace_b: trace_b vs x",
                         "x_name": "x",
                         "y_name": "trace_b",
                         "trace": {

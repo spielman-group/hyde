@@ -429,7 +429,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             self.assertEqual(dialog.ui.trace_list.count(), 1)
             self.assertEqual(
                 dialog.ui.trace_list.item(0).text(),
-                "trace_b | trace_b vs x",
+                "trace_b: trace_b vs x",
             )
             self.assertEqual(
                 dialog.lower_text_edit.toPlainText(),

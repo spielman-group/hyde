@@ -16,7 +16,7 @@ from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
 from hyde.user_interface.shared.core import HydeGuiState, log_hyde_state_debug
 from hyde.user_interface.shared.figure import (
     FigureEditSession,
-    supported_trace_records_from_figure_ir,
+    FigureDisplayHelper,
 )
 from hyde.user_interface.shared.plugin import (
     apply_saveable_window_state,
@@ -228,6 +228,7 @@ class FigureWindow(HydeInteractiveWidget):
 
     def __init__(self, figure_number, services=None, parent=None):
         self.figure_number = int(figure_number)
+        self.figure_display_helper = FigureDisplayHelper()
         super().__init__(
             services=services,
             initial_window_name=f"Figure{self.figure_number}",
@@ -313,9 +314,7 @@ class FigureWindow(HydeInteractiveWidget):
         )
         if self._subwindow is not None:
             self._subwindow.setWindowTitle(
-                self.formatted_window_title(
-                    warning_text=self.snapshot_state.window_warning_text(),
-                )
+                self._visible_window_title()
             )
         warning_message = self.snapshot_state.window_warning_message()
         self.warning_label.setVisible(bool(warning_message))
@@ -486,10 +485,25 @@ class FigureWindow(HydeInteractiveWidget):
         )
 
     def supported_trace_records(self):
-        return supported_trace_records_from_figure_ir(self.figure_ir())
+        return self.figure_display_helper.supported_trace_records(self.figure_ir())
 
     def has_supported_traces(self):
         return bool(self.supported_trace_records())
+
+    def _visible_title_name(self):
+        return self.snapshot_state.default_macro_name() or self.window_handle()
+
+    def _visible_trace_title_suffix(self):
+        return ", ".join(
+            record["display_name"] for record in self.supported_trace_records()
+        )
+
+    def _visible_window_title(self):
+        return self.formatted_window_title(
+            title_name=self._visible_title_name(),
+            title_suffix=self._visible_trace_title_suffix(),
+            warning_text=self.snapshot_state.window_warning_text(),
+        )
 
     def request_regenerate_from_ir(self):
         if not self.has_figure_ir():

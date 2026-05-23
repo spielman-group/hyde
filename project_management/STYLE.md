@@ -10,6 +10,9 @@
 - At module scope, do not use leading `_` for private functions or private classes.
 - At module scope, leading `_NAME` or `_name` is reserved for private module-global
   constants or variables.
+- For first-class figure elements, `label` means the raw plotted label metadata from
+  matplotlib, while `display_name` means Hyde's canonical synthesized user-facing
+  identifier. Do not reuse `label` to mean the canonical display string.
 - First-party plugin package names under `hyde.user_interface.plugins` should encode
   their primary widget family:
   - `*_tool` for `HydeToolWidget` plugins
@@ -62,6 +65,19 @@ QtWidgets
   base class over free helper functions. For first-class figure dialogs, the default
   pattern is a `HydeDialogWidget` subclass dedicated to figure work, such as
   `HydeFigureDialogWidget`, with concrete dialogs inheriting from that class.
+- When multiple figure-facing surfaces need one canonical user-facing name for traces
+  or analogous figure elements, prefer shared figure helper tooling used through
+  composition over duplicated widget-local string formatting.
+- Canonical trace display names follow this contract:
+  - `{label}: {y} vs {x}` when `label` and `x` exist
+  - `{label}: {y}` when `label` exists and `x` does not
+  - `{y} vs {x}` when `label` does not exist and `x` exists
+  - `{y}` otherwise
+- Figure windows may use visible titles of the form
+  `{Figure_name}: {trace display names}`. This affects visible chrome only. Stable
+  subwindow identity and save/restore naming must remain unchanged. For the first
+  pass, rely on the native title-bar truncation behavior rather than adding custom
+  Hyde ellipsis logic.
 - Treat code-built widget trees as exceptions that need a concrete reason, such as a
   third-party runtime widget or a layout that is materially impossible or misleading
   to express in Qt Designer.

@@ -423,10 +423,18 @@ class HydeInteractiveWidget(HydeToolWidget):
     def window_handle(self):
         return self.window_identifier()
 
-    def formatted_window_title(self, title_suffix=None, warning_text=None):
+    def formatted_window_title(
+        self,
+        title_suffix=None,
+        warning_text=None,
+        title_name=None,
+    ):
         stable_name = str(self.window_handle())
+        visible_name = str(title_name).strip() if title_name is not None else stable_name
+        if not visible_name:
+            visible_name = stable_name
         suffix_text = str(title_suffix).strip() if title_suffix is not None else ""
-        base_title = stable_name if not suffix_text else f"{stable_name}: {suffix_text}"
+        base_title = visible_name if not suffix_text else f"{visible_name}: {suffix_text}"
         warning = str(warning_text).strip() if warning_text is not None else ""
         if warning:
             return f"{base_title} [{warning}]"

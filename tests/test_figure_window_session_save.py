@@ -135,6 +135,11 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 "@hyde.figure(window_pos=(10, 20), window_state='minimized', register=False)",
                 source,
             )
+            self.assertEqual(
+                subwindow.windowTitle(),
+                "Graph0: fit_delay: fit_delay vs delay, raw_delay: raw_delay vs delay",
+            )
+            self.assertEqual(widget.window_handle(), "Figure7")
             self.assertIn("def Figure7(delay, fit_delay, raw_delay):", source)
             self.assertIn("Figure7(delay, fit_delay, raw_delay)", source)
             self.assertIn("fig = plt.figure('Figure7')", source)
@@ -227,7 +232,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(subwindow.windowTitle(), "Figure7 [Unsupported Feature]")
+            self.assertEqual(subwindow.windowTitle(), "Figure0 [Unsupported Feature]")
             self.assertIn("unsupported trace source", widget.warning_label.text().lower())
             self.assertFalse(widget.warning_label.isHidden())
         finally:
@@ -260,6 +265,10 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             macro = widget.macro_source("Figure0")
             source = widget.session_restore_source()
 
+            self.assertEqual(
+                subwindow.windowTitle(),
+                "Figure0: fit_delay: fit_delay vs delay, raw_delay: raw_delay vs delay [Unsupported Feature]",
+            )
             self.assertIn("fig = plt.figure('Figure7')", macro)
             self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
             self.assertIn("fig = plt.figure('Figure7')", source)
@@ -291,7 +300,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(subwindow.windowTitle(), "Figure7 [Unsupported Feature]")
+            self.assertEqual(subwindow.windowTitle(), "Graph0 [Unsupported Feature]")
             self.assertIn("unsupported trace source", widget.warning_label.text().lower())
             self.assertFalse(widget.warning_label.isHidden())
         finally:

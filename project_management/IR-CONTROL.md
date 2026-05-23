@@ -64,6 +64,11 @@ The GUI surface does not:
 - Shared UI-family behavior may live in a feature-family widget base class. For
   first-class figure dialogs, prefer a shared `HydeDialogWidget` subclass over free
   helper functions when multiple dialogs need the same figure-dialog behavior.
+- Shared user-facing display metadata may live in a composed feature support class
+  when it is not scientific state and when multiple surfaces need one canonical
+  representation. For first-class figures, canonical figure-element display names
+  should be owned by shared figure helper tooling used through composition, not by
+  duplicated widget-local formatting logic.
 
 ## Shared Pattern
 
@@ -128,6 +133,9 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - Figure axis, trace, and Curve Fit attached-display dialogs now emit matplotlib
   patch Python from imported figure IR rather than using a separate semantic
   figure-action transport.
+- Canonical user-facing trace identification is separate from raw plotted `label`
+  metadata. Figure-working surfaces should consume the shared figure helper's
+  canonical `display_name` rather than inferring their own fallback strings.
 - Runtime transport and feature-specific figure behavior belong in
   `ARCHITECTURE.md`, not in this generic control-pattern document.
 

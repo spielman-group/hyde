@@ -72,9 +72,7 @@ class RemoveFromGraphDialog(HydeFigureDialogWidget):
             regex = re.compile(pattern)
         except re.error as exc:
             return None, f"Invalid regex: {exc}"
-        return tuple(
-            row for row in trace_rows if regex.search(row["row_text"])
-        ), ""
+        return tuple(row for row in trace_rows if regex.search(row["display_name"])), ""
 
     def _apply_filter_feedback(self):
         if self._filter_error_message:

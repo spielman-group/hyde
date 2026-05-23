@@ -642,47 +642,60 @@ def supported_trace_style_state(
     return style
 
 
-def trace_source_name(source):
-    if not isinstance(source, dict):
-        return None
-    if source.get("kind") != "name":
-        return None
-    value = str(source.get("value") or "").strip()
-    return value or None
+class FigureDisplayHelper:
+    def trace_source_name(self, source):
+        if not isinstance(source, dict):
+            return None
+        if source.get("kind") != "name":
+            return None
+        value = str(source.get("value") or "").strip()
+        return value or None
 
-
-def trace_display_name(trace):
-    label = trace.get("kwargs", {}).get("label")
-    if label not in (None, "", "_nolegend_"):
+    def trace_label(self, trace):
+        label = dict(trace or {}).get("kwargs", {}).get("label")
+        if label in (None, "", "_nolegend_"):
+            return None
         return str(label)
-    y_name = trace_source_name(trace.get("y_source"))
-    if y_name:
-        return y_name
-    return str(trace.get("id", "trace"))
 
+    def trace_display_name(self, trace):
+        trace = dict(trace or {})
+        label = self.trace_label(trace)
+        x_name = self.trace_source_name(trace.get("x_source"))
+        y_name = self.trace_source_name(trace.get("y_source"))
+        if label and y_name and x_name:
+            return f"{label}: {y_name} vs {x_name}"
+        if label and y_name:
+            return f"{label}: {y_name}"
+        if y_name and x_name:
+            return f"{y_name} vs {x_name}"
+        if y_name:
+            return y_name
+        if label:
+            return label
+        return str(trace.get("id", "trace"))
 
-def supported_trace_records_from_figure_ir(figure_ir):
-    figure_ir = dict(figure_ir or {})
-    subplots = figure_ir.get("layout", {}).get("subplots", [])
-    if not subplots:
-        return ()
-    subplot = subplots[0]
-    records = []
-    for trace in subplot.get("traces", []):
-        if trace.get("kind") != "line":
-            continue
-        records.append(
-            {
-                "subplot_id": str(subplot.get("id")),
-                "trace_id": str(trace.get("id")),
-                "label": trace_display_name(trace),
-                "x_name": trace_source_name(trace.get("x_source")),
-                "y_name": trace_source_name(trace.get("y_source")),
-                "trace": dict(trace),
-            }
-        )
-    return tuple(records)
-
+    def supported_trace_records(self, figure_ir):
+        figure_ir = dict(figure_ir or {})
+        subplots = figure_ir.get("layout", {}).get("subplots", [])
+        if not subplots:
+            return ()
+        subplot = subplots[0]
+        records = []
+        for trace in subplot.get("traces", []):
+            if trace.get("kind") != "line":
+                continue
+            records.append(
+                {
+                    "subplot_id": str(subplot.get("id")),
+                    "trace_id": str(trace.get("id")),
+                    "label": self.trace_label(trace),
+                    "display_name": self.trace_display_name(trace),
+                    "x_name": self.trace_source_name(trace.get("x_source")),
+                    "y_name": self.trace_source_name(trace.get("y_source")),
+                    "trace": dict(trace),
+                }
+            )
+        return tuple(records)
 
 def default_subplot_layout_state():
     return FigureIRCodec.validate_state({"layout": {"subplots": [{}]}})["layout"][
@@ -768,10 +781,12 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         self._applied_effective_state = None
         self._supported_trace_rows = ()
         self._supported_trace_rows_by_id = {}
+        self.figure_display_helper = FigureDisplayHelper()
         super().__init__(*args, services=dict(services or {}), **kwargs)
         if self.figure_context is None:
             return
         self._session = self.figure_context.open_session()
+        self.figure_display_helper = self._session.figure_display_helper
         self._opening_effective_state = self._session.opening_effective_state()
         self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
         self._reload_supported_trace_rows()
@@ -943,7 +958,7 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         try:
             list_widget.clear()
             for row in rendered_rows:
-                item = QtWidgets.QListWidgetItem(row["row_text"])
+                item = QtWidgets.QListWidgetItem(row["display_name"])
                 item.setData(QtCore.Qt.UserRole, row["trace_id"])
                 list_widget.addItem(item)
                 if row["trace_id"] in normalized_selected:
@@ -982,33 +997,18 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         trace_records = (
             self._session.supported_trace_records()
             if effective_state is None
-            else supported_trace_records_from_figure_ir(effective_state)
+            else self.figure_display_helper.supported_trace_records(effective_state)
         )
         for index, record in enumerate(trace_records):
             row = dict(record)
             row["trace_index"] = index
             row["trace_id"] = str(row["trace_id"])
             row["subplot_id"] = str(row["subplot_id"])
-            row["row_text"] = self._canonical_supported_trace_row_text(row)
             rows.append(row)
             rows_by_id[row["trace_id"]] = dict(row)
         self._supported_trace_rows = tuple(rows)
         self._supported_trace_rows_by_id = rows_by_id
         return self.supported_trace_records()
-
-    def _canonical_supported_trace_row_text(self, record):
-        text = str(record.get("label") or "").strip()
-        if not text:
-            text = str(record.get("trace_id") or "").strip()
-        y_name = str(record.get("y_name") or "").strip()
-        x_name = str(record.get("x_name") or "").strip()
-        if y_name and x_name:
-            return f"{text} | {y_name} vs {x_name}"
-        if y_name:
-            return f"{text} | {y_name}"
-        if x_name:
-            return f"{text} | {x_name}"
-        return text
 
 
 class FigureEditSession:
@@ -1022,6 +1022,7 @@ class FigureEditSession:
         resolved_axis_limits=None,
     ):
         self.figure_number = int(figure_number)
+        self.figure_display_helper = FigureDisplayHelper()
         self._figure_defaults = copy.deepcopy(figure_defaults)
         self._trace_styles = copy.deepcopy(trace_styles) or {}
         self._trace_style_defaults = trace_style_defaults_by_subplot(self._figure_defaults)
@@ -1108,7 +1109,7 @@ class FigureEditSession:
         return copy.deepcopy(trace["kwargs"].get(str(name), default))
 
     def supported_trace_records(self):
-        return supported_trace_records_from_figure_ir(self._current_state)
+        return self.figure_display_helper.supported_trace_records(self._current_state)
 
     def has_supported_traces(self):
         return bool(self.supported_trace_records())
@@ -1473,7 +1474,9 @@ class FigureEditSession:
     def _sync_current_trace_style_state(self, trace_id, *, subplot_id=None):
         trace_key = self._trace_style_key(trace_id, subplot_id)
         self._current_trace_style_states.pop(trace_key, None)
-        for index, record in enumerate(supported_trace_records_from_figure_ir(self._current_state)):
+        for index, record in enumerate(
+            self.figure_display_helper.supported_trace_records(self._current_state)
+        ):
             if record["subplot_id"] != trace_key[0]:
                 continue
             if record["trace_id"] != trace_key[1]:
@@ -1641,7 +1644,9 @@ class FigureEditSession:
 
     def _initial_trace_style_states(self, state):
         trace_style_states = {}
-        for index, record in enumerate(supported_trace_records_from_figure_ir(state)):
+        for index, record in enumerate(
+            self.figure_display_helper.supported_trace_records(state)
+        ):
             trace_key = (record["subplot_id"], record["trace_id"])
             default_trace = self._trace_style_defaults.get(record["subplot_id"], {}).get(
                 record["trace_id"]

@@ -423,8 +423,8 @@ class TestAxisEditDialog(unittest.TestCase):
                 "trace0",
             )
             self.assertEqual(
-                [record["row_text"] for record in dialog.supported_trace_records()],
-                ["trace_a | trace_a vs x", "trace_b | trace_b vs x"],
+                [record["display_name"] for record in dialog.supported_trace_records()],
+                ["trace_a: trace_a vs x", "trace_b: trace_b vs x"],
             )
             self.assertEqual(
                 dialog.opening_effective_state()["settings"]["title"],

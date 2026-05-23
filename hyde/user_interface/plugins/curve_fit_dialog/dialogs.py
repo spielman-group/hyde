@@ -414,16 +414,21 @@ class CurveFitDialog(HydeFigureDialogWidget):
                 continue
             root = dict(y_source.get("root") or {})
             path = tuple(y_source.get("path") or ())
+            trace_label = self.figure_display_helper.trace_label(trace)
             if path == ("best_fit",):
                 fit_trace = dict(trace)
                 fit_root_name = root.get("value")
-                fit_result_name = str(trace.get("kwargs", {}).get("label") or "").strip() or fit_result_name
+                fit_result_name = trace_label or fit_result_name
             elif path == ("residual",):
                 residual_trace = dict(trace)
                 residual_root_name = root.get("value")
                 fit_result_name = (
                     fit_result_name
-                    or str(trace.get("kwargs", {}).get("label") or "").replace("_residuals", "").strip()
+                    or (
+                        None
+                        if trace_label is None
+                        else trace_label.replace("_residuals", "").strip() or None
+                    )
                 )
         return {
             "subplot_id": subplot_id,
