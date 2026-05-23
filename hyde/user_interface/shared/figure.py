@@ -6,7 +6,9 @@ from matplotlib import colors as mcolors
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec
+from hyde.features.matplotlib_features import FigureIRCodec, figure_patch_source
+from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.core import log_hyde_state_debug
 
 _COMMON_COLOR_NAMES = [
     "black",
@@ -756,6 +758,245 @@ class EditableFigureContext:
         return self.open_session().has_supported_traces()
 
 
+class HydeFigureDialogWidget(HydeDialogWidget):
+    figure_patch_command_name = "figure_edit"
+
+    def __init__(self, *args, figure_context=None, services=None, **kwargs):
+        self.figure_context = figure_context
+        self._session = None
+        self._opening_effective_state = None
+        self._applied_effective_state = None
+        self._supported_trace_rows = ()
+        self._supported_trace_rows_by_id = {}
+        super().__init__(*args, services=dict(services or {}), **kwargs)
+        if self.figure_context is None:
+            return
+        self._session = self.figure_context.open_session()
+        self._opening_effective_state = self._session.opening_effective_state()
+        self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
+        self._reload_supported_trace_rows()
+
+    def figure_session(self):
+        return self._session
+
+    def opening_effective_state(self):
+        if self._opening_effective_state is None:
+            return None
+        return copy.deepcopy(self._opening_effective_state)
+
+    def applied_effective_state(self):
+        if self._applied_effective_state is None:
+            return None
+        return copy.deepcopy(self._applied_effective_state)
+
+    def current_effective_state(self):
+        if self._session is None:
+            return None
+        return self._session.current_effective_state()
+
+    def figure_patch_source(self, source_state, target_state, *, refresh_trace_ids=()):
+        if self.figure_context is None:
+            return ""
+        return figure_patch_source(
+            source_state,
+            target_state,
+            figure_name=self.figure_context.figure_name(),
+            refresh_trace_ids=refresh_trace_ids,
+        )
+
+    def refresh_figure_preview(self, error_message=""):
+        message = str(error_message or "")
+        if message:
+            self.set_preview_message(message)
+            self.refresh_shell()
+            return self.preview_display_text()
+        target_state = self.current_effective_state()
+        if self._applied_effective_state is None or target_state is None:
+            self.set_preview_string("")
+            self.refresh_shell()
+            return self.preview_string()
+        try:
+            self.set_preview_string(
+                self.figure_patch_source(
+                    self._applied_effective_state,
+                    target_state,
+                )
+            )
+        except Exception as exc:
+            self.set_preview_message(str(exc))
+        self.refresh_shell()
+        return self.preview_string()
+
+    def execute_figure_patch(self, code, *, mode):
+        if not str(code or "").strip():
+            return True
+        if self.figure_context is not None:
+            log_hyde_state_debug(
+                "FigurePatchState",
+                {
+                    "feature": "figure_patch",
+                    "command": self.figure_patch_command_name,
+                    "mode": str(mode),
+                    "figure_number": int(self.figure_context.figure_number),
+                    "figure_name": self.figure_context.figure_name(),
+                },
+                code,
+            )
+        return self.execute_hidden_command(code)
+
+    def apply_figure_patch_command(
+        self,
+        code,
+        *,
+        mode,
+        target_state=None,
+        refresh_preview=True,
+    ):
+        if not str(code or "").strip():
+            return True
+        if not self.execute_figure_patch(code, mode=mode):
+            return False
+        if target_state is not None:
+            self._applied_effective_state = copy.deepcopy(target_state)
+            self._reload_supported_trace_rows(target_state)
+        if refresh_preview:
+            self.refresh_figure_preview()
+        return True
+
+    def apply_figure_patch(self, target_state, *, mode, refresh_preview=True):
+        if self._applied_effective_state is None or target_state is None:
+            return False
+        code = self.figure_patch_source(self._applied_effective_state, target_state)
+        return self.apply_figure_patch_command(
+            code,
+            mode=mode,
+            target_state=target_state,
+            refresh_preview=refresh_preview,
+        )
+
+    def apply_current_figure_patch(self, *, mode, refresh_preview=True):
+        return self.apply_figure_patch(
+            self.current_effective_state(),
+            mode=mode,
+            refresh_preview=refresh_preview,
+        )
+
+    def commit_current_figure_patch(self, *, mode="do_it"):
+        target_state = self.current_effective_state()
+        if self.dispatch_do_it_payload(
+            executor=lambda code: self.execute_figure_patch(code, mode=mode),
+            accept_on_success=False,
+        ):
+            if target_state is not None:
+                self._applied_effective_state = copy.deepcopy(target_state)
+                self._reload_supported_trace_rows(target_state)
+            self.accept()
+            return True
+        return False
+
+    def handle_do_it(self):
+        self.commit_current_figure_patch()
+
+    def rollback_figure_patch(self):
+        if (
+            self._opening_effective_state is None
+            or self._applied_effective_state is None
+        ):
+            return True
+        rollback_state = copy.deepcopy(self._opening_effective_state)
+        if not self.apply_figure_patch(
+            rollback_state,
+            mode="cancel",
+            refresh_preview=False,
+        ):
+            return False
+        self.refresh_figure_preview()
+        return True
+
+    def reject(self):
+        self.rollback_figure_patch()
+        super().reject()
+
+    def supported_trace_records(self):
+        return copy.deepcopy(self._supported_trace_rows)
+
+    def supported_trace_record(self, trace_id):
+        record = self._supported_trace_rows_by_id.get(str(trace_id))
+        return None if record is None else copy.deepcopy(record)
+
+    def refresh_supported_trace_list(
+        self,
+        list_widget,
+        *,
+        selected_trace_ids=(),
+        current_trace_id=None,
+    ):
+        normalized_selected = {str(trace_id) for trace_id in selected_trace_ids}
+        normalized_current = (
+            None if current_trace_id is None else str(current_trace_id)
+        )
+        blocker = QtCore.QSignalBlocker(list_widget)
+        try:
+            list_widget.clear()
+            for row in self._supported_trace_rows:
+                item = QtWidgets.QListWidgetItem(row["row_text"])
+                item.setData(QtCore.Qt.UserRole, row["trace_id"])
+                list_widget.addItem(item)
+                if row["trace_id"] in normalized_selected:
+                    item.setSelected(True)
+                if row["trace_id"] == normalized_current:
+                    list_widget.setCurrentItem(item)
+        finally:
+            del blocker
+        return self.supported_trace_records()
+
+    def current_supported_trace_id(self, list_widget):
+        item = list_widget.currentItem()
+        if item is None:
+            return None
+        trace_id = item.data(QtCore.Qt.UserRole)
+        return None if trace_id is None else str(trace_id)
+
+    def selected_supported_trace_ids(self, list_widget):
+        trace_ids = []
+        for item in list_widget.selectedItems():
+            trace_id = item.data(QtCore.Qt.UserRole)
+            if trace_id is None:
+                continue
+            trace_ids.append(str(trace_id))
+        return tuple(trace_ids)
+
+    def _reload_supported_trace_rows(self, effective_state=None):
+        if self._session is None and effective_state is None:
+            self._supported_trace_rows = ()
+            self._supported_trace_rows_by_id = {}
+            return self._supported_trace_rows
+        rows = []
+        rows_by_id = {}
+        trace_records = (
+            self._session.supported_trace_records()
+            if effective_state is None
+            else supported_trace_records_from_figure_ir(effective_state)
+        )
+        for index, record in enumerate(trace_records):
+            row = dict(record)
+            row["trace_index"] = index
+            row["trace_id"] = str(row["trace_id"])
+            row["subplot_id"] = str(row["subplot_id"])
+            row["row_text"] = self._canonical_supported_trace_row_text(row)
+            rows.append(row)
+            rows_by_id[row["trace_id"]] = dict(row)
+        self._supported_trace_rows = tuple(rows)
+        self._supported_trace_rows_by_id = rows_by_id
+        return self.supported_trace_records()
+
+    def _canonical_supported_trace_row_text(self, record):
+        text = str(record.get("label") or "").strip()
+        if text:
+            return text
+        return str(record.get("trace_id") or "").strip()
+
+
 class FigureEditSession:
     def __init__(
         self,
@@ -1430,46 +1671,3 @@ class FigureEditSession:
                 return copy.deepcopy(default)
             current = current[key]
         return current
-
-
-class FigureControlDraftTracker:
-    def __init__(self):
-        self.current_states = {}
-        self._opening_states = {}
-        self._revert_states = {}
-
-    def seed(self, key, opening_state, revert_state=None):
-        key = str(key)
-        opening_copy = copy.deepcopy(opening_state)
-        self._opening_states[key] = opening_copy
-        self._revert_states[key] = copy.deepcopy(
-            opening_state if revert_state is None else revert_state
-        )
-        self.current_states[key] = copy.deepcopy(opening_state)
-        return self.current_states[key]
-
-    def replace(self, key, state):
-        key = str(key)
-        self.current_states[key] = copy.deepcopy(state)
-        return self.current_states[key]
-
-    def update(self, key, patch):
-        key = str(key)
-        self.current_states[key].update(copy.deepcopy(patch))
-        return self.current_states[key]
-
-    def has_changes(self, key):
-        key = str(key)
-        return self.current_states[key] != self._opening_states[key]
-
-    def changed_keys(self):
-        return sorted(key for key in self.current_states if self.has_changes(key))
-
-    def revert_state(self, key):
-        key = str(key)
-        return copy.deepcopy(self._revert_states[key])
-
-    def replace_revert_state(self, key, state):
-        key = str(key)
-        self._revert_states[key] = copy.deepcopy(state)
-        return copy.deepcopy(self._revert_states[key])

@@ -61,6 +61,9 @@ The GUI surface does not:
 - GUI state classes belong under `hyde/user_interface/...`.
 - Feature codecs belong under `hyde/features/...`.
 - Pure transport, queueing, and message envelopes stay outside codec classes.
+- Shared UI-family behavior may live in a feature-family widget base class. For
+  first-class figure dialogs, prefer a shared `HydeDialogWidget` subclass over free
+  helper functions when multiple dialogs need the same figure-dialog behavior.
 
 ## Shared Pattern
 

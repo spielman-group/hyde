@@ -1,11 +1,9 @@
-import copy
-
 from qtutils.qt import QtWidgets
 
-from hyde.features.matplotlib_features import figure_patch_source
-from hyde.user_interface.shared.figure import MatplotlibColorLineEdit
-from hyde.user_interface.shared.core import log_hyde_state_debug
-from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.figure import (
+    HydeFigureDialogWidget,
+    MatplotlibColorLineEdit,
+)
 
 AXIS_TAB_TITLES = [
     "Axis",
@@ -169,6 +167,7 @@ def _primary_side_for_axis(axis_name):
 def _mirror_side_for_axis(axis_name):
     return "top" if axis_name == "x" else "right"
 
+
 def _label_choice_for_side(side, axis_name):
     return "primary" if side == _primary_side_for_axis(axis_name) else "mirror"
 
@@ -181,13 +180,15 @@ def _side_for_label_choice(choice, axis_name):
     )
 
 
-class AxisEditDialog(HydeDialogWidget):
+class AxisEditDialog(HydeFigureDialogWidget):
+    figure_patch_command_name = "axis_edit"
+
     def __init__(self, figure_context, services=None, parent=None):
-        self.figure_context = figure_context
-        self._session = self.figure_context.open_session()
-        self._opening_effective_state = self._session.opening_effective_state()
-        self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
-        super().__init__(parent=parent, services=dict(services or {}))
+        super().__init__(
+            figure_context=figure_context,
+            parent=parent,
+            services=services,
+        )
         self.setWindowTitle("Modify Axis")
         self._loading_controls = False
         self.load_ui("axis_edit_dialog.ui", module_name=__name__)
@@ -313,7 +314,7 @@ class AxisEditDialog(HydeDialogWidget):
 
     def _load_initial_axis(self):
         if not self.has_supported_axes():
-            self._update_preview()
+            self.refresh_figure_preview()
             return
         index = self.ui.axis_selector.findData("bottom")
         if index >= 0:
@@ -346,7 +347,7 @@ class AxisEditDialog(HydeDialogWidget):
     def _load_selected_side(self):
         context = self._selected_context()
         if context is None:
-            self._update_preview()
+            self.refresh_figure_preview()
             return
         subplot_id = context["subplot_id"]
         axis_name = context["axis_name"]
@@ -903,7 +904,7 @@ class AxisEditDialog(HydeDialogWidget):
             )
         finally:
             self._loading_controls = False
-        self._update_preview()
+        self.refresh_figure_preview()
 
     def _set_combo_data(self, combo, value):
         index = combo.findData(value)
@@ -1158,92 +1159,25 @@ class AxisEditDialog(HydeDialogWidget):
             return {"valid": False, "message": str(exc)}
         return {"valid": True, "message": ""}
 
-    def _update_preview(self, error_message=""):
-        message = str(error_message or "")
-        if message:
-            self.set_preview_message(message)
-            self.refresh_shell()
-            return
-        try:
-            self.set_preview_string(
-                self._patch_source(
-                    self._applied_effective_state,
-                    self._current_effective_state(),
-                )
-            )
-        except Exception as exc:
-            self.set_preview_message(str(exc))
-        self.refresh_shell()
-
-    def _current_effective_state(self):
-        return self._session.current_effective_state()
-
-    def _patch_source(self, source_state, target_state):
-        return figure_patch_source(
-            source_state,
-            target_state,
-            figure_name=self.figure_context.figure_name(),
-        )
-
-    def _execute_patch(self, code, *, mode):
-        if not str(code or "").strip():
-            return True
-        log_hyde_state_debug(
-            "FigurePatchState",
-            {
-                "feature": "figure_patch",
-                "command": "axis_edit",
-                "mode": str(mode),
-                "figure_number": int(self.figure_context.figure_number),
-                "figure_name": self.figure_context.figure_name(),
-            },
-            code,
-        )
-        return self.execute_hidden_command(code)
-
     def _on_controls_changed(self, *args):
         del args
         if self._loading_controls:
             return
         self.ui.axis_label_preview.setText(self.ui.axis_label_edit.text())
         result = self._apply_current_controls_to_session()
-        self._update_preview(result["message"])
+        self.refresh_figure_preview(result["message"])
         if not result["valid"]:
             return
         if self.ui.live_update_checkbox.isChecked():
-            target_state = self._current_effective_state()
-            if self._execute_patch(
-                self._patch_source(self._applied_effective_state, target_state),
-                mode="live_update",
-            ):
-                self._applied_effective_state = copy.deepcopy(target_state)
-                self._update_preview()
+            self.apply_current_figure_patch(mode="live_update")
 
     def _on_live_update_toggled(self, checked):
         if self._loading_controls or not checked:
             return
         result = self._apply_current_controls_to_session()
-        self._update_preview(result["message"])
+        self.refresh_figure_preview(result["message"])
         if result["valid"]:
-            target_state = self._current_effective_state()
-            if self._execute_patch(
-                self._patch_source(self._applied_effective_state, target_state),
-                mode="live_update_enable",
-            ):
-                self._applied_effective_state = copy.deepcopy(target_state)
-                self._update_preview()
-
-    def handle_do_it(self):
-        result = self._apply_current_controls_to_session()
-        self._update_preview(result["message"])
-        if not result["valid"]:
-            return
-        if self.dispatch_do_it_payload(
-            executor=lambda code: self._execute_patch(code, mode="do_it"),
-            accept_on_success=False,
-        ):
-            self._applied_effective_state = copy.deepcopy(self._current_effective_state())
-            self.accept()
+            self.apply_current_figure_patch(mode="live_update_enable")
 
     def _set_auto_tick_values(self):
         self.ui.major_tick_mode_combo.setCurrentIndex(self.ui.major_tick_mode_combo.findData("auto"))
@@ -1291,14 +1225,3 @@ class AxisEditDialog(HydeDialogWidget):
         finally:
             self._loading_controls = False
         self._on_controls_changed()
-
-    def reject(self):
-        if self._execute_patch(
-            self._patch_source(
-                self._applied_effective_state,
-                self._opening_effective_state,
-            ),
-            mode="cancel",
-        ):
-            self._applied_effective_state = copy.deepcopy(self._opening_effective_state)
-        super().reject()

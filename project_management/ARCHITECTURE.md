@@ -163,6 +163,10 @@ when a project is loaded.
   `figure_interactive`.
 - That figure edit session now serves primarily as the figure-owned local draft/read
   boundary used to build emitted matplotlib patch Python against imported figure IR.
+- Figure-working dialogs share UI-family behavior through a dedicated
+  `HydeDialogWidget` subclass for figure work rather than through free shared helper
+  functions. The intended shared surface for that family is a figure-dialog base class
+  such as `HydeFigureDialogWidget`.
 - Consumer dialogs do not use raw `figure_ir` dictionaries or raw figure-action
   payloads as their working contract.
 - Saved graph macros and `session.py` restore source both lower from figure IR.
@@ -199,6 +203,10 @@ when a project is loaded.
   `active_interactive_window()` only resolves the active typed Hyde interactive widget;
   Curve Fit and figure-control plugins decide separately whether an active figure window
   is sufficiently ready for their own dialogs.
+- For figure-working dialogs, structural reuse should prefer inheritance from a shared
+  figure-dialog base widget over free helper functions. Use helpers only for neutral
+  transport- or shell-level utilities, not as the primary reuse mechanism for figure
+  dialog behavior.
 - Cross-plugin code reuse through neutral mixins or shared helpers is allowed when it
   is purely structural code sharing. Importing a mixin across plugin boundaries is not
   itself a boundary violation if the mixin does not carry runtime authority, does not

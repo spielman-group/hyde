@@ -1,5 +1,3 @@
-import copy
-
 from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.lmfit_features import (
@@ -7,9 +5,8 @@ from hyde.features.lmfit_features import (
     LmfitCodec,
     attached_display_label,
 )
-from hyde.features.matplotlib_features import figure_patch_source
-from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
-from hyde.user_interface.shared.core import HydeGuiState, log_hyde_state_debug
+from hyde.user_interface.shared.core import HydeGuiState
+from hyde.user_interface.shared.figure import HydeFigureDialogWidget
 
 from .fit_function_scaffolding import CurveFitCatalogError
 
@@ -58,14 +55,19 @@ class CurveFitState(HydeGuiState):
             self.apply_action({"type": "clear", "path": path})
 
 
-class CurveFitDialog(HydeDialogWidget):
+class CurveFitDialog(HydeFigureDialogWidget):
+    figure_patch_command_name = "curve_fit_attached_display"
+
     def __init__(self, figure_context=None, services=None, parent=None):
-        self.figure_context = figure_context
         self.state = CurveFitState()
         self._loading_controls = False
         self._current_model = None
         self._live_error_message = ""
-        super().__init__(parent=parent, services=dict(services or {}))
+        super().__init__(
+            parent=parent,
+            services=dict(services or {}),
+            figure_context=figure_context,
+        )
         self._pending_fit_function_name = None
         self._catalog_service = self.services.get("curve_fit_catalog_service")
         self._catalog_status_text = ""
@@ -73,9 +75,6 @@ class CurveFitDialog(HydeDialogWidget):
         self._live_restore_store_name = f"_hyde_lmfit_live_restore_{id(self)}"
         self._live_missing_sentinel_name = f"_hyde_lmfit_missing_{id(self)}"
         self._preview_target_name = f"_hyde_lmfit_preview_{id(self)}"
-        self._figure_session = None
-        self._opening_effective_state = None
-        self._applied_effective_state = None
         self.setModal(True)
         self.setWindowTitle("Curve Fit")
         self.resize(720, 520)
@@ -128,9 +127,6 @@ class CurveFitDialog(HydeDialogWidget):
             self.show_fit_checkbox.setEnabled(False)
             self.show_residuals_checkbox.setEnabled(False)
         else:
-            self._figure_session = self.figure_context.open_session()
-            self._opening_effective_state = self._figure_session.opening_effective_state()
-            self._applied_effective_state = self._figure_session.opening_effective_state()
             self._loading_controls = True
             try:
                 self._seed_attached_display_controls()
@@ -189,11 +185,7 @@ class CurveFitDialog(HydeDialogWidget):
             "attached": self.figure_context is not None,
             "fit_functions": fit_functions,
             "namespace_view": self._namespace_view(),
-            "trace_records": (
-                ()
-                if self._figure_session is None
-                else self._figure_session.supported_trace_records()
-            ),
+            "trace_records": self.supported_trace_records(),
         }
 
     def _update_status_label(self, binding_message=""):
@@ -449,7 +441,7 @@ class CurveFitDialog(HydeDialogWidget):
 
     def _seed_attached_display_controls(self):
         display_state = self._attached_display_state_from_effective(
-            self._opening_effective_state
+            self.opening_effective_state()
         )
         if display_state is None:
             return
@@ -466,7 +458,7 @@ class CurveFitDialog(HydeDialogWidget):
 
     def _current_attached_display_state(self):
         display_state = self._attached_display_state_from_effective(
-            self._applied_effective_state
+            self.applied_effective_state()
         )
         if display_state is None:
             return None
@@ -497,15 +489,13 @@ class CurveFitDialog(HydeDialogWidget):
             return None
         return x_name
 
-    def _attached_display_failure_message(self):
-        return "Curve Fit attached display update failed."
-
     def _sync_attached_display_draft(self, *, root_name):
-        if self._figure_session is None:
-            return self._applied_effective_state
+        figure_session = self.figure_session()
+        if figure_session is None:
+            return self.applied_effective_state()
         desired_state = self._current_attached_display_state()
         if desired_state is None:
-            return self._applied_effective_state
+            return self.applied_effective_state()
         has_plot = bool(desired_state["show_fit"] or desired_state["show_residuals"])
         fit_result_name = (
             str(desired_state.get("fit_result_name") or "").strip() if has_plot else None
@@ -514,7 +504,7 @@ class CurveFitDialog(HydeDialogWidget):
             str(root_name).strip() if root_name is not None else fit_result_name
         )
         current_display = self._attached_display_state_from_effective(
-            self._applied_effective_state
+            self.applied_effective_state()
         ) or {}
         owner_root_names = (
             self._preview_target_name,
@@ -523,7 +513,7 @@ class CurveFitDialog(HydeDialogWidget):
             current_display.get("residual_root_name"),
             resolved_root_name,
         )
-        self._figure_session.set_attribute_path_lines(
+        figure_session.set_attribute_path_lines(
             fit_result_name,
             subplot_id=desired_state["subplot_id"],
             root_name=resolved_root_name,
@@ -553,7 +543,7 @@ class CurveFitDialog(HydeDialogWidget):
                 },
             ),
         )
-        return self._figure_session.current_effective_state()
+        return figure_session.current_effective_state()
 
     def _attached_display_command_source(
         self,
@@ -587,10 +577,9 @@ class CurveFitDialog(HydeDialogWidget):
             if not preview_command:
                 return "", target_state
             command_parts.append(str(preview_command).strip())
-        patch_code = figure_patch_source(
-            self._applied_effective_state,
+        patch_code = self.figure_patch_source(
+            self.applied_effective_state(),
             target_state,
-            figure_name=self.figure_context.figure_name(),
             refresh_trace_ids=refresh_trace_ids,
         )
         if str(patch_code or "").strip():
@@ -598,23 +587,12 @@ class CurveFitDialog(HydeDialogWidget):
         return "\n".join(command_parts), target_state
 
     def _execute_attached_display_command(self, code, *, mode, target_state):
-        if not str(code or "").strip():
-            return True
-        log_hyde_state_debug(
-            "FigurePatchState",
-            {
-                "feature": "figure_patch",
-                "command": "curve_fit_attached_display",
-                "mode": str(mode),
-                "figure_number": int(self.figure_context.figure_number),
-                "figure_name": self.figure_context.figure_name(),
-            },
+        return self.apply_figure_patch_command(
             code,
+            mode=mode,
+            target_state=target_state,
+            refresh_preview=False,
         )
-        if not self.execute_hidden_command(code):
-            return False
-        self._applied_effective_state = copy.deepcopy(target_state)
-        return True
 
     def _backing_command_source(self):
         model = self._current_model or {}
@@ -663,7 +641,7 @@ class CurveFitDialog(HydeDialogWidget):
         python_execution_service = self.services.get("python_execution_service")
         if python_execution_service is None:
             return False, "Curve Fit requires python_execution_service."
-        target_effective_state = self._applied_effective_state
+        target_effective_state = self.applied_effective_state()
         if command is None and self.execution_mode() == "suppressed":
             command = self.state.codec.state_to_commit_python(
                 self.state._state,
@@ -730,7 +708,7 @@ class CurveFitDialog(HydeDialogWidget):
 
     def _has_active_attached_preview(self):
         display_state = self._attached_display_state_from_effective(
-            self._applied_effective_state
+            self.applied_effective_state()
         ) or {}
         return bool(
             display_state.get("fit_trace_id") or display_state.get("residual_trace_id")
@@ -743,10 +721,10 @@ class CurveFitDialog(HydeDialogWidget):
         root_name=None,
         include_preview_object=False,
     ):
-        if self._figure_session is None:
+        if self.figure_session() is None:
             return True
         current_state = self._attached_display_state_from_effective(
-            self._applied_effective_state
+            self.applied_effective_state()
         )
         desired_state = self._current_attached_display_state()
         if current_state is None or desired_state is None:
@@ -845,7 +823,7 @@ class CurveFitDialog(HydeDialogWidget):
         )
         if success:
             success = self._run_preview_path(force=True)
-            message = "" if success else self._attached_display_failure_message()
+            message = "" if success else "Curve Fit attached display update failed."
         self._live_error_message = "" if success else message
         self._update_status_label(self._current_model.get("status_message", ""))
         self.refresh_shell()
@@ -989,16 +967,4 @@ class CurveFitDialog(HydeDialogWidget):
             if rollback_command:
                 python_execution_service.execute_hidden(rollback_command)
         self._live_result_target_name = None
-        if self._figure_session is not None and self._opening_effective_state is not None:
-            rollback_code = figure_patch_source(
-                self._applied_effective_state,
-                self._opening_effective_state,
-                figure_name=self.figure_context.figure_name(),
-            )
-            if str(rollback_code or "").strip():
-                self._execute_attached_display_command(
-                    rollback_code,
-                    mode="cancel",
-                    target_state=self._opening_effective_state,
-                )
         super().reject()

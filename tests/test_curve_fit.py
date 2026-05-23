@@ -872,14 +872,17 @@ class TestCurveFitPlugin(unittest.TestCase):
             },
         )
         harness.set_namespace_value("signal", np.array([1.0, 3.0, 5.0, 7.0]))
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+            implicit_x=True,
+        )
 
         try:
             dialog = create_curve_fit_dialog(
                 manager.plugins["curve_fit_dialog"],
                 app,
-                figure_window=make_figure_window(
-                    figure_ir_with_implicit_x_trace("signal")
-                ),
+                figure_window=attached_figure.figure_window,
             )
             try:
                 dialog.fit_function_combo.setCurrentIndex(
@@ -915,6 +918,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 dialog.close()
         finally:
             harness.close()
+            attached_figure.close()
 
     def test_new_fit_function_button_scaffolds_reloads_and_selects_new_function(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
@@ -2534,6 +2538,46 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertIn("curve_fit_attached_display", output)
             self.assertIn(".best_fit = line_fit(", output)
             self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", output)
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_attached_uses_shared_figure_dialog_state_contract(self):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            opening_state = dialog.opening_effective_state()
+            initial_applied_state = dialog.applied_effective_state()
+            self.assertIsNotNone(dialog.figure_session())
+            self.assertEqual(
+                [record["label"] for record in dialog.supported_trace_records()],
+                ["signal", "signal_fit_result"],
+            )
+            self.assertEqual(
+                dialog.supported_trace_record("signal_fit_result")["label"],
+                "signal_fit_result",
+            )
+
+            dialog.show_residuals_checkbox.setChecked(True)
+            QtWidgets.QApplication.processEvents()
+
+            updated_applied_state = dialog.applied_effective_state()
+            self.assertNotEqual(updated_applied_state, initial_applied_state)
+            self.assertEqual(
+                [record["label"] for record in dialog.supported_trace_records()],
+                ["signal", "signal_fit_result", "signal_fit_result_residuals"],
+            )
+
+            dialog.reject()
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(dialog.applied_effective_state(), opening_state)
         finally:
             dialog.close()
             harness.close()

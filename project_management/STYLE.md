@@ -24,11 +24,44 @@
 - If non-UI callbacks touch Qt widgets, route them onto the main thread.
 - GUI code may hold only transient state needed to generate commands or render UI.
 
+## Widget Hierarchy
+
+Use the widget base classes as the functionality path for plugins. Prefer inheriting
+from the narrowest Hyde base that already carries the behavior you need rather than
+rebuilding that behavior locally.
+
+```text
+QtWidgets
+├── QWidget
+│   └── HydeToolWidget
+│       ├── ProcedureBrowser
+│       ├── LoggingWindow
+│       ├── PythonVariables
+│       └── HydeInteractiveWidget
+│           ├── TableWidget
+│           └── FigureWindow
+└── QDialog
+    └── HydeDialog
+        ├── SaveWindowDialog
+        └── HydeDialogWidget
+            ├── NewTableDialog
+            ├── NewFigureDialog
+            └── HydeFigureDialogWidget
+                ├── TraceAppearanceDialog
+                ├── AxisEditDialog
+                ├── CurveFitDialog
+                └── ...
+```
+
 ## UI Conventions
 - For Hyde-authored dialogs and tool-window bodies, prefer `.ui` files for static
   structure. Python should normally supply signal wiring, state synchronization,
   dynamic row/item creation, and runtime-only widgets rather than assembling large
   static layout trees in code.
+- When multiple dialogs in one feature family share behavior, prefer a shared widget
+  base class over free helper functions. For first-class figure dialogs, the default
+  pattern is a `HydeDialogWidget` subclass dedicated to figure work, such as
+  `HydeFigureDialogWidget`, with concrete dialogs inheriting from that class.
 - Treat code-built widget trees as exceptions that need a concrete reason, such as a
   third-party runtime widget or a layout that is materially impossible or misleading
   to express in Qt Designer.

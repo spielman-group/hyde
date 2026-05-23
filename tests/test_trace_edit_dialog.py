@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.user_interface.main import HydeApp
@@ -283,6 +283,38 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             self.assertEqual(dialog.ui.line_width_spin.value(), 2.5)
             self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
             self.assertEqual(dialog.lower_text_edit.toPlainText(), "")
+        finally:
+            dialog.close()
+
+    def test_trace_dialog_uses_canonical_supported_trace_rows_keyed_by_trace_id(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = TraceAppearanceDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            expected_rows = dialog.supported_trace_records()
+            self.assertEqual(
+                [dialog.ui.trace_list.item(index).text() for index in range(dialog.ui.trace_list.count())],
+                [row["row_text"] for row in expected_rows],
+            )
+            self.assertEqual(
+                [
+                    dialog.ui.trace_list.item(index).data(QtCore.Qt.UserRole)
+                    for index in range(dialog.ui.trace_list.count())
+                ],
+                [row["trace_id"] for row in expected_rows],
+            )
         finally:
             dialog.close()
 

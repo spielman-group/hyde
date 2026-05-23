@@ -400,6 +400,39 @@ class TestAxisEditDialog(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_axis_dialog_exposes_shared_figure_dialog_state_contract(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = AxisEditDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            self.assertIsNotNone(dialog.figure_session())
+            self.assertEqual(
+                dialog.supported_trace_records()[0]["trace_id"],
+                "trace0",
+            )
+            self.assertEqual(
+                dialog.opening_effective_state()["settings"]["title"],
+                "Figure0",
+            )
+            self.assertEqual(
+                dialog.applied_effective_state()["settings"]["title"],
+                "Figure0",
+            )
+        finally:
+            dialog.close()
+
     def test_preview_and_send_to_cmd_line_use_same_canonical_patch_block(self):
         execution = FakeExecutionService()
         terminal = FakeVisibleTerminalService()

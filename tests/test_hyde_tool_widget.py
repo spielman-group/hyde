@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 import tempfile
@@ -8,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtWidgets
 
+from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.base_hyde_widgets import (
     HydeDialogWidget,
@@ -15,6 +17,8 @@ from hyde.user_interface.base_hyde_widgets import (
     HydeToolWidget,
 )
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.plugins.figure_interactive.window import FigureState
+from hyde.user_interface.shared.figure import HydeFigureDialogWidget
 
 
 class DemoToolWidget(HydeToolWidget):
@@ -60,6 +64,15 @@ class VisibleDispatchDialogWidget(DispatchingDialogWidget):
 
 class HelpFileDialogWidget(HydeDialogWidget):
     help_filename = "dialog_help.txt"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mount_content_widget(QtWidgets.QLabel("Upper content"))
+        self.refresh_shell()
+
+
+class DemoFigureDialogWidget(HydeFigureDialogWidget):
+    figure_patch_command_name = "demo_figure_edit"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -121,6 +134,51 @@ class RecordingExecutionService:
     def execute_visible(self, code):
         self.visible_calls.append(code)
         return True
+
+
+class FakeFigureSession:
+    def __init__(self, opening_state, *, current_state=None, trace_records=()):
+        self.figure_number = 7
+        self._opening_state = copy.deepcopy(opening_state)
+        self._current_state = copy.deepcopy(
+            opening_state if current_state is None else current_state
+        )
+        self._trace_records = copy.deepcopy(tuple(trace_records))
+
+    def opening_effective_state(self):
+        return copy.deepcopy(self._opening_state)
+
+    def current_effective_state(self):
+        return copy.deepcopy(self._current_state)
+
+    def set_current_effective_state(self, state):
+        self._current_state = copy.deepcopy(state)
+
+    def supported_trace_records(self):
+        return copy.deepcopy(self._trace_records)
+
+
+class FakeFigureContext:
+    def __init__(self, session, *, figure_name="Figure0"):
+        self.figure_number = int(session.figure_number)
+        self._session = session
+        self._figure_name = str(figure_name)
+        self.open_session_calls = 0
+
+    def open_session(self):
+        self.open_session_calls += 1
+        return self._session
+
+    def figure_name(self):
+        return self._figure_name
+
+
+def make_demo_figure_ir(title="Figure0", items=("trace_a",)):
+    state = FigureState()
+    state.set_title(title)
+    state.set_x_name("x")
+    state.set_items(list(items))
+    return FigureIRCodec.validate_state(figure_ir_from_live_state(state.normalized_state()))
 
 
 class TestHydeToolWidget(unittest.TestCase):
@@ -278,6 +336,81 @@ class TestHydeToolWidget(unittest.TestCase):
 
         opened_url = open_url.call_args.args[0]
         self.assertEqual(opened_url.toLocalFile(), help_path)
+
+    def test_figure_dialog_base_advances_live_patch_state_and_rolls_back_on_cancel(self):
+        execution_service = RecordingExecutionService()
+        opening_state = make_demo_figure_ir()
+        updated_state = copy.deepcopy(opening_state)
+        updated_state["layout"]["subplots"][0]["axes"]["x"]["label"]["text"] = "Delay"
+        session = FakeFigureSession(
+            opening_state,
+            current_state=updated_state,
+            trace_records=(
+                {
+                    "subplot_id": "subplot_1",
+                    "trace_id": "trace_1",
+                    "label": "trace_a",
+                    "x_name": "x",
+                    "y_name": "trace_a",
+                },
+            ),
+        )
+        figure_context = FakeFigureContext(session)
+        dialog = DemoFigureDialogWidget(
+            figure_context=figure_context,
+            services={"python_execution_service": execution_service},
+        )
+
+        try:
+            expected_patch = dialog.figure_patch_source(
+                opening_state,
+                updated_state,
+            )
+
+            self.assertIs(dialog.figure_context, figure_context)
+            self.assertIs(dialog.figure_session(), session)
+            self.assertEqual(figure_context.open_session_calls, 1)
+            self.assertEqual(
+                dialog.supported_trace_records()[0]["trace_id"],
+                "trace_1",
+            )
+
+            dialog.refresh_figure_preview()
+
+            self.assertEqual(dialog.preview_string(), expected_patch)
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_patch)
+            self.assertTrue(dialog.apply_current_figure_patch(mode="live_update"))
+            self.assertEqual(
+                execution_service.hidden_calls[-1],
+                (expected_patch, True),
+            )
+            self.assertEqual(dialog.preview_string(), "")
+
+            dialog.reject()
+        finally:
+            dialog.close()
+
+        rollback_patch = dialog.figure_patch_source(updated_state, opening_state)
+        self.assertEqual(
+            execution_service.hidden_calls,
+            [
+                (expected_patch, True),
+                (rollback_patch, True),
+            ],
+        )
+
+    def test_figure_dialog_base_supports_unattached_dialogs(self):
+        dialog = DemoFigureDialogWidget()
+        try:
+            dialog.refresh_figure_preview()
+
+            self.assertIsNone(dialog.figure_context)
+            self.assertIsNone(dialog.figure_session())
+            self.assertEqual(dialog.supported_trace_records(), ())
+            self.assertEqual(dialog.preview_string(), "")
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), "")
+        finally:
+            dialog.close()
 
     def test_bind_subwindow_uses_window_identifier_as_default_object_name(self):
         mdi_area = QtWidgets.QMdiArea()
