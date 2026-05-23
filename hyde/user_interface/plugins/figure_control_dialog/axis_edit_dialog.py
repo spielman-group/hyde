@@ -1194,7 +1194,7 @@ class AxisEditDialog(HydeDialogWidget):
             return self._preview_error_message
         try:
             return self._patch_source(
-                self._opening_effective_state,
+                self._applied_effective_state,
                 self._current_effective_state(),
             )
         except Exception as exc:
@@ -1222,6 +1222,7 @@ class AxisEditDialog(HydeDialogWidget):
                 mode="live_update",
             ):
                 self._applied_effective_state = copy.deepcopy(target_state)
+                self.refresh_shell()
 
     def _on_live_update_toggled(self, checked):
         if self._loading_controls or not checked:
@@ -1235,6 +1236,7 @@ class AxisEditDialog(HydeDialogWidget):
                 mode="live_update_enable",
             ):
                 self._applied_effective_state = copy.deepcopy(target_state)
+                self.refresh_shell()
 
     def handle_do_it(self):
         result = self._apply_current_controls_to_session()

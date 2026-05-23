@@ -432,6 +432,72 @@ class TestAxisEditDialog(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_preview_uses_next_patch_block_after_live_update_has_applied(self):
+        execution = FakeExecutionService()
+        terminal = FakeVisibleTerminalService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": terminal,
+            },
+        )
+
+        dialog = AxisEditDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
+        try:
+            dialog.ui.axis_label_edit.setText("Delay [ms]")
+            dialog.ui.axis_label_edit.editingFinished.emit()
+            self.assertTrue(execution.hidden_calls)
+            self.assertIn("ax.set_xlabel('Delay [ms]')", execution.hidden_calls[-1][0])
+
+            dialog.ui.live_update_checkbox.setChecked(False)
+            dialog.ui.side_visible_checkbox.setChecked(True)
+
+            preview = dialog.lower_text_edit.toPlainText()
+            self.assertIn("ax.spines['bottom'].set_visible(True)", preview)
+            self.assertNotIn("ax.set_xlabel('Delay [ms]')", preview)
+
+            dialog.to_cmd_line_button.click()
+            self.assertEqual(terminal.visible_calls[-1], preview)
+
+            dialog.do_it_button.click()
+        finally:
+            dialog.close()
+
+        self.assertEqual(execution.hidden_calls[-1][0], preview)
+
+    def test_live_applied_axis_state_clears_preview_and_send_to_cmd_line(self):
+        execution = FakeExecutionService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = AxisEditDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
+        try:
+            dialog.ui.axis_label_edit.setText("Delay [ms]")
+            dialog.ui.axis_label_edit.editingFinished.emit()
+
+            preview = dialog.lower_text_edit.toPlainText()
+            self.assertEqual(preview, "")
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+
+            hidden_count = len(execution.hidden_calls)
+            dialog.do_it_button.click()
+            self.assertEqual(len(execution.hidden_calls), hidden_count)
+        finally:
+            dialog.close()
+
+        self.assertTrue(execution.hidden_calls)
+        self.assertIn("ax.set_xlabel('Delay [ms]')", execution.hidden_calls[-1][0])
+
     def test_live_update_executes_hidden_python_patch(self):
         execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()

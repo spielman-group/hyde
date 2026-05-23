@@ -286,16 +286,15 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_preview_and_send_to_cmd_line_use_same_trace_patch_block(self):
+    def test_live_applied_trace_state_clears_preview_and_send_to_cmd_line(self):
         execution = FakeExecutionService()
-        terminal = FakeVisibleTerminalService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
             mdi_area,
             {
                 "mdi_area": mdi_area,
                 "python_execution_service": execution,
-                "visible_terminal_service": terminal,
+                "visible_terminal_service": FakeVisibleTerminalService(),
             },
         )
 
@@ -305,14 +304,12 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             dialog.ui.line_color_edit.editingFinished.emit()
 
             preview = dialog.lower_text_edit.toPlainText()
-            self.assertIn("fig = hyde.get_figure('Figure0')", preview)
-            self.assertIn("line = ax.lines[0]", preview)
-            self.assertIn("line.set_color('#abcdef')", preview)
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertEqual(preview, "")
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
 
-            dialog.to_cmd_line_button.click()
-
-            self.assertEqual(terminal.visible_calls[-1], preview)
+            hidden_count = len(execution.hidden_calls)
+            dialog.do_it_button.click()
+            self.assertEqual(len(execution.hidden_calls), hidden_count)
         finally:
             dialog.close()
 

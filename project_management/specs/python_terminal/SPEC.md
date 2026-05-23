@@ -49,10 +49,11 @@
 - While `hyde.HYDE_GUI` is true, `quit` / `quit()` / `exit` / `exit()` are rebound in
   the kernel namespace to `hyde.quit()` so terminal-driven quit follows Hyde's orderly
   shutdown path.
-- First-class figure-window render, metadata, and semantic edit traffic does not route
-  through the kernel-runtime hidden execution path and does not appear in the Python
-  Terminal as synthetic input. That traffic uses the dedicated figure `comm` path
-  defined by the figure feature.
+- First-class figure-window render and metadata traffic does not route through the
+  Python Terminal as synthetic input.
+- Command-driven first-class figure edits do use Hyde's ordinary hidden execution
+  path, so those hidden commands follow the same logging/debug channel as other
+  hidden Hyde commands.
 
 ## Reference Image
 
@@ -99,13 +100,13 @@ In [2]:
 
 ### Figure Traffic
 
-- Opening, redrawing, and editing first-class `@hyde.figure` figures is not a
-  kernel-runtime background-execution workflow.
-- Once a first-class figure exists, routine GUI edits are private semantic `comm`
-  actions against the figure feature's IR rather than visible terminal commands. For
-  this feature, Hyde keeps that IR kernel-owned and attached to the live figure.
-- Figure redraw payloads and edit acknowledgments therefore do not echo as terminal
-  input or consume prompt numbers.
+- Routine GUI edits on first-class `@hyde.figure` figures are command-driven.
+- Those edits execute as hidden Python commands through the same frontend execution
+  path Hyde uses for other hidden command traffic, so they follow the ordinary Hyde
+  debug logging channel.
+- Figure render updates, metadata publication, and the remaining narrow non-command
+  figure-window control traffic do not echo as terminal input or consume prompt
+  numbers.
 
 ## Output Policy
 
@@ -113,6 +114,8 @@ In [2]:
   producing `execute_input`.
 - Whether output from those silent requests should appear in the visible Python
   Terminal is a frontend display-policy decision.
-- Figure-window traffic is not part of that display-policy question. Figure updates
-  are delivered to figure windows over the dedicated figure `comm` path rather than
-  through terminal echo.
+- Hidden figure-edit commands are part of Hyde's ordinary hidden-command execution
+  model, not a special terminal exception.
+- Figure-window render/metadata traffic remains outside that display-policy question.
+  Those updates are delivered to figure windows over the figure metadata/control lane
+  rather than through terminal echo.

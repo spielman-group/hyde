@@ -105,7 +105,9 @@ That creation source must:
   instrumented plotting calls that occur during execution
 
 The dialog does not generate figure-edit source for later mutations. Once the figure
-exists, later edits use semantic `comm` actions against the kernel-owned figure IR.
+exists, later edits follow Hyde's ordinary command-driven figure-edit model: the GUI
+emits bounded matplotlib-oriented Python patches and the backend resyncs the
+kernel-owned figure IR from the resulting live figure.
 
 ## Synchronization
 

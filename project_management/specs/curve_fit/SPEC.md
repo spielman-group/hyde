@@ -69,6 +69,7 @@ The first implementation includes:
   accept
 - explicit Python preview
 - `To Clip`
+- `To Cmd Line`
 - live hidden reruns when screen updates are enabled
 - one-shot hidden execution on `Do It` when screen updates are suppressed
 - revert-on-cancel behavior for any real kernel-side targets and graph displays the
@@ -76,7 +77,6 @@ The first implementation includes:
 
 The first implementation does not include:
 
-- `To Cmd Line`
 - `Help`
 - `Graph Now`
 - `Edit Fit Function...`
@@ -298,7 +298,8 @@ Execution rules:
 
 `To Clip` copies the current command preview.
 
-`To Cmd Line` is not part of the first implementation.
+`To Cmd Line` emits the same canonical command block the dialog would execute through
+Hyde's hidden-command path.
 
 ## Real Targets, Live Ownership, And Revert Behavior
 
@@ -352,7 +353,6 @@ The dialog must not become the authoritative owner of:
 
 The first implementation explicitly excludes:
 
-- `To Cmd Line`
 - `Help`
 - `Graph Now`
 - `Edit Fit Function...`
@@ -369,7 +369,6 @@ The first implementation explicitly excludes:
 
 ## Future Work
 
-- shared `To Cmd Line` support across this dialog family
 - richer fit-function metadata beyond the initial decorator contract
 - bundled imported fit-function collections that still enter through
   `@hyde.fit_function`

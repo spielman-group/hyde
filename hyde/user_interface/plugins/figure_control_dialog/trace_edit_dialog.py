@@ -233,7 +233,7 @@ class TraceAppearanceDialog(HydeDialogWidget):
 
     def canonical_text_payload(self):
         return figure_patch_source(
-            self._opening_effective_state,
+            self._applied_effective_state,
             self._session.current_effective_state(),
             figure_name=self.figure_context.figure_name(),
         )

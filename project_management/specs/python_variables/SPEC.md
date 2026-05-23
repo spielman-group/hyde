@@ -162,10 +162,11 @@ It displays static placeholder text indicating that preview support will arrive 
 The preview pane remains a viewport-only area.
 Any durable or user-directed visualization action will still need to generate explicit Python commands and open the appropriate Hyde window once figure support exists.
 For first-class figures, that future command path must create or target a decorated
-figure workflow; once such a figure exists, later figure edits happen through semantic
-figure `comm` actions against the figure feature's IR rather than through Python
-Variables holding any plot state in the GUI. In this figure workflow, Hyde keeps that
-IR in the kernel on the live figure.
+figure workflow; once such a figure exists, later figure edits continue through
+explicit matplotlib-oriented Python commands rather than through Python Variables
+holding any plot state in the GUI. In this figure workflow, Hyde keeps the
+authoritative figure IR in the kernel on the live figure and resyncs it from those
+command-driven edits.
 
 ## Editable Operations
 
@@ -188,8 +189,8 @@ selections. They must remain compatible with Hyde's first-class figure model:
 - the created or targeted figure is a first-class `@hyde.figure` figure
 - the figure's authoritative internal state is the figure feature's IR, which Hyde
   keeps in the kernel on the live figure
-- later GUI edits on that figure use semantic `comm` actions, not Python Variables-side
-  state mutation
+- later GUI edits on that figure emit explicit command-driven matplotlib patches, not
+  Python Variables-side state mutation
 
 ## Context Menu Actions
 
