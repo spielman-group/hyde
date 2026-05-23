@@ -66,8 +66,9 @@ QtWidgets
   pattern is a `HydeDialogWidget` subclass dedicated to figure work, such as
   `HydeFigureDialogWidget`, with concrete dialogs inheriting from that class.
 - When multiple figure-facing surfaces need one canonical user-facing name for traces
-  or analogous figure elements, prefer shared figure helper tooling used through
-  composition over duplicated widget-local string formatting.
+  or analogous figure elements, prefer shared figure helper tooling such as
+  `FigureDisplayHelper`, used through composition, over duplicated widget-local
+  string formatting.
 - Canonical trace display names follow this contract:
   - `{label}: {y} vs {x}` when `label` and `x` exist
   - `{label}: {y}` when `label` exists and `x` does not

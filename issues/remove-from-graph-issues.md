@@ -45,13 +45,13 @@ raw plotted label and the synthesized canonical display name.
 
 ### Acceptance criteria
 
-- [ ] A shared figure helper class owns canonical display-name tooling and is
+- [x] A shared figure helper class owns canonical display-name tooling and is
       consumed through a has-a relationship by figure-facing code rather than by
       adding more free formatting helpers.
-- [ ] The trace display contract distinguishes raw `label`, raw source names, and the
+- [x] The trace display contract distinguishes raw `label`, raw source names, and the
       canonical synthesized `display_name`.
-- [ ] The four agreed trace display-name cases are covered by behavior tests.
-- [ ] The implementation removes or consolidates any duplicate trace display-name
+- [x] The four agreed trace display-name cases are covered by behavior tests.
+- [x] The implementation removes or consolidates any duplicate trace display-name
       formatting logic discovered during the slice instead of preserving it beside the
       helper class.
 
@@ -87,12 +87,12 @@ class.
 
 ### Acceptance criteria
 
-- [ ] Current trace selection lists and analogous trace-identification surfaces use
+- [x] Current trace selection lists and analogous trace-identification surfaces use
       the canonical shared `display_name`.
-- [ ] No migrated consumer keeps its own ad hoc trace display-name assembly logic.
-- [ ] Behavior tests prove that at least two concrete UI surfaces show the same
+- [x] No migrated consumer keeps its own ad hoc trace display-name assembly logic.
+- [x] Behavior tests prove that at least two concrete UI surfaces show the same
       canonical trace names for the same figure state.
-- [ ] The slice includes a simplification pass that removes duplicate display-name
+- [x] The slice includes a simplification pass that removes duplicate display-name
       logic found in the affected consumers.
 
 ### Blocked by
@@ -128,15 +128,15 @@ work and remove duplicate title-assembly logic where possible.
 
 ### Acceptance criteria
 
-- [ ] Visible figure window titles include the figure name plus the current trace
+- [x] Visible figure window titles include the figure name plus the current trace
       display-name list from the shared figure helper class.
-- [ ] Stable figure window identity remains unchanged; only the visible title text is
+- [x] Stable figure window identity remains unchanged; only the visible title text is
       updated.
-- [ ] Existing warning text behavior in figure window titles continues to compose
+- [x] Existing warning text behavior in figure window titles continues to compose
       correctly with the new visible title format.
-- [ ] Behavior tests cover visible title updates for at least one ordinary figure
+- [x] Behavior tests cover visible title updates for at least one ordinary figure
       state and one warning-bearing figure state.
-- [ ] The slice includes a simplification pass that removes duplicate title-assembly
+- [x] The slice includes a simplification pass that removes duplicate title-assembly
       or display-name plumbing discovered during implementation.
 
 ### Blocked by

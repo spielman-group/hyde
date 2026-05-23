@@ -138,8 +138,9 @@ when a project is loaded.
 - Runtime truth is the live kernel `Figure`.
 - Recreation/editability truth is kernel-owned `fig._hyde_ir`.
 - Hyde treats user-facing figure-element identification as display metadata, not as
-  scientific state. That metadata is owned by shared figure helper tooling used
-  through composition by figure-working tools and windows.
+  scientific state. That metadata is owned by shared figure helper tooling such as
+  `FigureDisplayHelper`, used through composition by figure-working tools and
+  windows.
 - For traces, Hyde distinguishes the raw plotted `label` from the synthesized
   canonical `display_name`. The canonical trace display contract is:
   - `{label}: {y} vs {x}` when `label` and `x` exist
@@ -177,8 +178,9 @@ when a project is loaded.
   functions. The intended shared surface for that family is a figure-dialog base class
   such as `HydeFigureDialogWidget`.
 - Figure-working dialogs and windows should not each assemble their own user-facing
-  trace names. They should consume shared figure helper tooling through a has-a
-  relationship and use its canonical `display_name` surface.
+  trace names. They should consume shared figure helper tooling such as
+  `FigureDisplayHelper` through a has-a relationship and use its canonical
+  `display_name` surface.
 - Consumer dialogs do not use raw `figure_ir` dictionaries or raw figure-action
   payloads as their working contract.
 - Saved graph macros and `session.py` restore source both lower from figure IR.

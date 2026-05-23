@@ -55,6 +55,8 @@ Default rule:
 - the base owns tracked namespace-state bookkeeping
 - the widget emits hidden Python through the normal execution path when it mutates
   kernel-owned state
+- visible window titles may include semantic detail beyond the stable handle, but
+  stable save/restore identity must remain separate
 
 Do not recreate save/restore or stable-name plumbing locally.
 
@@ -70,7 +72,11 @@ Do not recreate save/restore or stable-name plumbing locally.
    Use Python for signal wiring, dynamic rows/items, and runtime-only widgets.
 5. Keep command generation and validation in the feature layer when the interactive
    widget emits Python or owns domain lowering.
-6. Validate the interactive contract with behavior tests.
+6. For figure-facing interactive widgets, keep naming ownership clear.
+   If the visible title or other chrome includes trace or element names, prefer
+   shared figure helper tooling through composition rather than widget-local string
+   assembly, and keep the visible title separate from the stable window handle.
+7. Validate the interactive contract with behavior tests.
    Prefer tests that prove stable naming, save/restore source, and namespace-driven
    refresh behavior.
 
@@ -79,9 +85,12 @@ Do not recreate save/restore or stable-name plumbing locally.
 When this skill is paired with `to-issues`, make sure the implementation plan says:
 
 - what the stable window handle is
+- whether the visible title differs from the stable handle
 - what macro/session-restore source the widget must produce
 - whether namespace changes should trigger refresh behavior
 - whether the widget owns its domain package or calls a feature owner elsewhere
+- for figure-facing widgets, whether canonical element naming comes from shared
+  figure helper tooling
 - which tests must prove stable-name binding, save/restore source, and tracked-state
   behavior
 
@@ -105,6 +114,8 @@ When normalizing an existing plugin, prefer these end states:
 - no local namespace-tracking mirror when `tracked_namespace_names()` and
   `update_tracked_namespace_state(...)` are enough
 - no interactive-local hidden-command wrapper when the normal execution path is enough
+- no widget-local figure title or trace-name assembly when shared figure helper
+  tooling plus the base title path already satisfy the contract
 
 ## Output Rules
 

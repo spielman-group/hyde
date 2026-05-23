@@ -67,8 +67,8 @@ The GUI surface does not:
 - Shared user-facing display metadata may live in a composed feature support class
   when it is not scientific state and when multiple surfaces need one canonical
   representation. For first-class figures, canonical figure-element display names
-  should be owned by shared figure helper tooling used through composition, not by
-  duplicated widget-local formatting logic.
+  should be owned by shared figure helper tooling such as `FigureDisplayHelper`,
+  used through composition, not by duplicated widget-local formatting logic.
 
 ## Shared Pattern
 

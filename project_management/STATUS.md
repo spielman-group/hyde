@@ -31,6 +31,11 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 ### Figures
 - Only first-class `@hyde.figure` figures open Hyde figure windows.
 - Figure windows restore from `session.py` and preserve saved window metadata.
+- Figure-working surfaces now share canonical trace `display_name` generation through
+  the composed `FigureDisplayHelper` path rather than widget-local fallback strings.
+- Figure-window chrome now shows the current figure name plus canonical trace display
+  names while preserving stable window identity separately for save/restore and
+  subwindow binding.
 - Dirty first-class figures resync from the live matplotlib object graph and stay live
   when unsupported structure is imported.
 - Unsupported imported live structure is surfaced in figure-window chrome.

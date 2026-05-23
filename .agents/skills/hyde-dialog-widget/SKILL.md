@@ -85,7 +85,12 @@ contract, preview contract, package ownership, or legitimate exceptions.
    If the dialog owns a Python package or domain, lowering/validation belongs in the
    matching `hyde/features/..._features.py` module. If it uses a package owned
    elsewhere, call that existing feature module instead of duplicating logic.
-7. Validate the footer contract with behavior tests.
+7. For figure-working dialogs, reuse the shared figure family.
+   Prefer `HydeFigureDialogWidget` plus shared figure helper tooling through
+   composition when the dialog needs canonical trace or figure-element naming.
+   Do not invent dialog-local naming rules or a standalone display-only abstraction
+   when the figure family should own that behavior.
+8. Validate the footer contract with behavior tests.
    Prefer tests that prove what the user sees and what gets executed or copied, not
    helper wiring.
 
@@ -98,6 +103,8 @@ When this skill is paired with `to-issues`, make sure the implementation plan sa
 - whether `Do It`, `To Cmd Line`, and `To Clip` all use the same backing string
 - whether `Help` should be base-owned through `help_filename`
 - whether the plugin owns its domain package or calls a feature owner elsewhere
+- for figure-working dialogs, whether canonical element naming comes from shared
+  figure helper tooling rather than dialog-local formatting
 - whether launcher code only opens the dialog or still has a second dispatch path
 - which tests must prove the shared footer contract
 
@@ -134,6 +141,8 @@ When normalizing an existing plugin, prefer these end states:
 - no duplicated preview string and lower-text-edit state
 - no separate payload getter when `preview_string()` already is the real backing
   command contract
+- no dialog-local figure-element naming rules when shared figure helper tooling
+  already owns the canonical `display_name`
 
 ## Output Rules
 

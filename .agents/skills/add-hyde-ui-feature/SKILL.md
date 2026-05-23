@@ -57,6 +57,9 @@ Widget-shape mapping:
      alternate status/help/preview text
    - whether `Do It`, `To Cmd Line`, and `To Clip` all use the same backing string
    - whether the dialog owns its domain package or calls a feature owner elsewhere
+   - whether repeated figure-element naming should use shared figure helper tooling
+     through composition
+   - whether visible window titles may differ from stable save/restore identity
    - which visible controls are intentionally inert in the initial deployment
 
 ## Interpretation Rules
@@ -77,6 +80,13 @@ Widget-shape mapping:
   Specs should assume static dialog/window layout is authored in one or more `.ui`
   files, with Python reserved for signal wiring, dynamic row/item population, and
   genuinely runtime-only widgets.
+- For figure-facing surfaces, do not invent a standalone display-only abstraction just
+  because multiple widgets need the same trace or element name. Prefer a shared
+  figure helper object used through composition, and make that ownership seam
+  explicit in the spec.
+- For saveable interactive windows, distinguish stable identity from visible chrome.
+  If the visible window title includes semantic detail such as trace names, say
+  explicitly that the stable window handle remains separate.
 
 ## Output Requirements
 - Create or update `project_management/specs/<feature>/SPEC.md`.
@@ -99,6 +109,9 @@ Widget-shape mapping:
 - When the feature is expected to be a `HydeDialogWidget`, state whether the lower
   preview pane shows the executable backing string directly or may display alternate
   text while `Do It` / `To Cmd Line` / `To Clip` still use the backing string.
+- When the feature is figure-facing and users must identify traces or analogous
+  elements, state whether canonical naming comes from shared figure helper tooling
+  through composition and whether visible window titles include that canonical name.
 - For confirmed destructive dialogs, be explicit about whether the lower pane is a
   command preview, a status/validation surface, or both. A `remove_from_graph`-style
   dialog still needs one canonical backing command string whenever the selection is
