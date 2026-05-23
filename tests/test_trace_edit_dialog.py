@@ -277,13 +277,57 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
             self.assertEqual(dialog.ui.trace_list.count(), 2)
-            self.assertEqual(dialog.ui.trace_list.currentItem().text(), "trace_a")
+            self.assertEqual(
+                dialog.ui.trace_list.currentItem().text(),
+                "trace_a | trace_a vs x",
+            )
             self.assertEqual(dialog.ui.line_color_edit.text(), "#123456")
             self.assertEqual(dialog.ui.line_style_combo.currentData(), "--")
             self.assertEqual(dialog.ui.line_width_spin.value(), 2.5)
             self.assertEqual(dialog.ui.marker_combo.currentData(), "s")
             self.assertEqual(dialog.lower_text_edit.toPlainText(), "")
         finally:
+            dialog.close()
+
+    def test_trace_dialog_refresh_supported_trace_list_restores_selection_by_trace_id(self):
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": FakeExecutionService(),
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = TraceAppearanceDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        extra_list = QtWidgets.QListWidget()
+        extra_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        try:
+            dialog.refresh_supported_trace_list(
+                extra_list,
+                selected_trace_ids=("trace0", "trace1"),
+                current_trace_id="trace1",
+            )
+
+            self.assertEqual(
+                [extra_list.item(index).text() for index in range(extra_list.count())],
+                ["trace_a | trace_a vs x", "trace_b | trace_b vs x"],
+            )
+            self.assertEqual(
+                dialog.selected_supported_trace_ids(extra_list),
+                ("trace0", "trace1"),
+            )
+            self.assertEqual(
+                dialog.current_supported_trace_id(extra_list),
+                "trace1",
+            )
+        finally:
+            extra_list.close()
             dialog.close()
 
     def test_trace_dialog_uses_canonical_supported_trace_rows_keyed_by_trace_id(self):

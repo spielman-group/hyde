@@ -992,9 +992,17 @@ class HydeFigureDialogWidget(HydeDialogWidget):
 
     def _canonical_supported_trace_row_text(self, record):
         text = str(record.get("label") or "").strip()
-        if text:
-            return text
-        return str(record.get("trace_id") or "").strip()
+        if not text:
+            text = str(record.get("trace_id") or "").strip()
+        y_name = str(record.get("y_name") or "").strip()
+        x_name = str(record.get("x_name") or "").strip()
+        if y_name and x_name:
+            return f"{text} | {y_name} vs {x_name}"
+        if y_name:
+            return f"{text} | {y_name}"
+        if x_name:
+            return f"{text} | {x_name}"
+        return text
 
 
 class FigureEditSession:

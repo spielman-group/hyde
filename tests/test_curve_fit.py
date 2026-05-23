@@ -2560,6 +2560,10 @@ class TestCurveFitPlugin(unittest.TestCase):
                 ["signal", "signal_fit_result"],
             )
             self.assertEqual(
+                [record["row_text"] for record in dialog.supported_trace_records()],
+                ["signal | signal vs time", "signal_fit_result | time"],
+            )
+            self.assertEqual(
                 dialog.supported_trace_record("signal_fit_result")["label"],
                 "signal_fit_result",
             )
@@ -2572,6 +2576,14 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(
                 [record["label"] for record in dialog.supported_trace_records()],
                 ["signal", "signal_fit_result", "signal_fit_result_residuals"],
+            )
+            self.assertEqual(
+                [record["row_text"] for record in dialog.supported_trace_records()],
+                [
+                    "signal | signal vs time",
+                    "signal_fit_result | time",
+                    "signal_fit_result_residuals | time",
+                ],
             )
 
             dialog.reject()

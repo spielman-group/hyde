@@ -1,5 +1,5 @@
 - [x] Slice 1: Normalize the Figure Dialog Family on `HydeFigureDialogWidget`
-- [ ] Slice 2: Canonicalize Shared Figure Trace Lists
+- [x] Slice 2: Canonicalize Shared Figure Trace Lists
 - [ ] Slice 3: Ship the `Remove from Graph` Core Flow
 - [ ] Slice 4: Complete Regex Filter Behavior for `Remove from Graph`
 
@@ -69,12 +69,12 @@ hook: migrated figure dialogs share one canonical row representation.
 
 ### Acceptance criteria
 
-- [ ] The shared figure-dialog base owns supported-trace loading and canonical row
+- [x] The shared figure-dialog base owns supported-trace loading and canonical row
       text generation for figure dialogs.
-- [ ] Canonical trace rows are keyed by stable Hyde trace IDs and remain deterministic.
-- [ ] Migrated figure dialogs that consume supported traces now use the shared trace
+- [x] Canonical trace rows are keyed by stable Hyde trace IDs and remain deterministic.
+- [x] Migrated figure dialogs that consume supported traces now use the shared trace
       list contract instead of dialog-local row shaping.
-- [ ] Behavior tests prove the shared trace-list contract through real dialogs or
+- [x] Behavior tests prove the shared trace-list contract through real dialogs or
       concrete consumers, not through helper-only tests.
 
 ### Blocked by
