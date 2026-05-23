@@ -2,25 +2,17 @@
 
 ## Checklist
 
-- [x] Slice 1: Introduce canonical first-class figure lookup and identity rules
-- [x] Slice 2: Add backend dirty tracking and universal post-block figure resync
-- [x] Slice 3: Re-import full supported IR and unsupported-feature status from live figures
-- [x] Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
-- [x] Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
-- [x] Slice 6: Move Curve Fit attached display onto canonical matplotlib patch emission
-- [x] Slice 7: Restore save/reopen behavior for partially supported figures and harden tests
+- [ ] Slice 1: Move explicit figure regenerate and refresh onto the command path
+- [ ] Slice 2: Unify Curve Fit live and preview attached-display command emission
+- [ ] Slice 3: Retire stale figure-action test scaffolding and assertions
+- [ ] Slice 4: Rewrite stale figure specs around the final one-path model
 
-## Legacy-path cleanup checkpoints
+## Notes
 
-These checkpoints are not separate work items. They are completion conditions for the
-remaining slices so the old dual-path backend does not survive under a new name.
+- `resize_redraw` is a bounded exception. It is preferred, but not required, to move it onto the command-driven model.
+- Leaving `resize_redraw` on backend control traffic is acceptable as long as docs, specs, and tests describe it as a narrow non-command exception rather than evidence of a general figure-edit action lane.
 
-- [x] Remove the remaining non-first-class `_hyde_live_state` / `_infer_live_state` backend replay path as part of the final cleanup once the new command-driven figure path is fully in place.
-- [x] Remove first-class figure edit use of semantic figure `comm` actions for remaining routine edits as part of Slices 5 and 6.
-- [x] Delete obsolete tests that still defend the old live-state replay or semantic figure-action edit path when the product contract changes.
-- [x] Update docs and agent guidance so they no longer describe the old figure-edit `comm` exception as the intended architecture once the migration is complete.
-
-## Slice 1: Introduce canonical first-class figure lookup and identity rules
+## Slice 1: Move Explicit Figure Regenerate And Refresh Onto The Command Path
 
 ### Type
 
@@ -28,18 +20,21 @@ remaining slices so the old dual-path backend does not survive under a new name.
 
 ### What to build
 
-Introduce the canonical first-class figure lookup primitive and settle figure identity
-on one truth shared by matplotlib and Hyde. Creation names, lookup names, and later
-rename behavior should converge on one canonical figure identity, with failure on
-name collision and restoration of the previous valid name.
+Remove the remaining active production split where explicit first-class figure refresh
+and regenerate operations use the private figure-action transport instead of Hyde's
+normal command-driven Python path.
+
+This slice should cover explicit refresh/regenerate control only. It does not need to
+move `resize_redraw` if that would broaden the patch beyond the narrow exception you
+already approved.
 
 ### Acceptance criteria
 
-- [x] Hyde exposes a canonical first-class figure lookup primitive for Python command blocks.
-- [x] The canonical figure identity matches the creation/label name rather than a separate Hyde-only field.
-- [x] Renaming a first-class figure updates Hyde identity when the new name is valid.
-- [x] Rename collision fails and restores the previous valid canonical name.
-- [x] The canonical figure-edit Python path is compatible with Hyde's existing hidden-command logging interface.
+- [ ] `hyde.refresh_figure(...)` no longer mutates first-class figures through direct backend action dispatch.
+- [ ] Figure-window explicit regenerate/refresh requests no longer depend on the private figure-action transport.
+- [ ] Hidden refresh/regenerate commands route through Hyde's existing hidden Python execution path.
+- [ ] Hidden refresh/regenerate commands appear in the standard `[Hyde state] ... / python:` debug log channel.
+- [ ] If `resize_redraw` stays on backend control traffic, the remaining control lane is documented as a narrow exception rather than a general second figure-edit path.
 
 ### Blocked by
 
@@ -47,39 +42,9 @@ None - can start immediately
 
 ### User stories covered
 
-- 4, 5, 6, 7, 8
+- 1, 5, 10, 13, 22, 24
 
-## Slice 2: Add backend dirty tracking and universal post-block figure resync
-
-### Type
-
-`AFK`
-
-### What to build
-
-Add backend-side dirty tracking for first-class figures using matplotlib-native
-change/stale propagation, and run figure resync after every completed top-level
-Python execution block across Hyde execution paths. Resync should cover only dirty
-first-class figures and should still run after exceptions.
-
-### Acceptance criteria
-
-- [x] Dirty tracking for first-class figures uses matplotlib-native change/stale signals rather than broad method wrappers.
-- [x] Completed visible and hidden Python execution blocks trigger backend resync.
-- [x] Only dirty first-class figures are resynced after a block.
-- [x] Resync still runs after execution blocks that end with an exception.
-- [x] Hidden figure-edit Python blocks continue to appear in Hyde's normal debug logging stream.
-- [x] Hidden figure-edit Python blocks appear in the same `[Hyde state] ... / python:` debug channel used by existing hidden commands such as `hyde.save_project(...)`.
-
-### Blocked by
-
-- Slice 1: Introduce canonical first-class figure lookup and identity rules
-
-### User stories covered
-
-- 1, 2, 3, 9, 10, 11, 13, 22
-
-## Slice 3: Re-import full supported IR and unsupported-feature status from live figures
+## Slice 2: Unify Curve Fit Live And Preview Attached-Display Command Emission
 
 ### Type
 
@@ -87,27 +52,26 @@ first-class figures and should still run after exceptions.
 
 ### What to build
 
-Make backend resync rebuild the full supported semantic IR for each dirty
-first-class figure from the live matplotlib object graph. Unsupported structure
-should keep the figure first-class while marking it unsupported/incomplete and
-preserving only the supported subset for Hyde semantics.
+Remove the remaining split inside Curve Fit attached display so that live update,
+preview-style figure control, `Do It`, and `To Cmd Line` all converge on one
+canonical command-generation model with one standard hidden-command logging path.
 
 ### Acceptance criteria
 
-- [x] Dirty-figure resync rebuilds the full supported semantic IR from the live figure.
-- [x] Unsupported live structure marks the figure unsupported/incomplete instead of ejecting it from Hyde.
-- [x] Supported semantic regions remain available for later Hyde editing.
-- [x] Rename and other identity-sensitive imports remain consistent with the canonical name contract.
+- [ ] Curve Fit attached-display live behavior no longer uses a distinct command path from `Do It` / `To Cmd Line`.
+- [ ] Preview-style attached-display figure commands use the same command-generation model as the committed attached-display path.
+- [ ] Preview-related hidden Curve Fit figure commands appear in Hyde's standard `[Hyde state] ... / python:` debug log channel.
+- [ ] Focused Curve Fit tests verify one canonical attached-display command path across live update, preview, `Do It`, and `To Cmd Line`.
 
 ### Blocked by
 
-- Slice 2: Add backend dirty tracking and universal post-block figure resync
+None - can start immediately
 
 ### User stories covered
 
-- 12, 14, 15, 16, 18, 23
+- 1, 2, 3, 5, 19, 20, 24
 
-## Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
+## Slice 3: Retire Stale Figure-Action Test Scaffolding And Assertions
 
 ### Type
 
@@ -115,27 +79,30 @@ preserving only the supported subset for Hyde semantics.
 
 ### What to build
 
-Batch figure snapshot updates per completed Python block and surface the resulting
-status clearly in the figure window. Unsupported figures should show explicit warning
-text and remain usable as first-class windows with the imported supported subset.
+Harden the figure tests around the final control model by deleting stale test seams
+that still scaffold or defend the superseded figure-action transport for routine
+figure control.
+
+This includes backend/public tests, dialog tests, and Curve Fit harnesses where the
+remaining assertions no longer match the production contract.
 
 ### Acceptance criteria
 
-- [x] Figure snapshot updates are delivered to the GUI in one batch per completed execution block.
-- [x] Figure windows show clear unsupported/incomplete warning text when appropriate.
-- [x] Supported figure-window behaviors continue to work after batched refresh.
-- [x] Unsupported figures stay live in Hyde windows rather than disappearing.
-- [x] Batched refresh works from backend-imported figure snapshots rather than reviving any first-class `refresh_from_live_state` bridge.
+- [ ] Tests no longer defend routine semantic figure-edit actions for axis, trace, or Curve Fit attached display.
+- [ ] Stale `_hyde_live_state` terminology or fixtures are removed from figure tests unless they still prove a current product contract.
+- [ ] Figure-control test scaffolding reflects the remaining real transport split, if any, instead of the removed general semantic-edit path.
+- [ ] The focused figure test suite verifies the current one-path command model plus any explicitly accepted narrow exceptions.
 
 ### Blocked by
 
-- Slice 3: Re-import full supported IR and unsupported-feature status from live figures
+- Slice 1: Move explicit figure regenerate and refresh onto the command path
+- Slice 2: Unify Curve Fit live and preview attached-display command emission
 
 ### User stories covered
 
-- 14, 15, 16, 21
+- 5, 10, 13, 19, 20, 24
 
-## Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
+## Slice 4: Rewrite Stale Figure Specs Around The Final One-Path Model
 
 ### Type
 
@@ -143,95 +110,29 @@ text and remain usable as first-class windows with the imported supported subset
 
 ### What to build
 
-Keep the existing axis and trace dialogs, but change their mutation path so they emit
-the canonical minimal standard-matplotlib patch block for `Do It`, live update,
-`Cancel`, and `To Cmd Line`. Dialogs continue reading imported IR snapshots rather
-than live matplotlib objects directly.
+Update the remaining figure-related specs so they stop describing the superseded
+semantic `comm` figure-edit architecture as current behavior.
+
+The updated specs should clearly distinguish:
+- the canonical command-driven figure-edit path
+- any accepted narrow exception such as `resize_redraw`
+- unsupported or not-yet-implemented surfaces that should not be described as already complete
 
 ### Acceptance criteria
 
-- [x] Axis and trace dialogs emit the same canonical matplotlib patch block for hidden execution and `To Cmd Line`.
-- [x] Live update uses the same command path as final commit.
-- [x] Cancel under live update restores the opening state of the dialog-owned region through the same Python ingress path.
-- [x] Dialog command emission changes only actually changed features.
-- [x] Hidden axis/trace edit commands are logged through Hyde's ordinary hidden-command logging path.
-- [x] Hidden axis/trace edit commands are logged through the same `[Hyde state] ... / python:` channel used for existing hidden commands.
-- [x] Axis and trace edits no longer depend on `FigureEditSession.commit()`, `send_figure_action(...)`, or backend semantic edit actions for routine mutation.
-- [x] Old axis/trace tests are updated to verify canonical emitted matplotlib patches and backend resync rather than the former figure-action transport.
+- [ ] `IPC_PROTOCOL.md` no longer describes routine figure editing as a semantic `comm` lane.
+- [ ] `figure_window/SPEC.md` no longer describes routine dialog editing through session `live apply / commit / revert` transport or semantic figure actions.
+- [ ] `axis_edit_dialog/SPEC.md` and `trace_edit_dialog/SPEC.md` describe emitted command-driven figure control rather than semantic figure actions.
+- [ ] `remove_from_graph/SPEC.md` is either updated to the command-driven model or clearly marked as stale/not implemented instead of documenting the superseded action path as complete.
+- [ ] Specs describe `resize_redraw` accurately if it remains a bounded non-command exception.
 
 ### Blocked by
 
-- Slice 1: Introduce canonical first-class figure lookup and identity rules
-- Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
+- Slice 1: Move explicit figure regenerate and refresh onto the command path
+- Slice 2: Unify Curve Fit live and preview attached-display command emission
 
 ### User stories covered
 
-- 1, 2, 3, 4, 9, 16, 19, 20
-
-## Slice 6: Move Curve Fit attached display onto canonical matplotlib patch emission
-
-### Type
-
-`AFK`
-
-### What to build
-
-Keep the current Curve Fit dialog surface, but move attached display figure mutation
-onto the same canonical matplotlib patch emission model used by the other figure
-dialogs. Hidden execution, visible command emission, live update, and rollback should
-all converge on one Python ingress path.
-
-### Acceptance criteria
-
-- [x] Curve Fit attached display uses canonical matplotlib patch emission instead of a separate figure action transport.
-- [x] Hidden execution and visible command-line emission use the same emitted patch block.
-- [x] Live update and rollback/cancel use the same canonical Python ingress path.
-- [x] Attached-display figure results converge with backend resync and imported IR.
-- [x] Hidden Curve Fit figure-edit commands are logged through Hyde's ordinary hidden-command logging path.
-- [x] Hidden Curve Fit figure-edit commands are logged through the same `[Hyde state] ... / python:` channel used for existing hidden commands.
-- [x] Curve Fit attached display no longer commits figure changes through `FigureEditSession.commit()`, `send_figure_action(...)`, or backend semantic edit actions.
-- [x] Routine first-class figure mutation no longer relies on semantic figure `comm` edit traffic after axis/trace/attached-display migration is complete.
-
-### Blocked by
-
-- Slice 1: Introduce canonical first-class figure lookup and identity rules
-- Slice 4: Batch figure snapshot refresh and surface unsupported/incomplete warnings
-
-### User stories covered
-
-- 1, 2, 3, 4, 9, 16, 19, 20
-
-## Slice 7: Restore save/reopen behavior for partially supported figures and harden tests
-
-### Type
-
-`AFK`
-
-### What to build
-
-Finalize the cleanup by defining save/reopen behavior for partially supported figures
-and by hardening the behavioral test suite around the new one-path figure mutation
-model. Saving unsupported figures should warn and recreate the supported subset only,
-without silently losing windows when Hyde can still recover part of the figure.
-
-### Acceptance criteria
-
-- [x] Saving unsupported first-class figures surfaces a clear warning.
-- [x] Save/reopen preserves the supported subset of unsupported figures rather than dropping the window entirely.
-- [x] Tests verify one canonical Python ingress path across figure dialogs and command-line execution.
-- [x] Tests cover dirty tracking, post-block resync, exception resync, rename collision, unsupported-feature warnings, and partial save/reopen behavior.
-- [x] Tests cover hidden figure-edit command logging through Hyde's existing debug log behavior.
-- [x] Tests cover hidden figure-edit command logging through the same `[Hyde state] ... / python:` debug channel used by existing hidden commands.
-- [x] The remaining non-first-class `_hyde_live_state` / `_infer_live_state` replay path, including stale public helpers/tests that only support it, is either removed or explicitly justified by a still-current product contract.
-- [x] Obsolete figure-edit transport code is deleted rather than left dormant once Slices 5 and 6 finish.
-- [x] `AGENTS.md`, `ARCHITECTURE.md`, `IR-CONTROL.md`, and `STATUS.md` describe the final one-path figure mutation model rather than the superseded semantic-edit exception.
-
-### Blocked by
-
-- Slice 3: Re-import full supported IR and unsupported-feature status from live figures
-- Slice 5: Move axis and trace dialogs onto canonical matplotlib patch emission
-- Slice 6: Move Curve Fit attached display onto canonical matplotlib patch emission
-
-### User stories covered
-
-- 2, 9, 13, 15, 17, 18, 21, 23
+- PRD Implementation Decisions
+- PRD Testing Decisions
+- PRD Further Notes
