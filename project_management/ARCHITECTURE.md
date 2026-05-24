@@ -47,14 +47,8 @@
 
 Anything exported from `hyde/__init__.py` is public kernel-facing API.
 
-Current deliberate public entry points:
-- `hyde.create_table(...)`
-- `hyde.append_table(...)`
-- `@hyde.table`
-- `@hyde.figure`
-- `@hyde.fit_function`
-- `hyde.save_project(...)`
-- `hyde.load_project(...)`
+The docstrings in `hyde/__init__.py` are the primary API documentation for that
+surface.
 
 `features/...` is not public API. It is the GUI state/codec translation layer that
 turns GUI state into Python strings or GUI-facing metadata. For the generic GUI-side

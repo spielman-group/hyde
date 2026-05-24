@@ -83,11 +83,14 @@ def _build_window_metadata(
 
 
 def gui_mode(enable=True):
-    """
-    Set whether Hyde is running within the managed GUI environment.
-    This flag controls whether public helpers attempt to send IPC signals to the GUI.
-    When enabled, the Hyde module is also exposed in the interactive kernel
-    namespace as `hyde` so visible commands can use the public API directly.
+    """Enable or disable Hyde GUI mode.
+
+    Parameters
+    ----------
+    enable : bool, optional
+        When ``True``, expose the Hyde public API in the interactive namespace
+        and enable Hyde's GUI-facing signal handlers and IPC path. When
+        ``False``, restore the non-GUI signal and builtin state.
     """
     global HYDE_GUI
     HYDE_GUI = bool(enable)
@@ -124,19 +127,34 @@ def gui_mode(enable=True):
 
 
 def task_complete(name, success=True):
-    """
-    Report completion of a named background task back to the Hyde GUI.
+    """Report completion of a named background task to the Hyde GUI.
 
-    Args:
-        name (str): Stable task name understood by the GUI.
-        success (bool): Whether the task completed successfully.
+    Parameters
+    ----------
+    name : str
+        Stable task name understood by the GUI.
+    success : bool, optional
+        Whether the task completed successfully.
     """
     signal_task_complete(name, success=success)
 
 
 def new_project(path, load=True, overwrite=False):
-    """
-    Creates a new empty Hyde project at the specified path and optionally injects it as the active session.
+    """Create a new Hyde project directory.
+
+    Parameters
+    ----------
+    path : str or path-like
+        Target project directory.
+    load : bool, optional
+        When ``True``, load the new project after creating it.
+    overwrite : bool, optional
+        When ``True``, replace an existing path at ``path``.
+
+    Raises
+    ------
+    RuntimeError
+        If the target path already exists and ``overwrite`` is ``False``.
     """
     project_dir = project_tools.resolve_project_dir(path)
     try:
@@ -174,7 +192,24 @@ def new_project(path, load=True, overwrite=False):
 
 
 def heal_project(path):
-    """Fill in missing template files for an existing Hyde project directory."""
+    """Recreate missing template files in an existing Hyde project directory.
+
+    Parameters
+    ----------
+    path : str or path-like
+        Existing Hyde project directory to heal.
+
+    Returns
+    -------
+    list of str
+        Relative paths recreated from the default project template.
+
+    Raises
+    ------
+    RuntimeError
+        If ``path`` does not resolve to an existing ``.hy`` project directory
+        or if the healing operation fails.
+    """
     project_dir = project_tools.resolve_project_dir(path)
     errors = []
     healed_paths = []
@@ -217,14 +252,29 @@ def heal_project(path):
 
 
 def save_project(path=None, mode="save", overwrite=False):
-    """
-    Save the current kernel namespace into a Hyde project package.
+    """Save the current kernel namespace into a Hyde project package.
 
-    Args:
-        path (str, optional): Target `.hy` project directory. Defaults to the
-            active Hyde project when ``mode="save"``.
-        mode (str): One of "save", "copy", or "save_as".
-        overwrite (bool): Allow replacing an existing target for ``save_as`` or ``copy``.
+    Parameters
+    ----------
+    path : str or path-like, optional
+        Target ``.hy`` project directory. By default, save into the active Hyde
+        project when ``mode="save"``.
+    mode : {"save", "copy", "save_as"}, optional
+        Save mode to use.
+    overwrite : bool, optional
+        Whether to allow replacing an existing target for ``save_as`` or
+        ``copy``.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    ValueError
+        If ``path`` and ``mode`` are inconsistent.
+    RuntimeError
+        If no Hyde project is active or the save operation fails.
     """
     if mode not in ("save", "copy", "save_as"):
         raise ValueError("save_project mode must be 'save', 'copy', or 'save_as'")
@@ -308,12 +358,24 @@ def save_project(path=None, mode="save", overwrite=False):
 
 
 def load_project(path=None):
-    """
-    Load saved kernel namespace objects from a Hyde project package.
+    """Load saved kernel namespace objects from a Hyde project package.
 
-    Args:
-        path (str, optional): Source `.hy` project directory. Defaults to the
-            active Hyde project.
+    Parameters
+    ----------
+    path : str or path-like, optional
+        Source ``.hy`` project directory. By default, load the active Hyde
+        project.
+
+    Returns
+    -------
+    int
+        Number of objects restored into the kernel namespace.
+
+    Raises
+    ------
+    RuntimeError
+        If no Hyde project is active, required project files are missing, or
+        the load operation fails.
     """
     global HYDE_PROJECT_DIR
 
@@ -420,12 +482,18 @@ def load_project(path=None):
 
 
 def quit():
-    """
-    Request an orderly Hyde shutdown.
+    """Request an orderly Hyde shutdown.
 
-    In Hyde GUI mode this asks the parent GUI process to tear down the kernel
-    clients and child process before exiting the application. Outside GUI mode
-    it exits the current interpreter.
+    Returns
+    -------
+    None
+        Returned when Hyde is running in GUI mode and the shutdown request has
+        been sent to the parent GUI process.
+
+    Raises
+    ------
+    SystemExit
+        Raised outside GUI mode to exit the current interpreter immediately.
     """
     if HYDE_GUI:
         signal_enter_no_project_state()
@@ -441,11 +509,25 @@ def create_table(
     column_widths=None,
     window_state=None,
 ):
-    """
-    Open or append to a Hyde table window.
+    """Open a Hyde table window for one or more kernel objects.
 
-    This is the table creation/update primitive used by direct interactive
-    calls as well as saved table macros and session restore source.
+    Parameters
+    ----------
+    *args : object
+        Supported one-dimensional kernel objects to show in the table.
+    name : str, optional
+        Requested stable table name.
+    geometry : tuple, optional
+        Saved window geometry to apply when opening the table.
+    column_widths : sequence of int, optional
+        Saved table column widths.
+    window_state : {"visible", "minimized", "maximized"}, optional
+        Requested window presentation state.
+
+    Notes
+    -----
+    This is the table creation primitive used by direct interactive calls,
+    table macros, and session restore source.
     """
     from .execution.helpers import resolve_names
 
@@ -473,8 +555,19 @@ def create_table(
 
 
 def append_table(*args, name):
-    """
-    Append supported objects to an existing Hyde table window.
+    """Append objects to an existing Hyde table window.
+
+    Parameters
+    ----------
+    *args : object
+        Supported one-dimensional kernel objects to append.
+    name : str
+        Stable name of the target table window.
+
+    Raises
+    ------
+    TypeError
+        If ``name`` is empty.
     """
     from .execution.helpers import resolve_names
 
@@ -490,16 +583,29 @@ def append_table(*args, name):
 
 
 def table(_func=None, *, window_state=None, register=True):
-    """
-    Register a Hyde table recreation macro.
+    """Register a Hyde table recreation macro.
 
-    This public Hyde API currently supports decorator registration only:
+    Parameters
+    ----------
+    _func : callable, optional
+        Function being decorated when ``@hyde.table`` is used without
+        arguments.
+    window_state : {"visible", "minimized", "maximized"}, optional
+        Saved window presentation state to apply when the macro runs.
+    register : bool, optional
+        When ``True``, publish the decorated function in
+        ``Windows -> Table Macros``.
 
-    ``@hyde.table``
+    Returns
+    -------
+    callable
+        Decorator or wrapped macro function, depending on how
+        ``hyde.table`` is invoked.
 
-    Decorated functions are published into `Windows -> Table Macros` unless
-    ``register=False`` is provided. Internal restore paths may also pass
-    ``window_state='minimized'`` to restore saved GUI state.
+    Raises
+    ------
+    TypeError
+        If called in a non-decorator form.
     """
     metadata = _build_window_metadata(
         "hyde.table",
@@ -534,18 +640,31 @@ def table(_func=None, *, window_state=None, register=True):
     raise TypeError("hyde.table currently supports decorator registration only.")
 
 def figure(_func=None, *, window_pos=None, window_state=None, register=True):
-    """
-    Register a Hyde figure recreation macro.
+    """Register a Hyde figure recreation macro.
 
-    This public Hyde API currently supports decorator registration only:
+    Parameters
+    ----------
+    _func : callable, optional
+        Function being decorated when ``@hyde.figure`` is used without
+        arguments.
+    window_pos : tuple of int, optional
+        Saved window position to apply when the macro runs.
+    window_state : {"visible", "minimized", "maximized"}, optional
+        Saved window presentation state to apply when the macro runs.
+    register : bool, optional
+        When ``True``, publish the decorated function in
+        ``Windows -> Graph Macros``.
 
-    ``@hyde.figure``
+    Returns
+    -------
+    callable
+        Decorator or wrapped macro function, depending on how
+        ``hyde.figure`` is invoked.
 
-    Decorated functions are published into `Windows -> Graph Macros` after the
-    procedures package reload path rebuilds the registry unless
-    ``register=False`` is provided. Internal restore paths may also pass
-    ``window_pos=...`` and ``window_state`` restore metadata to restore saved GUI
-    state.
+    Raises
+    ------
+    TypeError
+        If called in a non-decorator form.
     """
     metadata = _build_window_metadata(
         "hyde.figure",
@@ -597,17 +716,34 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
 
 
 def fit_function(_func=None, *, independent_vars):
-    """
-    Register a user-defined curve-fit function for Hyde Curve Fit discovery.
+    """Register a curve-fit function for Hyde Curve Fit discovery.
 
-    This public Hyde API currently supports decorator registration only:
+    Parameters
+    ----------
+    _func : callable, optional
+        Function being decorated when ``@hyde.fit_function`` is used without
+        arguments.
+    independent_vars : tuple of str
+        Independent-variable parameter names that must appear first in the
+        decorated function signature.
 
-    ``@hyde.fit_function(independent_vars=("x",))``
+    Returns
+    -------
+    callable
+        Decorator or decorated function, depending on how
+        ``hyde.fit_function`` is invoked.
 
-    Supported first-pass signatures must begin with the declared
-    ``independent_vars`` in order, followed by explicitly named coefficient
-    parameters. Unsupported forms are excluded from the Curve Fit chooser rather
-    than aborting the procedures reload path.
+    Raises
+    ------
+    TypeError
+        If called in a non-decorator form.
+
+    Notes
+    -----
+    Supported first-pass signatures must begin with ``independent_vars`` in
+    order, followed by explicitly named coefficient parameters. Unsupported
+    forms are excluded from the Curve Fit chooser instead of aborting the
+    procedures reload path.
     """
 
     def decorator(func):
@@ -627,49 +763,182 @@ def fit_function(_func=None, *, independent_vars):
     raise TypeError("hyde.fit_function currently supports decorator registration only.")
 
 
+@fit_function(independent_vars=("x",))
 def line(x, a, b):
+    """Return a straight line.
+
+    Parameters
+    ----------
+    x : array_like
+        Independent-variable values.
+    a : array_like
+        Slope.
+    b : array_like
+        Intercept.
+
+    Returns
+    -------
+    array_like
+        Straight-line values ``a * x + b``.
+    """
     return a * x + b
 
 
+@fit_function(independent_vars=("x",))
 def gaussian(x, a, x0, width, y0):
+    """Return a Gaussian curve.
+
+    Parameters
+    ----------
+    x : array_like
+        Independent-variable values.
+    a : array_like
+        Peak amplitude.
+    x0 : array_like
+        Peak center.
+    width : array_like
+        Gaussian width parameter.
+    y0 : array_like
+        Constant offset.
+
+    Returns
+    -------
+    array_like
+        Gaussian-curve values.
+    """
     return a * np.exp(-((x - x0) ** 2) / (width**2)) + y0
 
 
+@fit_function(independent_vars=("x",))
 def lorentzian(x, a, x0, width, y0):
+    """Return a Lorentzian curve.
+
+    Parameters
+    ----------
+    x : array_like
+        Independent-variable values.
+    a : array_like
+        Peak amplitude.
+    x0 : array_like
+        Peak center.
+    width : array_like
+        Lorentzian width parameter.
+    y0 : array_like
+        Constant offset.
+
+    Returns
+    -------
+    array_like
+        Lorentzian-curve values.
+    """
     return a * (1.0 / (1.0 + ((x - x0) ** 2) / (width**2))) + y0
 
 
+@fit_function(independent_vars=("x",))
 def exp(x, a, width, y0):
+    """Return an exponential curve.
+
+    Parameters
+    ----------
+    x : array_like
+        Independent-variable values.
+    a : array_like
+        Amplitude.
+    width : array_like
+        Decay-width parameter.
+    y0 : array_like
+        Constant offset.
+
+    Returns
+    -------
+    array_like
+        Exponential-curve values.
+    """
     return a * np.exp(-x / width) + y0
 
 
+@fit_function(independent_vars=("x",))
 def sin(x, a, k, phi, y0):
+    """Return a sinusoid.
+
+    Parameters
+    ----------
+    x : array_like
+        Independent-variable values.
+    a : array_like
+        Amplitude.
+    k : array_like
+        Angular scaling factor applied to ``x``.
+    phi : array_like
+        Phase offset.
+    y0 : array_like
+        Constant offset.
+
+    Returns
+    -------
+    array_like
+        Sinusoidal values.
+    """
     return a * np.sin(k * x + phi) + y0
 
 
+@fit_function(independent_vars=("x",))
 def power(x, a, alpha, y0):
+    """Return a power-law curve.
+
+    Parameters
+    ----------
+    x : array_like
+        Independent-variable values.
+    a : array_like
+        Scale factor.
+    alpha : array_like
+        Power-law exponent.
+    y0 : array_like
+        Constant offset.
+
+    Returns
+    -------
+    array_like
+        Power-law values.
+    """
     return a * (x**alpha) + y0
 
 
+@fit_function(independent_vars=("x",))
 def log(x, a, y0):
+    """Return a logarithmic curve.
+
+    Parameters
+    ----------
+    x : array_like
+        Independent-variable values.
+    a : array_like
+        Scale factor.
+    y0 : array_like
+        Constant offset.
+
+    Returns
+    -------
+    array_like
+        Logarithmic-curve values.
+    """
     return a * np.log(x) + y0
 
 
-_BUILTIN_FIT_FUNCTIONS = (
-    (line, ("x",)),
-    (gaussian, ("x",)),
-    (lorentzian, ("x",)),
-    (exp, ("x",)),
-    (sin, ("x",)),
-    (power, ("x",)),
-    (log, ("x",)),
-)
-
-
 def register_builtin_fit_functions():
-    for func, independent_vars in _BUILTIN_FIT_FUNCTIONS:
-        register_fit_function(func, independent_vars=independent_vars)
-    return tuple(func.__name__ for func, _ in _BUILTIN_FIT_FUNCTIONS)
+    """Re-register Hyde's built-in Curve Fit functions.
+
+    Returns
+    -------
+    tuple of str
+        Names of the built-in fit functions re-registered into the catalog.
+    """
+    builtin_fit_functions = (line, gaussian, lorentzian, exp, sin, power, log)
+    decorator = fit_function(independent_vars=("x",))
+    for func in builtin_fit_functions:
+        decorator(func)
+    return tuple(func.__name__ for func in builtin_fit_functions)
 
 
 register_builtin_fit_functions()
@@ -688,11 +957,17 @@ def _resolve_matplotlib_figure(figure):
 
 
 def get_figure(name):
-    """
-    Return the live first-class Hyde figure for ``name``.
+    """Return a live first-class Hyde figure by name.
 
-    The lookup uses the canonical figure identity shared with the matplotlib
-    figure label.
+    Parameters
+    ----------
+    name : str
+        Canonical Hyde figure name.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Live first-class figure associated with ``name``.
     """
     from .matplotlib_backend import get_first_class_figure
 
@@ -700,18 +975,23 @@ def get_figure(name):
 
 
 def refresh_figure(figure, *, use_bound_values=False):
-    """
-    Regenerate a first-class Hyde figure from its kernel-owned figure IR.
+    """Regenerate a first-class Hyde figure from its kernel-owned figure IR.
 
     Parameters
     ----------
-    figure:
-        A live matplotlib figure object or a figure manager number resolvable to
-        a live figure.
-    use_bound_values:
-        When true, prefer the currently bound runtime operand values already stored
-        on the live figure IR. When false, re-resolve operands from the current
-        kernel namespace where possible.
+    figure : matplotlib.figure.Figure or int
+        Live matplotlib figure or figure-manager number resolvable to a live
+        figure.
+    use_bound_values : bool, optional
+        When ``True``, prefer operand values already bound on the live figure
+        IR. When ``False``, re-resolve operands from the current kernel
+        namespace where possible.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+        Refreshed live figure when ``figure`` is first-class, otherwise
+        ``None``.
     """
     from .matplotlib_backend import regenerate_figure_from_ir
 
@@ -726,22 +1006,21 @@ def refresh_figure(figure, *, use_bound_values=False):
 
 
 def remove_traces(figure, *trace_ids):
-    """
-    Remove one or more Hyde-managed traces from a live first-class figure.
+    """Remove traces from a live first-class Hyde figure.
 
     Parameters
     ----------
-    figure:
-        A live matplotlib figure object or a figure manager number resolvable to
-        a live figure.
-    *trace_ids:
-        One or more stable Hyde trace identifiers to remove. Missing trace IDs are
+    figure : matplotlib.figure.Figure or int
+        Live matplotlib figure or figure-manager number resolvable to a live
+        figure.
+    *trace_ids : str
+        Stable Hyde trace identifiers to remove. Missing trace identifiers are
         ignored.
 
     Returns
     -------
     matplotlib.figure.Figure
-        The live figure after the requested trace removals have been applied.
+        Live figure after the requested trace removals have been applied.
 
     Raises
     ------

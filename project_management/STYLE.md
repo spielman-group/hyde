@@ -104,6 +104,10 @@ QtWidgets
 
 ## Public API
 - Anything exported from `hyde/__init__.py` is public and must have proper docstrings.
+- Those `hyde/__init__.py` docstrings are the primary API documentation.
+- Public functions exported from `hyde/__init__.py` must use NumPy docstring
+  style: a summary line followed by standard sections such as `Parameters`,
+  `Returns`, `Raises`, and `Notes` when those sections apply.
 
 ## Default Bias
 - Prefer the smallest clear change.

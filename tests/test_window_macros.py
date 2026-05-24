@@ -1,3 +1,4 @@
+import inspect
 import os
 import tempfile
 import unittest
@@ -532,10 +533,12 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
             {name: f"hyde.{name}" for name in names},
         )
         self.assertEqual(entries["line"]["parameters"], ["a", "b"])
-        self.assertEqual(
+        self.assertIn(
+            '"""Return a straight line.',
             entries["line"]["source_text"],
-            "def line(x, a, b):\n    return a * x + b",
         )
+        self.assertIn("Parameters\n    ----------", entries["line"]["source_text"])
+        self.assertIn("Returns\n    -------", entries["line"]["source_text"])
         self.assertEqual(
             entries["gaussian"]["parameters"],
             ["a", "x0", "width", "y0"],
@@ -548,6 +551,83 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
         self.assertEqual(entries["sin"]["parameters"], ["a", "k", "phi", "y0"])
         self.assertEqual(entries["power"]["parameters"], ["a", "alpha", "y0"])
         self.assertEqual(entries["log"]["parameters"], ["a", "y0"])
+
+    def test_hyde_builtin_fit_functions_use_numpy_style_docstrings(self):
+        for func in (
+            hyde.line,
+            hyde.gaussian,
+            hyde.lorentzian,
+            hyde.exp,
+            hyde.sin,
+            hyde.power,
+            hyde.log,
+        ):
+            doc = inspect.getdoc(func)
+            self.assertTrue(doc)
+            self.assertTrue(doc.splitlines()[0].startswith("Return "))
+            self.assertIn("Parameters\n----------", doc)
+            self.assertIn("Returns\n-------", doc)
+
+    def test_public_hyde_api_uses_numpy_style_docstrings(self):
+        expected_sections = {
+            "gui_mode": ("Parameters\n----------",),
+            "task_complete": ("Parameters\n----------",),
+            "new_project": ("Parameters\n----------", "Raises\n------"),
+            "heal_project": (
+                "Parameters\n----------",
+                "Returns\n-------",
+                "Raises\n------",
+            ),
+            "save_project": (
+                "Parameters\n----------",
+                "Returns\n-------",
+                "Raises\n------",
+            ),
+            "load_project": (
+                "Parameters\n----------",
+                "Returns\n-------",
+                "Raises\n------",
+            ),
+            "quit": ("Returns\n-------", "Raises\n------"),
+            "create_table": ("Parameters\n----------", "Notes\n-----"),
+            "append_table": ("Parameters\n----------", "Raises\n------"),
+            "table": (
+                "Parameters\n----------",
+                "Returns\n-------",
+                "Raises\n------",
+            ),
+            "figure": (
+                "Parameters\n----------",
+                "Returns\n-------",
+                "Raises\n------",
+            ),
+            "fit_function": (
+                "Parameters\n----------",
+                "Returns\n-------",
+                "Raises\n------",
+                "Notes\n-----",
+            ),
+            "line": ("Parameters\n----------", "Returns\n-------"),
+            "gaussian": ("Parameters\n----------", "Returns\n-------"),
+            "lorentzian": ("Parameters\n----------", "Returns\n-------"),
+            "exp": ("Parameters\n----------", "Returns\n-------"),
+            "sin": ("Parameters\n----------", "Returns\n-------"),
+            "power": ("Parameters\n----------", "Returns\n-------"),
+            "log": ("Parameters\n----------", "Returns\n-------"),
+            "register_builtin_fit_functions": ("Returns\n-------",),
+            "get_figure": ("Parameters\n----------", "Returns\n-------"),
+            "refresh_figure": ("Parameters\n----------", "Returns\n-------"),
+            "remove_traces": (
+                "Parameters\n----------",
+                "Returns\n-------",
+                "Raises\n------",
+            ),
+        }
+        for name, sections in expected_sections.items():
+            doc = inspect.getdoc(getattr(hyde, name))
+            self.assertTrue(doc, name)
+            for section in sections:
+                self.assertIn(section, doc, name)
 
     def test_hyde_builtin_fit_function_formulas(self):
         x = np.array([1.0, 2.0, 4.0])
