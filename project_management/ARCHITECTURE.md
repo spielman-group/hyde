@@ -127,6 +127,18 @@ when a project is loaded.
 - Project session restore reuses the same recreation-source path as explicit macros, but
   preserves stable names via `name=<table_name>` in `session.py`.
 
+### Project file dialogs
+- Target-selecting project dialogs such as `New Project`, `Load Project`,
+  `Heal Project`, `Save As`, and `Save Copy` are preview-backed
+  `HydeDialogWidget` surfaces built on the shared `HydeFileDialog` /
+  `HydeFileWidget` family in `hyde.user_interface.base_hyde_widgets`.
+- That shared file-dialog family owns chooser UI, preview refresh from the backing
+  command string, generic target validation, and optional overwrite confirmation.
+- Concrete project dialogs own command-specific defaults and operation-specific
+  exceptions such as same-target semantics or copy-target restrictions.
+- Plain `Save` remains a direct hidden `hyde.save_project(mode="save")` dispatch
+  with no chooser dialog.
+
 ### Figures
 - Only first-class `@hyde.figure` figures enter Hyde MDI figure windows.
 - Non-decorated figures stay ordinary kernel-side matplotlib figures and do not open

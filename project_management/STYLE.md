@@ -49,6 +49,10 @@ QtWidgets
         └── HydeDialogWidget
             ├── NewTableDialog
             ├── NewFigureDialog
+            ├── HydeFileDialog
+            │   ├── project target dialogs
+            │   ├── import/export target dialogs
+            │   └── ...
             └── HydeFigureDialogWidget
                 ├── TraceAppearanceDialog
                 ├── AxisEditDialog
@@ -65,6 +69,12 @@ QtWidgets
   base class over free helper functions. For first-class figure dialogs, the default
   pattern is a `HydeDialogWidget` subclass dedicated to figure work, such as
   `HydeFigureDialogWidget`, with concrete dialogs inheriting from that class.
+- Target-selecting project and file dialogs should follow the same pattern through
+  shared `HydeFileDialog` / `HydeFileWidget` infrastructure in
+  `hyde.user_interface.base_hyde_widgets`. Keep generic chooser policy and optional
+  overwrite confirmation there, and keep operation-specific exceptions in the
+  concrete dialog. `File -> Save` remains a direct hidden dispatch rather than a
+  chooser dialog.
 - When multiple figure-facing surfaces need one canonical user-facing name for traces
   or analogous figure elements, prefer shared figure helper tooling such as
   `FigureDisplayHelper`, used through composition, over duplicated widget-local

@@ -310,6 +310,219 @@ class HydeDialogWidget(HydeDialog):
         self.help_button.setEnabled(self.can_show_help())
 
 
+class HydeFileWidget(QtWidgets.QFileDialog):
+    selection_changed = QtCore.Signal()
+
+    def __init__(
+        self,
+        selection_mode="file",
+        require_existing=False,
+        allowed_suffixes=(),
+        name_filters=(),
+        initial_path=None,
+        parent=None,
+        **kwargs,
+    ):
+        self.selection_mode = str(selection_mode)
+        self.require_existing = bool(require_existing)
+        self.allowed_suffixes = tuple(
+            suffix.lower()
+            for suffix in allowed_suffixes
+            if str(suffix or "").strip()
+        )
+        self.name_filters = tuple(
+            str(name_filter)
+            for name_filter in name_filters
+            if str(name_filter or "").strip()
+        )
+        self.initial_path = (
+            None if initial_path is None else os.path.abspath(str(initial_path))
+        )
+        super().__init__(parent, "", self.initial_directory(), **kwargs)
+        self.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
+        self.setAcceptMode(
+            QtWidgets.QFileDialog.AcceptOpen
+            if self.require_existing
+            else QtWidgets.QFileDialog.AcceptSave
+        )
+        self.configure_file_dialog()
+        if self.name_filters:
+            self.setNameFilters(list(self.name_filters))
+        self.hide_dialog_buttons()
+
+        self.file_name_edit = self.findChild(
+            QtWidgets.QLineEdit,
+            "fileNameEdit",
+        )
+        if self.file_name_edit is not None:
+            self.file_name_edit.textChanged.connect(self.emit_selection_changed)
+        self.currentChanged.connect(lambda _path: self.emit_selection_changed())
+        self.directoryEntered.connect(lambda _path: self.emit_selection_changed())
+
+        if self.initial_path:
+            self.set_selected_path(self.initial_path)
+        else:
+            self.emit_selection_changed()
+
+    def initial_directory(self):
+        initial_path = self.initial_path
+        if not initial_path:
+            return ""
+        return os.path.dirname(initial_path) or initial_path
+
+    def configure_file_dialog(self):
+        if self.selection_mode == "directory":
+            self.setFileMode(QtWidgets.QFileDialog.Directory)
+            self.setOption(QtWidgets.QFileDialog.ShowDirsOnly, True)
+            return
+        if self.selection_mode == "file":
+            self.setFileMode(
+                QtWidgets.QFileDialog.ExistingFile
+                if self.require_existing
+                else QtWidgets.QFileDialog.AnyFile
+            )
+            return
+        raise ValueError(f"Unsupported selection_mode: {self.selection_mode!r}")
+
+    def hide_dialog_buttons(self):
+        for button_box in self.findChildren(QtWidgets.QDialogButtonBox):
+            button_box.hide()
+
+    def emit_selection_changed(self):
+        self.selection_changed.emit()
+
+    def set_selected_path(self, path):
+        if path is None:
+            return None
+        normalized_path = os.path.abspath(str(path))
+        parent_dir = os.path.dirname(normalized_path)
+        if parent_dir:
+            self.setDirectory(parent_dir)
+        self.selectFile(normalized_path)
+        self.emit_selection_changed()
+        return normalized_path
+
+    def selected_path(self):
+        if self.file_name_edit is not None:
+            text = self.file_name_edit.text().strip()
+            if text:
+                return os.path.abspath(self.directory().absoluteFilePath(text))
+        selected_files = self.selectedFiles()
+        if selected_files:
+            return os.path.abspath(selected_files[0])
+        return None
+
+    def validation_error(self, path=None):
+        selected_path = self.selected_path() if path is None else os.path.abspath(str(path))
+        if not selected_path:
+            return "Select a target."
+        if self.allowed_suffixes and not selected_path.lower().endswith(
+            self.allowed_suffixes
+        ):
+            allowed = ", ".join(self.allowed_suffixes)
+            return f"Target must end with {allowed}."
+        if self.require_existing and not os.path.exists(selected_path):
+            return f"{selected_path} does not exist."
+        if self.selection_mode == "directory":
+            if os.path.exists(selected_path) and not os.path.isdir(selected_path):
+                return f"{selected_path} is not a directory."
+            return None
+        if os.path.exists(selected_path) and os.path.isdir(selected_path):
+            return f"{selected_path} is a directory."
+        return None
+
+    def is_selection_valid(self):
+        return self.validation_error() is None
+
+
+class HydeFileDialog(HydeDialogWidget):
+    selection_mode = "file"
+    require_existing = False
+    allowed_suffixes = ()
+    name_filters = ()
+    confirm_overwrite = False
+
+    def __init__(self, *args, services=None, **kwargs):
+        super().__init__(*args, services=services, **kwargs)
+        self.file_widget = HydeFileWidget(
+            selection_mode=self.selection_mode,
+            require_existing=self.require_existing,
+            allowed_suffixes=self.allowed_suffixes,
+            name_filters=self.name_filters,
+            initial_path=self.suggested_path(),
+            parent=self,
+        )
+        self.mount_content_widget(self.file_widget)
+        self.file_widget.selection_changed.connect(self.refresh_from_file_selection)
+        self.refresh_from_file_selection()
+
+    def suggested_path(self):
+        return None
+
+    def selected_path(self):
+        return self.file_widget.selected_path()
+
+    def build_preview_payload(self, selected_path):
+        del selected_path
+        return ""
+
+    def selection_validation_message(self, selected_path):
+        del selected_path
+        return None
+
+    def validation_message(self, selected_path):
+        error_message = self.file_widget.validation_error(selected_path)
+        if error_message is None:
+            error_message = self.selection_validation_message(selected_path)
+        return error_message
+
+    def refresh_from_file_selection(self):
+        selected_path = self.selected_path()
+        error_message = self.validation_message(selected_path)
+        if error_message is not None:
+            self.set_preview_message(error_message)
+            self.refresh_shell()
+            return selected_path
+        payload = self.build_preview_payload(selected_path)
+        self.set_preview_string(payload)
+        self.refresh_shell()
+        return selected_path
+
+    def needs_overwrite_confirmation(self, selected_path):
+        return bool(
+            self.confirm_overwrite
+            and selected_path
+            and os.path.exists(selected_path)
+        )
+
+    def overwrite_confirmation_title(self, selected_path):
+        del selected_path
+        return "Overwrite Existing Target"
+
+    def overwrite_confirmation_message(self, selected_path):
+        return f"{selected_path} already exists. Overwrite it?"
+
+    def confirm_overwrite_target(self, selected_path):
+        response = QtWidgets.QMessageBox.question(
+            self,
+            self.overwrite_confirmation_title(selected_path),
+            self.overwrite_confirmation_message(selected_path),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        return response == QtWidgets.QMessageBox.Yes
+
+    def handle_do_it(self):
+        selected_path = self.selected_path()
+        if self.validation_message(selected_path) is not None:
+            return False
+        if self.needs_overwrite_confirmation(selected_path) and not self.confirm_overwrite_target(
+            selected_path
+        ):
+            return False
+        return self.dispatch_do_it_payload()
+
+
 def active_interactive_window(services, interactive_type=None):
     mdi_area = None if services is None else services.get("mdi_area")
     if mdi_area is None:

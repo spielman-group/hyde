@@ -15,8 +15,10 @@ from qtutils.qt import QtGui, QtWidgets
 
 from hyde.user_interface.plugins.file import Plugin
 from hyde.user_interface.plugins.file.dialogs import (
+    HealProjectDialog,
     LoadProjectDialog,
     NewProjectDialog,
+    SaveAsProjectDialog,
     SaveCopyProjectDialog,
 )
 
@@ -27,6 +29,15 @@ class ExecutionService:
 
     def execute_hidden(self, code, silent=True):
         self._dispatched.append((code, silent))
+        return True
+
+
+class VisibleTerminalService:
+    def __init__(self):
+        self.executed = []
+
+    def execute_visible(self, code):
+        self.executed.append(code)
 
 
 class TestFileDialogPlugin(unittest.TestCase):
@@ -90,7 +101,7 @@ class TestFileDialogPlugin(unittest.TestCase):
         self.assertFalse(actions[("file", "Save As...")].isEnabled())
         self.assertFalse(actions[("file", "Save a Copy...")].isEnabled())
 
-    def test_new_project_dialog_dispatches_hidden_command(self):
+    def test_new_project_dialog_previews_and_dispatches_hidden_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "new_project.hy")
             dispatched = []
@@ -104,13 +115,15 @@ class TestFileDialogPlugin(unittest.TestCase):
             }
 
             dialog = NewProjectDialog(services)
-            with patch.object(NewProjectDialog, "exec_", return_value=True):
-                with patch.object(
-                    NewProjectDialog, "selectedFiles", return_value=[project_dir]
-                ):
-                    self.assertTrue(dialog.run())
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.do_it_button.click()
 
             self.assertEqual(operations, ["Creating Hyde project..."])
+            self.assertEqual(
+                dialog.preview_string(),
+                f"hyde.new_project({project_dir!r}, load=True, overwrite=True)",
+            )
             self.assertEqual(
                 dispatched,
                 [
@@ -121,32 +134,66 @@ class TestFileDialogPlugin(unittest.TestCase):
                 ],
             )
 
-    def test_load_project_dialog_dispatches_hidden_command(self):
+    def test_existing_project_dialogs_preview_and_dispatch_hidden_commands(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "existing.hy")
             os.makedirs(project_dir)
-            dispatched = []
-            operations = []
+            scenarios = (
+                (
+                    LoadProjectDialog,
+                    "Loading Hyde project...",
+                    f"hyde.load_project({project_dir!r})",
+                ),
+                (
+                    HealProjectDialog,
+                    "Healing Hyde project...",
+                    f"hyde.heal_project({project_dir!r})",
+                ),
+            )
+
+            for dialog_class, operation_label, expected_payload in scenarios:
+                with self.subTest(dialog_class=dialog_class.__name__):
+                    dispatched = []
+                    operations = []
+                    services = {
+                        "ui": QtWidgets.QWidget(),
+                        "begin_project_operation": operations.append,
+                        "python_execution_service": ExecutionService(dispatched),
+                    }
+
+                    dialog = dialog_class(services)
+                    dialog.file_widget.set_selected_path(project_dir)
+                    self.qapp.processEvents()
+                    dialog.do_it_button.click()
+
+                    self.assertEqual(dialog.preview_string(), expected_payload)
+                    self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
+                    self.assertEqual(operations, [operation_label])
+                    self.assertEqual(dispatched, [(expected_payload, True)])
+
+    def test_project_dialog_preview_generation_does_not_log_hyde_state_debug(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "existing.hy")
+            os.makedirs(project_dir)
             services = {
                 "ui": QtWidgets.QWidget(),
-                "begin_project_operation": operations.append,
-                "python_execution_service": ExecutionService(dispatched),
+                "python_execution_service": ExecutionService([]),
             }
 
             dialog = LoadProjectDialog(services)
-            with patch.object(LoadProjectDialog, "exec_", return_value=True):
-                with patch.object(
-                    LoadProjectDialog, "selectedFiles", return_value=[project_dir]
-                ):
-                    self.assertTrue(dialog.run())
+            with patch(
+                "hyde.user_interface.shared.core.log_hyde_state_debug"
+            ) as log_debug:
+                dialog.file_widget.set_selected_path(project_dir)
+                self.qapp.processEvents()
 
-            self.assertEqual(operations, ["Loading Hyde project..."])
             self.assertEqual(
-                dispatched,
-                [(f"hyde.load_project({project_dir!r})", True)],
+                dialog.preview_string(),
+                f"hyde.load_project({project_dir!r})",
             )
+            log_debug.assert_not_called()
 
-    def test_save_copy_same_path_stays_copy_only(self):
+    def test_save_as_same_target_previews_and_dispatches_plain_save(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "current.hy")
             os.makedirs(project_dir)
@@ -161,17 +208,85 @@ class TestFileDialogPlugin(unittest.TestCase):
                 "confirm_overwrite_project": lambda path: True,
             }
 
-            dialog = SaveCopyProjectDialog(services)
-            with patch.object(SaveCopyProjectDialog, "exec_", return_value=True):
-                with patch.object(
-                    SaveCopyProjectDialog, "selectedFiles", return_value=[project_dir]
-                ):
-                    with patch.object(QtWidgets.QMessageBox, "warning") as warning:
-                        self.assertFalse(dialog.run())
+            dialog = SaveAsProjectDialog(services)
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.do_it_button.click()
 
-            warning.assert_called_once()
-            self.assertEqual(dispatched, [])
-            self.assertEqual(operations, [])
+            self.assertEqual(dialog.preview_string(), "hyde.save_project(mode='save')")
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.preview_string())
+            self.assertEqual(operations, ["Saving Hyde project..."])
+            self.assertEqual(dispatched, [("hyde.save_project(mode='save')", True)])
+
+    def test_save_as_same_target_skips_overwrite_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "current.hy")
+            os.makedirs(project_dir)
+            dispatched = []
+            operations = []
+            confirmations = []
+            services = {
+                "ui": QtWidgets.QWidget(),
+                "get_current_project_dir": lambda: project_dir,
+                "begin_project_operation": operations.append,
+                "python_execution_service": ExecutionService(dispatched),
+                "project_target_needs_confirmation": lambda path: True,
+                "confirm_overwrite_project": lambda path: confirmations.append(path) or True,
+            }
+
+            dialog = SaveAsProjectDialog(services)
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.do_it_button.click()
+
+            self.assertEqual(confirmations, [])
+            self.assertEqual(dialog.preview_string(), "hyde.save_project(mode='save')")
+            self.assertEqual(operations, ["Saving Hyde project..."])
+            self.assertEqual(dispatched, [("hyde.save_project(mode='save')", True)])
+
+    def test_save_copy_same_path_requires_different_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "current.hy")
+            os.makedirs(project_dir)
+            services = {
+                "ui": QtWidgets.QWidget(),
+                "get_current_project_dir": lambda: project_dir,
+                "python_execution_service": ExecutionService([]),
+                "project_target_needs_confirmation": lambda path: False,
+                "confirm_overwrite_project": lambda path: True,
+            }
+
+            dialog = SaveCopyProjectDialog(services)
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+
+            self.assertEqual(dialog.preview_string(), "")
+            self.assertIn("requires a different .hy directory", dialog.lower_text_edit.toPlainText())
+            self.assertFalse(dialog.do_it_button.isEnabled())
+
+    def test_project_dialog_footer_actions_reuse_preview_payload(self):
+        clipboard = QtWidgets.QApplication.clipboard()
+        terminal_service = VisibleTerminalService()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "existing.hy")
+            os.makedirs(project_dir)
+            services = {
+                "ui": QtWidgets.QWidget(),
+                "python_execution_service": ExecutionService([]),
+                "visible_terminal_service": terminal_service,
+            }
+
+            dialog = LoadProjectDialog(services)
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.to_clip_button.click()
+            dialog.to_cmd_line_button.click()
+
+            expected_payload = f"hyde.load_project({project_dir!r})"
+            self.assertEqual(dialog.preview_string(), expected_payload)
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
+            self.assertEqual(clipboard.text(), expected_payload)
+            self.assertEqual(terminal_service.executed, [expected_payload])
 
     def test_plugin_save_project_dispatches_hidden_save(self):
         dispatched = []

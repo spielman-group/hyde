@@ -14,6 +14,8 @@ from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.base_hyde_widgets import (
     HydeDialogWidget,
     HydeDialog,
+    HydeFileDialog,
+    HydeFileWidget,
     HydeToolWidget,
 )
 from hyde.user_interface.main import HydeApp
@@ -134,6 +136,19 @@ class RecordingExecutionService:
     def execute_visible(self, code):
         self.visible_calls.append(code)
         return True
+
+
+class DemoFileDialog(HydeFileDialog):
+    selection_mode = "directory"
+    require_existing = True
+    allowed_suffixes = (".hy",)
+
+    def build_preview_payload(self, selected_path):
+        return f"emit({selected_path!r})"
+
+
+class ConfirmingFileDialog(DemoFileDialog):
+    confirm_overwrite = True
 
 
 class FakeFigureSession:
@@ -336,6 +351,179 @@ class TestHydeToolWidget(unittest.TestCase):
 
         opened_url = open_url.call_args.args[0]
         self.assertEqual(opened_url.toLocalFile(), help_path)
+
+    def test_file_widget_applies_declarative_selection_policy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+            image_path = os.path.join(tmpdir, "plot.png")
+            with open(image_path, "w", encoding="utf-8") as handle:
+                handle.write("png")
+
+            directory_widget = HydeFileWidget(
+                selection_mode="directory",
+                require_existing=True,
+                allowed_suffixes=(".hy",),
+                initial_path=project_dir,
+            )
+            file_widget = HydeFileWidget(
+                selection_mode="file",
+                require_existing=True,
+                allowed_suffixes=(".png", ".svg"),
+                name_filters=("Images (*.png *.svg)",),
+                initial_path=image_path,
+            )
+
+            self.qapp.processEvents()
+
+            self.assertTrue(
+                directory_widget.testOption(
+                    QtWidgets.QFileDialog.DontUseNativeDialog
+                )
+            )
+            self.assertEqual(
+                directory_widget.fileMode(),
+                QtWidgets.QFileDialog.Directory,
+            )
+            self.assertTrue(
+                directory_widget.testOption(
+                    QtWidgets.QFileDialog.ShowDirsOnly
+                )
+            )
+            self.assertEqual(directory_widget.selected_path(), os.path.abspath(project_dir))
+            self.assertIsNone(directory_widget.validation_error())
+
+            directory_widget.set_selected_path(os.path.join(tmpdir, "wrong_target"))
+            self.qapp.processEvents()
+            self.assertIn(".hy", directory_widget.validation_error())
+
+            self.assertEqual(
+                file_widget.fileMode(),
+                QtWidgets.QFileDialog.ExistingFile,
+            )
+            self.assertEqual(file_widget.nameFilters(), ["Images (*.png *.svg)"])
+            self.assertEqual(file_widget.selected_path(), os.path.abspath(image_path))
+            self.assertIsNone(file_widget.validation_error())
+
+            file_widget.set_selected_path(os.path.join(tmpdir, "missing.png"))
+            self.qapp.processEvents()
+            self.assertIn("does not exist", file_widget.validation_error())
+
+    def test_file_widget_defaults_to_file_selection_mode(self):
+        widget = HydeFileWidget()
+
+        self.assertEqual(
+            widget.fileMode(),
+            QtWidgets.QFileDialog.AnyFile,
+        )
+        self.assertFalse(
+            widget.testOption(QtWidgets.QFileDialog.ShowDirsOnly)
+        )
+
+    def test_file_dialog_mounts_chooser_and_dispatches_hidden_preview_payload(self):
+        execution_service = RecordingExecutionService()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+            dialog = DemoFileDialog(
+                services={"python_execution_service": execution_service}
+            )
+
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.do_it_button.click()
+
+            expected_payload = f"emit({os.path.abspath(project_dir)!r})"
+            self.assertIs(dialog.mounted_child, dialog.file_widget)
+            self.assertEqual(dialog.preview_string(), expected_payload)
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
+            self.assertEqual(execution_service.hidden_calls, [(expected_payload, True)])
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+
+    def test_file_dialog_routes_valid_preview_payload_through_footer_actions(self):
+        clipboard = QtWidgets.QApplication.clipboard()
+        terminal_service = RecordingVisibleTerminalService()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+            dialog = DemoFileDialog(
+                services={"visible_terminal_service": terminal_service}
+            )
+
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.to_clip_button.click()
+            dialog.to_cmd_line_button.click()
+
+            expected_payload = f"emit({os.path.abspath(project_dir)!r})"
+            self.assertEqual(dialog.preview_string(), expected_payload)
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
+            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertTrue(dialog.to_clip_button.isEnabled())
+            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertEqual(clipboard.text(), expected_payload)
+            self.assertEqual(terminal_service.executed, [expected_payload])
+
+    def test_file_dialog_optional_overwrite_confirmation_gates_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+
+            execution_service = RecordingExecutionService()
+            dialog = ConfirmingFileDialog(
+                services={"python_execution_service": execution_service}
+            )
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+
+            with patch.object(
+                QtWidgets.QMessageBox,
+                "question",
+                return_value=QtWidgets.QMessageBox.No,
+            ) as question:
+                dialog.do_it_button.click()
+
+            question.assert_called_once()
+            self.assertEqual(execution_service.hidden_calls, [])
+            self.assertEqual(dialog.result(), 0)
+
+            execution_service = RecordingExecutionService()
+            dialog = ConfirmingFileDialog(
+                services={"python_execution_service": execution_service}
+            )
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+
+            with patch.object(
+                QtWidgets.QMessageBox,
+                "question",
+                return_value=QtWidgets.QMessageBox.Yes,
+            ) as question:
+                dialog.do_it_button.click()
+
+            question.assert_called_once()
+            self.assertEqual(
+                execution_service.hidden_calls,
+                [(f"emit({os.path.abspath(project_dir)!r})", True)],
+            )
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+
+    def test_file_dialog_invalid_selection_shows_message_and_disables_payload_actions(self):
+        terminal_service = RecordingVisibleTerminalService()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_project_dir = os.path.join(tmpdir, "missing.hy")
+            dialog = DemoFileDialog(
+                services={"visible_terminal_service": terminal_service}
+            )
+
+            dialog.file_widget.set_selected_path(missing_project_dir)
+            self.qapp.processEvents()
+
+            self.assertEqual(dialog.preview_string(), "")
+            self.assertIn("does not exist", dialog.lower_text_edit.toPlainText())
+            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.to_clip_button.isEnabled())
+            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
 
     def test_figure_dialog_base_advances_live_patch_state_and_rolls_back_on_cancel(self):
         execution_service = RecordingExecutionService()

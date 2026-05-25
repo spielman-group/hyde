@@ -64,6 +64,9 @@ The GUI surface does not:
 - Shared UI-family behavior may live in a feature-family widget base class. For
   first-class figure dialogs, prefer a shared `HydeDialogWidget` subclass over free
   helper functions when multiple dialogs need the same figure-dialog behavior.
+- Target-selecting project dialogs follow the same rule through a shared
+  `HydeFileDialog` / `HydeFileWidget` family in
+  `hyde.user_interface.base_hyde_widgets` rather than dialog-local chooser logic.
 - Shared user-facing display metadata may live in a composed feature support class
   when it is not scientific state and when multiple surfaces need one canonical
   representation. For first-class figures, canonical figure-element display names
@@ -77,7 +80,8 @@ Use one state class across GUI surfaces when they express the same semantic feat
 Current examples:
 - `NewTableDialog` and `TableWidget` both use `TableState`
 - table live data edits use shared `MutationState`
-- file/project dialogs use Hyde-owned simple command state classes
+- file/project dialogs use Hyde-owned simple command state classes inside the shared
+  file-dialog family
 - figure creation surfaces use `FigureState` for GUI-side creation state
 
 Split state classes only when the semantic schema truly diverges.
@@ -129,6 +133,9 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - Generic data mutation is intentionally shared through `MutationState` /
   `MutationCodec` rather than being table-local.
 - Trivial visible project commands may share a lightweight command codec.
+- Target-selecting project dialogs keep chooser policy and generic overwrite checks
+  in the shared file-dialog family while leaving command-specific exceptions in the
+  concrete dialog.
 - Figure creation surfaces use `FigureState` for GUI-side creation state.
 - Figure axis, trace, and Curve Fit attached-display dialogs now emit matplotlib
   patch Python from imported figure IR rather than using a separate semantic

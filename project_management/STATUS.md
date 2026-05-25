@@ -66,6 +66,15 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Declarative GUI state saves to `session.toml`.
 - Open saveable windows save to `session.py`.
 - Visible command history saves to `terminal/history.py`.
+- Target-selecting project dialogs now use the shared `HydeFileDialog` /
+  `HydeFileWidget` family, preview the real generated Hyde command, and route
+  `Do It`, `To Cmd Line`, and `To Clip` through that same preview payload.
+- `File -> Save` remains a direct hidden `hyde.save_project(mode='save')` dispatch
+  with no chooser dialog.
+- Same-target `Save As...` degenerates to plain `hyde.save_project(mode='save')`
+  without overwrite confirmation.
+- Same-target `Save Copy...` stays inline validation that requires a different `.hy`
+  target before Hyde enables payload actions.
 - Mixed MDI restore preserves named `objectName()` order across tool windows, tables,
   and figures after successful `session.py` completion.
 

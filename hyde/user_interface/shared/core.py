@@ -38,6 +38,10 @@ class HydeGuiState:
     def validate_state(self):
         return self.codec.validate_state(self._state)
 
+    def preview_python_source(self):
+        self.validate_state()
+        return self.codec.state_to_python(self._state)
+
     def python_source(self):
         normalized = self.validate_state()
         source = self.codec.state_to_python(self._state)

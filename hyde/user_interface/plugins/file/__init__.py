@@ -9,7 +9,6 @@ from .dialogs import (
     SaveAsProjectDialog,
     SaveCopyProjectDialog,
     SaveProjectState,
-    dispatch_hidden_command,
 )
 
 
@@ -95,44 +94,36 @@ class Plugin(HydePlugin):
         ):
             self.set_bound_action_enabled(attr_name, has_project)
 
-    def _dispatch_load_project(self, project_dir):
-        state = LoadProjectState()
-        state.set_project_dir(project_dir)
-        return dispatch_hidden_command(
-            self.services,
-            state,
-            operation_label="Loading Hyde project...",
-        )
-
     def new_project(self, checked=False):
         del checked
-        NewProjectDialog(self.services).run()
+        NewProjectDialog(self.services).exec_()
 
     def load_project(self, checked=False):
         del checked
-        LoadProjectDialog(self.services).run()
+        LoadProjectDialog(self.services).exec_()
 
     def heal_project(self, checked=False):
         del checked
-        HealProjectDialog(self.services).run()
+        HealProjectDialog(self.services).exec_()
 
     def save_project(self, checked=False):
         del checked
         if not self.services["get_current_project_dir"]():
             return False
-        return dispatch_hidden_command(
-            self.services,
-            SaveProjectState(),
-            operation_label="Saving Hyde project...",
+        self.services["begin_project_operation"]("Saving Hyde project...")
+        return bool(
+            self.services["python_execution_service"].execute_hidden(
+                SaveProjectState().python_source()
+            )
         )
 
     def save_project_as(self, checked=False):
         del checked
-        SaveAsProjectDialog(self.services).run()
+        SaveAsProjectDialog(self.services).exec_()
 
     def save_project_copy(self, checked=False):
         del checked
-        SaveCopyProjectDialog(self.services).run()
+        SaveCopyProjectDialog(self.services).exec_()
 
     def quit_application(self, checked=False):
         del checked
@@ -142,7 +133,11 @@ class Plugin(HydePlugin):
         ):
             return False
         self.services["set_quit_command_sent"](True)
-        return dispatch_hidden_command(self.services, QuitState())
+        return bool(
+            self.services["python_execution_service"].execute_hidden(
+                QuitState().python_source()
+            )
+        )
 
     def get_event_handlers(self):
         return {
@@ -167,4 +162,9 @@ class Plugin(HydePlugin):
     def on_request_project_load(self, data):
         project_dir = data.get("project_dir")
         if project_dir:
-            self._dispatch_load_project(project_dir)
+            state = LoadProjectState()
+            state.set_project_dir(project_dir)
+            self.services["begin_project_operation"]("Loading Hyde project...")
+            self.services["python_execution_service"].execute_hidden(
+                state.python_source()
+            )
