@@ -8,8 +8,6 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec, figure_patch_source
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
-from hyde.user_interface.shared.core import log_hyde_state_debug
-
 _COMMON_COLOR_NAMES = [
     "black",
     "red",
@@ -874,18 +872,6 @@ class HydeFigureDialogWidget(HydeDialogWidget):
     def execute_figure_patch(self, code, *, mode):
         if not str(code or "").strip():
             return True
-        if self.figure_context is not None:
-            log_hyde_state_debug(
-                "FigurePatchState",
-                {
-                    "feature": "figure_patch",
-                    "command": self.figure_patch_command_name,
-                    "mode": str(mode),
-                    "figure_number": int(self.figure_context.figure_number),
-                    "figure_name": self.figure_context.figure_name(),
-                },
-                code,
-            )
         return self.execute_hidden_command(code)
 
     def apply_figure_patch_command(

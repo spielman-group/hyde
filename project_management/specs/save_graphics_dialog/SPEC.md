@@ -132,9 +132,10 @@ The `Size` section contains:
 The dialog follows Hyde's string-factory rule:
 
 - GUI state stays transient and UI-local
-- `hyde/features/matplotlib_features.py` lowers the export request to the executable
-  Python string
+- a figure export state/codec path owns export request normalization and lowering
+- `hyde/features/matplotlib_features.py` owns the export-command lowering
 - execution runs against the live kernel figure looked up by stable Hyde figure name
+- `Do It` may dispatch the already generated preview string without regenerating it
 
 The generated command:
 

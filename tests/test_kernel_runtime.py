@@ -22,10 +22,11 @@ from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugins.kernel_runtime import (
     FrontendKernelService,
     Plugin as KernelRuntimePlugin,
+    PythonExecutionService,
     RuntimeHelper,
 )
 from hyde.user_interface.plugins.remote_requests import RemoteRequestServer
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtCore, QtWidgets
 
 
 class FakeSignal:
@@ -735,6 +736,58 @@ class TestRuntimeArchitecture(unittest.TestCase):
         state = RuntimeCommandState()
         state.set_remote_request("/path/to/file.h5")
         self.assertEqual(queued, [(state.python_source(), False)])
+
+    def test_python_execution_service_logs_hidden_dispatch(self):
+        executed = []
+        plugin = type("Plugin", (), {})()
+        plugin.services = {}
+        plugin.frontend_kernel_service = type(
+            "FrontendKernelService",
+            (),
+            {
+                "is_ready": lambda self: True,
+                "execute": lambda self, code, silent=True: (
+                    executed.append((code, silent)) or True
+                ),
+            },
+        )()
+        plugin._main_thread_executor = type(
+            "Executor", (), {"thread": lambda self: QtCore.QThread.currentThread()}
+        )()
+        plugin.execute_frontend = KernelRuntimePlugin.execute_frontend.__get__(
+            plugin, type(plugin)
+        )
+        service = plugin.python_execution_service = PythonExecutionService(plugin)
+
+        with self.assertLogs("hyde", level="DEBUG") as logs:
+            self.assertTrue(service.execute_hidden("value = 1"))
+
+        self.assertEqual(executed, [("value = 1", True)])
+        output = "\n".join(logs.output)
+        self.assertIn("[Hyde state] TransportDispatchState", output)
+        self.assertIn("'mode': 'hidden'", output)
+        self.assertIn("python:\nvalue = 1", output)
+
+    def test_python_execution_service_logs_visible_dispatch(self):
+        executed = []
+        plugin = type("Plugin", (), {})()
+        plugin.services = {
+            "visible_terminal_service": type(
+                "VisibleTerminalService",
+                (),
+                {"execute_visible": lambda self, code: executed.append(code)},
+            )()
+        }
+        service = plugin.python_execution_service = PythonExecutionService(plugin)
+
+        with self.assertLogs("hyde", level="DEBUG") as logs:
+            self.assertTrue(service.execute_visible("print('alpha')"))
+
+        self.assertEqual(executed, ["print('alpha')"])
+        output = "\n".join(logs.output)
+        self.assertIn("[Hyde state] TransportDispatchState", output)
+        self.assertIn("'mode': 'visible'", output)
+        self.assertIn("python:\nprint('alpha')", output)
 
     def test_on_kernel_crashed_resets_shell_state_without_runtime_restart(self):
         calls = []

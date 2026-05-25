@@ -15,6 +15,7 @@ from hyde.user_interface.plugins.figure_control_dialog.axis_edit_dialog import (
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.shared.figure import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
 
@@ -27,6 +28,7 @@ class FakeExecutionService:
         self.hidden_calls = []
 
     def execute_hidden(self, code, silent=True):
+        log_hyde_dispatch_debug("hidden", code)
         self.hidden_calls.append((str(code), bool(silent)))
         return True
 
@@ -694,7 +696,7 @@ class TestAxisEditDialog(unittest.TestCase):
         self.assertIn("ax.set_xlabel('Delay [s]')", execution.hidden_calls[0][0])
         self.assertIn("ax.set_xlabel('Delay')", execution.hidden_calls[1][0])
 
-    def test_hidden_axis_patch_logs_through_standard_hyde_debug_channel(self):
+    def test_hidden_axis_patch_logs_through_transport_debug_channel(self):
         execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
@@ -717,6 +719,8 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.close()
 
         output = "\n".join(logs.output)
-        self.assertIn("[Hyde state] FigurePatchState", output)
+        self.assertIn("[Hyde state] TransportDispatchState", output)
+        self.assertNotIn("FigurePatchState", output)
+        self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:\n", output)
         self.assertIn("ax.set_xlabel('Delay [ms]')", output)

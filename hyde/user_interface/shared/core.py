@@ -16,6 +16,14 @@ def log_hyde_state_debug(label, state, source):
     )
 
 
+def log_hyde_dispatch_debug(mode, source):
+    log_hyde_state_debug(
+        "TransportDispatchState",
+        {"mode": str(mode)},
+        str(source),
+    )
+
+
 class HydeGuiState:
     codec = None
 

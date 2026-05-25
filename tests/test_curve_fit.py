@@ -26,6 +26,7 @@ from hyde.matplotlib_backend import (
 )
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.shared.figure import (
     EditableFigureContext,
     FigureEditSession,
@@ -181,6 +182,7 @@ class FakeExecutionService:
         self.last_error_message = ""
 
     def execute_hidden(self, code, silent=True):
+        log_hyde_dispatch_debug("hidden", code)
         self.calls.append({"code": code, "silent": silent})
         result = self.harness.execute_hidden(code, silent=silent)
         self.last_error_message = self.harness.last_error_message
@@ -2492,7 +2494,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_hidden_curve_fit_attached_patch_logs_through_standard_hyde_debug_channel(
+    def test_hidden_curve_fit_attached_patch_logs_through_transport_debug_channel(
         self,
     ):
         attached_figure = AttachedFigureHarness(
@@ -2514,9 +2516,12 @@ class TestCurveFitPlugin(unittest.TestCase):
             attached_figure.close()
 
         output = "\n".join(logs.output)
-        self.assertIn("[Hyde state] FigurePatchState", output)
-        self.assertIn("curve_fit_attached_display", output)
+        self.assertIn("[Hyde state] TransportDispatchState", output)
+        self.assertNotIn("FigurePatchState", output)
+        self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:", output)
+        self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", output)
+        self.assertIn(".residual = signal - ", output)
 
     def test_curve_fit_dialog_attached_preview_edit_uses_one_hidden_logged_command_block(
         self,
@@ -2545,8 +2550,9 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertIn(".residual = signal - ", command)
 
             output = "\n".join(logs.output)
-            self.assertIn("[Hyde state] FigurePatchState", output)
-            self.assertIn("curve_fit_attached_display", output)
+            self.assertIn("[Hyde state] TransportDispatchState", output)
+            self.assertNotIn("FigurePatchState", output)
+            self.assertIn("'mode': 'hidden'", output)
             self.assertIn(".best_fit = line_fit(", output)
             self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", output)
         finally:

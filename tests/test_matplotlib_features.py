@@ -24,6 +24,7 @@ from hyde.matplotlib_backend import (
 )
 from hyde.features.matplotlib_features import (
     FigureIRCodec,
+    FigureGraphicsExportCodec,
     figure_ir_from_live_state,
     figure_graphics_export_command_source,
     figure_patch_source,
@@ -48,6 +49,7 @@ from hyde.user_interface.plugins.figure_interactive.window import (
     FigureState,
     FigureWindow,
 )
+from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.shared.figure import EditableFigureContext
 
 
@@ -80,6 +82,7 @@ class FakeExecutionService:
         self.visible_calls = visible_calls if visible_calls is not None else []
 
     def execute_hidden(self, code, silent=True):
+        log_hyde_dispatch_debug("hidden", code)
         self.hidden_calls.append((code, silent))
         return True
 
@@ -102,6 +105,33 @@ class FakeShell:
 
 
 class TestGraphicsExportFormats(unittest.TestCase):
+    def test_graphics_export_codec_lowers_state_to_savefig_command(self):
+        source = FigureGraphicsExportCodec.state_to_python(
+            {
+                "settings": {
+                    "figure_name": "Figure9",
+                    "output_path": "/tmp/Figure9.png",
+                    "output_format": "png",
+                    "dpi": 450,
+                    "transparent": True,
+                    "size_inches": (4.0, 2.5),
+                }
+            }
+        )
+
+        self.assertNotIn("import hyde", source)
+        self.assertIn("fig = hyde.get_figure('Figure9')", source)
+        self.assertIn("_hyde_original_size = tuple(fig.get_size_inches())", source)
+        self.assertIn("fig.set_size_inches(4.0, 2.5, forward=False)", source)
+        self.assertIn(
+            "fig.savefig('/tmp/Figure9.png', format='png', dpi=450, transparent=True)",
+            source,
+        )
+        self.assertIn(
+            "fig.set_size_inches(*_hyde_original_size, forward=False)",
+            source,
+        )
+
     def test_runtime_graphics_export_formats_orders_defaults_and_tracks_suffix_variants(self):
         formats = runtime_graphics_export_formats(
             {
@@ -1379,7 +1409,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         finally:
             widget.close()
 
-    def test_figure_window_hidden_refresh_logs_through_standard_hyde_debug_channel(self):
+    def test_figure_window_hidden_refresh_logs_through_transport_debug_channel(self):
         execution = FakeExecutionService()
         widget = FigureWindow(
             figure_number=1,
@@ -1402,7 +1432,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             widget.close()
 
         output = "\n".join(logs.output)
-        self.assertIn("[Hyde state] FigureRefreshState", output)
+        self.assertIn("[Hyde state] TransportDispatchState", output)
+        self.assertNotIn("FigureRefreshState", output)
+        self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:\n", output)
         self.assertIn("fig = hyde.get_figure('DelayGraph')", output)
         self.assertIn("hyde.refresh_figure(fig, use_bound_values=True)", output)

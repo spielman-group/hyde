@@ -33,7 +33,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Figure windows restore from `session.py` and preserve saved window metadata.
 - Figure windows now expose `Save Graphics...`, a figure-scoped `HydeFileDialog`
   export surface that defaults into the project-local `exports/` container and emits
-  preview-backed live-kernel `savefig(...)` commands.
+  preview-backed live-kernel `savefig(...)` commands generated through a dedicated
+  figure export state/codec path in the matplotlib feature layer.
 - Figure-working surfaces now share canonical trace `display_name` generation through
   the composed `FigureDisplayHelper` path rather than widget-local fallback strings.
 - Figure-window chrome now shows the current figure name plus canonical trace display
@@ -48,6 +49,9 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   through hidden matplotlib patch Python routed over Hyde's standard hidden-command
   execution/logging path, and Curve Fit attached live/preview uses the same
   command-generation model as `Do It` / `To Cmd Line`.
+- Hidden and visible GUI command dispatch now log the final dispatched command at the
+  transport layer, so command visibility no longer depends on feature-local logging
+  shims.
 - Explicit first-class figure refresh/regenerate now uses the same hidden
   command-driven path; only viewport `resize_redraw` stays on the narrow backend
   control lane.

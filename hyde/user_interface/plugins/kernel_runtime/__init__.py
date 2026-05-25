@@ -12,6 +12,7 @@ from hyde.user_interface.shared.plugin import (
     HydePlugin,
     SETUP_PRIORITY_RUNTIME_START,
 )
+from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 
 
 qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
@@ -247,6 +248,7 @@ class PythonExecutionService:
         visible_terminal_service = self.plugin.services.get("visible_terminal_service")
         if visible_terminal_service is None:
             return False
+        log_hyde_dispatch_debug("visible", code)
         visible_terminal_service.execute_visible(code)
         return True
 
@@ -376,11 +378,13 @@ class Plugin(HydePlugin):
     def execute_frontend(self, code, silent=True):
         if self.frontend_kernel_service is None or not self.frontend_kernel_service.is_ready():
             return False
+        code = str(code)
+        log_hyde_dispatch_debug("hidden", code)
         current_thread = QtCore.QThread.currentThread()
         executor_thread = self._main_thread_executor.thread()
         if current_thread is executor_thread:
             return self.frontend_kernel_service.execute(code, silent=bool(silent))
-        self._main_thread_executor.execute_requested.emit(str(code), bool(silent))
+        self._main_thread_executor.execute_requested.emit(code, bool(silent))
         return True
 
     def kill_kernel(self, checked=False):

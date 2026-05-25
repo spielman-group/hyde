@@ -17,6 +17,7 @@ from hyde.user_interface.plugins.figure_interactive.window import FigureState, F
 from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
     RemoveFromGraphDialog,
 )
+from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.shared.figure import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
 
@@ -29,6 +30,7 @@ class FakeExecutionService:
         self.hidden_calls = []
 
     def execute_hidden(self, code, silent=True):
+        log_hyde_dispatch_debug("hidden", code)
         self.hidden_calls.append((str(code), bool(silent)))
         return True
 
@@ -580,7 +582,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         self.assertIn("line.set_linewidth(4.0)", execution.hidden_calls[0][0])
         self.assertIn("line.set_linewidth(2.5)", execution.hidden_calls[1][0])
 
-    def test_hidden_trace_patch_logs_through_standard_hyde_debug_channel(self):
+    def test_hidden_trace_patch_logs_through_transport_debug_channel(self):
         execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
@@ -601,6 +603,8 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             dialog.close()
 
         output = "\n".join(logs.output)
-        self.assertIn("[Hyde state] FigurePatchState", output)
+        self.assertIn("[Hyde state] TransportDispatchState", output)
+        self.assertNotIn("FigurePatchState", output)
+        self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:\n", output)
         self.assertIn("line.set_color('#abcdef')", output)

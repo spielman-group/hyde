@@ -241,6 +241,118 @@ def graphics_output_options(
     }
 
 
+class FigureGraphicsExportCodec(FeatureCodec):
+    feature_name = "figure_graphics_export"
+    state_version = 1
+
+    @classmethod
+    def default_state(cls):
+        return {
+            "feature": cls.feature_name,
+            "state_version": cls.state_version,
+            "settings": {
+                "figure_name": None,
+                "output_path": None,
+                "output_format": "pdf",
+                "dpi": 300,
+                "transparent": False,
+                "size_inches": None,
+            },
+            "items": [],
+            "ui": {},
+        }
+
+    @classmethod
+    def normalize_state(cls, state):
+        normalized = copy.deepcopy(cls.default_state())
+        if state:
+            normalized["feature"] = state.get("feature", normalized["feature"])
+            normalized["state_version"] = state.get(
+                "state_version", normalized["state_version"]
+            )
+            settings = state.get("settings", {})
+            if isinstance(settings, dict):
+                normalized["settings"].update(settings)
+            normalized["items"] = list(state.get("items", []))
+            ui = state.get("ui", {})
+            normalized["ui"] = dict(ui) if isinstance(ui, dict) else {}
+
+        settings = normalized["settings"]
+        for key in ("figure_name", "output_path", "output_format"):
+            value = settings.get(key)
+            settings[key] = None if value in (None, "") else str(value)
+        settings["dpi"] = int(settings.get("dpi", 300))
+        settings["transparent"] = bool(settings.get("transparent", False))
+        size_inches = settings.get("size_inches")
+        if size_inches in (None, ""):
+            settings["size_inches"] = None
+        else:
+            settings["size_inches"] = (float(size_inches[0]), float(size_inches[1]))
+        return normalized
+
+    @classmethod
+    def validate_state(cls, state):
+        normalized = cls.normalize_state(state)
+        if normalized["feature"] != cls.feature_name:
+            raise ValueError(f"Expected feature={cls.feature_name!r}.")
+        settings = normalized["settings"]
+        if not settings["figure_name"]:
+            raise ValueError("Graphics export requires settings.figure_name.")
+        if not settings["output_path"]:
+            raise ValueError("Graphics export requires settings.output_path.")
+        options = graphics_output_options(
+            settings["output_format"],
+            dpi=settings["dpi"],
+            transparent=settings["transparent"],
+            size_inches=settings["size_inches"],
+        )
+        settings["output_format"] = options["format"]
+        settings["dpi"] = options["dpi"]
+        settings["transparent"] = options["transparent"]
+        settings["size_inches"] = options["size_inches"]
+        return normalized
+
+    @classmethod
+    def update_state(cls, state, action):
+        normalized = cls.normalize_state(state)
+        action_type = action.get("type")
+        if action_type == "set":
+            _set_path(normalized, action["path"], action["value"])
+        elif action_type == "clear":
+            _set_path(normalized, action["path"], None)
+        else:
+            raise ValueError(f"Unsupported graphics export action: {action_type!r}.")
+        return cls.normalize_state(normalized)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        del context
+        normalized = cls.validate_state(state)
+        settings = normalized["settings"]
+        savefig_source = (
+            f"fig.savefig({settings['output_path']!r}, "
+            f"format={settings['output_format']!r}, "
+            f"dpi={settings['dpi']!r}, "
+            f"transparent={settings['transparent']!r})"
+        )
+        if settings["size_inches"] is None:
+            return "\n".join(
+                figure_command_prelude_lines(settings["figure_name"]) + [savefig_source]
+            )
+        width, height = settings["size_inches"]
+        return "\n".join(
+            figure_command_prelude_lines(settings["figure_name"])
+            + [
+                "_hyde_original_size = tuple(fig.get_size_inches())",
+                "try:",
+                f"    fig.set_size_inches({width!r}, {height!r}, forward=False)",
+                f"    {savefig_source}",
+                "finally:",
+                "    fig.set_size_inches(*_hyde_original_size, forward=False)",
+            ]
+        )
+
+
 def figure_graphics_export_command_source(
     figure_name,
     output_path,
@@ -250,39 +362,17 @@ def figure_graphics_export_command_source(
     transparent=False,
     size_inches=None,
 ):
-    normalized_name = str(figure_name or "").strip()
-    if not normalized_name:
-        raise ValueError("Graphics export requires a stable first-class figure name.")
-    normalized_path = str(output_path or "").strip()
-    if not normalized_path:
-        raise ValueError("Graphics export requires an output path.")
-    options = graphics_output_options(
-        output_format,
-        dpi=dpi,
-        transparent=transparent,
-        size_inches=size_inches,
-    )
-    savefig_source = (
-        f"fig.savefig({normalized_path!r}, "
-        f"format={options['format']!r}, "
-        f"dpi={options['dpi']!r}, "
-        f"transparent={options['transparent']!r})"
-    )
-    if options["size_inches"] is None:
-        return "\n".join(
-            figure_command_prelude_lines(normalized_name) + [savefig_source]
-        )
-    width, height = options["size_inches"]
-    return "\n".join(
-        figure_command_prelude_lines(normalized_name)
-        + [
-            "_hyde_original_size = tuple(fig.get_size_inches())",
-            "try:",
-            f"    fig.set_size_inches({width!r}, {height!r}, forward=False)",
-            f"    {savefig_source}",
-            "finally:",
-            "    fig.set_size_inches(*_hyde_original_size, forward=False)",
-        ]
+    return FigureGraphicsExportCodec.state_to_python(
+        {
+            "settings": {
+                "figure_name": figure_name,
+                "output_path": output_path,
+                "output_format": output_format,
+                "dpi": dpi,
+                "transparent": transparent,
+                "size_inches": size_inches,
+            }
+        }
     )
 
 

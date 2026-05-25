@@ -36,6 +36,10 @@
 - The `kernel_runtime` plugin owns the kernel subprocess, shared
   `FrontendKernelService`, Lane 1 watcher startup/shutdown, and the exported
   `kernel_runtime_service` plus `python_execution_service`.
+- `python_execution_service` is the authoritative GUI-side hidden/visible
+  command-dispatch surface and owns logging of the final dispatched command
+  string. Feature-local debug logging may exist for local state inspection, but
+  it is not the authoritative command-visibility path.
 - The `python_terminal` plugin owns the visible terminal UI and exports
   `visible_terminal_service` for visible user-facing execution and history behavior.
 - The shell exports lifecycle adapters used by the runtime layer:
@@ -178,6 +182,11 @@ when a project is loaded.
   `hyde.refresh_figure(...)` or `hyde.remove_traces(...)`. Curve Fit attached live
   update, preview, `Do It`, and `To Cmd Line` now share one attached-display
   command-generation model.
+- `Save Graphics...` is a preview-backed figure export surface. The dialog owns
+  only transient file/output UI state; figure export command generation belongs
+  to a dedicated figure export state/codec path in the matplotlib feature
+  layer, and execution still targets the live kernel figure resolved by stable
+  Hyde figure name.
 - Explicit first-class figure refresh/regenerate also emits hidden Python through
   Hyde's normal command path using `hyde.refresh_figure(...)`. `resize_redraw`
   remains the narrow accepted backend control-traffic exception for viewport-driven
