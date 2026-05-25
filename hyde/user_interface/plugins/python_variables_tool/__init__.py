@@ -5,7 +5,7 @@ import time
 from qtutils import inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from spyder_kernels.comms.commbase import CommBase, CommError
-from hyde.features.hyde_features import is_eligible_for_table
+from hyde.features.base import is_eligible_for_numeric_series
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
 from hyde.user_interface.shared.core import MutationState
 from hyde.user_interface.shared.plugin import HydeToolWindowPlugin, HydeToolWindowService
@@ -300,7 +300,7 @@ class PythonVariables(HydeToolWidget):
         names = []
         for metadata in entries:
             name = metadata.get("name")
-            if not name or not is_eligible_for_table(metadata):
+            if not name or not is_eligible_for_numeric_series(metadata):
                 return []
             names.append(name)
         return names

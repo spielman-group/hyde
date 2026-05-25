@@ -23,6 +23,7 @@ from hyde.matplotlib_backend import (
     figure_snapshot_payload,
 )
 from hyde.features.matplotlib_features import (
+    MatplotlibCodec,
     FigureIRCodec,
     FigureGraphicsExportCodec,
     figure_ir_from_live_state,
@@ -105,6 +106,103 @@ class FakeShell:
 
 
 class TestGraphicsExportFormats(unittest.TestCase):
+    def test_matplotlib_codec_rejects_ambiguous_legacy_figure_feature(self):
+        with self.assertRaisesRegex(ValueError, "Ambiguous matplotlib feature"):
+            MatplotlibCodec.validate_state(
+                {
+                    "feature": "figure",
+                    "settings": {"title": "DelayGraph"},
+                }
+            )
+
+    def test_graphics_export_macro_source_raises_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            FigureGraphicsExportCodec.state_to_macro_source(
+                {
+                    "settings": {
+                        "figure_name": "Figure9",
+                        "output_path": "/tmp/Figure9.png",
+                        "output_format": "png",
+                        "dpi": 300,
+                        "transparent": False,
+                    }
+                },
+                "SaveFigure",
+            )
+
+    def test_matplotlib_codec_lowers_command_ir_patch_and_export_variants(self):
+        figure_command = MatplotlibCodec.state_to_python(
+            {
+                "feature": "figure_command",
+                "settings": {
+                    "command": "create",
+                    "title": "DelayGraph",
+                    "x_name": "delay",
+                    "subplot_code": "111",
+                },
+                "items": ["fit_delay"],
+            }
+        )
+        self.assertIn("@hyde.figure(register=False)", figure_command)
+        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_command)
+
+        figure_ir = figure_ir_from_live_state(
+            {
+                "feature": "figure_command",
+                "settings": {
+                    "command": "create",
+                    "title": "DelayGraph",
+                    "x_name": "delay",
+                    "subplot_code": "111",
+                },
+                "items": ["fit_delay"],
+            }
+        )
+        figure_ir_source = MatplotlibCodec.state_to_python(figure_ir)
+        self.assertIn("fig = plt.figure('DelayGraph')", figure_ir_source)
+        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_ir_source)
+
+        target_ir = MatplotlibCodec.update_state(
+            figure_ir,
+            {
+                "type": "set_legend_visible",
+                "visible": True,
+            },
+        )
+        figure_patch = MatplotlibCodec.state_to_python(
+            {
+                "feature": "figure_patch",
+                "settings": {
+                    "figure_name": "Figure9",
+                    "source_state": figure_ir,
+                    "target_state": target_ir,
+                    "refresh_trace_ids": (),
+                    "refresh_legend": True,
+                },
+            }
+        )
+        self.assertIn("fig = hyde.get_figure('Figure9')", figure_patch)
+        self.assertIn("ax.legend()", figure_patch)
+
+        figure_export = MatplotlibCodec.state_to_python(
+            {
+                "feature": "figure_graphics_export",
+                "settings": {
+                    "figure_name": "Figure9",
+                    "output_path": "/tmp/Figure9.png",
+                    "output_format": "png",
+                    "dpi": 450,
+                    "transparent": True,
+                    "size_inches": (4.0, 2.5),
+                },
+            }
+        )
+        self.assertIn("fig = hyde.get_figure('Figure9')", figure_export)
+        self.assertIn(
+            "fig.savefig('/tmp/Figure9.png', format='png', dpi=450, transparent=True)",
+            figure_export,
+        )
+
     def test_graphics_export_codec_lowers_state_to_savefig_command(self):
         source = FigureGraphicsExportCodec.state_to_python(
             {

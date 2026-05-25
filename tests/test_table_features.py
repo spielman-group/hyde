@@ -28,6 +28,16 @@ from hyde.user_interface.plugins.table_interactive.window import (
 )
 
 class TestTableCodec(unittest.TestCase):
+    def test_table_state_preserves_table_python_source(self):
+        state = TableState()
+        state.set_items(["delay2", "fit_delay2"])
+        state.set_name("Table7")
+
+        self.assertEqual(
+            state.python_source(),
+            "hyde.create_table(delay2, fit_delay2, name='Table7')",
+        )
+
     def test_create_table_accepts_mixed_numeric_and_string_arrays(self):
         x = np.array([1.0, 2.0, 3.0])
         string_array0 = np.array(["a", "b", "c"])
@@ -135,6 +145,12 @@ class TestTableCodec(unittest.TestCase):
         )
 
 class TestMutationCodec(unittest.TestCase):
+    def test_mutation_state_preserves_delete_python_source(self):
+        state = MutationState()
+        state.set_delete_indices("array0", [4, 1])
+
+        self.assertEqual(state.python_source(), "array0 = np.delete(array0, [1, 4])")
+
     def test_mutation_state_generates_edit_append_new_array_and_delete_commands(self):
         edit_state = MutationState()
         edit_state.set_edit_value("array0", 1, "abc")

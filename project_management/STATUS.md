@@ -21,6 +21,18 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - The kernel-runtime and Python Terminal services are in place and exported through the
   current plugin architecture.
 
+### Feature codecs
+- Each supported feature-library surface now has one authoritative
+  `FeatureCodec`.
+- `MatplotlibCodec` is the one GUI-side codec truth for figure command
+  generation, figure IR normalization, figure patch lowering, and graphics
+  export lowering.
+- `HydeCodec` is the one GUI-side codec truth for Hyde-owned project-command,
+  runtime-command, table, and mutation generation.
+- Legacy names such as `FigureCodec`, `FigureIRCodec`, `RuntimeCommandCodec`,
+  and `TableCodec` now exist only as compatibility views over those canonical
+  codecs.
+
 ### Tables
 - `hyde.create_table(...)` opens or reopens a table by requested stable name.
 - `hyde.append_table(...)` appends objects to an existing open table.

@@ -58,6 +58,14 @@ surface.
 turns GUI state into Python strings or GUI-facing metadata. For the generic GUI-side
 state/codec pattern, see `IR-CONTROL.md`.
 
+Across Hyde, each supported feature-library surface has one authoritative
+`FeatureCodec`. Hyde does not keep parallel codecs inside one feature module as
+competing truths for one feature surface. The current canonical examples are
+`MatplotlibCodec` for Hyde's matplotlib-backed figure surface and `HydeCodec`
+for Hyde-owned command generation. Legacy names such as `FigureIRCodec` or
+`TableCodec` may remain as compatibility views, but they are not additional
+`FeatureCodec` authorities.
+
 Across Hyde, GUI-generated command Python comes from
 `HydeGuiState.python_source()`. Preview surfaces display that same generated string,
 and `Do It`, `To Cmd Line`, or `To Clip` may dispatch the cached preview payload

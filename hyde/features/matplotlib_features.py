@@ -9,6 +9,7 @@ from hyde.features.base import (
     normalize_optional_text,
     ordered_unique,
     set_path,
+    sorted_eligible_names,
     valid_python_identifier,
 )
 
@@ -219,7 +220,7 @@ def graphics_output_options(
     }
 
 
-class FigureGraphicsExportCodec(FeatureCodec):
+class FigureGraphicsExportModel:
     feature_name = "figure_graphics_export"
     state_version = 1
 
@@ -340,8 +341,9 @@ def figure_graphics_export_command_source(
     transparent=False,
     size_inches=None,
 ):
-    return FigureGraphicsExportCodec.state_to_python(
+    return MatplotlibCodec.state_to_python(
         {
+            "feature": MatplotlibCodec.figure_graphics_export_feature,
             "settings": {
                 "figure_name": figure_name,
                 "output_path": output_path,
@@ -354,7 +356,7 @@ def figure_graphics_export_command_source(
     )
 
 
-class FigurePatchCodec(FeatureCodec):
+class FigurePatchModel:
     feature_name = "figure_patch"
     state_version = 1
 
@@ -415,8 +417,8 @@ class FigurePatchCodec(FeatureCodec):
             raise ValueError("Figure patch requires settings.source_state.")
         if settings["target_state"] is None:
             raise ValueError("Figure patch requires settings.target_state.")
-        FigureIRCodec.validate_state(settings["source_state"])
-        FigureIRCodec.validate_state(settings["target_state"])
+        MatplotlibCodec.validate_state(settings["source_state"])
+        MatplotlibCodec.validate_state(settings["target_state"])
         return normalized
 
     @classmethod
@@ -445,8 +447,8 @@ class FigurePatchCodec(FeatureCodec):
         )
 
 
-class FigureCodec(FeatureCodec):
-    feature_name = "figure"
+class FigureCommandModel:
+    feature_name = "figure_command"
     state_version = 1
     _valid_commands = {
         "create",
@@ -634,30 +636,8 @@ class FigureCodec(FeatureCodec):
             f"def {macro_name}({', '.join(parameters)}):\n"
             f"{body}\n"
         )
-
-
-def is_eligible_for_plot(metadata):
-    python_type = metadata.get("python_type", "").lower()
-    numpy_type = metadata.get("numpy_type", "")
-    ndim = metadata.get("ndim", 1)
-    kind = metadata.get("numpy_kind", "f")
-
-    is_array = python_type in ("ndarray", "series") or numpy_type == "Array"
-    is_numeric = kind in "biuf"
-
-    return is_array and is_numeric and ndim == 1
-
-
-def sorted_eligible_names(objects_metadata):
-    eligible = []
-    for name, metadata in dict(objects_metadata or {}).items():
-        if is_eligible_for_plot(dict(metadata or {})):
-            eligible.append(str(name))
-    return sorted(eligible)
-
-
 def apply_figure_state(figure, state, namespace):
-    normalized = FigureCodec.normalize_state(state)
+    normalized = MatplotlibCodec.normalize_state(state)
     settings = normalized["settings"]
     title = settings["title"]
     x_name = settings["x_name"]
@@ -1043,8 +1023,8 @@ def sync_legacy_subplot_axis_fields(subplot):
     return subplot
 
 
-class FigureIRCodec(FeatureCodec):
-    feature_name = "figure"
+class FigureIRModel:
+    feature_name = "figure_ir"
     state_version = 1
 
     @classmethod
@@ -1487,7 +1467,7 @@ class FigureIRCodec(FeatureCodec):
         normalized_ir = None
         if default_ir is not None:
             try:
-                normalized_ir = cls.validate_state(default_ir)
+                normalized_ir = MatplotlibCodec.validate_state(default_ir)
             except Exception:
                 normalized_ir = None
         trace_styles = dict(defaults.get("trace_styles", {}) or {})
@@ -1943,12 +1923,166 @@ class FigureIRCodec(FeatureCodec):
         )
 
 
+class MatplotlibCodec(FeatureCodec):
+    feature_name = "matplotlib"
+    state_version = 1
+    figure_command_feature = "figure_command"
+    figure_ir_feature = "figure_ir"
+    figure_patch_feature = FigurePatchModel.feature_name
+    figure_graphics_export_feature = FigureGraphicsExportModel.feature_name
+
+    @classmethod
+    def default_state(cls, feature=None):
+        feature_kind = cls._feature_kind(feature=feature)
+        model = cls._model_for_feature(feature_kind)
+        return cls._canonicalize_feature(model.default_state(), feature_kind)
+
+    @classmethod
+    def normalize_state(cls, state):
+        feature_kind = cls._feature_kind(state)
+        model = cls._model_for_feature(feature_kind)
+        return cls._canonicalize_feature(
+            model.normalize_state(cls._delegate_state(feature_kind, state)),
+            feature_kind,
+        )
+
+    @classmethod
+    def validate_state(cls, state):
+        feature_kind = cls._feature_kind(state)
+        model = cls._model_for_feature(feature_kind)
+        return cls._canonicalize_feature(
+            model.validate_state(cls._delegate_state(feature_kind, state)),
+            feature_kind,
+        )
+
+    @classmethod
+    def update_state(cls, state, action):
+        feature_kind = cls._feature_kind(state)
+        model = cls._model_for_feature(feature_kind)
+        return cls._canonicalize_feature(
+            model.update_state(cls._delegate_state(feature_kind, state), action),
+            feature_kind,
+        )
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        feature_kind = cls._feature_kind(state)
+        model = cls._model_for_feature(feature_kind)
+        return model.state_to_python(cls._delegate_state(feature_kind, state), context=context)
+
+    @classmethod
+    def state_to_macro_source(cls, state, macro_name, context=None):
+        feature_kind = cls._feature_kind(state)
+        model = cls._model_for_feature(feature_kind)
+        if not hasattr(model, "state_to_macro_source"):
+            raise NotImplementedError(
+                f"{model.__name__} does not support macro source generation."
+            )
+        return model.state_to_macro_source(
+            cls._delegate_state(feature_kind, state),
+            macro_name,
+            context=context,
+        )
+
+    @classmethod
+    def tracked_names(cls, state):
+        feature_kind = cls._feature_kind(state)
+        model = cls._model_for_feature(feature_kind)
+        return model.tracked_names(cls._delegate_state(feature_kind, state))
+
+    @classmethod
+    def _normalize_subplot(cls, subplot, index):
+        return FigureIRModel._normalize_subplot(subplot, index)
+
+    @classmethod
+    def _normalize_trace(cls, trace, index):
+        return FigureIRModel._normalize_trace(trace, index)
+
+    @classmethod
+    def _resolve_subplot(cls, normalized, subplot_id):
+        return FigureIRModel._resolve_subplot(normalized, subplot_id)
+
+    @classmethod
+    def _plot_call(cls, trace, default_style=None):
+        return FigureIRModel._plot_call(trace, default_style=default_style)
+
+    @classmethod
+    def _feature_kind(cls, state=None, *, feature=None):
+        candidate = feature
+        if candidate in (None, "") and isinstance(state, dict):
+            candidate = state.get("feature")
+        if candidate == "figure":
+            raise ValueError(
+                "Ambiguous matplotlib feature 'figure'; use 'figure_command' or "
+                "'figure_ir'."
+            )
+        if candidate == cls.figure_command_feature:
+            return cls.figure_command_feature
+        if candidate == cls.figure_ir_feature:
+            return cls.figure_ir_feature
+        if candidate == cls.figure_patch_feature:
+            return cls.figure_patch_feature
+        if candidate == cls.figure_graphics_export_feature:
+            return cls.figure_graphics_export_feature
+        if isinstance(state, dict):
+            settings = dict(state.get("settings", {}) or {})
+            if "layout" in state or "opaque_nodes" in state:
+                return cls.figure_ir_feature
+            if "source_state" in settings or "target_state" in settings:
+                return cls.figure_patch_feature
+            if any(
+                key in settings
+                for key in ("output_path", "output_format", "dpi", "transparent", "size_inches")
+            ):
+                return cls.figure_graphics_export_feature
+            if any(
+                key in settings
+                for key in (
+                    "command",
+                    "x_name",
+                    "subplot_code",
+                    "figure_number",
+                    "figure_name",
+                    "use_bound_values",
+                )
+            ) or "items" in state:
+                return cls.figure_command_feature
+        return cls.figure_command_feature
+
+    @classmethod
+    def _model_for_feature(cls, feature_kind):
+        if feature_kind == cls.figure_command_feature:
+            return FigureCommandModel
+        if feature_kind == cls.figure_ir_feature:
+            return FigureIRModel
+        if feature_kind == cls.figure_patch_feature:
+            return FigurePatchModel
+        if feature_kind == cls.figure_graphics_export_feature:
+            return FigureGraphicsExportModel
+        raise ValueError(f"Unsupported matplotlib feature kind: {feature_kind!r}.")
+
+    @classmethod
+    def _delegate_state(cls, feature_kind, state):
+        candidate = copy.deepcopy(state) if state is not None else None
+        if candidate is None:
+            return None
+        model = cls._model_for_feature(feature_kind)
+        candidate["feature"] = model.feature_name
+        return candidate
+
+    @classmethod
+    def _canonicalize_feature(cls, state, feature_kind):
+        normalized = copy.deepcopy(state)
+        normalized["feature"] = feature_kind
+        return normalized
+
+
 def figure_ir_default_state():
-    return FigureIRCodec.default_state()
+    return MatplotlibCodec.default_state(feature=MatplotlibCodec.figure_ir_feature)
 
 
 def figure_ir_from_live_state(state):
-    normalized = FigureCodec.validate_state(state)
+    normalized = MatplotlibCodec.validate_state(state)
     title = normalized["settings"]["title"]
     subplot = {
         "id": "subplot0",
@@ -1976,33 +2110,33 @@ def figure_ir_from_live_state(state):
                 "kwargs": {"label": y_name},
             }
         )
-    ir = FigureIRCodec.default_state()
+    ir = MatplotlibCodec.default_state(feature=MatplotlibCodec.figure_ir_feature)
     ir["settings"]["title"] = title
     ir["settings"]["figsize"] = normalized["settings"]["figsize"]
     ir["layout"]["subplots"] = [subplot]
-    return FigureIRCodec.validate_state(ir)
+    return MatplotlibCodec.validate_state(ir)
 
 
 def figure_ir_apply_title(figure_ir, title):
-    normalized = FigureIRCodec.normalize_state(figure_ir)
+    normalized = MatplotlibCodec.normalize_state(figure_ir)
     normalized["settings"]["title"] = None if title in (None, "") else str(title)
-    return FigureIRCodec.validate_state(normalized)
+    return MatplotlibCodec.validate_state(normalized)
 
 
 def figure_ir_append_trace(figure_ir, trace):
-    normalized = FigureIRCodec.normalize_state(figure_ir)
+    normalized = MatplotlibCodec.normalize_state(figure_ir)
     if not normalized["layout"]["subplots"]:
-        normalized["layout"]["subplots"].append(FigureIRCodec._normalize_subplot({}, 0))
+        normalized["layout"]["subplots"].append(MatplotlibCodec._normalize_subplot({}, 0))
     subplot = normalized["layout"]["subplots"][0]
     trace_index = len(subplot["traces"])
-    subplot["traces"].append(FigureIRCodec._normalize_trace(trace, trace_index))
+    subplot["traces"].append(MatplotlibCodec._normalize_trace(trace, trace_index))
     subplot["legend"] = len(subplot["traces"]) > 1
-    return FigureIRCodec.validate_state(normalized)
+    return MatplotlibCodec.validate_state(normalized)
 
 
 def figure_patch_subplot(state, subplot_id):
-    normalized = FigureIRCodec.validate_state(state)
-    return FigureIRCodec._resolve_subplot(normalized, subplot_id)
+    normalized = MatplotlibCodec.validate_state(state)
+    return MatplotlibCodec._resolve_subplot(normalized, subplot_id)
 
 
 def figure_patch_reset_color(target, default_expr):
@@ -2308,8 +2442,8 @@ def figure_patch_remove_trace_helper_source(
 ):
     if refresh_trace_ids:
         return ""
-    source = FigureIRCodec.validate_state(source_state)
-    target = FigureIRCodec.validate_state(target_state)
+    source = MatplotlibCodec.validate_state(source_state)
+    target = MatplotlibCodec.validate_state(target_state)
     source_subplots = list(source.get("layout", {}).get("subplots", ()) or ())
     target_subplots = list(target.get("layout", {}).get("subplots", ()) or ())
     if len(source_subplots) != 1 or len(target_subplots) != 1:
@@ -2374,8 +2508,8 @@ def figure_patch_source(
     refresh_trace_ids=(),
     refresh_legend=True,
 ):
-    source = FigureIRCodec.validate_state(source_state)
-    target = FigureIRCodec.validate_state(target_state)
+    source = MatplotlibCodec.validate_state(source_state)
+    target = MatplotlibCodec.validate_state(target_state)
     helper_source = figure_patch_remove_trace_helper_source(
         source,
         target,
@@ -2503,3 +2637,81 @@ def operand_from_runtime_value(value, named_values=None):
     if array.ndim == 1:
         return {"kind": "array_literal", "value": array.tolist()}
     raise ValueError("Hyde figure IR currently supports only 1D runtime operands.")
+
+
+class MatplotlibCodecView:
+    feature_name = None
+
+    @classmethod
+    def default_state(cls):
+        return MatplotlibCodec.default_state(feature=cls.feature_name)
+
+    @classmethod
+    def normalize_state(cls, state):
+        return MatplotlibCodec.normalize_state(cls._with_feature(state))
+
+    @classmethod
+    def validate_state(cls, state):
+        return MatplotlibCodec.validate_state(cls._with_feature(state))
+
+    @classmethod
+    def update_state(cls, state, action):
+        return MatplotlibCodec.update_state(cls._with_feature(state), action)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        return MatplotlibCodec.state_to_python(cls._with_feature(state), context=context)
+
+    @classmethod
+    def state_to_macro_source(cls, state, macro_name, context=None):
+        return MatplotlibCodec.state_to_macro_source(
+            cls._with_feature(state),
+            macro_name,
+            context=context,
+        )
+
+    @classmethod
+    def tracked_names(cls, state):
+        return MatplotlibCodec.tracked_names(cls._with_feature(state))
+
+    @classmethod
+    def wrapped_creation_lines(cls, state, helper_name="_hyde_figure"):
+        return FigureCommandModel.wrapped_creation_lines(cls._with_feature(state), helper_name)
+
+    @classmethod
+    def _with_feature(cls, state):
+        normalized = {} if state is None else copy.deepcopy(state)
+        normalized["feature"] = cls.feature_name
+        return normalized
+
+
+class FigureGraphicsExportCodec(MatplotlibCodecView):
+    feature_name = MatplotlibCodec.figure_graphics_export_feature
+
+
+class FigurePatchCodec(MatplotlibCodecView):
+    feature_name = MatplotlibCodec.figure_patch_feature
+
+
+class FigureCodec(MatplotlibCodecView):
+    feature_name = MatplotlibCodec.figure_command_feature
+
+
+class FigureIRCodec(MatplotlibCodecView):
+    feature_name = MatplotlibCodec.figure_ir_feature
+
+    @classmethod
+    def _normalize_subplot(cls, subplot, index):
+        return FigureIRModel._normalize_subplot(subplot, index)
+
+    @classmethod
+    def _normalize_trace(cls, trace, index):
+        return FigureIRModel._normalize_trace(trace, index)
+
+    @classmethod
+    def _resolve_subplot(cls, normalized, subplot_id):
+        return FigureIRModel._resolve_subplot(normalized, subplot_id)
+
+    @classmethod
+    def _plot_call(cls, trace, default_style=None):
+        return FigureIRModel._plot_call(trace, default_style=default_style)

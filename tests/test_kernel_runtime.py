@@ -103,6 +103,16 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIsNotNone(comm._on_msg)
         self.assertIsNotNone(comm._on_close)
 
+    def test_runtime_state_preserves_session_restore_python_source(self):
+        state = RuntimeCommandState()
+        state.set_session_restore_source("x = 1")
+
+        source = state.python_source(log=False)
+
+        self.assertIn("import hyde", source)
+        self.assertIn("x = 1", source)
+        self.assertIn("hyde.task_complete(\"session_restore\", True)", source)
+
     def test_frontend_kernel_service_marks_ready_from_kernel_info_reply(self):
         class FakeQtKernelClient:
             def __init__(self, connection_file):

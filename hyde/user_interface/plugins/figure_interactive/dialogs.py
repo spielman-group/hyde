@@ -1,6 +1,6 @@
 from qtutils.qt import QtWidgets
 
-from hyde.features.matplotlib_features import sorted_eligible_names
+from hyde.features.base import sorted_eligible_names
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 
 from .window import FigureState

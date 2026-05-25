@@ -7,8 +7,7 @@ from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import (
-    FigureCodec,
-    FigureIRCodec,
+    MatplotlibCodec,
     figure_ir_apply_title,
 )
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
@@ -37,9 +36,10 @@ def _canonicalize_figure_window_name(name, fallback_number):
 
 
 class FigureState(HydeGuiState):
-    codec = FigureCodec
+    codec = MatplotlibCodec
 
     def configure_defaults(self):
+        self._state = self.codec.default_state(feature=self.codec.figure_command_feature)
         self.set_command("create")
 
     def set_command(self, command):
@@ -173,19 +173,19 @@ class FigureSnapshotState:
         if default_macro_name:
             self._default_macro_name = str(default_macro_name)
         elif self._figure_ir is not None:
-            title = FigureIRCodec.normalize_state(self._figure_ir)["settings"]["title"]
+            title = MatplotlibCodec.normalize_state(self._figure_ir)["settings"]["title"]
             if title:
                 self._default_macro_name = title
         self._call_source = call_source
         if not self._call_source and self._figure_ir is not None:
-            self._call_source = FigureIRCodec.state_to_python(
+            self._call_source = MatplotlibCodec.state_to_python(
                 self._figure_ir,
                 context={"figure_defaults": self._figure_defaults},
             )
         if tracked_names:
             self._tracked_names = tuple(tracked_names)
         elif self._figure_ir is not None:
-            self._tracked_names = FigureIRCodec.tracked_names(self._figure_ir)
+            self._tracked_names = MatplotlibCodec.tracked_names(self._figure_ir)
         else:
             self._tracked_names = ()
         self._save_error = save_error
@@ -239,7 +239,7 @@ class FigureSnapshotState:
             figure_ir = self._figure_ir
             if figure_title not in (None, ""):
                 figure_ir = figure_ir_apply_title(figure_ir, figure_title)
-            return FigureIRCodec.state_to_macro_source(
+            return MatplotlibCodec.state_to_macro_source(
                 figure_ir,
                 macro_name,
                 context={"figure_defaults": self._figure_defaults},

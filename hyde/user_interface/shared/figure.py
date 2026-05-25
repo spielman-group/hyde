@@ -6,7 +6,7 @@ from matplotlib import colors as mcolors
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec, FigurePatchCodec
+from hyde.features.matplotlib_features import MatplotlibCodec
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 from hyde.user_interface.shared.core import HydeGuiState
 _COMMON_COLOR_NAMES = [
@@ -32,7 +32,10 @@ _COMMON_COLOR_NAMES = [
 
 
 class FigurePatchState(HydeGuiState):
-    codec = FigurePatchCodec
+    codec = MatplotlibCodec
+
+    def configure_defaults(self):
+        self._state = self.codec.default_state(feature=self.codec.figure_patch_feature)
 
     def set_figure_name(self, figure_name):
         if figure_name:
@@ -740,7 +743,7 @@ class FigureDisplayHelper:
         return tuple(records)
 
 def default_subplot_layout_state():
-    return FigureIRCodec.validate_state({"layout": {"subplots": [{}]}})["layout"][
+    return MatplotlibCodec.validate_state({"feature": MatplotlibCodec.figure_ir_feature, "layout": {"subplots": [{}]}})["layout"][
         "subplots"
     ][0]
 
@@ -767,9 +770,9 @@ def figure_ir_with_defaults(figure_ir, figure_defaults):
     if figure_ir is None:
         return None
     if not isinstance(figure_defaults, dict):
-        return FigureIRCodec.validate_state(figure_ir)
-    merged = FigureIRCodec.validate_state(figure_ir)
-    defaults = FigureIRCodec.validate_state(figure_defaults)
+        return MatplotlibCodec.validate_state(figure_ir)
+    merged = MatplotlibCodec.validate_state(figure_ir)
+    defaults = MatplotlibCodec.validate_state(figure_defaults)
     baseline_subplot = default_subplot_layout_state()
     default_subplots = {
         subplot["id"]: subplot for subplot in defaults.get("layout", {}).get("subplots", [])
@@ -1129,7 +1132,7 @@ class FigureEditSession:
         self._trace_styles = copy.deepcopy(trace_styles) or {}
         self._trace_style_defaults = trace_style_defaults_by_subplot(self._figure_defaults)
         self._resolved_axis_limits = copy.deepcopy(resolved_axis_limits) or {}
-        self._opening_state = FigureIRCodec.validate_state(figure_ir)
+        self._opening_state = MatplotlibCodec.validate_state(figure_ir)
         self._current_state = copy.deepcopy(self._opening_state)
         self._opening_trace_style_states = self._initial_trace_style_states(
             self._opening_state
@@ -1223,7 +1226,7 @@ class FigureEditSession:
         )
 
     def preview_source(self):
-        return FigureIRCodec.state_to_python(
+        return MatplotlibCodec.state_to_python(
             self._dispatch_state(self._current_state, self._current_trace_style_states),
             context={"figure_defaults": self._figure_defaults},
         )
@@ -1507,13 +1510,13 @@ class FigureEditSession:
         return copy.deepcopy(self._current_state)
 
     def _update_current_state(self, action):
-        self._current_state = FigureIRCodec.update_state(self._current_state, action)
+        self._current_state = MatplotlibCodec.update_state(self._current_state, action)
         return copy.deepcopy(self._current_state)
 
     def _dispatch_state(self, state, trace_style_states):
         dispatch_state = copy.deepcopy(state)
         for (subplot_id, trace_id), style in trace_style_states.items():
-            dispatch_state = FigureIRCodec.update_state(
+            dispatch_state = MatplotlibCodec.update_state(
                 dispatch_state,
                 {
                     "type": "set_trace_style",

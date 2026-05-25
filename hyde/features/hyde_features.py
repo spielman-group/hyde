@@ -5,17 +5,17 @@ import textwrap
 from hyde.features.base import FeatureCodec, set_path
 
 
-class SimpleHydeCommandCodec(FeatureCodec):
+class ProjectCommandModel:
     feature_name = "hyde_command"
     state_version = 1
-    _valid_commands = {
+    valid_commands = {
         "new_project",
         "load_project",
         "heal_project",
         "save_project",
         "quit",
     }
-    _valid_save_modes = {"save", "save_as", "copy"}
+    valid_save_modes = {"save", "save_as", "copy"}
 
     @classmethod
     def default_state(cls):
@@ -38,7 +38,9 @@ class SimpleHydeCommandCodec(FeatureCodec):
         normalized = copy.deepcopy(cls.default_state())
         if state:
             normalized["feature"] = state.get("feature", normalized["feature"])
-            normalized["state_version"] = state.get("state_version", normalized["state_version"])
+            normalized["state_version"] = state.get(
+                "state_version", normalized["state_version"]
+            )
             normalized["command"] = state.get("command")
             settings = state.get("settings", {})
             if isinstance(settings, dict):
@@ -61,7 +63,7 @@ class SimpleHydeCommandCodec(FeatureCodec):
         if normalized["feature"] != cls.feature_name:
             raise ValueError(f"Expected feature={cls.feature_name!r}.")
         command = normalized["command"]
-        if command not in cls._valid_commands:
+        if command not in cls.valid_commands:
             raise ValueError(f"Unsupported Hyde command: {command!r}.")
 
         settings = normalized["settings"]
@@ -71,7 +73,7 @@ class SimpleHydeCommandCodec(FeatureCodec):
 
         if command == "save_project":
             mode = settings["mode"]
-            if mode not in cls._valid_save_modes:
+            if mode not in cls.valid_save_modes:
                 raise ValueError(f"Unsupported save mode: {mode!r}.")
             if mode != "save" and not settings["project_dir"]:
                 raise ValueError(f"{mode} requires settings.project_dir.")
@@ -123,10 +125,10 @@ class SimpleHydeCommandCodec(FeatureCodec):
         raise ValueError(f"Unsupported Hyde command: {command!r}.")
 
 
-class RuntimeCommandCodec(FeatureCodec):
+class RuntimeCommandModel:
     feature_name = "runtime_command"
     state_version = 1
-    _valid_commands = {
+    valid_commands = {
         "reload_procedures",
         "remote_request",
         "callable_invocation",
@@ -191,7 +193,7 @@ class RuntimeCommandCodec(FeatureCodec):
             raise ValueError(f"Expected feature={cls.feature_name!r}.")
 
         command = normalized["command"]
-        if command not in cls._valid_commands:
+        if command not in cls.valid_commands:
             raise ValueError(f"Unsupported runtime command: {command!r}.")
 
         settings = normalized["settings"]
@@ -252,10 +254,7 @@ class RuntimeCommandCodec(FeatureCodec):
             args = ", ".join(settings["callable_args"])
             return f"{settings['callable_name']}({args})"
         if command == "session_restore":
-            indented_source = textwrap.indent(
-                f"{settings['session_source']}\n",
-                "    ",
-            )
+            indented_source = textwrap.indent(f"{settings['session_source']}\n", "    ")
             return (
                 "import hyde\n"
                 "try:\n"
@@ -269,10 +268,10 @@ class RuntimeCommandCodec(FeatureCodec):
         raise ValueError(f"Unsupported runtime command: {command!r}.")
 
 
-class TableCodec(FeatureCodec):
+class TableModel:
     feature_name = "table"
     state_version = 1
-    _valid_commands = {
+    valid_commands = {
         "open",
         "append",
         "push_table_data",
@@ -300,7 +299,9 @@ class TableCodec(FeatureCodec):
         normalized = copy.deepcopy(cls.default_state())
         if state:
             normalized["feature"] = state.get("feature", normalized["feature"])
-            normalized["state_version"] = state.get("state_version", normalized["state_version"])
+            normalized["state_version"] = state.get(
+                "state_version", normalized["state_version"]
+            )
             settings = state.get("settings", {})
             if isinstance(settings, dict):
                 normalized["settings"].update(settings)
@@ -338,7 +339,7 @@ class TableCodec(FeatureCodec):
 
         settings = normalized["settings"]
         command = settings["command"]
-        if command not in cls._valid_commands:
+        if command not in cls.valid_commands:
             raise ValueError(f"Unsupported table command: {command!r}.")
 
         if command in {"open", "append", "push_table_data"} and not normalized["items"]:
@@ -379,7 +380,7 @@ class TableCodec(FeatureCodec):
         return cls.normalize_state(normalized)
 
     @classmethod
-    def _table_python_arguments(cls, normalized, include_layout=True):
+    def table_python_arguments(cls, normalized, include_layout=True):
         arguments = list(normalized["items"])
         settings = normalized["settings"]
         kwargs = []
@@ -394,7 +395,7 @@ class TableCodec(FeatureCodec):
         return ", ".join(arguments)
 
     @classmethod
-    def _append_table_arguments(cls, normalized):
+    def append_table_arguments(cls, normalized):
         arguments = list(normalized["items"])
         arguments.append(f"name={normalized['settings']['name']!r}")
         return ", ".join(arguments)
@@ -407,15 +408,10 @@ class TableCodec(FeatureCodec):
         command = settings["command"]
 
         if command == "open":
-            return (
-                "hyde.create_table("
-                f"{cls._table_python_arguments(normalized, include_layout=True)})"
-            )
+            arguments = cls.table_python_arguments(normalized, include_layout=True)
+            return f"hyde.create_table({arguments})"
         if command == "append":
-            return (
-                "hyde.append_table("
-                f"{cls._append_table_arguments(normalized)})"
-            )
+            return f"hyde.append_table({cls.append_table_arguments(normalized)})"
         if command == "push_table_data":
             return (
                 "hyde.execution.ipc.push_table_data("
@@ -426,32 +422,20 @@ class TableCodec(FeatureCodec):
         raise ValueError(f"Unsupported table command: {command!r}.")
 
     @classmethod
-    def state_to_macro_source(
-        cls,
-        state,
-        macro_name,
-        context=None,
-    ):
+    def state_to_macro_source(cls, state, macro_name, context=None):
         del context
         normalized = cls.validate_state(state)
         parameters = ", ".join(normalized["items"])
         macro_state = copy.deepcopy(normalized)
         macro_state["settings"]["command"] = "open"
-        # Table recreation macros intentionally preserve saved GUI layout even
-        # though session.toml also stores it, because macros must fully reopen
-        # the table window as the user last arranged it.
         body = cls.state_to_python(macro_state)
-        return (
-            "@hyde.table\n"
-            f"def {macro_name}({parameters}):\n"
-            f"    {body}\n"
-        )
+        return "@hyde.table\n" f"def {macro_name}({parameters}):\n" f"    {body}\n"
 
 
-class MutationCodec(FeatureCodec):
+class MutationModel:
     feature_name = "mutation"
     state_version = 1
-    _valid_commands = {
+    valid_commands = {
         "edit_value",
         "append_value",
         "create_array",
@@ -481,7 +465,9 @@ class MutationCodec(FeatureCodec):
         normalized = copy.deepcopy(cls.default_state())
         if state:
             normalized["feature"] = state.get("feature", normalized["feature"])
-            normalized["state_version"] = state.get("state_version", normalized["state_version"])
+            normalized["state_version"] = state.get(
+                "state_version", normalized["state_version"]
+            )
             settings = state.get("settings", {})
             if isinstance(settings, dict):
                 normalized["settings"].update(settings)
@@ -520,7 +506,7 @@ class MutationCodec(FeatureCodec):
 
         settings = normalized["settings"]
         command = settings["command"]
-        if command not in cls._valid_commands:
+        if command not in cls.valid_commands:
             raise ValueError(f"Unsupported mutation command: {command!r}.")
         if command != "create_array" and not settings["var_name"]:
             raise ValueError("Mutation commands require settings.var_name.")
@@ -529,12 +515,10 @@ class MutationCodec(FeatureCodec):
             cls.format_entry_literal(settings["value_text"])
         if command == "edit_value" and settings["index"] is None:
             raise ValueError("Cell edits require settings.index.")
-        if command == "delete_indices":
-            if settings["indices"] is None:
-                raise ValueError("Delete commands require settings.indices.")
-        if command == "delete_name":
-            if settings["indices"] not in (None, []):
-                raise ValueError("delete_name does not support settings.indices.")
+        if command == "delete_indices" and settings["indices"] is None:
+            raise ValueError("Delete commands require settings.indices.")
+        if command == "delete_name" and settings["indices"] not in (None, []):
+            raise ValueError("delete_name does not support settings.indices.")
         return normalized
 
     @classmethod
@@ -599,7 +583,8 @@ class MutationCodec(FeatureCodec):
                 f"))"
             )
         if command == "create_array":
-            return f"{var_name} = np.array([{cls.format_entry_literal(settings['value_text'])}])"
+            literal = cls.format_entry_literal(settings["value_text"])
+            return f"{var_name} = np.array([{literal}])"
         if command == "delete_indices":
             indices = sorted(set(settings["indices"] or []))
             return f"{var_name} = np.delete({var_name}, {indices!r})"
@@ -608,17 +593,192 @@ class MutationCodec(FeatureCodec):
         raise ValueError(f"Unsupported mutation command: {command!r}.")
 
 
-def is_eligible_for_table(metadata):
-    """
-    Determines if a variable (from Python Variables metadata) is eligible for table display.
-    Scoped to 1D numeric arrays initially.
-    """
-    python_type = metadata.get("python_type", "").lower()
-    numpy_type = metadata.get("numpy_type", "")
-    ndim = metadata.get("ndim", 1)
-    kind = metadata.get("numpy_kind", "f")
+class HydeCodec(FeatureCodec):
+    feature_name = "hyde"
+    state_version = 1
+    project_command_feature = ProjectCommandModel.feature_name
+    runtime_command_feature = RuntimeCommandModel.feature_name
+    table_feature = TableModel.feature_name
+    mutation_feature = MutationModel.feature_name
 
-    is_array = python_type in ("ndarray", "series") or numpy_type == "Array"
-    is_numeric = kind in "biuf"
+    @classmethod
+    def default_state(cls, feature=None):
+        feature_kind = cls.feature_kind(feature=feature)
+        model = cls.model_for_feature(feature_kind)
+        return cls.canonicalize_feature(model.default_state(), feature_kind)
 
-    return is_array and is_numeric and ndim == 1
+    @classmethod
+    def normalize_state(cls, state):
+        feature_kind = cls.feature_kind(state)
+        model = cls.model_for_feature(feature_kind)
+        delegated = cls.delegate_state(feature_kind, state)
+        return cls.canonicalize_feature(model.normalize_state(delegated), feature_kind)
+
+    @classmethod
+    def validate_state(cls, state):
+        feature_kind = cls.feature_kind(state)
+        model = cls.model_for_feature(feature_kind)
+        delegated = cls.delegate_state(feature_kind, state)
+        return cls.canonicalize_feature(model.validate_state(delegated), feature_kind)
+
+    @classmethod
+    def update_state(cls, state, action):
+        feature_kind = cls.feature_kind(state)
+        model = cls.model_for_feature(feature_kind)
+        delegated = cls.delegate_state(feature_kind, state)
+        return cls.canonicalize_feature(model.update_state(delegated, action), feature_kind)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        feature_kind = cls.feature_kind(state)
+        model = cls.model_for_feature(feature_kind)
+        return model.state_to_python(cls.delegate_state(feature_kind, state), context=context)
+
+    @classmethod
+    def state_to_macro_source(cls, state, macro_name, context=None):
+        feature_kind = cls.feature_kind(state)
+        model = cls.model_for_feature(feature_kind)
+        if not hasattr(model, "state_to_macro_source"):
+            raise NotImplementedError(
+                f"{model.__name__} does not support macro source generation."
+            )
+        return model.state_to_macro_source(
+            cls.delegate_state(feature_kind, state),
+            macro_name,
+            context=context,
+        )
+
+    @classmethod
+    def format_entry_literal(cls, value_text):
+        return MutationModel.format_entry_literal(value_text)
+
+    @classmethod
+    def suggest_new_array_name(cls, existing_names, value_text):
+        return MutationModel.suggest_new_array_name(existing_names, value_text)
+
+    @classmethod
+    def feature_kind(cls, state=None, *, feature=None):
+        candidate = feature
+        if candidate in (None, "") and isinstance(state, dict):
+            candidate = state.get("feature")
+        if candidate == cls.project_command_feature:
+            return cls.project_command_feature
+        if candidate == cls.runtime_command_feature:
+            return cls.runtime_command_feature
+        if candidate == cls.table_feature:
+            return cls.table_feature
+        if candidate == cls.mutation_feature:
+            return cls.mutation_feature
+        if isinstance(state, dict):
+            settings = dict(state.get("settings", {}) or {})
+            if any(
+                key in settings
+                for key in ("request_id", "column_widths", "geometry", "name")
+            ):
+                return cls.table_feature
+            if any(
+                key in settings
+                for key in ("var_name", "value_text", "index", "indices", "existing_names")
+            ):
+                return cls.mutation_feature
+            if any(
+                key in settings
+                for key in (
+                    "hyde_source_root",
+                    "request_filepath",
+                    "callable_name",
+                    "callable_args",
+                    "session_source",
+                    "reset_namespace",
+                )
+            ):
+                return cls.runtime_command_feature
+        return cls.project_command_feature
+
+    @classmethod
+    def model_for_feature(cls, feature_kind):
+        if feature_kind == cls.project_command_feature:
+            return ProjectCommandModel
+        if feature_kind == cls.runtime_command_feature:
+            return RuntimeCommandModel
+        if feature_kind == cls.table_feature:
+            return TableModel
+        if feature_kind == cls.mutation_feature:
+            return MutationModel
+        raise ValueError(f"Unsupported Hyde feature kind: {feature_kind!r}.")
+
+    @classmethod
+    def delegate_state(cls, feature_kind, state):
+        candidate = copy.deepcopy(state) if state is not None else None
+        if candidate is None:
+            return None
+        candidate["feature"] = cls.model_for_feature(feature_kind).feature_name
+        return candidate
+
+    @classmethod
+    def canonicalize_feature(cls, state, feature_kind):
+        normalized = copy.deepcopy(state)
+        normalized["feature"] = feature_kind
+        return normalized
+
+
+class HydeCodecView:
+    feature_name = None
+
+    @classmethod
+    def default_state(cls):
+        return HydeCodec.default_state(feature=cls.feature_name)
+
+    @classmethod
+    def normalize_state(cls, state):
+        return HydeCodec.normalize_state(cls.with_feature(state))
+
+    @classmethod
+    def validate_state(cls, state):
+        return HydeCodec.validate_state(cls.with_feature(state))
+
+    @classmethod
+    def update_state(cls, state, action):
+        return HydeCodec.update_state(cls.with_feature(state), action)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        return HydeCodec.state_to_python(cls.with_feature(state), context=context)
+
+    @classmethod
+    def state_to_macro_source(cls, state, macro_name, context=None):
+        return HydeCodec.state_to_macro_source(
+            cls.with_feature(state),
+            macro_name,
+            context=context,
+        )
+
+    @classmethod
+    def with_feature(cls, state):
+        normalized = {} if state is None else copy.deepcopy(state)
+        normalized["feature"] = cls.feature_name
+        return normalized
+
+
+class SimpleHydeCommandCodec(HydeCodecView):
+    feature_name = HydeCodec.project_command_feature
+
+
+class RuntimeCommandCodec(HydeCodecView):
+    feature_name = HydeCodec.runtime_command_feature
+
+
+class TableCodec(HydeCodecView):
+    feature_name = HydeCodec.table_feature
+
+
+class MutationCodec(HydeCodecView):
+    feature_name = HydeCodec.mutation_feature
+
+    @classmethod
+    def format_entry_literal(cls, value_text):
+        return MutationModel.format_entry_literal(value_text)
+
+    @classmethod
+    def suggest_new_array_name(cls, existing_names, value_text):
+        return MutationModel.suggest_new_array_name(existing_names, value_text)

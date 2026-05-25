@@ -138,6 +138,14 @@ class TestFileDialogPlugin(unittest.TestCase):
                 ],
             )
 
+    def test_load_project_state_preserves_python_source(self):
+        from hyde.user_interface.plugins.file.dialogs import LoadProjectState
+
+        state = LoadProjectState()
+        state.set_project_dir("/tmp/demo.hy")
+
+        self.assertEqual(state.python_source(), "hyde.load_project('/tmp/demo.hy')")
+
     def test_existing_project_dialogs_preview_and_dispatch_hidden_commands(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "existing.hy")

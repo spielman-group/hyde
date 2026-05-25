@@ -3,7 +3,7 @@ import os
 from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.matplotlib_features import (
-    FigureGraphicsExportCodec,
+    MatplotlibCodec,
     graphics_output_transparency_supported,
     runtime_graphics_export_formats,
 )
@@ -48,7 +48,12 @@ def figure_context_size_inches(figure_context, fallback=(6.4, 4.8)):
 
 
 class FigureGraphicsExportState(HydeGuiState):
-    codec = FigureGraphicsExportCodec
+    codec = MatplotlibCodec
+
+    def configure_defaults(self):
+        self._state = self.codec.default_state(
+            feature=self.codec.figure_graphics_export_feature
+        )
 
     def set_figure_name(self, figure_name):
         if figure_name:

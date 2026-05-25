@@ -52,6 +52,12 @@ The GUI surface does not:
 - deterministic mutation semantics
 - lowering to Python or recreation source
 
+Each supported feature-library surface has one authoritative `FeatureCodec`.
+Hyde does not keep multiple parallel codecs inside one feature module as
+competing truths for one feature surface. The canonical codec owns the surface,
+and any retained legacy names are compatibility views rather than additional
+`FeatureCodec` authorities.
+
 ### Kernel/backend owns
 - authoritative scientific objects and values
 - backend notifications and metadata
@@ -168,5 +174,7 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 Prefer the smallest clear shape:
 - one authoritative state owner
 - one lowering path per behavior
-- one codec per semantic feature when practical
+- one `FeatureCodec` per supported feature-library surface
+- compatibility views only when needed to preserve callers during migration,
+  never as parallel codec truths
 - composition over GUI/state multiple inheritance

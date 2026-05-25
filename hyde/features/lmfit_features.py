@@ -7,9 +7,9 @@ from hyde.features.base import (
     normalize_optional_text,
     ordered_unique_text,
     set_path,
+    sorted_eligible_names,
     valid_python_identifier,
 )
-from hyde.features.matplotlib_features import sorted_eligible_names
 
 CALCULATED_X_NAME = "_calculated_"
 

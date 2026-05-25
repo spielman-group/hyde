@@ -53,6 +53,27 @@ def valid_python_identifier(text):
     return normalized_text.isidentifier() and not keyword.iskeyword(normalized_text)
 
 
+def is_eligible_for_numeric_series(metadata):
+    metadata = dict(metadata or {})
+    python_type = str(metadata.get("python_type", "")).lower()
+    numpy_type = str(metadata.get("numpy_type", ""))
+    ndim = metadata.get("ndim", 1)
+    kind = str(metadata.get("numpy_kind", "f"))
+
+    is_array = python_type in ("ndarray", "series") or numpy_type == "Array"
+    is_numeric = kind in "biuf"
+
+    return is_array and is_numeric and ndim == 1
+
+
+def sorted_eligible_names(objects_metadata):
+    eligible = []
+    for name, metadata in dict(objects_metadata or {}).items():
+        if is_eligible_for_numeric_series(metadata):
+            eligible.append(str(name))
+    return sorted(eligible)
+
+
 class FeatureCodec(ABC):
     feature_name = None
     state_version = 1

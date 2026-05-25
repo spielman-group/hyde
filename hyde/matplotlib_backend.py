@@ -24,7 +24,7 @@ from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 
 from hyde.features.matplotlib_features import (
-    FigureIRCodec,
+    MatplotlibCodec,
     apply_figure_state,
     figure_ir_append_trace,
     figure_ir_apply_title,
@@ -630,8 +630,8 @@ def _default_trace_style(index):
 
 
 def _figure_defaults_snapshot(figure_ir):
-    normalized = FigureIRCodec.validate_state(figure_ir)
-    default_ir = FigureIRCodec.default_state()
+    normalized = MatplotlibCodec.validate_state(figure_ir)
+    default_ir = MatplotlibCodec.default_state(feature=MatplotlibCodec.figure_ir_feature)
     default_ir["settings"]["figsize"] = tuple(
         float(value) for value in rcParams["figure.figsize"]
     )
@@ -657,7 +657,7 @@ def _figure_defaults_snapshot(figure_ir):
                 }
             )
         trace_style_defaults[subplot["id"]] = subplot_trace_defaults
-    default_ir = FigureIRCodec.validate_state(default_ir)
+    default_ir = MatplotlibCodec.validate_state(default_ir)
     default_ir["trace_styles"] = trace_style_defaults
     return default_ir
 
@@ -728,7 +728,7 @@ def figure_snapshot_payload(figure, number):
         _refresh_first_class_figure_metadata(figure)
         figure_ir = getattr(figure, "_hyde_ir", None)
     if _is_windowed_figure(figure) and figure_ir is not None:
-        normalized_figure_ir = FigureIRCodec.validate_state(figure_ir)
+        normalized_figure_ir = MatplotlibCodec.validate_state(figure_ir)
         figure_defaults = getattr(figure, "_hyde_defaults", None)
         if figure_defaults is None:
             figure_defaults = _figure_defaults_snapshot(normalized_figure_ir)
@@ -737,11 +737,11 @@ def figure_snapshot_payload(figure, number):
         save_error = getattr(figure, "_hyde_import_warning", None)
         tracked_names = []
         try:
-            call_source = FigureIRCodec.state_to_python(
+            call_source = MatplotlibCodec.state_to_python(
                 normalized_figure_ir,
                 context={"figure_defaults": figure_defaults},
             )
-            tracked_names = list(FigureIRCodec.tracked_names(normalized_figure_ir))
+            tracked_names = list(MatplotlibCodec.tracked_names(normalized_figure_ir))
         except Exception as exc:
             save_error = save_error or str(exc)
         payload = {
@@ -873,7 +873,7 @@ def _resolve_live_line(axis, trace_id=None):
 
 def _figure_trace_styles(figure, figure_ir):
     styles = {}
-    normalized = FigureIRCodec.validate_state(figure_ir)
+    normalized = MatplotlibCodec.validate_state(figure_ir)
     for subplot in normalized["layout"]["subplots"]:
         axis = _resolve_live_axis(figure, subplot["id"])
         live_lines = {
@@ -893,7 +893,7 @@ def _figure_trace_styles(figure, figure_ir):
 
 def _resolved_axis_limits_snapshot(figure, figure_ir):
     limits = {}
-    normalized = FigureIRCodec.validate_state(figure_ir)
+    normalized = MatplotlibCodec.validate_state(figure_ir)
     for subplot in normalized["layout"]["subplots"]:
         axis = _resolve_live_axis(figure, subplot["id"])
         limits[subplot["id"]] = {
@@ -1090,8 +1090,8 @@ def _subplot_margins_from_live_figure(figure):
 def _import_first_class_figure_ir(figure, namespace=None):
     namespace = _main_namespace() if namespace is None else namespace
     candidates = _candidate_series_names(namespace)
-    previous_ir = FigureIRCodec.validate_state(getattr(figure, "_hyde_ir", None))
-    imported = FigureIRCodec.default_state()
+    previous_ir = MatplotlibCodec.validate_state(getattr(figure, "_hyde_ir", None))
+    imported = MatplotlibCodec.default_state(feature=MatplotlibCodec.figure_ir_feature)
     imported["settings"]["title"] = _default_figure_title(
         figure,
         getattr(getattr(figure, "canvas", None), "manager", None).num
@@ -1106,7 +1106,7 @@ def _import_first_class_figure_ir(figure, namespace=None):
     if len(axes) > 1:
         warnings.append("unsupported live figure features were omitted during Hyde import")
     if not axes:
-        return FigureIRCodec.validate_state(imported), (
+        return MatplotlibCodec.validate_state(imported), (
             None if not warnings else warnings[0]
         )
     axis = axes[0]
@@ -1178,7 +1178,7 @@ def _import_first_class_figure_ir(figure, namespace=None):
         line._hyde_trace_id = trace_id
         trace_index += 1
     imported["layout"]["subplots"] = [subplot]
-    return FigureIRCodec.validate_state(imported), (
+    return MatplotlibCodec.validate_state(imported), (
         None if not warnings else warnings[0]
     )
 
@@ -1403,12 +1403,12 @@ def regenerate_figure_from_ir(figure, use_bound_values=True):
     if figure_ir is None:
         raise ValueError("Figure does not have Hyde IR.")
 
-    normalized = FigureIRCodec.validate_state(figure_ir)
+    normalized = MatplotlibCodec.validate_state(figure_ir)
     default_subplot = None
     figure_defaults = getattr(figure, "_hyde_defaults", None)
     if figure_defaults is not None:
         try:
-            default_subplot = FigureIRCodec.validate_state(figure_defaults)["layout"][
+            default_subplot = MatplotlibCodec.validate_state(figure_defaults)["layout"][
                 "subplots"
             ][0]
         except Exception:
@@ -1695,7 +1695,7 @@ class AxesHyde(Axes):
                 trace = subplot["traces"][-1]
                 if lines:
                     lines[0]._hyde_trace_id = trace["id"]
-                source = FigureIRCodec._plot_call(trace)
+                source = MatplotlibCodec._plot_call(trace)
                 figure._record_command(
                     "plot",
                     source,

@@ -1,6 +1,6 @@
 from qtutils.qt import QtWidgets
 
-from hyde.features.hyde_features import is_eligible_for_table
+from hyde.features.base import is_eligible_for_numeric_series
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 
 from .window import TableState
@@ -22,7 +22,7 @@ class NewTableDialog(HydeDialogWidget):
 
     def _populate_list(self):
         for name, metadata in sorted(self.objects_metadata.items()):
-            if is_eligible_for_table(metadata):
+            if is_eligible_for_numeric_series(metadata):
                 item = QtWidgets.QListWidgetItem(name)
                 self.ui.objectList.addItem(item)
                 if name in self.preselection:
