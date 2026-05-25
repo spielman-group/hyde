@@ -31,6 +31,9 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 ### Figures
 - Only first-class `@hyde.figure` figures open Hyde figure windows.
 - Figure windows restore from `session.py` and preserve saved window metadata.
+- Figure windows now expose `Save Graphics...`, a figure-scoped `HydeFileDialog`
+  export surface that defaults into the project-local `exports/` container and emits
+  preview-backed live-kernel `savefig(...)` commands.
 - Figure-working surfaces now share canonical trace `display_name` generation through
   the composed `FigureDisplayHelper` path rather than widget-local fallback strings.
 - Figure-window chrome now shows the current figure name plus canonical trace display

@@ -25,7 +25,11 @@ from hyde.matplotlib_backend import (
 from hyde.features.matplotlib_features import (
     FigureIRCodec,
     figure_ir_from_live_state,
+    figure_graphics_export_command_source,
     figure_patch_source,
+    graphics_output_options,
+    graphics_output_transparency_supported,
+    runtime_graphics_export_formats,
 )
 from hyde.project_tools import (
     HYDE_MATPLOTLIB_BACKEND,
@@ -95,6 +99,83 @@ class FakeShellEvents:
 class FakeShell:
     def __init__(self):
         self.events = FakeShellEvents()
+
+
+class TestGraphicsExportFormats(unittest.TestCase):
+    def test_runtime_graphics_export_formats_orders_defaults_and_tracks_suffix_variants(self):
+        formats = runtime_graphics_export_formats(
+            {
+                "svg": "Scalable Vector Graphics",
+                "png": "Portable Network Graphics",
+                "jpeg": "Joint Photographic Experts Group",
+                "jpg": "Joint Photographic Experts Group",
+                "pdf": "Portable Document Format",
+                "tiff": "Tagged Image File Format",
+                "tif": "Tagged Image File Format",
+            }
+        )
+
+        self.assertEqual(
+            [item.key for item in formats],
+            ["pdf", "png", "jpeg", "jpg", "svg", "tif", "tiff"],
+        )
+
+        jpg_format = next(item for item in formats if item.key == "jpg")
+        jpeg_format = next(item for item in formats if item.key == "jpeg")
+
+        self.assertEqual(jpg_format.display_label, "JPG")
+        self.assertEqual(jpg_format.compatible_suffixes, (".jpg", ".jpeg"))
+        self.assertEqual(jpg_format.name_filter, "JPG Files (*.jpg *.jpeg)")
+        self.assertEqual(jpeg_format.display_label, "JPEG")
+        self.assertEqual(jpeg_format.compatible_suffixes, (".jpeg", ".jpg"))
+        self.assertEqual(jpeg_format.name_filter, "JPEG Files (*.jpeg *.jpg)")
+
+    def test_graphics_output_options_normalize_savefig_controls(self):
+        options = graphics_output_options(
+            "png",
+            dpi=450,
+            transparent=True,
+            size_inches=(4, 2.5),
+        )
+
+        self.assertEqual(
+            options,
+            {
+                "format": "png",
+                "dpi": 450,
+                "transparent": True,
+                "size_inches": (4.0, 2.5),
+            },
+        )
+
+    def test_transparency_support_is_disabled_only_for_clearly_opaque_formats(self):
+        self.assertTrue(graphics_output_transparency_supported("pdf"))
+        self.assertTrue(graphics_output_transparency_supported("svg"))
+        self.assertFalse(graphics_output_transparency_supported("jpg"))
+        self.assertFalse(graphics_output_transparency_supported("jpeg"))
+
+    def test_graphics_export_command_source_applies_size_override_dpi_and_transparency(self):
+        source = figure_graphics_export_command_source(
+            "Figure9",
+            "/tmp/Figure9.png",
+            output_format="png",
+            dpi=450,
+            transparent=True,
+            size_inches=(4.0, 2.5),
+        )
+
+        self.assertNotIn("import hyde", source)
+        self.assertIn("fig = hyde.get_figure('Figure9')", source)
+        self.assertIn("_hyde_original_size = tuple(fig.get_size_inches())", source)
+        self.assertIn("fig.set_size_inches(4.0, 2.5, forward=False)", source)
+        self.assertIn(
+            "fig.savefig('/tmp/Figure9.png', format='png', dpi=450, transparent=True)",
+            source,
+        )
+        self.assertIn(
+            "fig.set_size_inches(*_hyde_original_size, forward=False)",
+            source,
+        )
 
 
 class TestFigureCodec(unittest.TestCase):
@@ -430,7 +511,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         source = figure_patch_source(source_ir, target_ir, figure_name="FigureA")
 
-        self.assertIn("import hyde", source)
+        self.assertNotIn("import hyde", source)
         self.assertIn("fig = hyde.get_figure('FigureA')", source)
         self.assertIn("hyde.remove_traces(fig, 'trace0')", source)
         self.assertNotIn("line.remove()", source)

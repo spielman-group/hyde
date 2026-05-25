@@ -152,6 +152,29 @@ class ConfirmingFileDialog(DemoFileDialog):
     confirm_overwrite = True
 
 
+class ExtendedDemoFileDialog(DemoFileDialog):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.extra_controls = QtWidgets.QLabel("Extra controls")
+        self.mount_content_widget(self.extra_controls, row=1)
+
+
+class SuggestedPathFileDialog(HydeFileDialog):
+    def __init__(self, suggested_path, *args, **kwargs):
+        self._suggested_path = suggested_path
+        super().__init__(*args, **kwargs)
+
+    def suggested_path(self):
+        return self._suggested_path
+
+    def build_preview_payload(self, selected_path):
+        return f"emit({selected_path!r})"
+
+
+class CreatingSuggestedPathFileDialog(SuggestedPathFileDialog):
+    create_suggested_directory = True
+
+
 class FakeFigureSession:
     def __init__(self, opening_state, *, current_state=None, trace_records=()):
         self.figure_number = 7
@@ -250,8 +273,8 @@ class TestHydeToolWidget(unittest.TestCase):
         dialog.show()
         self.qapp.processEvents()
 
-        self.assertIs(content.parentWidget(), dialog.shell_ui.content_widget)
-        self.assertEqual(dialog.shell_ui.content_layout.count(), 1)
+        self.assertTrue(content.isVisibleTo(dialog))
+        self.assertLess(content.geometry().top(), dialog.lower_text_edit.geometry().top())
         self.assertTrue(dialog.lower_text_edit.isReadOnly())
         self.assertEqual(dialog.do_it_button.text(), "Do It")
         self.assertEqual(dialog.to_cmd_line_button.text(), "To Cmd Line")
@@ -265,6 +288,45 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertTrue(dialog.help_button.isVisibleTo(dialog))
         self.assertGreater(dialog.shell_ui.left_button_layout.count(), 0)
         self.assertGreater(dialog.shell_ui.right_button_layout.count(), 0)
+
+    def test_tool_dialog_shell_supports_stacked_content_rows_and_row_replacement(self):
+        dialog = DemoDialogWidget()
+        top = QtWidgets.QLabel("Top row")
+        lower = QtWidgets.QLabel("Lower row")
+        replacement = QtWidgets.QLabel("Replacement top row")
+
+        dialog.mount_content_widget(top)
+        dialog.mount_content_widget(lower, row=1)
+        dialog.mount_content_widget(replacement)
+        dialog.show()
+        self.qapp.processEvents()
+
+        self.assertTrue(replacement.isVisibleTo(dialog))
+        self.assertTrue(lower.isVisibleTo(dialog))
+        self.assertFalse(top.isVisibleTo(dialog))
+        self.assertLess(replacement.geometry().top(), lower.geometry().top())
+        self.assertLess(lower.geometry().top(), dialog.lower_text_edit.geometry().top())
+        self.assertTrue(dialog.lower_text_edit.isVisibleTo(dialog))
+        self.assertTrue(dialog.cancel_button.isVisibleTo(dialog))
+
+    def test_tool_dialog_load_ui_can_mount_into_later_content_row(self):
+        dialog = DemoDialogWidget()
+        top = QtWidgets.QLabel("Top row")
+
+        dialog.mount_content_widget(top)
+        loaded = dialog.load_ui(
+            "hyde_window_widget.ui",
+            module_name="hyde.user_interface",
+            row=1,
+        )
+        dialog.show()
+        self.qapp.processEvents()
+
+        self.assertIs(dialog.ui, loaded)
+        self.assertTrue(top.isVisibleTo(dialog))
+        self.assertTrue(loaded.isVisibleTo(dialog))
+        self.assertLess(top.geometry().top(), loaded.geometry().top())
+        self.assertLess(loaded.geometry().top(), dialog.lower_text_edit.geometry().top())
 
     def test_tool_dialog_shell_uses_preview_string_backing_for_base_footer_actions(self):
         clipboard = QtWidgets.QApplication.clipboard()
@@ -544,6 +606,35 @@ class TestHydeToolWidget(unittest.TestCase):
             self.assertEqual(execution_service.hidden_calls, [(expected_payload, True)])
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
 
+    def test_file_dialog_subclass_can_add_extra_content_below_embedded_chooser(self):
+        execution_service = RecordingExecutionService()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+            dialog = ExtendedDemoFileDialog(
+                services={"python_execution_service": execution_service}
+            )
+
+            dialog.show()
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.do_it_button.click()
+
+            expected_payload = f"emit({os.path.abspath(project_dir)!r})"
+            self.assertTrue(dialog.file_widget.isVisibleTo(dialog))
+            self.assertTrue(dialog.extra_controls.isVisibleTo(dialog))
+            self.assertLess(
+                dialog.file_widget.geometry().top(),
+                dialog.extra_controls.geometry().top(),
+            )
+            self.assertLess(
+                dialog.extra_controls.geometry().top(),
+                dialog.lower_text_edit.geometry().top(),
+            )
+            self.assertEqual(dialog.preview_string(), expected_payload)
+            self.assertEqual(execution_service.hidden_calls, [(expected_payload, True)])
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
+
     def test_file_dialog_routes_valid_preview_payload_through_footer_actions(self):
         clipboard = QtWidgets.QApplication.clipboard()
         terminal_service = RecordingVisibleTerminalService()
@@ -628,6 +719,21 @@ class TestHydeToolWidget(unittest.TestCase):
             self.assertFalse(dialog.do_it_button.isEnabled())
             self.assertFalse(dialog.to_clip_button.isEnabled())
             self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+
+    def test_file_dialog_can_optionally_create_directory_for_suggested_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            suggested_path = os.path.join(tmpdir, "exports", "figure.pdf")
+            self.assertFalse(os.path.exists(os.path.dirname(suggested_path)))
+
+            dialog = CreatingSuggestedPathFileDialog(suggested_path)
+            self.qapp.processEvents()
+
+            self.assertTrue(os.path.isdir(os.path.dirname(suggested_path)))
+            self.assertEqual(dialog.selected_path(), os.path.abspath(suggested_path))
+            self.assertEqual(
+                dialog.preview_string(),
+                f"emit({os.path.abspath(suggested_path)!r})",
+            )
 
     def test_figure_dialog_base_advances_live_patch_state_and_rolls_back_on_cancel(self):
         execution_service = RecordingExecutionService()

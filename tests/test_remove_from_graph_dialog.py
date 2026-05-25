@@ -46,7 +46,7 @@ class FakeExecutionService:
 class EvaluatingExecutionService(FakeExecutionService):
     def execute_hidden(self, code, silent=True):
         super().execute_hidden(code, silent=silent)
-        exec(str(code), {"__builtins__": __builtins__}, {})
+        exec(str(code), {"__builtins__": __builtins__, "hyde": hyde}, {})
         return True
 
 

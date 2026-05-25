@@ -1,5 +1,6 @@
 import copy
 import numbers
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -66,6 +67,23 @@ TRACE_STYLE_ACTION_KEYS = (
     "visible",
 )
 
+GRAPHICS_EXPORT_SUFFIX_VARIANTS = {
+    "jpeg": ("jpg",),
+    "jpg": ("jpeg",),
+    "tif": ("tiff",),
+    "tiff": ("tif",),
+}
+GRAPHICS_EXPORT_TRANSPARENCY_UNSUPPORTED_FORMATS = frozenset({"jpeg", "jpg"})
+
+
+@dataclass(frozen=True)
+class GraphicsExportFormat:
+    key: str
+    display_label: str
+    preferred_suffix: str
+    compatible_suffixes: tuple[str, ...]
+    name_filter: str
+
 
 def _operand_to_python(operand):
     if operand is None:
@@ -99,15 +117,171 @@ def _macro_ready_lines(lines):
     return [line for line in lines if line.strip() != "fig.canvas.draw_idle()"]
 
 
+def figure_command_prelude_lines(
+    figure_name,
+    *,
+    extra_imports=(),
+    include_axes=False,
+):
+    lines = [str(line) for line in tuple(extra_imports or ())]
+    lines.append(f"fig = hyde.get_figure({str(figure_name)!r})")
+    if include_axes:
+        lines.append("ax = fig.axes[0]")
+    return lines
+
+
 def figure_refresh_command_source(figure_name, *, use_bound_values=False):
     normalized_name = str(figure_name or "").strip()
     if not normalized_name:
         raise ValueError("Figure refresh requires a stable first-class figure name.")
     return "\n".join(
-        [
-            "import hyde",
-            f"fig = hyde.get_figure({normalized_name!r})",
-            f"hyde.refresh_figure(fig, use_bound_values={bool(use_bound_values)!r})",
+        figure_command_prelude_lines(normalized_name)
+        + [f"hyde.refresh_figure(fig, use_bound_values={bool(use_bound_values)!r})"]
+    )
+
+
+def runtime_graphics_export_filetypes():
+    import matplotlib.pyplot as plt
+
+    backend_module = plt._get_backend_mod()
+    canvas_type = getattr(backend_module, "FigureCanvas", None)
+    return dict(getattr(canvas_type, "filetypes", {}) or {})
+
+
+def graphics_export_suffixes_for_format(format_key, filetypes=None):
+    normalized_key = str(format_key or "").strip().lower()
+    if not normalized_key:
+        return ()
+    available_filetypes = (
+        runtime_graphics_export_filetypes() if filetypes is None else dict(filetypes)
+    )
+    suffixes = [f".{normalized_key}"]
+    for variant in GRAPHICS_EXPORT_SUFFIX_VARIANTS.get(normalized_key, ()):
+        if variant in available_filetypes:
+            suffixes.append(f".{variant}")
+    return tuple(_ordered_unique(suffixes))
+
+
+def graphics_export_name_filter(display_label, suffixes):
+    patterns = " ".join(f"*{suffix}" for suffix in tuple(suffixes or ()))
+    if not patterns:
+        patterns = "*"
+    return f"{display_label} Files ({patterns})"
+
+
+def runtime_graphics_export_formats(filetypes=None):
+    resolved_filetypes = (
+        runtime_graphics_export_filetypes() if filetypes is None else dict(filetypes)
+    )
+    formats = []
+    for key in resolved_filetypes:
+        normalized_key = str(key or "").strip().lower()
+        if not normalized_key:
+            continue
+        display_label = normalized_key.upper()
+        compatible_suffixes = graphics_export_suffixes_for_format(
+            normalized_key,
+            resolved_filetypes,
+        )
+        formats.append(
+            GraphicsExportFormat(
+                key=normalized_key,
+                display_label=display_label,
+                preferred_suffix=f".{normalized_key}",
+                compatible_suffixes=compatible_suffixes,
+                name_filter=graphics_export_name_filter(
+                    display_label,
+                    compatible_suffixes,
+                ),
+            )
+        )
+
+    def sort_key(item):
+        if item.key == "pdf":
+            return (0, item.display_label.lower())
+        if item.key == "png":
+            return (1, item.display_label.lower())
+        return (2, item.display_label.lower())
+
+    return sorted(formats, key=sort_key)
+
+
+def graphics_output_transparency_supported(output_format):
+    normalized_format = str(output_format or "").strip().lower()
+    if not normalized_format:
+        return False
+    return normalized_format not in GRAPHICS_EXPORT_TRANSPARENCY_UNSUPPORTED_FORMATS
+
+
+def graphics_output_options(
+    output_format,
+    *,
+    dpi=300,
+    transparent=False,
+    size_inches=None,
+):
+    normalized_format = str(output_format or "").strip().lower()
+    if not normalized_format:
+        raise ValueError("Graphics output requires an output format.")
+    if not isinstance(dpi, numbers.Integral) or int(dpi) <= 0:
+        raise ValueError("Graphics output requires a positive integer DPI.")
+    normalized_size = None
+    if size_inches is not None:
+        if not isinstance(size_inches, (list, tuple)) or len(size_inches) != 2:
+            raise ValueError("Graphics output size_inches must be a length-2 sequence.")
+        normalized_size = (float(size_inches[0]), float(size_inches[1]))
+        if normalized_size[0] <= 0 or normalized_size[1] <= 0:
+            raise ValueError("Graphics output size_inches values must be positive.")
+    return {
+        "format": normalized_format,
+        "dpi": int(dpi),
+        "transparent": bool(transparent)
+        and graphics_output_transparency_supported(normalized_format),
+        "size_inches": normalized_size,
+    }
+
+
+def figure_graphics_export_command_source(
+    figure_name,
+    output_path,
+    *,
+    output_format="pdf",
+    dpi=300,
+    transparent=False,
+    size_inches=None,
+):
+    normalized_name = str(figure_name or "").strip()
+    if not normalized_name:
+        raise ValueError("Graphics export requires a stable first-class figure name.")
+    normalized_path = str(output_path or "").strip()
+    if not normalized_path:
+        raise ValueError("Graphics export requires an output path.")
+    options = graphics_output_options(
+        output_format,
+        dpi=dpi,
+        transparent=transparent,
+        size_inches=size_inches,
+    )
+    savefig_source = (
+        f"fig.savefig({normalized_path!r}, "
+        f"format={options['format']!r}, "
+        f"dpi={options['dpi']!r}, "
+        f"transparent={options['transparent']!r})"
+    )
+    if options["size_inches"] is None:
+        return "\n".join(
+            figure_command_prelude_lines(normalized_name) + [savefig_source]
+        )
+    width, height = options["size_inches"]
+    return "\n".join(
+        figure_command_prelude_lines(normalized_name)
+        + [
+            "_hyde_original_size = tuple(fig.get_size_inches())",
+            "try:",
+            f"    fig.set_size_inches({width!r}, {height!r}, forward=False)",
+            f"    {savefig_source}",
+            "finally:",
+            "    fig.set_size_inches(*_hyde_original_size, forward=False)",
         ]
     )
 
@@ -1986,11 +2160,8 @@ def _figure_patch_remove_trace_helper_source(
 
     joined_ids = ", ".join(repr(trace_id) for trace_id in removed_trace_ids)
     return "\n".join(
-        [
-            "import hyde",
-            f"fig = hyde.get_figure({str(figure_name)!r})",
-            f"hyde.remove_traces(fig, {joined_ids})",
-        ]
+        figure_command_prelude_lines(figure_name)
+        + [f"hyde.remove_traces(fig, {joined_ids})"]
     )
 
 
@@ -2121,16 +2292,16 @@ def figure_patch_source(
     if not lines:
         return ""
 
-    prelude = ["import hyde"]
+    prelude = []
     if needs_ticker:
         prelude.append("import matplotlib.ticker as mticker")
     if any("rcParams[" in line for line in lines):
         prelude.append("from matplotlib import rcParams")
     prelude.extend(
-        [
-            f"fig = hyde.get_figure({str(figure_name)!r})",
-            "ax = fig.axes[0]",
-        ]
+        figure_command_prelude_lines(
+            figure_name,
+            include_axes=True,
+        )
     )
     return "\n".join(prelude + lines + ["fig.canvas.draw_idle()"])
 

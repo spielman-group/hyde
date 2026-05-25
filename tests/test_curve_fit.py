@@ -26,7 +26,6 @@ from hyde.matplotlib_backend import (
 )
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.shared.figure import (
     EditableFigureContext,
     FigureEditSession,
@@ -654,6 +653,30 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
+    def test_project_activation_does_not_dispatch_fit_function_registry_refresh(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
+        app = make_plugin_host(manager)
+        harness = configure_curve_fit_runtime(app, manager)
+
+        try:
+            plugin = manager.plugins["curve_fit_dialog"]
+            execution_service = manager.services["python_execution_service"]
+            execution_service.calls.clear()
+
+            plugin.on_project_activated({"project_dir": harness.project_dir})
+
+            self.assertEqual(execution_service.calls, [])
+            self.assertIn(
+                "line",
+                [
+                    entry["name"]
+                    for entry in manager.services["curve_fit_catalog_service"].fit_functions()
+                ],
+            )
+        finally:
+            harness.close()
+
     def test_curve_fit_dialog_preserves_static_surface_after_ui_port(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
@@ -990,7 +1013,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_catalog_service_refreshes_entries_and_default_name(self):
+    def test_curve_fit_catalog_service_uses_reload_published_catalog_and_default_name(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
@@ -1011,15 +1034,6 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.reload_procedures()
             catalog_service = manager.services["curve_fit_catalog_service"]
             execution_service = manager.services["python_execution_service"]
-            expected_refresh_state = RuntimeCommandState()
-            expected_refresh_state.set_callable_invocation(
-                "hyde.recreation_registry.publish_registry",
-                [repr("fit_function")],
-            )
-            expected_refresh_command = expected_refresh_state.python_source()
-
-            catalog_service.replace_catalog([], [])
-            self.assertTrue(catalog_service.refresh())
 
             self.assertIn(
                 "FitFunction0",
@@ -1033,10 +1047,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 catalog_service.default_new_fit_function_name(),
                 "FitFunction2",
             )
-            self.assertEqual(
-                execution_service.calls[-1]["code"],
-                expected_refresh_command,
-            )
+            self.assertEqual(execution_service.calls, [])
         finally:
             harness.close()
 

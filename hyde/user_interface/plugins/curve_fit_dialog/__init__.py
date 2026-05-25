@@ -1,6 +1,5 @@
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.shared.plugin import HydePlugin
 from hyde.user_interface.shared.project import resolve_requested_name
 
@@ -27,18 +26,6 @@ class CurveFitCatalogService(QtCore.QObject):
     def rejected_fit_functions(self):
         return tuple(dict(entry) for entry in self._rejected_fit_functions)
 
-    def refresh(self):
-        python_execution_service = self.plugin.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False
-        state = RuntimeCommandState()
-        state.set_callable_invocation(
-            "hyde.recreation_registry.publish_registry",
-            [repr("fit_function")],
-        )
-        python_execution_service.execute_hidden(state.python_source())
-        return True
-
     def default_new_fit_function_name(self):
         existing_names = [
             entry["name"] for entry in self._fit_functions
@@ -61,7 +48,6 @@ class CurveFitCatalogService(QtCore.QObject):
             )
         write_fit_function_scaffold(procedures_init, validated_name)
         procedures_service.reload_procedures()
-        self.refresh()
         return validated_name
 
     def replace_catalog(self, fit_functions, rejected_fit_functions):
@@ -109,7 +95,6 @@ class Plugin(HydePlugin):
 
     def on_project_activated(self, data):
         del data
-        self.catalog_service.refresh()
 
     def on_kernel_message(self, payload):
         if payload.get("task") != "FIT_FUNCTIONS_RESPONSE":

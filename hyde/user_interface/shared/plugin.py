@@ -582,7 +582,11 @@ class HydeMenuContext(MenuContext):
             if key not in group_orders:
                 group_orders[key] = {}
             if group not in group_orders[key]:
-                group_orders[key][group] = len(group_orders[key])
+                explicit_group_order = contribution.get("group_order", None)
+                if explicit_group_order is None:
+                    group_orders[key][group] = len(group_orders[key])
+                else:
+                    group_orders[key][group] = int(explicit_group_order)
 
             grouped.setdefault(key, []).append((plugin_name, contribution))
 

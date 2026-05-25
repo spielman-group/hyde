@@ -66,6 +66,7 @@ example.hy/
 ├── manifest.toml
 ├── session.toml
 ├── session.py
+├── exports/
 ├── terminal/history.py
 ├── procedures/__init__.py
 ├── procedures/helpers.py
@@ -75,6 +76,7 @@ example.hy/
 - `manifest.toml` + `data/` store saved kernel objects.
 - `session.toml` stores declarative GUI session state.
 - `session.py` stores executable reopen source for open saveable windows.
+- `exports/` is the default project-local destination for figure graphics export.
 - `terminal/history.py` stores visible command history only.
 - `procedures/__init__.py` is the canonical project bootstrap and the bounded macro
   store for explicit saved window macros and project-defined fit functions.

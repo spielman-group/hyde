@@ -931,8 +931,12 @@ class TestProjectStateHelpers(unittest.TestCase):
             self.assertTrue((project_dir / "session.toml").exists())
             self.assertTrue((project_dir / "session.py").exists())
             self.assertTrue((project_dir / "terminal" / "history.py").exists())
+            self.assertTrue((project_dir / "exports").is_dir())
             self.assertFalse((project_dir / "data" / ".gitkeep").exists())
+            self.assertFalse((project_dir / "exports" / ".gitkeep").exists())
+            self.assertIn("exports", created_paths)
             self.assertNotIn("data/.gitkeep", created_paths)
+            self.assertNotIn("exports/.gitkeep", created_paths)
 
     def test_gui_mode_rebinds_quit_and_exit_to_hyde_quit(self):
         original_quit = builtins.quit

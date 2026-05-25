@@ -146,7 +146,6 @@ class CurveFitDialog(HydeFigureDialogWidget):
                 QtCore.Qt.UniqueConnection,
             )
             self._populate_fit_function_combo()
-            self._catalog_service.refresh()
         self._refresh_from_state()
 
     def can_do_it(self):

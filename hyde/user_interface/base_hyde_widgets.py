@@ -179,6 +179,7 @@ class HydeDialogWidget(HydeDialog):
             module_name="hyde.user_interface",
         )
         self.mounted_child = None
+        self._mounted_content_rows = {}
         self._preview_string = ""
         self._preview_display_text = None
         self.lower_text_edit.setReadOnly(True)
@@ -192,24 +193,38 @@ class HydeDialogWidget(HydeDialog):
         self.cancel_button.clicked.connect(self.reject)
         self.refresh_shell()
 
-    def mount_content_widget(self, child):
-        if self.mounted_child is child:
+    def _refresh_content_rows(self):
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+        for row in sorted(self._mounted_content_rows):
+            self.content_layout.addWidget(self._mounted_content_rows[row])
+        self.mounted_child = self._mounted_content_rows.get(0)
+
+    def mount_content_widget(self, child, *, row=0):
+        row = int(row)
+        if row < 0:
+            raise ValueError("row must be >= 0")
+        if self._mounted_content_rows.get(row) is child:
             return child
-        if self.mounted_child is not None:
-            self.content_layout.removeWidget(self.mounted_child)
-            self.mounted_child.setParent(None)
-        self.content_layout.addWidget(child)
-        self.mounted_child = child
+        for existing_row, existing_widget in list(self._mounted_content_rows.items()):
+            if existing_widget is child:
+                del self._mounted_content_rows[existing_row]
+                break
+        self._mounted_content_rows[row] = child
+        self._refresh_content_rows()
         return child
 
-    def load_ui(self, ui_filename, *, module_name=None):
+    def load_ui(self, ui_filename, *, module_name=None, row=0):
         content = load_ui_for_owner(
             QtWidgets.QWidget(self),
             ui_filename,
             module_name=module_name,
         )
         self.ui = content
-        self.mount_content_widget(content)
+        self.mount_content_widget(content, row=row)
         return content
 
     def preview_string(self):
@@ -418,8 +433,36 @@ class HydeFileWidget(QtWidgets.QFileDialog):
         if parent_dir:
             self.setDirectory(parent_dir)
         self.selectFile(normalized_path)
+        if self.file_name_edit is not None:
+            self.file_name_edit.setText(os.path.basename(normalized_path))
         self.emit_selection_changed()
         return normalized_path
+
+    def set_selection_policy(
+        self,
+        *,
+        allowed_suffixes=None,
+        name_filters=None,
+        selected_name_filter=None,
+    ):
+        if allowed_suffixes is not None:
+            self.allowed_suffixes = tuple(
+                suffix.lower()
+                for suffix in allowed_suffixes
+                if str(suffix or "").strip()
+            )
+        if name_filters is not None:
+            self.name_filters = tuple(
+                str(name_filter)
+                for name_filter in name_filters
+                if str(name_filter or "").strip()
+            )
+            if self.name_filters:
+                self.setNameFilters(list(self.name_filters))
+        if selected_name_filter:
+            self.selectNameFilter(str(selected_name_filter))
+        elif self.name_filters:
+            self.selectNameFilter(self.name_filters[0])
 
     def selected_path(self):
         if self.file_name_edit is not None:
@@ -457,23 +500,42 @@ class HydeFileDialog(HydeDialogWidget):
     allowed_suffixes = ()
     name_filters = ()
     confirm_overwrite = False
+    create_suggested_directory = False
 
     def __init__(self, *args, services=None, **kwargs):
         super().__init__(*args, services=services, **kwargs)
+        suggested_path = self.suggested_path()
+        self._create_suggested_directory_for_path(suggested_path)
         self.file_widget = HydeFileWidget(
             selection_mode=self.selection_mode,
             require_existing=self.require_existing,
             allowed_suffixes=self.allowed_suffixes,
             name_filters=self.name_filters,
-            initial_path=self.suggested_path(),
+            initial_path=suggested_path,
             parent=self,
         )
-        self.mount_content_widget(self.file_widget)
+        self.mount_content_widget(self.file_widget, row=0)
         self.file_widget.selection_changed.connect(self.refresh_from_file_selection)
         self.refresh_from_file_selection()
 
     def suggested_path(self):
         return None
+
+    def _create_suggested_directory_for_path(self, suggested_path):
+        if not self.create_suggested_directory or not suggested_path:
+            return None
+        normalized_path = os.path.abspath(str(suggested_path))
+        if self.selection_mode == "directory":
+            directory_path = normalized_path
+        else:
+            directory_path = os.path.dirname(normalized_path) or None
+        if not directory_path:
+            return None
+        try:
+            os.makedirs(directory_path, exist_ok=True)
+        except OSError:
+            return None
+        return directory_path
 
     def selected_path(self):
         return self.file_widget.selected_path()
