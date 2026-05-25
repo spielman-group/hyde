@@ -450,9 +450,6 @@ class HydeFileWidget(QtWidgets.QFileDialog):
             return f"{selected_path} is a directory."
         return None
 
-    def is_selection_valid(self):
-        return self.validation_error() is None
-
 
 class HydeFileDialog(HydeDialogWidget):
     selection_mode = "file"

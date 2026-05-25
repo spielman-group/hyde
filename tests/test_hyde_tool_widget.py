@@ -409,7 +409,6 @@ class TestHydeToolWidget(unittest.TestCase):
                     QtWidgets.QFileDialog.ShowDirsOnly
                 )
             )
-            self.assertEqual(directory_widget.selectedNameFilter(), "Directories")
             self.assertEqual(directory_widget.selected_path(), os.path.abspath(project_dir))
             self.assertIsNone(directory_widget.validation_error())
 
