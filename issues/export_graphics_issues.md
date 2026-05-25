@@ -1,9 +1,9 @@
-- [x] Slice 1: Make Kernel Transport Logging Authoritative For Hidden And Visible Commands
+- [x] Slice 1: Adopt Shared Hidden And Visible Command Dispatch For Export Graphics
 - [x] Slice 2: Bring Save Graphics Source Generation Up To Current Figure Patch Family Level
-- [x] Slice 3: Trim Redundant Local Logging Around Figure Export Paths
-- [x] Slice 4: Lock Export Graphics And Transport Logging With Behavior Tests And Present-Tense Docs
+- [x] Slice 3: Trim Redundant Local State Shims Around Figure Export Paths
+- [x] Slice 4: Lock Export Graphics With Behavior Tests And Present-Tense Docs
 
-## Slice 1: Make Kernel Transport Logging Authoritative For Hidden And Visible Commands
+## Slice 1: Adopt Shared Hidden And Visible Command Dispatch For Export Graphics
 
 ### Type
 
@@ -11,21 +11,19 @@
 
 ### What to build
 
-Move debug logging for GUI-originated Python dispatch into the shared
-hidden/visible transport path so Hyde logs the final command string actually
-sent to the kernel, regardless of which feature generated it. This slice should
-leave current feature behavior intact while making transport logging the
-authoritative source of truth for kernel-bound command visibility.
+Make `Save Graphics...` use the same shared hidden/visible command-dispatch
+path as the rest of Hyde while leaving current feature behavior intact. This
+slice is the baseline plumbing step before export-specific source-generation
+cleanup.
 
 ### Acceptance criteria
 
-- [x] Hidden command dispatch logs the final command string at the transport
-      layer.
-- [x] Visible command dispatch uses the same logging policy.
-- [x] The log window now shows dispatch activity for `Save Graphics...` even
-      before export-specific source-generation cleanup is complete.
-- [x] Existing manual state-local logging is not yet required to be removed, but
-      transport logging is sufficient to observe all dispatched commands.
+- [x] `Save Graphics...` uses Hyde’s shared hidden command-dispatch path.
+- [x] Visible dispatch follows the same shared dispatch contract.
+- [x] Export-specific source-generation cleanup can proceed without inventing a
+      separate submission path.
+- [x] Existing local state handling is not yet required to be removed at this
+      stage.
 
 ### Blocked by
 
@@ -33,7 +31,7 @@ None - can start immediately.
 
 ### User stories covered
 
-- `issues/nonuniform_python_strings.md`: User stories 2, 3, 4, 10
+- `issues/nonuniform_python_strings.md`: User stories 2, 3, 4, 8
 
 ## Slice 2: Bring Save Graphics Source Generation Up To Current Figure Patch Family Level
 
@@ -65,14 +63,14 @@ first-class figure operations.
 
 ### Blocked by
 
-- Slice 1: Make Kernel Transport Logging Authoritative For Hidden And Visible Commands
+- Slice 1: Adopt Shared Hidden And Visible Command Dispatch For Export Graphics
 
 ### User stories covered
 
 - `issues/export_graphics.md`: User stories 3, 4, 5, 23, 24
 - `issues/nonuniform_python_strings.md`: User stories 6, 7, 8
 
-## Slice 3: Trim Redundant Local Logging Around Figure Export Paths
+## Slice 3: Trim Redundant Local State Shims Around Figure Export Paths
 
 ### Type
 
@@ -80,33 +78,33 @@ first-class figure operations.
 
 ### What to build
 
-Clean up redundant feature-local manual logging in the export-adjacent figure
-command paths now that transport logging is authoritative. This slice should
-focus on the nearby figure export and figure patch surfaces, not the whole
-package, and should leave the code closer to one logging rule rather than two
-overlapping ones.
+Clean up redundant feature-local state shims in the export-adjacent figure
+command paths now that `Save Graphics...` uses the shared figure-family command
+path. This slice should focus on the nearby figure export and figure patch
+surfaces, not the whole package, and should leave the code closer to one clear
+command-generation rule rather than overlapping local variations.
 
 ### Acceptance criteria
 
-- [x] Nearby export-adjacent figure command paths no longer rely on manual
-      logging shims solely to make dispatched commands visible in logs.
+- [x] Nearby export-adjacent figure command paths no longer rely on redundant
+      local state shims.
 - [x] `Save Graphics...` and the current figure patch family follow one clear
-      logging rule.
-- [x] Removing redundant local logging does not reduce the observability of
-      dispatched commands in the log window.
+      command-generation rule.
+- [x] Removing redundant local state shims does not change the dispatched
+      export behavior.
 - [x] This cleanup remains local to export-adjacent figure command paths and
       does not broaden into a package-wide rewrite.
 
 ### Blocked by
 
-- Slice 1: Make Kernel Transport Logging Authoritative For Hidden And Visible Commands
+- Slice 1: Adopt Shared Hidden And Visible Command Dispatch For Export Graphics
 - Slice 2: Bring Save Graphics Source Generation Up To Current Figure Patch Family Level
 
 ### User stories covered
 
-- `issues/nonuniform_python_strings.md`: User stories 2, 4, 9, 10
+- `issues/nonuniform_python_strings.md`: User stories 2, 4, 7, 8
 
-## Slice 4: Lock Export Graphics And Transport Logging With Behavior Tests And Present-Tense Docs
+## Slice 4: Lock Export Graphics With Behavior Tests And Present-Tense Docs
 
 ### Type
 
@@ -115,30 +113,28 @@ overlapping ones.
 ### What to build
 
 Add the behavior-focused tests and present-tense documentation needed to lock
-the new export and logging contract. The tests should verify the final
-dispatched command and the log-observable behavior rather than helper wiring.
-The docs should make clear that transport logging is authoritative and that
-`Save Graphics...` now follows the current figure-family command path rather
-than dialog-local lowering.
+the new export contract. The tests should verify the final dispatched command
+rather than helper wiring. The docs should make clear that `Save Graphics...`
+now follows the current figure-family command path rather than dialog-local
+lowering.
 
 ### Acceptance criteria
 
-- [x] Tests cover transport-observable logging for hidden and visible dispatch.
 - [x] Tests cover `Save Graphics...` preview/dispatch behavior through the new
       figure-family export command path.
-- [x] Tests verify that export logging no longer depends on dialog-local or
-      feature-local manual logging.
-- [x] Present-tense docs describe the new export command path and logging
-      contract without implying that `Do It` must rerun `python_source()` when
-      it is already dispatching the authoritative generated preview string.
+- [x] Tests verify the export behavior through the shared command path rather
+      than dialog-local or feature-local shims.
+- [x] Present-tense docs describe the new export command path without implying
+      that `Do It` must rerun `python_source()` when it is already dispatching
+      the authoritative generated preview string.
 
 ### Blocked by
 
-- Slice 1: Make Kernel Transport Logging Authoritative For Hidden And Visible Commands
+- Slice 1: Adopt Shared Hidden And Visible Command Dispatch For Export Graphics
 - Slice 2: Bring Save Graphics Source Generation Up To Current Figure Patch Family Level
-- Slice 3: Trim Redundant Local Logging Around Figure Export Paths
+- Slice 3: Trim Redundant Local State Shims Around Figure Export Paths
 
 ### User stories covered
 
 - `issues/export_graphics.md`: User story 25
-- `issues/nonuniform_python_strings.md`: User stories 4, 9, 10, 11, 12
+- `issues/nonuniform_python_strings.md`: User stories 4, 7, 8, 9, 10
