@@ -182,6 +182,9 @@ class HydeDialogWidget(HydeDialog):
         self._preview_string = ""
         self._preview_display_text = None
         self.lower_text_edit.setReadOnly(True)
+        self.do_it_button.setDefault(True)
+        self.do_it_button.setAutoDefault(True)
+        self.cancel_button.setAutoDefault(False)
         self.do_it_button.clicked.connect(self.handle_do_it)
         self.to_cmd_line_button.clicked.connect(self.send_to_cmd_line)
         self.to_clip_button.clicked.connect(self.copy_to_clip)
@@ -340,11 +343,8 @@ class HydeFileWidget(QtWidgets.QFileDialog):
         )
         super().__init__(parent, "", self.initial_directory(), **kwargs)
         self.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
-        self.setAcceptMode(
-            QtWidgets.QFileDialog.AcceptOpen
-            if self.require_existing
-            else QtWidgets.QFileDialog.AcceptSave
-        )
+        self.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
+        self.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, True)
         self.configure_file_dialog()
         if self.name_filters:
             self.setNameFilters(list(self.name_filters))
@@ -390,6 +390,25 @@ class HydeFileWidget(QtWidgets.QFileDialog):
 
     def emit_selection_changed(self):
         self.selection_changed.emit()
+
+    def accept(self):
+        self.emit_selection_changed()
+        parent = self.outer_dialog(HydeDialogWidget)
+        if parent is not None and parent.do_it_button.isEnabled():
+            parent.do_it_button.click()
+
+    def outer_dialog(self, dialog_type):
+        parent = self.parentWidget()
+        while parent is not None and not isinstance(parent, dialog_type):
+            parent = parent.parentWidget()
+        return parent
+
+    def reject(self):
+        parent = self.outer_dialog(QtWidgets.QDialog)
+        if parent is not None:
+            parent.reject()
+            return
+        super().reject()
 
     def set_selected_path(self, path):
         if path is None:
@@ -514,7 +533,8 @@ class HydeFileDialog(HydeDialogWidget):
 
     def handle_do_it(self):
         selected_path = self.selected_path()
-        if self.validation_message(selected_path) is not None:
+        validation_message = self.validation_message(selected_path)
+        if validation_message is not None:
             return False
         if self.needs_overwrite_confirmation(selected_path) and not self.confirm_overwrite_target(
             selected_path

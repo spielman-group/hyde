@@ -115,6 +115,10 @@ class TestFileDialogPlugin(unittest.TestCase):
             }
 
             dialog = NewProjectDialog(services)
+            self.assertEqual(
+                dialog.file_widget.selectedNameFilter(),
+                "Hyde Packages (*.hy)",
+            )
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
             dialog.do_it_button.click()
@@ -170,6 +174,33 @@ class TestFileDialogPlugin(unittest.TestCase):
                     self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
                     self.assertEqual(operations, [operation_label])
                     self.assertEqual(dispatched, [(expected_payload, True)])
+
+    def test_load_project_dialog_never_prompts_overwrite_for_existing_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "existing.hy")
+            os.makedirs(project_dir)
+            dispatched = []
+            operations = []
+            confirmations = []
+            services = {
+                "ui": QtWidgets.QWidget(),
+                "begin_project_operation": operations.append,
+                "python_execution_service": ExecutionService(dispatched),
+                "project_target_needs_confirmation": lambda path: True,
+                "confirm_overwrite_project": lambda path: confirmations.append(path) or True,
+            }
+
+            dialog = LoadProjectDialog(services)
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+            dialog.do_it_button.click()
+
+            self.assertEqual(confirmations, [])
+            self.assertEqual(operations, ["Loading Hyde project..."])
+            self.assertEqual(
+                dispatched,
+                [(f"hyde.load_project({project_dir!r})", True)],
+            )
 
     def test_project_dialog_preview_generation_does_not_log_hyde_state_debug(self):
         with tempfile.TemporaryDirectory() as tmpdir:

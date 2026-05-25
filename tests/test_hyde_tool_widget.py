@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.user_interface.shared.plugin import HydeMDIContext
@@ -142,6 +142,7 @@ class DemoFileDialog(HydeFileDialog):
     selection_mode = "directory"
     require_existing = True
     allowed_suffixes = (".hy",)
+    name_filters = ("Demo Packages (*.hy)",)
 
     def build_preview_payload(self, selected_path):
         return f"emit({selected_path!r})"
@@ -287,6 +288,24 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertTrue(dialog.to_clip_button.isEnabled())
         self.assertFalse(dialog.help_button.isEnabled())
 
+    def test_dialog_base_return_triggers_default_do_it_action(self):
+        dialog = HookedDialogWidget()
+
+        dialog.show()
+        self.qapp.processEvents()
+
+        QtWidgets.QApplication.sendEvent(
+            dialog,
+            QtGui.QKeyEvent(
+                QtCore.QEvent.KeyPress,
+                QtCore.Qt.Key_Return,
+                QtCore.Qt.NoModifier,
+            ),
+        )
+        self.qapp.processEvents()
+
+        self.assertEqual(dialog.do_it_calls, 1)
+
     def test_tool_dialog_shell_can_show_message_without_enabling_footer_payload_actions(self):
         terminal_service = RecordingVisibleTerminalService()
         dialog = DemoDialogWidget(services={"visible_terminal_service": terminal_service})
@@ -390,6 +409,7 @@ class TestHydeToolWidget(unittest.TestCase):
                     QtWidgets.QFileDialog.ShowDirsOnly
                 )
             )
+            self.assertEqual(directory_widget.selectedNameFilter(), "Directories")
             self.assertEqual(directory_widget.selected_path(), os.path.abspath(project_dir))
             self.assertIsNone(directory_widget.validation_error())
 
@@ -416,9 +436,90 @@ class TestHydeToolWidget(unittest.TestCase):
             widget.fileMode(),
             QtWidgets.QFileDialog.AnyFile,
         )
+        self.assertEqual(
+            widget.acceptMode(),
+            QtWidgets.QFileDialog.AcceptOpen,
+        )
         self.assertFalse(
             widget.testOption(QtWidgets.QFileDialog.ShowDirsOnly)
         )
+        self.assertTrue(
+            widget.testOption(QtWidgets.QFileDialog.DontConfirmOverwrite)
+        )
+
+    def test_embedded_file_widget_suppresses_qfiledialog_accept_behavior(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+            widget = HydeFileWidget(
+                selection_mode="directory",
+                require_existing=True,
+                initial_path=project_dir,
+            )
+
+            self.qapp.processEvents()
+            widget.accept()
+
+            self.assertEqual(widget.result(), 0)
+            self.assertEqual(widget.selected_path(), os.path.abspath(project_dir))
+
+    def test_escape_in_embedded_file_widget_rejects_outer_dialog(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+            dialog = DemoFileDialog()
+
+            dialog.file_widget.set_selected_path(project_dir)
+            dialog.show()
+            self.assertIsNotNone(dialog.file_widget.file_name_edit)
+            dialog.file_widget.file_name_edit.setFocus()
+            self.qapp.processEvents()
+
+            self.assertTrue(dialog.isVisible())
+
+            QtWidgets.QApplication.sendEvent(
+                dialog.file_widget.file_name_edit,
+                QtGui.QKeyEvent(
+                    QtCore.QEvent.KeyPress,
+                    QtCore.Qt.Key_Escape,
+                    QtCore.Qt.NoModifier,
+                ),
+            )
+            self.qapp.processEvents()
+
+            self.assertFalse(dialog.isVisible())
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Rejected)
+
+    def test_return_in_embedded_file_widget_triggers_outer_dialog_do_it(self):
+        execution_service = RecordingExecutionService()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir)
+            dialog = DemoFileDialog(
+                services={"python_execution_service": execution_service}
+            )
+
+            dialog.file_widget.set_selected_path(project_dir)
+            dialog.show()
+            self.assertIsNotNone(dialog.file_widget.file_name_edit)
+            dialog.file_widget.file_name_edit.setFocus()
+            self.qapp.processEvents()
+
+            QtWidgets.QApplication.sendEvent(
+                dialog.file_widget.file_name_edit,
+                QtGui.QKeyEvent(
+                    QtCore.QEvent.KeyPress,
+                    QtCore.Qt.Key_Return,
+                    QtCore.Qt.NoModifier,
+                ),
+            )
+            self.qapp.processEvents()
+
+            self.assertEqual(
+                execution_service.hidden_calls,
+                [(f"emit({os.path.abspath(project_dir)!r})", True)],
+            )
+            self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
 
     def test_file_dialog_mounts_chooser_and_dispatches_hidden_preview_payload(self):
         execution_service = RecordingExecutionService()
@@ -435,6 +536,10 @@ class TestHydeToolWidget(unittest.TestCase):
 
             expected_payload = f"emit({os.path.abspath(project_dir)!r})"
             self.assertIs(dialog.mounted_child, dialog.file_widget)
+            self.assertEqual(
+                dialog.file_widget.selectedNameFilter(),
+                "Demo Packages (*.hy)",
+            )
             self.assertEqual(dialog.preview_string(), expected_payload)
             self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
             self.assertEqual(execution_service.hidden_calls, [(expected_payload, True)])

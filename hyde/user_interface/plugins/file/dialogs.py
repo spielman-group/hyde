@@ -91,6 +91,7 @@ class ProjectSelectionDialog(HydeFileDialog):
     operation_label = None
     selection_mode = "directory"
     allowed_suffixes = (".hy",)
+    name_filters = ("Hyde Packages (*.hy)",)
     require_existing = False
     ensure_projects_dir = False
     suggest_current_project_name = False
@@ -168,6 +169,8 @@ class ProjectSelectionDialog(HydeFileDialog):
         return super().execute_do_it_payload(payload)
 
     def needs_overwrite_confirmation(self, selected_path):
+        if not self.confirm_overwrite:
+            return False
         current_project_dir = self.current_project_dir()
         if (
             self.same_target_state_class is not None
