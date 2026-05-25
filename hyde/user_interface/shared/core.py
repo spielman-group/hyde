@@ -46,14 +46,11 @@ class HydeGuiState:
     def validate_state(self):
         return self.codec.validate_state(self._state)
 
-    def preview_python_source(self):
-        self.validate_state()
-        return self.codec.state_to_python(self._state)
-
-    def python_source(self):
+    def python_source(self, *, log=True):
         normalized = self.validate_state()
         source = self.codec.state_to_python(self._state)
-        log_hyde_state_debug(type(self).__name__, normalized, source)
+        if log:
+            log_hyde_state_debug(type(self).__name__, normalized, source)
         return source
 
     def macro_source(self, macro_name):
@@ -126,6 +123,7 @@ class RuntimeCommandState(HydeGuiState):
             {"type": "set", "path": ("settings", "reset_namespace"), "value": bool(reset_namespace)}
         )
         self.apply_action({"type": "clear", "path": ("settings", "request_filepath")})
+        self.apply_action({"type": "clear", "path": ("settings", "session_source")})
 
     def set_remote_request(self, request_filepath):
         self.set_command("remote_request")
@@ -134,6 +132,7 @@ class RuntimeCommandState(HydeGuiState):
         )
         self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
         self.apply_action({"type": "clear", "path": ("settings", "hyde_source_root")})
+        self.apply_action({"type": "clear", "path": ("settings", "session_source")})
 
     def set_callable_invocation(self, callable_name, args):
         self.set_command("callable_invocation")
@@ -146,3 +145,15 @@ class RuntimeCommandState(HydeGuiState):
         self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
         self.apply_action({"type": "clear", "path": ("settings", "hyde_source_root")})
         self.apply_action({"type": "clear", "path": ("settings", "request_filepath")})
+        self.apply_action({"type": "clear", "path": ("settings", "session_source")})
+
+    def set_session_restore_source(self, session_source):
+        self.set_command("session_restore")
+        self.apply_action(
+            {"type": "set", "path": ("settings", "session_source"), "value": session_source}
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "project_dir")})
+        self.apply_action({"type": "clear", "path": ("settings", "hyde_source_root")})
+        self.apply_action({"type": "clear", "path": ("settings", "request_filepath")})
+        self.apply_action({"type": "clear", "path": ("settings", "callable_name")})
+        self.apply_action({"type": "set", "path": ("settings", "callable_args"), "value": []})

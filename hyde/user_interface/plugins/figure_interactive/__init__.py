@@ -253,8 +253,9 @@ class Plugin(HydePlugin):
         self.figure_macros = []
         self.rebuild_configured_window_macros_menu()
         state = FigureState()
+        state.set_publish_figure_macros()
         self.services["python_execution_service"].execute_hidden(
-            state.source_for_command("publish_figure_macros")
+            state.python_source(log=False)
         )
 
     def on_project_loaded(self, data):

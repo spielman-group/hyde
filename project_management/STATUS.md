@@ -65,8 +65,10 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - `New Fit Function...` appends a minimal valid scaffold to `procedures/__init__.py`,
   reloads procedures, refreshes the catalog, and keeps the dialog open on success.
 - Curve Fit preview/commit uses one GUI-side coefficient model over kernel-owned fit
-  results and attached figure state, with attached-display preview/live logging
-  routed through Hyde's ordinary hidden-command debug path.
+  results and attached figure state. Preview, `Do It`, live update, and
+  rollback/store command generation all flow through
+  `CurveFitState.python_source()`, while attached-display patching stays on the
+  shared figure-patch path.
 
 ### Project persistence
 - Kernel objects save to `manifest.toml` + `data/`.

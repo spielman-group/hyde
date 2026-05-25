@@ -737,6 +737,18 @@ class TestRuntimeArchitecture(unittest.TestCase):
         state.set_remote_request("/path/to/file.h5")
         self.assertEqual(queued, [(state.python_source(), False)])
 
+    def test_runtime_command_state_session_restore_wraps_session_source(self):
+        state = RuntimeCommandState()
+        state.set_session_restore_source("Table0()\nFigure0(delay)\n")
+
+        source = state.python_source()
+
+        self.assertIn("import hyde", source)
+        self.assertIn("Table0()", source)
+        self.assertIn("Figure0(delay)", source)
+        self.assertIn('hyde.task_complete("session_restore", False)', source)
+        self.assertIn('hyde.task_complete("session_restore", True)', source)
+
     def test_python_execution_service_logs_hidden_dispatch(self):
         executed = []
         plugin = type("Plugin", (), {})()

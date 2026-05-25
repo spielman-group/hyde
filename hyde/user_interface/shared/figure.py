@@ -6,8 +6,9 @@ from matplotlib import colors as mcolors
 from matplotlib import rcParams
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec, figure_patch_source
+from hyde.features.matplotlib_features import FigureIRCodec, FigurePatchCodec
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
+from hyde.user_interface.shared.core import HydeGuiState
 _COMMON_COLOR_NAMES = [
     "black",
     "red",
@@ -28,6 +29,49 @@ _COMMON_COLOR_NAMES = [
     "maroon",
     "lime",
 ]
+
+
+class FigurePatchState(HydeGuiState):
+    codec = FigurePatchCodec
+
+    def set_figure_name(self, figure_name):
+        if figure_name:
+            self.apply_action(
+                {
+                    "type": "set",
+                    "path": ("settings", "figure_name"),
+                    "value": str(figure_name),
+                }
+            )
+        else:
+            self.apply_action({"type": "clear", "path": ("settings", "figure_name")})
+
+    def set_source_state(self, source_state):
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "source_state"),
+                "value": copy.deepcopy(source_state),
+            }
+        )
+
+    def set_target_state(self, target_state):
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "target_state"),
+                "value": copy.deepcopy(target_state),
+            }
+        )
+
+    def set_refresh_trace_ids(self, refresh_trace_ids):
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "refresh_trace_ids"),
+                "value": tuple(refresh_trace_ids or ()),
+            }
+        )
 
 
 def rgba_from_matplotlib_color(value):
@@ -815,15 +859,15 @@ class HydeFigureDialogWidget(HydeDialogWidget):
             return None
         return self._session.current_effective_state()
 
-    def figure_patch_source(self, source_state, target_state, *, refresh_trace_ids=()):
+    def figure_patch_state(self, source_state, target_state, *, refresh_trace_ids=()):
         if self.figure_context is None:
-            return ""
-        return figure_patch_source(
-            source_state,
-            target_state,
-            figure_name=self.figure_context.figure_name(),
-            refresh_trace_ids=refresh_trace_ids,
-        )
+            return None
+        state = FigurePatchState()
+        state.set_figure_name(self.figure_context.figure_name())
+        state.set_source_state(source_state)
+        state.set_target_state(target_state)
+        state.set_refresh_trace_ids(refresh_trace_ids)
+        return state
 
     def resolved_figure_patch_preview(
         self,
@@ -832,11 +876,12 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         *,
         refresh_trace_ids=(),
     ):
-        code = self.figure_patch_source(
+        patch_state = self.figure_patch_state(
             source_state,
             target_state,
             refresh_trace_ids=refresh_trace_ids,
         )
+        code = "" if patch_state is None else patch_state.python_source(log=False)
         if str(code or "").strip():
             return str(code), ""
         if source_state != target_state:
@@ -896,7 +941,11 @@ class HydeFigureDialogWidget(HydeDialogWidget):
     def apply_figure_patch(self, target_state, *, mode, refresh_preview=True):
         if self._applied_effective_state is None or target_state is None:
             return False
-        code = self.figure_patch_source(self._applied_effective_state, target_state)
+        patch_state = self.figure_patch_state(
+            self._applied_effective_state,
+            target_state,
+        )
+        code = "" if patch_state is None else patch_state.python_source(log=False)
         return self.apply_figure_patch_command(
             code,
             mode=mode,

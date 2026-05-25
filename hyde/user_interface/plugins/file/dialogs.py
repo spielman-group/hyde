@@ -157,10 +157,8 @@ class ProjectSelectionDialog(HydeFileDialog):
             state.set_overwrite(self.needs_overwrite_confirmation(selected_path))
         return state
 
-    def build_preview_payload(self, selected_path):
-        return self.build_state_for_selected_path(
-            selected_path
-        ).preview_python_source()
+    def build_preview_state(self, selected_path):
+        return self.build_state_for_selected_path(selected_path)
 
     def execute_do_it_payload(self, payload):
         begin_project_operation = self.services.get("begin_project_operation")

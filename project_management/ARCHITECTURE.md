@@ -58,6 +58,11 @@ surface.
 turns GUI state into Python strings or GUI-facing metadata. For the generic GUI-side
 state/codec pattern, see `IR-CONTROL.md`.
 
+Across Hyde, GUI-generated command Python comes from
+`HydeGuiState.python_source()`. Preview surfaces display that same generated string,
+and `Do It`, `To Cmd Line`, or `To Clip` may dispatch the cached preview payload
+without regenerating it.
+
 Across Hyde, `IR` means feature-specific internal representation/internal state that can
 lower to standard Python. It is not always kernel-owned. Table state is GUI-owned long
 enough to emit commands. Figure IR is kernel-owned and attached to the live
@@ -140,6 +145,10 @@ when a project is loaded.
   `HydeFileWidget` family in `hyde.user_interface.base_hyde_widgets`.
 - That shared file-dialog family owns chooser UI, preview refresh from the backing
   command string, generic target validation, and optional overwrite confirmation.
+- The backing command string for that family comes from the dialog state's
+  `python_source()` path. `HydeFileDialog` subclasses extend the shared
+  generation/submission path by overriding hooks and calling `super()` as needed
+  rather than by creating alternate command-generation or submission paths.
 - Concrete project dialogs own command-specific defaults and operation-specific
   exceptions such as same-target semantics or copy-target restrictions.
 - Plain `Save` remains a direct hidden `hyde.save_project(mode="save")` dispatch
@@ -225,9 +234,10 @@ when a project is loaded.
 - `New Fit Function...` is intentionally narrow: it appends one minimal valid
   `@hyde.fit_function` scaffold to `procedures/__init__.py`, triggers the normal
   procedures reload path, refreshes the catalog, and reselects the new function.
-- Preview/commit command generation is GUI-side codec work in
-  `hyde.features.lmfit_features`; authoritative fit results and any attached figure
-  display objects live in the kernel/runtime figure path, not in Qt state.
+- Curve Fit command generation flows through `CurveFitState.python_source()`
+  over the GUI-side codec work in `hyde.features.lmfit_features`; authoritative
+  fit results and any attached figure display objects live in the kernel/runtime
+  figure path, not in Qt state.
 - When Curve Fit is attached to a first-class figure, attached display traces are
   managed through the figure edit session boundary rather than by a dialog-local
   figure trace manager.

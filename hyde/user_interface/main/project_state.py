@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import logging
-import textwrap
 from pathlib import Path
 
 import tomllib
@@ -228,19 +227,3 @@ def apply_mdi_window_order(mdi_area, window_order):
             continue
         subwindow.raise_()
 
-
-def build_session_restore_wrapper(session_source):
-    stripped_source = str(session_source or "").strip()
-    if not stripped_source:
-        return ""
-    indented_source = textwrap.indent(f"{stripped_source}\n", "    ")
-    return (
-        "import hyde\n"
-        "try:\n"
-        f"{indented_source}"
-        "except Exception:\n"
-        '    hyde.task_complete("session_restore", False)\n'
-        "    raise\n"
-        "else:\n"
-        '    hyde.task_complete("session_restore", True)\n'
-    )

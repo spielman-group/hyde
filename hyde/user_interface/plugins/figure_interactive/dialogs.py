@@ -54,7 +54,7 @@ class NewFigureDialog(HydeDialogWidget):
 
     def _refresh_from_widgets(self):
         self._sync_state_from_widgets()
-        self.set_preview_string(self.figure_state.source_for_command("create"))
+        self.set_preview_string(self.figure_state.python_source(log=False))
         self.refresh_shell()
 
     def normalized_state(self):

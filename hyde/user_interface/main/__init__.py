@@ -12,7 +12,6 @@ from hyde.paths import (
 from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.main.project_state import (
     apply_mdi_window_order,
-    build_session_restore_wrapper,
     try_read_history,
     try_read_session,
     try_read_session_source,
@@ -670,11 +669,12 @@ class HydeApp:
         if session:
             restore_main_window(self, session)
         self.emit_plugin_event("project_loaded", {"session": session})
-        wrapped_session_source = build_session_restore_wrapper(session_source)
-        if wrapped_session_source:
+        if str(session_source or "").strip():
             python_execution_service = self.plugin_service("python_execution_service")
             if python_execution_service is not None:
-                if python_execution_service.execute_hidden(wrapped_session_source):
+                state = RuntimeCommandState()
+                state.set_session_restore_source(session_source)
+                if python_execution_service.execute_hidden(state.python_source()):
                     return
             self._complete_session_restore(False)
         else:

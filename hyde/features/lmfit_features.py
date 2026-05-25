@@ -1,60 +1,39 @@
 from __future__ import annotations
 
 import copy
-import keyword
 
-from hyde.features.base import FeatureCodec
+from hyde.features.base import (
+    FeatureCodec,
+    normalize_optional_text,
+    ordered_unique_text,
+    set_path,
+    valid_python_identifier,
+)
 from hyde.features.matplotlib_features import sorted_eligible_names
+
 CALCULATED_X_NAME = "_calculated_"
 
 
-def _set_path(target, path, value):
-    cursor = target
-    for key in path[:-1]:
-        cursor = cursor.setdefault(key, {})
-    cursor[path[-1]] = value
-
-
-def _existing_namespace_names(namespace_view):
+def existing_namespace_names(namespace_view):
     return sorted(str(name) for name in dict(namespace_view or {}))
 
 
-def _unique_preserving_order(values):
-    seen = set()
-    ordered = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        ordered.append(text)
-    return ordered
+def unique_preserving_order(values):
+    return ordered_unique_text(values)
 
 
-def _normalize_optional_text(value):
-    text = str(value or "").strip()
-    return None if not text else text
-
-
-def valid_python_identifier(text):
-    normalized_text = _normalize_optional_text(text)
-    if normalized_text is None:
-        return False
-    return normalized_text.isidentifier() and not keyword.iskeyword(normalized_text)
-
-
-def _x_options(eligible_names):
+def x_options(eligible_names):
     return [CALCULATED_X_NAME, *list(eligible_names)]
 
 
-def _fit_argument_expression(argument_name, y_name):
+def fit_argument_expression(argument_name, y_name):
     if argument_name == CALCULATED_X_NAME:
         return f"np.arange(len({y_name}))"
     return str(argument_name)
 
 
-def _command_symbol_names(fit_result_name):
-    normalized_name = _normalize_optional_text(fit_result_name)
+def command_symbol_names(fit_result_name):
+    normalized_name = normalize_optional_text(fit_result_name)
     if normalized_name is None:
         return "_hyde_lmfit_model", "_hyde_lmfit_params"
     base_name = (
@@ -67,15 +46,15 @@ def _command_symbol_names(fit_result_name):
     return f"{base_name}_model", f"{base_name}_params"
 
 
-def _fit_report_line(fit_result_name):
-    normalized_name = _normalize_optional_text(fit_result_name)
+def fit_report_line(fit_result_name):
+    normalized_name = normalize_optional_text(fit_result_name)
     if not valid_python_identifier(normalized_name):
         return ""
     return f"print({normalized_name}.fit_report())"
 
 
-def _coefficient_argument_expression(row):
-    expression = _normalize_optional_text(row.get("expr"))
+def coefficient_argument_expression(row):
+    expression = normalize_optional_text(row.get("expr"))
     if expression is not None:
         return expression
     initial_value = row.get("value")
@@ -84,7 +63,7 @@ def _coefficient_argument_expression(row):
     return repr(initial_value)
 
 
-def _parse_optional_float(text, field_name):
+def parse_optional_float(text, field_name):
     stripped = str(text or "").strip()
     if not stripped:
         return None
@@ -94,7 +73,7 @@ def _parse_optional_float(text, field_name):
         raise ValueError(f"{field_name} must be a valid number.") from exc
 
 
-def _fit_result_default_name(y_name, existing_names):
+def fit_result_default_name(y_name, existing_names):
     base_name = f"{str(y_name)}_fit_result"
     existing = {str(name) for name in existing_names}
     if base_name not in existing:
@@ -117,10 +96,10 @@ def attached_display_trace(
     *,
     root_name=None,
 ):
-    normalized_result_name = _normalize_optional_text(result_name)
+    normalized_result_name = normalize_optional_text(result_name)
     if normalized_result_name is None:
         raise ValueError("Curve Fit attached displays require a fit result name.")
-    normalized_root_name = _normalize_optional_text(root_name) or normalized_result_name
+    normalized_root_name = normalize_optional_text(root_name) or normalized_result_name
     return {
         "id": str(trace_id),
         "kind": "line",
@@ -139,7 +118,7 @@ def attached_display_trace(
 
 
 def attached_display_label(result_name, component):
-    normalized_result_name = _normalize_optional_text(result_name)
+    normalized_result_name = normalize_optional_text(result_name)
     if normalized_result_name is None:
         raise ValueError("Curve Fit attached displays require a fit result name.")
     if component == "best_fit":
@@ -150,7 +129,7 @@ def attached_display_label(result_name, component):
 
 
 def attached_display_trace_id(result_name, component):
-    normalized_result_name = _normalize_optional_text(result_name)
+    normalized_result_name = normalize_optional_text(result_name)
     if normalized_result_name is None:
         raise ValueError("Curve Fit attached displays require a fit result name.")
     if component == "best_fit":
@@ -177,7 +156,7 @@ def restore_target_command(
     restore_store_name="_hyde_lmfit_live_restore",
     missing_sentinel_name="_hyde_lmfit_missing",
 ):
-    normalized_target_name = _normalize_optional_text(target_name)
+    normalized_target_name = normalize_optional_text(target_name)
     if normalized_target_name is None:
         return ""
     return "\n".join(
@@ -210,7 +189,7 @@ def store_target_command(
     restore_store_name="_hyde_lmfit_live_restore",
     missing_sentinel_name="_hyde_lmfit_missing",
 ):
-    normalized_target_name = _normalize_optional_text(target_name)
+    normalized_target_name = normalize_optional_text(target_name)
     if normalized_target_name is None:
         return ""
     return "\n".join(
@@ -230,12 +209,20 @@ def store_target_command(
 class LmfitCodec(FeatureCodec):
     feature_name = "lmfit"
     state_version = 1
+    _valid_commands = {
+        "commit",
+        "preview",
+        "live",
+        "store_target",
+        "restore_target",
+    }
 
     @classmethod
     def default_state(cls):
         return {
             "feature": cls.feature_name,
             "state_version": cls.state_version,
+            "command": "commit",
             "settings": {
                 "fit_function_name": None,
                 "y_name": None,
@@ -247,6 +234,11 @@ class LmfitCodec(FeatureCodec):
                 "fit_result_name": None,
                 "fit_result_name_locked": False,
                 "preview_mode": "Commands",
+                "preview_target_name": None,
+                "target_name": None,
+                "previous_target_name": None,
+                "restore_store_name": "_hyde_lmfit_live_restore",
+                "missing_sentinel_name": "_hyde_lmfit_missing",
             },
             "ui": {},
         }
@@ -260,6 +252,7 @@ class LmfitCodec(FeatureCodec):
                 "state_version",
                 normalized["state_version"],
             )
+            normalized["command"] = state.get("command", normalized["command"])
             settings = state.get("settings", {})
             if isinstance(settings, dict):
                 normalized["settings"].update(settings)
@@ -287,17 +280,17 @@ class LmfitCodec(FeatureCodec):
         if isinstance(coefficients, dict):
             normalized["settings"]["coefficients"] = {
                 str(name): {
-                    "initial_value": _normalize_optional_text(
+                    "initial_value": normalize_optional_text(
                         dict(values or {}).get("initial_value")
                     ),
                     "vary": bool(dict(values or {}).get("vary", True)),
-                    "lower_bound": _normalize_optional_text(
+                    "lower_bound": normalize_optional_text(
                         dict(values or {}).get("lower_bound")
                     ),
-                    "upper_bound": _normalize_optional_text(
+                    "upper_bound": normalize_optional_text(
                         dict(values or {}).get("upper_bound")
                     ),
-                    "expr": _normalize_optional_text(dict(values or {}).get("expr")),
+                    "expr": normalize_optional_text(dict(values or {}).get("expr")),
                 }
                 for name, values in coefficients.items()
                 if str(name)
@@ -322,6 +315,21 @@ class LmfitCodec(FeatureCodec):
         settings["preview_mode"] = (
             "Equation" if preview_mode == "Equation" else "Commands"
         )
+        settings["preview_target_name"] = normalize_optional_text(
+            settings.get("preview_target_name")
+        )
+        settings["target_name"] = normalize_optional_text(settings.get("target_name"))
+        settings["previous_target_name"] = normalize_optional_text(
+            settings.get("previous_target_name")
+        )
+        settings["restore_store_name"] = (
+            normalize_optional_text(settings.get("restore_store_name"))
+            or "_hyde_lmfit_live_restore"
+        )
+        settings["missing_sentinel_name"] = (
+            normalize_optional_text(settings.get("missing_sentinel_name"))
+            or "_hyde_lmfit_missing"
+        )
         return normalized
 
     @classmethod
@@ -329,16 +337,26 @@ class LmfitCodec(FeatureCodec):
         normalized = cls.normalize_state(state)
         if normalized["feature"] != cls.feature_name:
             raise ValueError(f"Expected feature={cls.feature_name!r}.")
+        command = normalized["command"]
+        if command not in cls._valid_commands:
+            raise ValueError(f"Unsupported lmfit command: {command!r}.")
+        settings = normalized["settings"]
+        if command == "preview" and not settings["preview_target_name"]:
+            raise ValueError("Lmfit preview requires settings.preview_target_name.")
+        if command in {"store_target", "restore_target"} and not settings["target_name"]:
+            raise ValueError(f"Lmfit {command} requires settings.target_name.")
         return normalized
 
     @classmethod
     def update_state(cls, state, action):
         normalized = cls.normalize_state(state)
         action_type = action.get("type")
-        if action_type == "set":
-            _set_path(normalized, action["path"], action["value"])
+        if action_type == "set_command":
+            normalized["command"] = action["command"]
+        elif action_type == "set":
+            set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            _set_path(normalized, action["path"], None)
+            set_path(normalized, action["path"], None)
         else:
             raise ValueError(f"Unsupported lmfit action: {action_type!r}.")
         return cls.normalize_state(normalized)
@@ -356,7 +374,7 @@ class LmfitCodec(FeatureCodec):
     def _y_options(cls, eligible_names, trace_records, from_target):
         if not from_target:
             return list(eligible_names)
-        trace_y_names = _unique_preserving_order(
+        trace_y_names = unique_preserving_order(
             record.get("y_name") for record in trace_records
         )
         narrowed = [name for name in trace_y_names if name in eligible_names]
@@ -392,7 +410,7 @@ class LmfitCodec(FeatureCodec):
 
         for index, independent_var in enumerate(entry.get("independent_vars", [])):
             current_name = stored_x_names.get(independent_var)
-            options = _x_options(eligible_names)
+            options = x_options(eligible_names)
             if current_name in options and current_name not in used_names:
                 value = current_name
             else:
@@ -436,9 +454,9 @@ class LmfitCodec(FeatureCodec):
             return explicit_name
         if not y_name:
             return explicit_name or ""
-        return _fit_result_default_name(
+        return fit_result_default_name(
             y_name,
-            _existing_namespace_names(context.get("namespace_view")),
+            existing_namespace_names(context.get("namespace_view")),
         )
 
     @classmethod
@@ -447,20 +465,20 @@ class LmfitCodec(FeatureCodec):
         rows = []
         for parameter_name in entry.get("parameters", []):
             stored = dict(stored_rows.get(parameter_name, {}))
-            expr = _normalize_optional_text(stored.get("expr"))
+            expr = normalize_optional_text(stored.get("expr"))
             rows.append(
                 {
                     "name": str(parameter_name),
-                    "initial_value": _normalize_optional_text(
+                    "initial_value": normalize_optional_text(
                         stored.get("initial_value")
                     )
                     or "",
                     "vary": bool(stored.get("vary", True)),
-                    "lower_bound": _normalize_optional_text(
+                    "lower_bound": normalize_optional_text(
                         stored.get("lower_bound")
                     )
                     or "",
-                    "upper_bound": _normalize_optional_text(
+                    "upper_bound": normalize_optional_text(
                         stored.get("upper_bound")
                     )
                     or "",
@@ -511,7 +529,7 @@ class LmfitCodec(FeatureCodec):
         lowered_rows = []
         for row in coefficient_rows:
             parameter_name = row["name"]
-            expression = _normalize_optional_text(row.get("expr"))
+            expression = normalize_optional_text(row.get("expr"))
             if expression is not None:
                 lowered_rows.append(
                     {
@@ -532,15 +550,15 @@ class LmfitCodec(FeatureCodec):
                     "rows": [],
                 }
             try:
-                initial_number = _parse_optional_float(
+                initial_number = parse_optional_float(
                     initial_value,
                     f"Parameter {parameter_name} initial value",
                 )
-                lower_bound = _parse_optional_float(
+                lower_bound = parse_optional_float(
                     row.get("lower_bound"),
                     f"Parameter {parameter_name} lower bound",
                 )
-                upper_bound = _parse_optional_float(
+                upper_bound = parse_optional_float(
                     row.get("upper_bound"),
                     f"Parameter {parameter_name} upper bound",
                 )
@@ -616,7 +634,7 @@ class LmfitCodec(FeatureCodec):
     def _preview_argument_lines(cls, lowered_coefficients):
         arguments = []
         for row in lowered_coefficients:
-            expression = _coefficient_argument_expression(row)
+            expression = coefficient_argument_expression(row)
             if not expression:
                 return []
             arguments.append(f"{row['name']}={expression}")
@@ -637,7 +655,7 @@ class LmfitCodec(FeatureCodec):
         if entry is None:
             return ""
         callable_ref = str(entry.get("callable_ref") or entry["name"])
-        model_name, params_name = _command_symbol_names(fit_result_name)
+        model_name, params_name = command_symbol_names(fit_result_name)
         lines = [
             f"{model_name} = lmfit.Model({callable_ref}, "
             f"independent_vars={list(entry.get('independent_vars', []))!r})"
@@ -662,7 +680,7 @@ class LmfitCodec(FeatureCodec):
             fit_arguments.extend(
                 (
                     f"{row['name']}="
-                    f"{_fit_argument_expression(row['value'], y_name)}"
+                    f"{fit_argument_expression(row['value'], y_name)}"
                 )
                 for row in x_rows
             )
@@ -673,7 +691,7 @@ class LmfitCodec(FeatureCodec):
                 f"{y_name}, {', '.join(fit_arguments)})"
             )
             if include_report:
-                lines.append(_fit_report_line(fit_result_name))
+                lines.append(fit_report_line(fit_result_name))
         return "\n".join(lines)
 
     @classmethod
@@ -700,7 +718,7 @@ class LmfitCodec(FeatureCodec):
     ):
         if entry is None:
             return ""
-        normalized_preview_target = _normalize_optional_text(preview_target_name)
+        normalized_preview_target = normalize_optional_text(preview_target_name)
         if normalized_preview_target is None:
             return ""
         if (
@@ -714,7 +732,7 @@ class LmfitCodec(FeatureCodec):
         if not preview_arguments:
             return ""
         independent_arguments = [
-            f"{row['name']}={_fit_argument_expression(row['value'], y_name)}"
+            f"{row['name']}={fit_argument_expression(row['value'], y_name)}"
             for row in x_rows
         ]
         return "\n".join(
@@ -807,8 +825,8 @@ class LmfitCodec(FeatureCodec):
         lowered_coefficients = cls._lowered_coefficients(coefficient_rows)
         weighting_name = cls._resolved_weighting_name(normalized, eligible_names)
         fit_result_name = cls._resolved_fit_result_name(normalized, context, y_name)
-        existing_names = _existing_namespace_names(context.get("namespace_view"))
-        fit_result_options = _unique_preserving_order(existing_names + [fit_result_name])
+        existing_names = existing_namespace_names(context.get("namespace_view"))
+        fit_result_options = unique_preserving_order(existing_names + [fit_result_name])
         validation = cls._validate_configuration(
             entry,
             y_name,
@@ -854,7 +872,38 @@ class LmfitCodec(FeatureCodec):
 
     @classmethod
     def state_to_python(cls, state, context=None):
-        return cls.state_to_commit_python(state, context=context)
+        normalized = cls.validate_state(state)
+        settings = normalized["settings"]
+        command = normalized["command"]
+        if command == "commit":
+            return cls.state_to_commit_python(normalized, context=context)
+        if command == "preview":
+            return cls.state_to_preview_python(
+                normalized,
+                context=context,
+                preview_target_name=settings["preview_target_name"],
+            )
+        if command == "live":
+            return cls.state_to_live_python(
+                normalized,
+                context=context,
+                previous_target_name=settings["previous_target_name"],
+                restore_store_name=settings["restore_store_name"],
+                missing_sentinel_name=settings["missing_sentinel_name"],
+            )
+        if command == "store_target":
+            return cls.state_to_store_target_python(
+                settings["target_name"],
+                restore_store_name=settings["restore_store_name"],
+                missing_sentinel_name=settings["missing_sentinel_name"],
+            )
+        if command == "restore_target":
+            return cls.state_to_restore_target_python(
+                settings["target_name"],
+                restore_store_name=settings["restore_store_name"],
+                missing_sentinel_name=settings["missing_sentinel_name"],
+            )
+        raise ValueError(f"Unsupported lmfit command: {command!r}.")
 
     @classmethod
     def state_to_commit_python(cls, state, context=None):

@@ -5,7 +5,7 @@ from hyde.features.lmfit_features import (
     LmfitCodec,
     attached_display_label,
 )
-from hyde.user_interface.shared.core import HydeGuiState
+from hyde.user_interface.shared.core import HydeGuiState, log_hyde_state_debug
 from hyde.user_interface.shared.figure import HydeFigureDialogWidget
 
 from .fit_function_scaffolding import CurveFitCatalogError
@@ -13,6 +13,148 @@ from .fit_function_scaffolding import CurveFitCatalogError
 
 class CurveFitState(HydeGuiState):
     codec = LmfitCodec
+
+    def __init__(self):
+        self._context = {}
+        super().__init__()
+
+    def configure_defaults(self):
+        self.set_commit_command()
+
+    def set_context(self, context):
+        self._context = dict(context or {})
+
+    def present_state(self):
+        return self.codec.present_state(self._state, context=self._context)
+
+    def python_source(self, *, log=True):
+        normalized = self.validate_state()
+        source = self.codec.state_to_python(self._state, context=self._context)
+        if log:
+            log_hyde_state_debug(type(self).__name__, normalized, source)
+        return source
+
+    def set_command(self, command):
+        self.apply_action({"type": "set_command", "command": str(command)})
+
+    def set_commit_command(self):
+        self.set_command("commit")
+        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
+        self.apply_action({"type": "clear", "path": ("settings", "target_name")})
+        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
+
+    def set_preview_command(self, *, preview_target_name):
+        self.set_command("preview")
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "preview_target_name"),
+                "value": str(preview_target_name),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "target_name")})
+        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
+
+    def set_live_command(
+        self,
+        *,
+        previous_target_name,
+        restore_store_name,
+        missing_sentinel_name,
+    ):
+        self.set_command("live")
+        if previous_target_name:
+            self.apply_action(
+                {
+                    "type": "set",
+                    "path": ("settings", "previous_target_name"),
+                    "value": str(previous_target_name),
+                }
+            )
+        else:
+            self.apply_action(
+                {"type": "clear", "path": ("settings", "previous_target_name")}
+            )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "restore_store_name"),
+                "value": str(restore_store_name),
+            }
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "missing_sentinel_name"),
+                "value": str(missing_sentinel_name),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
+        self.apply_action({"type": "clear", "path": ("settings", "target_name")})
+
+    def set_store_target_command(
+        self,
+        target_name,
+        *,
+        restore_store_name,
+        missing_sentinel_name,
+    ):
+        self.set_command("store_target")
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "target_name"),
+                "value": str(target_name),
+            }
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "restore_store_name"),
+                "value": str(restore_store_name),
+            }
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "missing_sentinel_name"),
+                "value": str(missing_sentinel_name),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
+        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
+
+    def set_restore_target_command(
+        self,
+        target_name,
+        *,
+        restore_store_name,
+        missing_sentinel_name,
+    ):
+        self.set_command("restore_target")
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "target_name"),
+                "value": str(target_name),
+            }
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "restore_store_name"),
+                "value": str(restore_store_name),
+            }
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "missing_sentinel_name"),
+                "value": str(missing_sentinel_name),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
+        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
 
     def set_x_name(self, independent_var, x_name):
         path = ("settings", "x_names", str(independent_var))
@@ -353,7 +495,8 @@ class CurveFitDialog(HydeFigureDialogWidget):
             )
 
     def _refresh_from_state(self):
-        model = self.state.codec.present_state(self.state._state, context=self._context())
+        self.state.set_context(self._context())
+        model = self.state.present_state()
         self._current_model = dict(model)
         self._loading_controls = True
         try:
@@ -572,19 +715,18 @@ class CurveFitDialog(HydeFigureDialogWidget):
             refresh_trace_ids = tuple(refresh_ids)
         command_parts = []
         if include_preview_object:
-            preview_command = self.state.codec.state_to_preview_python(
-                self.state._state,
-                context=self._context(),
-                preview_target_name=self._preview_target_name,
-            )
+            self.state.set_context(self._context())
+            self.state.set_preview_command(preview_target_name=self._preview_target_name)
+            preview_command = self.state.python_source(log=False)
             if not preview_command:
                 return "", target_state
             command_parts.append(str(preview_command).strip())
-        patch_code = self.figure_patch_source(
+        patch_state = self.figure_patch_state(
             self.applied_effective_state(),
             target_state,
             refresh_trace_ids=refresh_trace_ids,
         )
+        patch_code = "" if patch_state is None else patch_state.python_source(log=False)
         if str(patch_code or "").strip():
             command_parts.append(str(patch_code).strip())
         return "\n".join(command_parts), target_state
@@ -603,10 +745,9 @@ class CurveFitDialog(HydeFigureDialogWidget):
             return str(model.get("commands_preview") or "")
         command_lines = []
         if self.execution_mode() == "suppressed":
-            commit_command = self.state.codec.state_to_commit_python(
-                self.state._state,
-                context=self._context(),
-            )
+            self.state.set_context(self._context())
+            self.state.set_commit_command()
+            commit_command = self.state.python_source(log=False)
             if str(commit_command or "").strip():
                 command_lines.append(str(commit_command))
         if self.figure_context is not None:
@@ -646,10 +787,9 @@ class CurveFitDialog(HydeFigureDialogWidget):
             return False, "Curve Fit requires python_execution_service."
         target_effective_state = self.applied_effective_state()
         if command is None and self.execution_mode() == "suppressed":
-            command = self.state.codec.state_to_commit_python(
-                self.state._state,
-                context=self._context(),
-            )
+            self.state.set_context(self._context())
+            self.state.set_commit_command()
+            command = self.state.python_source(log=False)
         needs_rollback_snapshot = (
             bool(str(command or "").strip())
             and self.figure_context is not None
@@ -657,11 +797,12 @@ class CurveFitDialog(HydeFigureDialogWidget):
             and display_root_name is not None
         )
         if needs_rollback_snapshot:
-            snapshot_command = self.state.codec.state_to_store_target_python(
+            self.state.set_store_target_command(
                 success_target_name,
                 restore_store_name=self._live_restore_store_name,
                 missing_sentinel_name=self._live_missing_sentinel_name,
             )
+            snapshot_command = self.state.python_source(log=False)
             if snapshot_command and not python_execution_service.execute_hidden(
                 snapshot_command
             ):
@@ -683,11 +824,12 @@ class CurveFitDialog(HydeFigureDialogWidget):
                 target_state=target_effective_state,
             ):
                 if needs_rollback_snapshot:
-                    rollback_command = self.state.codec.state_to_restore_target_python(
+                    self.state.set_restore_target_command(
                         success_target_name,
                         restore_store_name=self._live_restore_store_name,
                         missing_sentinel_name=self._live_missing_sentinel_name,
                     )
+                    rollback_command = self.state.python_source(log=False)
                     if rollback_command:
                         python_execution_service.execute_hidden(rollback_command)
                 return False, self._execution_failure_message(python_execution_service)
@@ -813,13 +955,13 @@ class CurveFitDialog(HydeFigureDialogWidget):
             return
         if not self._current_model.get("valid"):
             return
-        live_command = self.state.codec.state_to_live_python(
-            self.state._state,
-            context=self._context(),
+        self.state.set_context(self._context())
+        self.state.set_live_command(
             previous_target_name=self._live_result_target_name,
             restore_store_name=self._live_restore_store_name,
             missing_sentinel_name=self._live_missing_sentinel_name,
         )
+        live_command = self.state.python_source(log=False)
         success, message = self._run_commit_path(
             live_command,
             success_target_name=self._current_model.get("fit_result_name"),
@@ -962,11 +1104,12 @@ class CurveFitDialog(HydeFigureDialogWidget):
             python_execution_service is not None
             and self._live_result_target_name is not None
         ):
-            rollback_command = self.state.codec.state_to_restore_target_python(
+            self.state.set_restore_target_command(
                 self._live_result_target_name,
                 restore_store_name=self._live_restore_store_name,
                 missing_sentinel_name=self._live_missing_sentinel_name,
             )
+            rollback_command = self.state.python_source(log=False)
             if rollback_command:
                 python_execution_service.execute_hidden(rollback_command)
         self._live_result_target_name = None

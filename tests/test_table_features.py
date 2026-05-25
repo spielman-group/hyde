@@ -114,6 +114,26 @@ class TestTableCodec(unittest.TestCase):
             "hyde.append_table(delay2, fit_delay2, name='Table7')",
         )
 
+    def test_table_state_push_table_data_generation_uses_python_source(self):
+        state = TableState()
+        state.set_push_table_data(["delay2", "fit_delay2"], "request-7")
+
+        source = state.python_source()
+
+        self.assertEqual(
+            source,
+            "hyde.execution.ipc.push_table_data(['delay2', 'fit_delay2'], 'request-7')",
+        )
+
+    def test_table_state_publish_table_macros_generation_uses_python_source(self):
+        state = TableState()
+        state.set_publish_table_macros()
+
+        self.assertEqual(
+            state.python_source(),
+            "hyde.recreation_registry.publish_registry('table')",
+        )
+
 class TestMutationCodec(unittest.TestCase):
     def test_mutation_state_generates_edit_append_new_array_and_delete_commands(self):
         edit_state = MutationState()
@@ -776,6 +796,31 @@ class TestTableWidget(unittest.TestCase):
             widget.shutdown_client()
             widget.close()
 
+    def test_table_refresh_uses_table_state_python_source_for_hidden_push_command(self):
+        queued = []
+        namespace_service = FakeNamespaceViewService({"a": {"type": "ndarray"}})
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "python_execution_service": FakeExecutionService(queued),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                widget.refresh_data()
+
+            self.assertEqual(len(queued), 1)
+            self.assertTrue(queued[0][1])
+            self.assertIn("hyde.execution.ipc.push_table_data(['a'],", queued[0][0])
+            output = "\n".join(logs.output)
+            self.assertIn("[Hyde state] TableState", output)
+            self.assertIn("'command': 'push_table_data'", output)
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
     def test_activate_popup_menu_activates_bound_subwindow(self):
         popup_calls = []
         mdi_area = QtWidgets.QMdiArea()
@@ -1337,6 +1382,29 @@ class TestTableWorkspaceService(unittest.TestCase):
 
         plugin.workspace.clear()
         self._drain_events()
+
+    def test_project_activation_uses_table_state_python_source_for_macro_publish(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = Plugin({})
+        execution = FakeExecutionService()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "python_execution_service": execution,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "get_current_project_dir": lambda: "/tmp/demo.hy",
+            "save_window_dialog_service": FakeSaveWindowDialogService(),
+        }
+
+        with self.assertLogs("hyde", level="DEBUG") as logs:
+            plugin.on_project_activated({})
+
+        self.assertEqual(
+            execution.hidden_calls,
+            [("hyde.recreation_registry.publish_registry('table')", True)],
+        )
+        output = "\n".join(logs.output)
+        self.assertIn("[Hyde state] TableState", output)
+        self.assertIn("'command': 'publish_table_macros'", output)
 
     def test_workspace_opens_minimized_table_window(self):
         mdi_area = QtWidgets.QMdiArea()

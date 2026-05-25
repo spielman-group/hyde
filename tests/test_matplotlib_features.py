@@ -272,17 +272,26 @@ class TestFigureCodec(unittest.TestCase):
         self.assertIn("python:\n", output)
         self.assertIn(source, output)
 
-    def test_figure_codec_rejects_removed_track_command(self):
+    def test_figure_state_generates_refresh_command_through_python_source(self):
         state = FigureState()
-        state.set_title("DelayGraph")
-        state.set_items(["fit_delay"])
+        state.set_refresh_figure("DelayGraph", use_bound_values=True)
 
-        with self.assertRaises(ValueError):
-            state.source_for_command(
-                "track",
-                figure_number=3,
-                tracked_state=state.normalized_state(),
-            )
+        self.assertEqual(
+            state.python_source(log=False),
+            "fig = hyde.get_figure('DelayGraph')\n"
+            "hyde.refresh_figure(fig, use_bound_values=True)",
+        )
+
+    def test_figure_state_generates_publish_and_close_commands_through_python_source(self):
+        state = FigureState()
+        state.set_publish_figure_macros()
+        self.assertEqual(
+            state.python_source(log=False),
+            "hyde.recreation_registry.publish_registry('figure')",
+        )
+
+        state.set_close_figure(3)
+        self.assertEqual(state.python_source(log=False), "plt.close(3)")
 
 
 class TestFigurePluginDispatch(unittest.TestCase):
@@ -361,6 +370,10 @@ class TestFigurePluginDispatch(unittest.TestCase):
                 dialog.lower_text_edit.toPlainText(),
                 dialog.preview_string(),
             )
+            self.assertEqual(
+                dialog.preview_string(),
+                dialog.figure_state.python_source(log=False),
+            )
             self.assertTrue(dialog.do_it_button.isEnabled())
             self.assertFalse(dialog.to_cmd_line_button.isEnabled())
             self.assertTrue(dialog.to_clip_button.isEnabled())
@@ -371,6 +384,10 @@ class TestFigurePluginDispatch(unittest.TestCase):
             self.assertEqual(
                 dialog.lower_text_edit.toPlainText(),
                 dialog.preview_string(),
+            )
+            self.assertEqual(
+                dialog.preview_string(),
+                dialog.figure_state.python_source(log=False),
             )
             self.assertIn("fig = plt.figure('Delay Graph'", dialog.preview_string())
         finally:
@@ -422,6 +439,18 @@ class TestFigurePluginDispatch(unittest.TestCase):
         Plugin._execute_macro(plugin, "Figure0", ("x", "y"))
 
         self.assertEqual(executed, ["Figure0(x, y)"])
+
+    def test_project_activation_publishes_figure_macros_from_figure_state(self):
+        execution = FakeExecutionService()
+        plugin = Plugin({})
+        plugin.services = {"python_execution_service": execution}
+        plugin.rebuild_configured_window_macros_menu = lambda: None
+
+        plugin.on_project_activated(None)
+
+        state = FigureState()
+        state.set_publish_figure_macros()
+        self.assertEqual(execution.hidden_calls, [(state.python_source(log=False), True)])
 
 
 class TestFigureBackendSnapshot(unittest.TestCase):
@@ -1301,9 +1330,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             self.assertEqual(len(widget.services["python_execution_service"].hidden_calls), 1)
             code, silent = widget.services["python_execution_service"].hidden_calls[0]
+            state = FigureState()
+            state.set_refresh_figure("DelayGraph", use_bound_values=False)
+            self.assertEqual(code, state.python_source(log=False))
             self.assertTrue(silent)
-            self.assertIn("fig = hyde.get_figure('DelayGraph')", code)
-            self.assertIn("hyde.refresh_figure(fig, use_bound_values=False)", code)
         finally:
             widget.close()
 
@@ -1345,9 +1375,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             self.assertEqual(len(execution.hidden_calls), 1)
             code, silent = execution.hidden_calls[0]
+            state = FigureState()
+            state.set_refresh_figure("DelayGraph", use_bound_values=False)
+            self.assertEqual(code, state.python_source(log=False))
             self.assertTrue(silent)
-            self.assertIn("fig = hyde.get_figure('DelayGraph')", code)
-            self.assertIn("hyde.refresh_figure(fig, use_bound_values=False)", code)
         finally:
             widget.close()
 
@@ -1403,9 +1434,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             self.assertEqual(len(execution.hidden_calls), 2)
             code, silent = execution.hidden_calls[1]
+            state = FigureState()
+            state.set_refresh_figure("DelayGraph", use_bound_values=False)
+            self.assertEqual(code, state.python_source(log=False))
             self.assertTrue(silent)
-            self.assertIn("fig = hyde.get_figure('DelayGraph')", code)
-            self.assertIn("hyde.refresh_figure(fig, use_bound_values=False)", code)
         finally:
             widget.close()
 
@@ -1519,7 +1551,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.close()
         self.qapp.processEvents()
 
-        self.assertEqual(queued, [("plt.close(1)", True)])
+        state = FigureState()
+        state.set_close_figure(1)
+        self.assertEqual(queued, [(state.python_source(log=False), True)])
 
         widget.close_from_kernel()
         widget.close_from_kernel()
@@ -1546,7 +1580,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.close()
         self.qapp.processEvents()
 
-        self.assertEqual(queued, [("plt.close(1)", True)])
+        state = FigureState()
+        state.set_close_figure(1)
+        self.assertEqual(queued, [(state.python_source(log=False), True)])
 
         widget.close_from_kernel()
         self.qapp.processEvents()
@@ -1597,7 +1633,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         subwindow.close()
         self.qapp.processEvents()
-        self.assertEqual(queued, [("plt.close(1)", True), ("plt.close(1)", True)])
+        state = FigureState()
+        state.set_close_figure(1)
+        expected = (state.python_source(log=False), True)
+        self.assertEqual(queued, [expected, expected])
         widget.close_from_kernel()
         self.qapp.processEvents()
 

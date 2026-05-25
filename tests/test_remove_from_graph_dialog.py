@@ -399,6 +399,41 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             dialog.close()
             live_figure.canvas.manager.destroy()
 
+    def test_remove_from_graph_preview_and_commit_match_figure_patch_state_python_source(self):
+        execution = FakeExecutionService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = RemoveFromGraphDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            dialog.ui.trace_list.item(0).setSelected(True)
+            self.qapp.processEvents()
+
+            patch_state = dialog.figure_patch_state(
+                dialog.preview_source_state(),
+                dialog.current_effective_state(),
+            )
+            expected_command = patch_state.python_source(log=False)
+
+            self.assertEqual(dialog.preview_string(), expected_command)
+
+            dialog.do_it_button.click()
+
+            self.assertEqual(execution.hidden_calls, [(expected_command, True)])
+        finally:
+            dialog.close()
+
     def test_backend_payload_after_remove_unblocks_next_trace_dialog(self):
         live_figure, snapshot = make_live_first_class_figure()
         execution = EvaluatingExecutionService()

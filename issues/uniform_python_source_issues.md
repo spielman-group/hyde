@@ -1,11 +1,11 @@
-- [ ] Slice 1: Document The No-Exceptions `python_source()` Rule
-- [ ] Slice 2: Inventory Every GUI Python-Generation Path
-- [ ] Slice 3: Harden Shared `HydeGuiState` And `HydeFileDialog` Contracts
-- [ ] Slice 4: Normalize Non-Figure Shortcut Command Surfaces
-- [ ] Slice 5: Normalize Figure Refresh And Figure-Window Command Paths
-- [ ] Slice 6: Normalize The Shared Figure Dialog Patch Family
-- [ ] Slice 7: Normalize Curve Fit And Remaining Inventory Tail Cases
-- [ ] Slice 8: Resync Final Docs After Package-Wide Migration
+- [x] Slice 1: Document The No-Exceptions `python_source()` Rule
+- [x] Slice 2: Inventory Every GUI Python-Generation Path
+- [x] Slice 3: Harden Shared `HydeGuiState` And `HydeFileDialog` Contracts
+- [x] Slice 4: Normalize Non-Figure Shortcut Command Surfaces
+- [x] Slice 5: Normalize Figure Refresh And Figure-Window Command Paths
+- [x] Slice 6: Normalize The Shared Figure Dialog Patch Family
+- [x] Slice 7: Normalize Curve Fit And Remaining Inventory Tail Cases
+- [x] Slice 8: Resync Final Docs After Package-Wide Migration
 
 ## Slice 1: Document The No-Exceptions `python_source()` Rule
 

@@ -277,8 +277,9 @@ class Plugin(HydePlugin):
         self.table_macros = []
         self.rebuild_configured_window_macros_menu()
         state = TableState()
+        state.set_publish_table_macros()
         self.services["python_execution_service"].execute_hidden(
-            state.source_for_command("publish_table_macros")
+            state.python_source()
         )
 
     def on_kernel_message(self, payload):

@@ -33,7 +33,10 @@ from hyde.user_interface.shared.figure import (
 )
 from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.plugins.curve_fit_dialog import Plugin as CurveFitPlugin
-from hyde.user_interface.plugins.curve_fit_dialog.dialogs import CurveFitDialog
+from hyde.user_interface.plugins.curve_fit_dialog.dialogs import (
+    CurveFitDialog,
+    CurveFitState,
+)
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 
 
@@ -1728,6 +1731,100 @@ class TestCurveFitPlugin(unittest.TestCase):
             guessed_preview,
         )
 
+    def test_curve_fit_state_python_source_selects_preview_commit_live_store_and_restore_commands(
+        self,
+    ):
+        array_metadata = {
+            "python_type": "ndarray",
+            "numpy_type": "Array",
+            "ndim": 1,
+            "numpy_kind": "f",
+        }
+        state = CurveFitState()
+        state.set_context(
+            {
+                "fit_functions": [
+                    {
+                        "name": "line_fit",
+                        "callable_ref": "line_fit",
+                        "independent_vars": ["x"],
+                        "parameters": ["slope", "offset"],
+                    }
+                ],
+                "namespace_view": {
+                    "signal": array_metadata,
+                    "time": array_metadata,
+                },
+                "trace_records": [],
+            }
+        )
+        state.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "fit_function_name"),
+                "value": "line_fit",
+            }
+        )
+        state.apply_action(
+            {"type": "set", "path": ("settings", "y_name"), "value": "signal"}
+        )
+        state.set_x_name("x", "time")
+        state.set_fit_result_name("signal_fit_result", locked=True)
+        state.set_coefficient_field("slope", "initial_value", "2.0")
+        state.set_coefficient_field("offset", "initial_value", "1.0")
+
+        state.set_preview_command(preview_target_name="_preview_fit")
+        preview_source = state.python_source(log=False)
+
+        state.set_commit_command()
+        commit_source = state.python_source(log=False)
+
+        state.set_live_command(
+            previous_target_name="old_fit_result",
+            restore_store_name="_restore_store",
+            missing_sentinel_name="_missing",
+        )
+        live_source = state.python_source(log=False)
+
+        state.set_store_target_command(
+            "signal_fit_result",
+            restore_store_name="_restore_store",
+            missing_sentinel_name="_missing",
+        )
+        store_source = state.python_source(log=False)
+
+        state.set_restore_target_command(
+            "signal_fit_result",
+            restore_store_name="_restore_store",
+            missing_sentinel_name="_missing",
+        )
+        restore_source = state.python_source(log=False)
+
+        self.assertIn(
+            "_preview_fit.best_fit = line_fit(x=time, slope=2.0, offset=1.0)",
+            preview_source,
+        )
+        self.assertIn(
+            "signal_fit_result = signal_fit_model.fit(signal, params=signal_fit_params, x=time)",
+            commit_source,
+        )
+        self.assertIn(
+            "_restore_store = globals().setdefault('_restore_store', {})",
+            live_source,
+        )
+        self.assertIn(
+            "globals().pop('old_fit_result', None)",
+            live_source,
+        )
+        self.assertIn(
+            "if 'signal_fit_result' not in _restore_store:",
+            store_source,
+        )
+        self.assertIn(
+            "_hyde_lmfit_restore_target_state = _restore_store.pop(",
+            restore_source,
+        )
+
     def test_curve_fit_dialog_data_options_update_preview_and_execution_mode_without_running(
         self,
     ):
@@ -2640,6 +2737,56 @@ class TestCurveFitPlugin(unittest.TestCase):
             )
             self.assertIn(".best_fit = line_fit(", harness.execution_service.calls[1]["code"])
             self.assertIn(".residual = signal - ", harness.execution_service.calls[1]["code"])
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_dialog_live_update_and_reject_use_curve_fit_state_python_source(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            dialog.state.set_live_command(
+                previous_target_name=None,
+                restore_store_name=dialog._live_restore_store_name,
+                missing_sentinel_name=dialog._live_missing_sentinel_name,
+            )
+            expected_live = dialog.state.python_source(log=False)
+
+            harness.execution_service.calls.clear()
+            dialog.suppress_screen_updates_checkbox.setChecked(False)
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(
+                harness.execution_service.calls[0]["code"],
+                expected_live,
+            )
+
+            dialog.state.set_restore_target_command(
+                "signal_fit_result",
+                restore_store_name=dialog._live_restore_store_name,
+                missing_sentinel_name=dialog._live_missing_sentinel_name,
+            )
+            expected_restore = dialog.state.python_source(log=False)
+            call_count_before_reject = len(harness.execution_service.calls)
+
+            dialog.reject()
+            QtWidgets.QApplication.processEvents()
+
+            self.assertIn(
+                expected_restore,
+                [
+                    call["code"]
+                    for call in harness.execution_service.calls[call_count_before_reject:]
+                ],
+            )
         finally:
             dialog.close()
             harness.close()

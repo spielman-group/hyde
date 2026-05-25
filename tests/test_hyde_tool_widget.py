@@ -20,6 +20,7 @@ from hyde.user_interface.base_hyde_widgets import (
 )
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugins.figure_interactive.window import FigureState
+from hyde.user_interface.shared.core import HydeGuiState
 from hyde.user_interface.shared.figure import HydeFigureDialogWidget
 
 
@@ -138,14 +139,53 @@ class RecordingExecutionService:
         return True
 
 
+class DemoCommandCodec:
+    @staticmethod
+    def default_state():
+        return {"settings": {"path": None}}
+
+    @staticmethod
+    def normalize_state(state):
+        return copy.deepcopy(state)
+
+    @classmethod
+    def validate_state(cls, state):
+        normalized = cls.normalize_state(state)
+        if not normalized["settings"]["path"]:
+            raise ValueError("path is required")
+        return normalized
+
+    @staticmethod
+    def update_state(state, action):
+        updated = copy.deepcopy(state)
+        if action["type"] == "set_path":
+            updated["settings"]["path"] = action["path"]
+            return updated
+        raise ValueError(f"Unsupported action: {action!r}")
+
+    @staticmethod
+    def state_to_python(state, context=None):
+        del context
+        return f"emit({state['settings']['path']!r})"
+
+
+class DemoCommandState(HydeGuiState):
+    codec = DemoCommandCodec
+
+    def set_path(self, path):
+        self.apply_action({"type": "set_path", "path": os.path.abspath(path)})
+
+
 class DemoFileDialog(HydeFileDialog):
     selection_mode = "directory"
     require_existing = True
     allowed_suffixes = (".hy",)
     name_filters = ("Demo Packages (*.hy)",)
 
-    def build_preview_payload(self, selected_path):
-        return f"emit({selected_path!r})"
+    def build_preview_state(self, selected_path):
+        state = DemoCommandState()
+        state.set_path(selected_path)
+        return state
 
 
 class ConfirmingFileDialog(DemoFileDialog):
@@ -167,8 +207,10 @@ class SuggestedPathFileDialog(HydeFileDialog):
     def suggested_path(self):
         return self._suggested_path
 
-    def build_preview_payload(self, selected_path):
-        return f"emit({selected_path!r})"
+    def build_preview_state(self, selected_path):
+        state = DemoCommandState()
+        state.set_path(selected_path)
+        return state
 
 
 class CreatingSuggestedPathFileDialog(SuggestedPathFileDialog):
@@ -248,6 +290,20 @@ class TestHydeToolWidget(unittest.TestCase):
 
         self.assertIs(dialog.service("demo_service"), service)
         self.assertEqual(dialog.service("missing", "fallback"), "fallback")
+
+    def test_gui_state_python_source_can_skip_state_debug_logging_for_preview(self):
+        state = DemoCommandState()
+        state.set_path("/tmp/demo.hy")
+
+        with patch(
+            "hyde.user_interface.shared.core.log_hyde_state_debug"
+        ) as log_debug:
+            preview_source = state.python_source(log=False)
+            committed_source = state.python_source()
+
+        self.assertEqual(preview_source, "emit('/tmp/demo.hy')")
+        self.assertEqual(committed_source, preview_source)
+        log_debug.assert_called_once()
 
     def test_dialog_base_stores_services_without_tool_shell(self):
         service = object()
@@ -761,10 +817,11 @@ class TestHydeToolWidget(unittest.TestCase):
         dialog.live_update_always_enabled = True
 
         try:
-            expected_patch = dialog.figure_patch_source(
+            patch_state = dialog.figure_patch_state(
                 opening_state,
                 updated_state,
             )
+            expected_patch = patch_state.python_source(log=False)
 
             self.assertIs(dialog.figure_context, figure_context)
             self.assertIs(dialog.figure_session(), session)
@@ -793,7 +850,10 @@ class TestHydeToolWidget(unittest.TestCase):
         finally:
             dialog.close()
 
-        rollback_patch = dialog.figure_patch_source(updated_state, opening_state)
+        rollback_patch = dialog.figure_patch_state(
+            updated_state,
+            opening_state,
+        ).python_source(log=False)
         self.assertEqual(
             execution_service.hidden_calls,
             [

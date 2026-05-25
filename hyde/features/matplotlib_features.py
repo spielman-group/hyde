@@ -4,34 +4,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from hyde.features.base import FeatureCodec
+from hyde.features.base import (
+    FeatureCodec,
+    normalize_optional_text,
+    ordered_unique,
+    set_path,
+    valid_python_identifier,
+)
 
 
-def _set_path(state, path, value):
-    target = state
-    for key in tuple(path or ())[:-1]:
-        target = target[key]
-    target[tuple(path or ())[-1]] = value
-
-
-def _ordered_unique(items):
-    seen = set()
-    result = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        result.append(item)
-    return result
-
-
-def _patch_empty_choice(value):
+def patch_empty_choice(value):
     if value in (None, "", "none", "None", " "):
         return "None"
     return str(value)
 
 
-def _patch_can_dispatch_trace_style_edit(source_trace, target_trace):
+def patch_can_dispatch_trace_style_edit(source_trace, target_trace):
     if not isinstance(source_trace, dict) or not isinstance(target_trace, dict):
         return False
     source_copy = copy.deepcopy(source_trace)
@@ -85,7 +73,7 @@ class GraphicsExportFormat:
     name_filter: str
 
 
-def _operand_to_python(operand):
+def operand_to_python(operand):
     if operand is None:
         return None
     kind = operand.get("kind")
@@ -96,24 +84,24 @@ def _operand_to_python(operand):
     if kind == "array_literal":
         return f"np.array({operand['value']!r})"
     if kind == "attribute_path":
-        expression = _operand_to_python(operand["root"])
+        expression = operand_to_python(operand["root"])
         for attribute in operand["path"]:
             expression = f"getattr({expression}, {attribute!r})"
         return expression
     raise ValueError(f"Unsupported figure operand kind: {kind!r}.")
 
 
-def _operand_names(operand):
+def operand_names(operand):
     if operand is None:
         return []
     if operand.get("kind") == "name":
         return [operand["value"]]
     if operand.get("kind") == "attribute_path":
-        return _operand_names(operand.get("root"))
+        return operand_names(operand.get("root"))
     return []
 
 
-def _macro_ready_lines(lines):
+def macro_ready_lines(lines):
     return [line for line in lines if line.strip() != "fig.canvas.draw_idle()"]
 
 
@@ -128,16 +116,6 @@ def figure_command_prelude_lines(
     if include_axes:
         lines.append("ax = fig.axes[0]")
     return lines
-
-
-def figure_refresh_command_source(figure_name, *, use_bound_values=False):
-    normalized_name = str(figure_name or "").strip()
-    if not normalized_name:
-        raise ValueError("Figure refresh requires a stable first-class figure name.")
-    return "\n".join(
-        figure_command_prelude_lines(normalized_name)
-        + [f"hyde.refresh_figure(fig, use_bound_values={bool(use_bound_values)!r})"]
-    )
 
 
 def runtime_graphics_export_filetypes():
@@ -159,7 +137,7 @@ def graphics_export_suffixes_for_format(format_key, filetypes=None):
     for variant in GRAPHICS_EXPORT_SUFFIX_VARIANTS.get(normalized_key, ()):
         if variant in available_filetypes:
             suffixes.append(f".{variant}")
-    return tuple(_ordered_unique(suffixes))
+    return tuple(ordered_unique(suffixes))
 
 
 def graphics_export_name_filter(display_label, suffixes):
@@ -317,9 +295,9 @@ class FigureGraphicsExportCodec(FeatureCodec):
         normalized = cls.normalize_state(state)
         action_type = action.get("type")
         if action_type == "set":
-            _set_path(normalized, action["path"], action["value"])
+            set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            _set_path(normalized, action["path"], None)
+            set_path(normalized, action["path"], None)
         else:
             raise ValueError(f"Unsupported graphics export action: {action_type!r}.")
         return cls.normalize_state(normalized)
@@ -376,6 +354,97 @@ def figure_graphics_export_command_source(
     )
 
 
+class FigurePatchCodec(FeatureCodec):
+    feature_name = "figure_patch"
+    state_version = 1
+
+    @classmethod
+    def default_state(cls):
+        return {
+            "feature": cls.feature_name,
+            "state_version": cls.state_version,
+            "settings": {
+                "figure_name": None,
+                "source_state": None,
+                "target_state": None,
+                "refresh_trace_ids": (),
+                "refresh_legend": True,
+            },
+            "items": [],
+            "ui": {},
+        }
+
+    @classmethod
+    def normalize_state(cls, state):
+        normalized = copy.deepcopy(cls.default_state())
+        if state:
+            normalized["feature"] = state.get("feature", normalized["feature"])
+            normalized["state_version"] = state.get(
+                "state_version", normalized["state_version"]
+            )
+            settings = state.get("settings", {})
+            if isinstance(settings, dict):
+                normalized["settings"].update(settings)
+            normalized["items"] = list(state.get("items", []))
+            ui = state.get("ui", {})
+            normalized["ui"] = dict(ui) if isinstance(ui, dict) else {}
+        settings = normalized["settings"]
+        figure_name = settings.get("figure_name")
+        settings["figure_name"] = None if figure_name in (None, "") else str(figure_name)
+        settings["source_state"] = (
+            None if settings.get("source_state") is None else copy.deepcopy(settings["source_state"])
+        )
+        settings["target_state"] = (
+            None if settings.get("target_state") is None else copy.deepcopy(settings["target_state"])
+        )
+        settings["refresh_trace_ids"] = tuple(
+            str(trace_id) for trace_id in tuple(settings.get("refresh_trace_ids") or ())
+        )
+        settings["refresh_legend"] = bool(settings.get("refresh_legend", True))
+        return normalized
+
+    @classmethod
+    def validate_state(cls, state):
+        normalized = cls.normalize_state(state)
+        if normalized["feature"] != cls.feature_name:
+            raise ValueError(f"Expected feature={cls.feature_name!r}.")
+        settings = normalized["settings"]
+        if not settings["figure_name"]:
+            raise ValueError("Figure patch requires settings.figure_name.")
+        if settings["source_state"] is None:
+            raise ValueError("Figure patch requires settings.source_state.")
+        if settings["target_state"] is None:
+            raise ValueError("Figure patch requires settings.target_state.")
+        FigureIRCodec.validate_state(settings["source_state"])
+        FigureIRCodec.validate_state(settings["target_state"])
+        return normalized
+
+    @classmethod
+    def update_state(cls, state, action):
+        normalized = cls.normalize_state(state)
+        action_type = action.get("type")
+        if action_type == "set":
+            set_path(normalized, action["path"], copy.deepcopy(action["value"]))
+        elif action_type == "clear":
+            set_path(normalized, action["path"], None)
+        else:
+            raise ValueError(f"Unsupported figure patch action: {action_type!r}.")
+        return cls.normalize_state(normalized)
+
+    @classmethod
+    def state_to_python(cls, state, context=None):
+        del context
+        normalized = cls.validate_state(state)
+        settings = normalized["settings"]
+        return figure_patch_source(
+            settings["source_state"],
+            settings["target_state"],
+            figure_name=settings["figure_name"],
+            refresh_trace_ids=settings["refresh_trace_ids"],
+            refresh_legend=settings["refresh_legend"],
+        )
+
+
 class FigureCodec(FeatureCodec):
     feature_name = "figure"
     state_version = 1
@@ -383,6 +452,7 @@ class FigureCodec(FeatureCodec):
         "create",
         "publish_figure_macros",
         "close",
+        "refresh",
     }
 
     @classmethod
@@ -397,6 +467,8 @@ class FigureCodec(FeatureCodec):
                 "figsize": None,
                 "subplot_code": "111",
                 "figure_number": None,
+                "figure_name": None,
+                "use_bound_values": False,
             },
             "items": [],
             "ui": {},
@@ -435,6 +507,11 @@ class FigureCodec(FeatureCodec):
         settings["figure_number"] = (
             None if figure_number in (None, "") else int(figure_number)
         )
+        figure_name = settings.get("figure_name")
+        settings["figure_name"] = (
+            None if figure_name in (None, "") else str(figure_name)
+        )
+        settings["use_bound_values"] = bool(settings.get("use_bound_values", False))
         return normalized
 
     @classmethod
@@ -453,6 +530,8 @@ class FigureCodec(FeatureCodec):
                 raise ValueError("Figure figsize values must be positive.")
         if command == "close" and not settings["figure_number"]:
             raise ValueError(f"Figure command {command!r} requires a figure number.")
+        if command == "refresh" and not settings["figure_name"]:
+            raise ValueError(f"Figure command {command!r} requires a figure name.")
         if settings["subplot_code"] != "111":
             raise ValueError("Initial Hyde figure editing only supports subplot code '111'.")
         return normalized
@@ -465,9 +544,9 @@ class FigureCodec(FeatureCodec):
         if action_type == "set_command":
             normalized["settings"]["command"] = action["command"]
         elif action_type == "set":
-            _set_path(normalized, action["path"], action["value"])
+            set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            _set_path(normalized, action["path"], None)
+            set_path(normalized, action["path"], None)
         elif action_type == "replace_items":
             normalized["items"] = list(action.get("items", []))
         else:
@@ -509,7 +588,7 @@ class FigureCodec(FeatureCodec):
         if settings["x_name"] and normalized["items"]:
             names.append(settings["x_name"])
         names.extend(normalized["items"])
-        return tuple(_ordered_unique(names))
+        return tuple(ordered_unique(names))
 
     @classmethod
     def wrapped_creation_lines(cls, state, helper_name="_hyde_figure"):
@@ -532,6 +611,15 @@ class FigureCodec(FeatureCodec):
             return "hyde.recreation_registry.publish_registry('figure')"
         if command == "close":
             return f"plt.close({normalized['settings']['figure_number']})"
+        if command == "refresh":
+            settings = normalized["settings"]
+            return "\n".join(
+                figure_command_prelude_lines(settings["figure_name"])
+                + [
+                    "hyde.refresh_figure("
+                    f"fig, use_bound_values={settings['use_bound_values']!r})"
+                ]
+            )
         raise ValueError(f"Unsupported figure command: {command!r}.")
 
     @classmethod
@@ -539,7 +627,7 @@ class FigureCodec(FeatureCodec):
         del context
         normalized = cls.validate_state(state)
         parameters = list(cls.tracked_names(normalized))
-        body_lines = _macro_ready_lines(cls._creation_lines(normalized))
+        body_lines = macro_ready_lines(cls._creation_lines(normalized))
         body = "\n".join(f"    {line}" for line in body_lines)
         return (
             "@hyde.figure\n"
@@ -613,22 +701,22 @@ _PRIMARY_SIDE = {"x": "bottom", "y": "left"}
 _MIRROR_SIDE = {"x": "top", "y": "right"}
 
 
-def _deep_merge_dict(target, updates):
+def deep_merge_dict(target, updates):
     for key, value in dict(updates or {}).items():
         if isinstance(value, dict) and isinstance(target.get(key), dict):
-            _deep_merge_dict(target[key], value)
+            deep_merge_dict(target[key], value)
         else:
             target[key] = copy.deepcopy(value)
     return target
 
 
-def _normalize_optional_float(value):
+def normalize_optional_float(value):
     if value in (None, ""):
         return None
     return float(value)
 
 
-def _normalize_float_pair(value, field_name, default=None):
+def normalize_float_pair(value, field_name, default=None):
     if value in (None, ""):
         return copy.deepcopy(default)
     if not isinstance(value, (list, tuple)) or len(value) != 2:
@@ -636,7 +724,7 @@ def _normalize_float_pair(value, field_name, default=None):
     return (float(value[0]), float(value[1]))
 
 
-def _default_axis_state(axis_name):
+def default_axis_state(axis_name):
     return {
         "id": axis_name,
         "scale_mode": "linear",
@@ -705,11 +793,11 @@ def _default_axis_state(axis_name):
     }
 
 
-def _normalize_axis_label(axis_name, label, legacy_text=None):
-    normalized = _default_axis_state(axis_name)["label"]
+def normalize_axis_label(axis_name, label, legacy_text=None):
+    normalized = default_axis_state(axis_name)["label"]
     explicit_visible = isinstance(label, dict) and "visible" in label
     if isinstance(label, dict):
-        _deep_merge_dict(normalized, label)
+        deep_merge_dict(normalized, label)
     elif label not in (None, ""):
         normalized["text"] = str(label)
     if normalized["text"] in (None, ""):
@@ -727,19 +815,19 @@ def _normalize_axis_label(axis_name, label, legacy_text=None):
         raise ValueError(f"Axis {axis_name!r} label side is invalid.")
     normalized["position_mode"] = str(normalized.get("position_mode", "auto"))
     position = normalized.get("position")
-    normalized["position"] = _normalize_optional_float(position)
+    normalized["position"] = normalize_optional_float(position)
     normalized["offset"] = float(normalized.get("offset", 0.0) or 0.0)
-    normalized["rotation"] = _normalize_optional_float(normalized.get("rotation"))
+    normalized["rotation"] = normalize_optional_float(normalized.get("rotation"))
     normalized["line_spacing"] = float(normalized.get("line_spacing", 1.2) or 1.2)
     color = normalized.get("color")
     normalized["color"] = None if color in (None, "") else str(color)
     return normalized
 
 
-def _normalize_axis_range(axis_name, range_state, legacy_limits=None):
-    normalized = _default_axis_state(axis_name)["range"]
+def normalize_axis_range(axis_name, range_state, legacy_limits=None):
+    normalized = default_axis_state(axis_name)["range"]
     if isinstance(range_state, dict):
-        _deep_merge_dict(normalized, range_state)
+        deep_merge_dict(normalized, range_state)
     limit_mode = dict(normalized.get("limit_mode", {}) or {})
     normalized["limit_mode"] = {
         "min": str(limit_mode.get("min", "auto")),
@@ -750,7 +838,7 @@ def _normalize_axis_range(axis_name, range_state, legacy_limits=None):
         normalized["limits"] = (
             None
             if legacy_limits in (None, [])
-            else _normalize_float_pair(legacy_limits, "axis limits")
+            else normalize_float_pair(legacy_limits, "axis limits")
         )
     else:
         if not isinstance(limits, (list, tuple)) or len(limits) != 2:
@@ -771,10 +859,10 @@ def _normalize_axis_range(axis_name, range_state, legacy_limits=None):
     return normalized
 
 
-def _normalize_axis_ticks(axis_name, ticks):
-    normalized = _default_axis_state(axis_name)["ticks"]
+def normalize_axis_ticks(axis_name, ticks):
+    normalized = default_axis_state(axis_name)["ticks"]
     if isinstance(ticks, dict):
-        _deep_merge_dict(normalized, ticks)
+        deep_merge_dict(normalized, ticks)
     major = dict(normalized.get("major", {}) or {})
     positions = major.get("positions")
     major["positions"] = (
@@ -790,7 +878,7 @@ def _normalize_axis_ticks(axis_name, ticks):
     major["count"] = (
         None if major.get("count") in (None, "") else int(major.get("count"))
     )
-    major["step"] = _normalize_optional_float(major.get("step"))
+    major["step"] = normalize_optional_float(major.get("step"))
     normalized["major"] = major
     normalized["minor"] = {
         "visible": bool(dict(normalized.get("minor", {}) or {}).get("visible"))
@@ -799,9 +887,9 @@ def _normalize_axis_ticks(axis_name, ticks):
     formatter = dict(normalized.get("formatter", {}) or {})
     normalized["formatter"] = {
         "style": str(formatter.get("style", "plain")),
-        "low_trip": _normalize_optional_float(formatter.get("low_trip")),
-        "high_trip": _normalize_optional_float(formatter.get("high_trip")),
-        "exponent_prescale": _normalize_optional_float(
+        "low_trip": normalize_optional_float(formatter.get("low_trip")),
+        "high_trip": normalize_optional_float(formatter.get("high_trip")),
+        "exponent_prescale": normalize_optional_float(
             formatter.get("exponent_prescale")
         ),
         "use_thousands_separator": bool(
@@ -817,72 +905,72 @@ def _normalize_axis_ticks(axis_name, ticks):
         float(value)
         for value in suppressed
     ]
-    normalized["display_range"] = _normalize_float_pair(
+    normalized["display_range"] = normalize_float_pair(
         normalized.get("display_range"),
         "tick display range",
         default=None,
     )
-    normalized["max_log_cycles_minor"] = _normalize_optional_float(
+    normalized["max_log_cycles_minor"] = normalize_optional_float(
         normalized.get("max_log_cycles_minor")
     )
-    normalized["max_log_cycles_minor_labels"] = _normalize_optional_float(
+    normalized["max_log_cycles_minor_labels"] = normalize_optional_float(
         normalized.get("max_log_cycles_minor_labels")
     )
     return normalized
 
 
-def _normalize_axis_grid(axis_name, grid):
-    normalized = _default_axis_state(axis_name)["grid"]
+def normalize_axis_grid(axis_name, grid):
+    normalized = default_axis_state(axis_name)["grid"]
     if isinstance(grid, dict):
-        _deep_merge_dict(normalized, grid)
+        deep_merge_dict(normalized, grid)
     normalized["visible"] = bool(normalized.get("visible"))
     normalized["which"] = str(normalized.get("which", "major"))
     normalized["linestyle"] = str(normalized.get("linestyle", "-"))
-    normalized["linewidth"] = _normalize_optional_float(normalized.get("linewidth"))
+    normalized["linewidth"] = normalize_optional_float(normalized.get("linewidth"))
     color = normalized.get("color")
     normalized["color"] = None if color in (None, "") else str(color)
     return normalized
 
 
-def _normalize_axis_zero_line(axis_name, zero_line):
-    normalized = _default_axis_state(axis_name)["zero_line"]
+def normalize_axis_zero_line(axis_name, zero_line):
+    normalized = default_axis_state(axis_name)["zero_line"]
     if isinstance(zero_line, dict):
-        _deep_merge_dict(normalized, zero_line)
+        deep_merge_dict(normalized, zero_line)
     normalized["visible"] = bool(normalized.get("visible"))
     normalized["linestyle"] = str(normalized.get("linestyle", "-"))
-    normalized["linewidth"] = _normalize_optional_float(normalized.get("linewidth"))
+    normalized["linewidth"] = normalize_optional_float(normalized.get("linewidth"))
     color = normalized.get("color")
     normalized["color"] = None if color in (None, "") else str(color)
     return normalized
 
 
-def _normalize_axis_state(axis_name, axis_state, legacy_label=None, legacy_limits=None):
-    normalized = _default_axis_state(axis_name)
+def normalize_axis_state(axis_name, axis_state, legacy_label=None, legacy_limits=None):
+    normalized = default_axis_state(axis_name)
     if isinstance(axis_state, dict):
-        _deep_merge_dict(normalized, axis_state)
+        deep_merge_dict(normalized, axis_state)
     normalized["id"] = axis_name
     normalized["scale_mode"] = str(normalized.get("scale_mode", "linear"))
     normalized["log_tick_mode"] = str(normalized.get("log_tick_mode", "plain"))
-    normalized["range"] = _normalize_axis_range(
+    normalized["range"] = normalize_axis_range(
         axis_name,
         normalized.get("range"),
         legacy_limits=legacy_limits,
     )
-    normalized["label"] = _normalize_axis_label(
+    normalized["label"] = normalize_axis_label(
         axis_name,
         normalized.get("label"),
         legacy_text=legacy_label,
     )
-    normalized["ticks"] = _normalize_axis_ticks(axis_name, normalized.get("ticks"))
-    normalized["grid"] = _normalize_axis_grid(axis_name, normalized.get("grid"))
-    normalized["zero_line"] = _normalize_axis_zero_line(
+    normalized["ticks"] = normalize_axis_ticks(axis_name, normalized.get("ticks"))
+    normalized["grid"] = normalize_axis_grid(axis_name, normalized.get("grid"))
+    normalized["zero_line"] = normalize_axis_zero_line(
         axis_name,
         normalized.get("zero_line"),
     )
     return normalized
 
 
-def _default_axis_side_state(side):
+def default_axis_side_state(side):
     axis_name = _AXIS_SIDE_TO_AXIS[side]
     primary = _PRIMARY_SIDE[axis_name] == side
     return {
@@ -901,7 +989,7 @@ def _default_axis_side_state(side):
     }
 
 
-def _default_subplot_margins():
+def default_subplot_margins():
     return {
         "left": None,
         "bottom": None,
@@ -910,19 +998,19 @@ def _default_subplot_margins():
     }
 
 
-def _normalize_subplot_margins(margins):
-    normalized = _default_subplot_margins()
+def normalize_subplot_margins(margins):
+    normalized = default_subplot_margins()
     if isinstance(margins, dict):
-        _deep_merge_dict(normalized, margins)
+        deep_merge_dict(normalized, margins)
     for side in ("left", "bottom", "right", "top"):
-        normalized[side] = _normalize_optional_float(normalized.get(side))
+        normalized[side] = normalize_optional_float(normalized.get(side))
     return normalized
 
 
-def _normalize_axis_side_state(side, side_state):
-    normalized = _default_axis_side_state(side)
+def normalize_axis_side_state(side, side_state):
+    normalized = default_axis_side_state(side)
     if isinstance(side_state, dict):
-        _deep_merge_dict(normalized, side_state)
+        deep_merge_dict(normalized, side_state)
     normalized.pop("draw_between", None)
     normalized["side"] = side
     normalized["axis"] = _AXIS_SIDE_TO_AXIS[side]
@@ -935,7 +1023,7 @@ def _normalize_axis_side_state(side, side_state):
     normalized["tick_label_color"] = (
         None if tick_label_color in (None, "") else str(tick_label_color)
     )
-    normalized["spine_width"] = _normalize_optional_float(normalized.get("spine_width"))
+    normalized["spine_width"] = normalize_optional_float(normalized.get("spine_width"))
     normalized["tick_label_rotation"] = float(
         normalized.get("tick_label_rotation", 0.0) or 0.0
     )
@@ -947,7 +1035,7 @@ def _normalize_axis_side_state(side, side_state):
     return normalized
 
 
-def _sync_legacy_subplot_axis_fields(subplot):
+def sync_legacy_subplot_axis_fields(subplot):
     subplot["xlabel"] = subplot["axes"]["x"]["label"]["text"]
     subplot["ylabel"] = subplot["axes"]["y"]["label"]["text"]
     subplot["x_limits"] = subplot["axes"]["x"]["range"]["limits"]
@@ -1019,7 +1107,7 @@ class FigureIRCodec(FeatureCodec):
             "id": f"subplot{index}",
             "subplot_code": "111",
             "title": None,
-            "margins": _default_subplot_margins(),
+            "margins": default_subplot_margins(),
             "xlabel": None,
             "ylabel": None,
             "x_limits": None,
@@ -1049,7 +1137,7 @@ class FigureIRCodec(FeatureCodec):
                     normalized[field] = None
                 else:
                     normalized[field] = tuple(value)
-            normalized["margins"] = _normalize_subplot_margins(
+            normalized["margins"] = normalize_subplot_margins(
                 subplot.get("margins")
             )
             normalized["traces"] = [
@@ -1062,13 +1150,13 @@ class FigureIRCodec(FeatureCodec):
             ]
             axes = dict(subplot.get("axes", {}) or {})
             normalized["axes"] = {
-                "x": _normalize_axis_state(
+                "x": normalize_axis_state(
                     "x",
                     axes.get("x"),
                     legacy_label=normalized["xlabel"],
                     legacy_limits=normalized["x_limits"],
                 ),
-                "y": _normalize_axis_state(
+                "y": normalize_axis_state(
                     "y",
                     axes.get("y"),
                     legacy_label=normalized["ylabel"],
@@ -1077,20 +1165,20 @@ class FigureIRCodec(FeatureCodec):
             }
             axis_sides = dict(subplot.get("axis_sides", {}) or {})
             normalized["axis_sides"] = {
-                side: _normalize_axis_side_state(side, axis_sides.get(side))
+                side: normalize_axis_side_state(side, axis_sides.get(side))
                 for side in ("bottom", "top", "left", "right")
             }
         else:
-            normalized["margins"] = _normalize_subplot_margins(None)
+            normalized["margins"] = normalize_subplot_margins(None)
             normalized["axes"] = {
-                "x": _normalize_axis_state("x", None),
-                "y": _normalize_axis_state("y", None),
+                "x": normalize_axis_state("x", None),
+                "y": normalize_axis_state("y", None),
             }
             normalized["axis_sides"] = {
-                side: _normalize_axis_side_state(side, None)
+                side: normalize_axis_side_state(side, None)
                 for side in ("bottom", "top", "left", "right")
             }
-        return _sync_legacy_subplot_axis_fields(normalized)
+        return sync_legacy_subplot_axis_fields(normalized)
 
     @classmethod
     def _normalize_trace(cls, trace, index):
@@ -1264,8 +1352,8 @@ class FigureIRCodec(FeatureCodec):
                 raise ValueError("Figure axis edits require axis='x' or axis='y'.")
             axis_state = copy.deepcopy(subplot["axes"][axis_name])
             if action.get("replace"):
-                axis_state = _default_axis_state(axis_name)
-            _deep_merge_dict(axis_state, action.get("state"))
+                axis_state = default_axis_state(axis_name)
+            deep_merge_dict(axis_state, action.get("state"))
             subplot["axes"][axis_name] = axis_state
         elif action_type == "set_axis_side_state":
             side = str(action.get("side", ""))
@@ -1273,14 +1361,14 @@ class FigureIRCodec(FeatureCodec):
                 raise ValueError(f"Unsupported figure axis side: {side!r}.")
             side_state = copy.deepcopy(subplot["axis_sides"][side])
             if action.get("replace"):
-                side_state = _default_axis_side_state(side)
-            _deep_merge_dict(side_state, action.get("state"))
+                side_state = default_axis_side_state(side)
+            deep_merge_dict(side_state, action.get("state"))
             subplot["axis_sides"][side] = side_state
         elif action_type == "set_subplot_margins":
             margins = copy.deepcopy(subplot["margins"])
             if action.get("replace"):
-                margins = _default_subplot_margins()
-            _deep_merge_dict(margins, action.get("state"))
+                margins = default_subplot_margins()
+            deep_merge_dict(margins, action.get("state"))
             subplot["margins"] = margins
         elif action_type in {"set_subplot_title", "set_figure_title"}:
             title = None if action.get("title") in (None, "") else str(action.get("title"))
@@ -1351,7 +1439,7 @@ class FigureIRCodec(FeatureCodec):
         else:
             raise ValueError(f"Unsupported figure IR action: {action_type!r}.")
 
-        _sync_legacy_subplot_axis_fields(subplot)
+        sync_legacy_subplot_axis_fields(subplot)
         return cls.validate_state(normalized)
 
     @classmethod
@@ -1384,9 +1472,9 @@ class FigureIRCodec(FeatureCodec):
         names = []
         for subplot in normalized["layout"]["subplots"]:
             for trace in subplot["traces"]:
-                names.extend(_operand_names(trace["x_source"]))
-                names.extend(_operand_names(trace["y_source"]))
-        return tuple(_ordered_unique(names))
+                names.extend(operand_names(trace["x_source"]))
+                names.extend(operand_names(trace["y_source"]))
+        return tuple(ordered_unique(names))
 
     @classmethod
     def _lowering_defaults(cls, normalized, context):
@@ -1419,8 +1507,8 @@ class FigureIRCodec(FeatureCodec):
     @classmethod
     def _plot_call(cls, trace, default_style=None):
         arguments = []
-        x_source = _operand_to_python(trace["x_source"])
-        y_source = _operand_to_python(trace["y_source"])
+        x_source = operand_to_python(trace["x_source"])
+        y_source = operand_to_python(trace["y_source"])
         if x_source:
             arguments.append(x_source)
         arguments.append(y_source)
@@ -1844,7 +1932,7 @@ class FigureIRCodec(FeatureCodec):
     def state_to_macro_source(cls, state, macro_name, context=None):
         normalized = cls.validate_state(state)
         parameters = ", ".join(cls.tracked_names(normalized))
-        body_lines = _macro_ready_lines(
+        body_lines = macro_ready_lines(
             cls.state_to_python(normalized, context=context).splitlines()
         )
         body = "\n".join(f"    {line}" for line in body_lines)
@@ -1912,16 +2000,16 @@ def figure_ir_append_trace(figure_ir, trace):
     return FigureIRCodec.validate_state(normalized)
 
 
-def _figure_patch_subplot(state, subplot_id):
+def figure_patch_subplot(state, subplot_id):
     normalized = FigureIRCodec.validate_state(state)
     return FigureIRCodec._resolve_subplot(normalized, subplot_id)
 
 
-def _figure_patch_reset_color(target, default_expr):
+def figure_patch_reset_color(target, default_expr):
     return repr(target) if target is not None else default_expr
 
 
-def _figure_patch_label_lines(axis_name, source_axis_state, target_axis_state):
+def figure_patch_label_lines(axis_name, source_axis_state, target_axis_state):
     setter = "xlabel" if axis_name == "x" else "ylabel"
     axis_obj = f"ax.{axis_name}axis"
     source_label = source_axis_state["label"]
@@ -1934,7 +2022,7 @@ def _figure_patch_label_lines(axis_name, source_axis_state, target_axis_state):
     if source_label["visible"] != target_label["visible"]:
         lines.append(f"{axis_obj}.label.set_visible({target_label['visible']!r})")
     if source_label["color"] != target_label["color"]:
-        color_value = _figure_patch_reset_color(
+        color_value = figure_patch_reset_color(
             target_label["color"],
             "rcParams['axes.labelcolor']",
         )
@@ -1973,7 +2061,7 @@ def _figure_patch_label_lines(axis_name, source_axis_state, target_axis_state):
     return lines
 
 
-def _figure_patch_range_lines(axis_name, source_axis_state, target_axis_state):
+def figure_patch_range_lines(axis_name, source_axis_state, target_axis_state):
     source_range = source_axis_state["range"]
     target_range = target_axis_state["range"]
     if source_range == target_range:
@@ -2007,7 +2095,7 @@ def _figure_patch_range_lines(axis_name, source_axis_state, target_axis_state):
     return lines
 
 
-def _figure_patch_tick_params_lines(axis_name, source_subplot, target_subplot):
+def figure_patch_tick_params_lines(axis_name, source_subplot, target_subplot):
     primary_side = _PRIMARY_SIDE[axis_name]
     mirror_side = _MIRROR_SIDE[axis_name]
     source_axis_state = source_subplot["axes"][axis_name]
@@ -2037,7 +2125,7 @@ def _figure_patch_tick_params_lines(axis_name, source_subplot, target_subplot):
     ]
 
 
-def _figure_patch_spine_lines(axis_name, source_subplot, target_subplot):
+def figure_patch_spine_lines(axis_name, source_subplot, target_subplot):
     lines = []
     for side in (_PRIMARY_SIDE[axis_name], _MIRROR_SIDE[axis_name]):
         source_side = source_subplot["axis_sides"][side]
@@ -2045,7 +2133,7 @@ def _figure_patch_spine_lines(axis_name, source_subplot, target_subplot):
         if source_side["spine_visible"] != target_side["spine_visible"]:
             lines.append(f"ax.spines[{side!r}].set_visible({target_side['spine_visible']!r})")
         if source_side["spine_color"] != target_side["spine_color"]:
-            color_value = _figure_patch_reset_color(
+            color_value = figure_patch_reset_color(
                 target_side["spine_color"],
                 "rcParams['axes.edgecolor']",
             )
@@ -2066,7 +2154,7 @@ def _figure_patch_spine_lines(axis_name, source_subplot, target_subplot):
     return lines
 
 
-def _figure_patch_tick_locator_lines(axis_name, source_axis_state, target_axis_state):
+def figure_patch_tick_locator_lines(axis_name, source_axis_state, target_axis_state):
     if (
         source_axis_state["ticks"] == target_axis_state["ticks"]
         and source_axis_state["scale_mode"] == target_axis_state["scale_mode"]
@@ -2101,7 +2189,7 @@ def _figure_patch_tick_locator_lines(axis_name, source_axis_state, target_axis_s
     return lines
 
 
-def _figure_patch_tick_label_style_lines(axis_name, source_subplot, target_subplot):
+def figure_patch_tick_label_style_lines(axis_name, source_subplot, target_subplot):
     axis_obj = f"ax.{axis_name}axis"
     default_color_expr = f"rcParams['{axis_name}tick.color']"
     lines = []
@@ -2114,14 +2202,17 @@ def _figure_patch_tick_label_style_lines(axis_name, source_subplot, target_subpl
             continue
         lines.append(f"for _hyde_tick in {axis_obj}.get_major_ticks() + {axis_obj}.get_minor_ticks():")
         if color_changed:
-            color_value = _figure_patch_reset_color(target_side["tick_label_color"], default_color_expr)
+            color_value = figure_patch_reset_color(
+                target_side["tick_label_color"],
+                default_color_expr,
+            )
             lines.append(f"    _hyde_tick.{label_attr}.set_color({color_value})")
         if rotation_changed:
             lines.append(f"    _hyde_tick.{label_attr}.set_rotation({target_side['tick_label_rotation']!r})")
     return lines
 
 
-def _figure_patch_grid_lines(axis_name, source_axis_state, target_axis_state):
+def figure_patch_grid_lines(axis_name, source_axis_state, target_axis_state):
     source_grid = source_axis_state["grid"]
     target_grid = target_axis_state["grid"]
     if source_grid == target_grid:
@@ -2141,7 +2232,7 @@ def _figure_patch_grid_lines(axis_name, source_axis_state, target_axis_state):
     return [f"ax.grid({', '.join(arguments)})"]
 
 
-def _figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state):
+def figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state):
     source_zero = source_axis_state["zero_line"]
     target_zero = target_axis_state["zero_line"]
     if source_zero == target_zero:
@@ -2163,8 +2254,8 @@ def _figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_stat
     return lines
 
 
-def _figure_patch_trace_lines(source_trace, target_trace, *, trace_index):
-    if not _patch_can_dispatch_trace_style_edit(source_trace, target_trace):
+def figure_patch_trace_lines(source_trace, target_trace, *, trace_index):
+    if not patch_can_dispatch_trace_style_edit(source_trace, target_trace):
         return []
     source_kwargs = dict(source_trace.get("kwargs", {}) or {})
     target_kwargs = dict(target_trace.get("kwargs", {}) or {})
@@ -2181,12 +2272,12 @@ def _figure_patch_trace_lines(source_trace, target_trace, *, trace_index):
         "alpha": lambda value: f"line.set_alpha({value!r})",
         "color": lambda value: f"line.set_color({value!r})",
         "drawstyle": lambda value: f"line.set_drawstyle({value!r})",
-        "marker": lambda value: f"line.set_marker({_patch_empty_choice(value)!r})",
+        "marker": lambda value: f"line.set_marker({patch_empty_choice(value)!r})",
         "markersize": lambda value: f"line.set_markersize({value!r})",
         "markerfacecolor": lambda value: f"line.set_markerfacecolor({value!r})",
         "markeredgecolor": lambda value: f"line.set_markeredgecolor({value!r})",
         "markeredgewidth": lambda value: f"line.set_markeredgewidth({value!r})",
-        "linestyle": lambda value: f"line.set_linestyle({_patch_empty_choice(value)!r})",
+        "linestyle": lambda value: f"line.set_linestyle({patch_empty_choice(value)!r})",
         "linewidth": lambda value: f"line.set_linewidth({value!r})",
         "label": lambda value: f"line.set_label({value!r})",
     }
@@ -2195,7 +2286,7 @@ def _figure_patch_trace_lines(source_trace, target_trace, *, trace_index):
     return lines
 
 
-def _figure_patch_remove_trace_lines(trace_id):
+def figure_patch_remove_trace_lines(trace_id):
     return [
         (
             "_hyde_line = next(("
@@ -2208,7 +2299,7 @@ def _figure_patch_remove_trace_lines(trace_id):
     ]
 
 
-def _figure_patch_remove_trace_helper_source(
+def figure_patch_remove_trace_helper_source(
     source_state,
     target_state,
     *,
@@ -2255,10 +2346,10 @@ def _figure_patch_remove_trace_helper_source(
     )
 
 
-def _figure_patch_add_trace_lines(trace):
+def figure_patch_add_trace_lines(trace):
     arguments = []
-    x_source = _operand_to_python(trace["x_source"])
-    y_source = _operand_to_python(trace["y_source"])
+    x_source = operand_to_python(trace["x_source"])
+    y_source = operand_to_python(trace["y_source"])
     if x_source:
         arguments.append(x_source)
     arguments.append(y_source)
@@ -2285,7 +2376,7 @@ def figure_patch_source(
 ):
     source = FigureIRCodec.validate_state(source_state)
     target = FigureIRCodec.validate_state(target_state)
-    helper_source = _figure_patch_remove_trace_helper_source(
+    helper_source = figure_patch_remove_trace_helper_source(
         source,
         target,
         figure_name=figure_name,
@@ -2293,8 +2384,8 @@ def figure_patch_source(
     )
     if helper_source:
         return helper_source
-    source_subplot = _figure_patch_subplot(source, None)
-    target_subplot = _figure_patch_subplot(target, None)
+    source_subplot = figure_patch_subplot(source, None)
+    target_subplot = figure_patch_subplot(target, None)
     lines = []
     needs_ticker = False
     refresh_trace_ids = {str(trace_id) for trace_id in tuple(refresh_trace_ids or ())}
@@ -2330,18 +2421,18 @@ def figure_patch_source(
                 lines.append(f"ax.set_{axis_name}scale('log')")
             else:
                 lines.append(f"ax.set_{axis_name}scale('log', base=2)")
-        lines.extend(_figure_patch_label_lines(axis_name, source_axis_state, target_axis_state))
-        lines.extend(_figure_patch_range_lines(axis_name, source_axis_state, target_axis_state))
-        tick_param_lines = _figure_patch_tick_params_lines(axis_name, source_subplot, target_subplot)
+        lines.extend(figure_patch_label_lines(axis_name, source_axis_state, target_axis_state))
+        lines.extend(figure_patch_range_lines(axis_name, source_axis_state, target_axis_state))
+        tick_param_lines = figure_patch_tick_params_lines(axis_name, source_subplot, target_subplot)
         lines.extend(tick_param_lines)
-        lines.extend(_figure_patch_spine_lines(axis_name, source_subplot, target_subplot))
-        locator_lines = _figure_patch_tick_locator_lines(axis_name, source_axis_state, target_axis_state)
+        lines.extend(figure_patch_spine_lines(axis_name, source_subplot, target_subplot))
+        locator_lines = figure_patch_tick_locator_lines(axis_name, source_axis_state, target_axis_state)
         if locator_lines:
             needs_ticker = True
             lines.extend(locator_lines)
-        lines.extend(_figure_patch_tick_label_style_lines(axis_name, source_subplot, target_subplot))
-        lines.extend(_figure_patch_grid_lines(axis_name, source_axis_state, target_axis_state))
-        lines.extend(_figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state))
+        lines.extend(figure_patch_tick_label_style_lines(axis_name, source_subplot, target_subplot))
+        lines.extend(figure_patch_grid_lines(axis_name, source_axis_state, target_axis_state))
+        lines.extend(figure_patch_zero_line_lines(axis_name, source_axis_state, target_axis_state))
 
     trace_lines = []
     legend_changed = source_subplot["legend"] != target_subplot["legend"]
@@ -2351,26 +2442,26 @@ def figure_patch_source(
         if source_trace["id"] in target_traces:
             continue
         legend_changed = True
-        trace_lines.extend(_figure_patch_remove_trace_lines(source_trace["id"]))
+        trace_lines.extend(figure_patch_remove_trace_lines(source_trace["id"]))
     for index, target_trace in enumerate(target_subplot.get("traces", [])):
         source_trace = source_traces.get(target_trace["id"])
         if source_trace is None:
             legend_changed = True
-            trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
+            trace_lines.extend(figure_patch_add_trace_lines(target_trace))
             continue
-        lowered = _figure_patch_trace_lines(source_trace, target_trace, trace_index=index)
+        lowered = figure_patch_trace_lines(source_trace, target_trace, trace_index=index)
         if lowered:
             legend_changed = True
             trace_lines.extend(lowered)
             continue
         if source_trace != target_trace:
             legend_changed = True
-            trace_lines.extend(_figure_patch_remove_trace_lines(target_trace["id"]))
-            trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
+            trace_lines.extend(figure_patch_remove_trace_lines(target_trace["id"]))
+            trace_lines.extend(figure_patch_add_trace_lines(target_trace))
             continue
         if target_trace["id"] in refresh_trace_ids:
-            trace_lines.extend(_figure_patch_remove_trace_lines(target_trace["id"]))
-            trace_lines.extend(_figure_patch_add_trace_lines(target_trace))
+            trace_lines.extend(figure_patch_remove_trace_lines(target_trace["id"]))
+            trace_lines.extend(figure_patch_add_trace_lines(target_trace))
     lines.extend(trace_lines)
     legend_visibility_changed = source_subplot["legend"] != target_subplot["legend"]
     if refresh_legend and legend_changed:

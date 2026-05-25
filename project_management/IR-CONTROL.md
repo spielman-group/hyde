@@ -24,6 +24,7 @@ lowering to a codec.
 
 The GUI surface does not:
 - directly mutate deep state dictionaries in many places
+- generate command Python outside `HydeGuiState.python_source()`
 - duplicate lowering logic in widget helpers
 - become the authoritative owner of scientific state
 
@@ -40,7 +41,8 @@ The GUI surface does not:
 - the current local edit session state
 - calls into its codec
 - normalized/validated state access
-- lowering requests such as `python_source()` and `macro_source()`
+- command lowering through `python_source()`
+- any separate reopen-source lowering such as `macro_source()`
 
 ### `FeatureCodec` owns
 - canonical state schema
@@ -67,6 +69,8 @@ The GUI surface does not:
 - Target-selecting project dialogs follow the same rule through a shared
   `HydeFileDialog` / `HydeFileWidget` family in
   `hyde.user_interface.base_hyde_widgets` rather than dialog-local chooser logic.
+- `HydeFileDialog` subclasses should extend that shared generation/submission path
+  through hook overrides and `super()` rather than alternate dialog-local paths.
 - Shared user-facing display metadata may live in a composed feature support class
   when it is not scientific state and when multiple surfaces need one canonical
   representation. For first-class figures, canonical figure-element display names
@@ -111,6 +115,10 @@ The shared codec contract is intentionally small:
 - `state_to_python(state, context=None)`
 - optional `state_to_macro_source(state, macro_name, context=None)`
 
+For command-emitting GUI surfaces, `HydeGuiState.python_source()` is the one
+authoritative command-generation method. Preview text shows that same generated
+string; Hyde does not grow separate preview-only Python-generation APIs.
+
 Do not grow this into a framework unless the code actually needs it.
 
 In particular, do not add by default:
@@ -135,8 +143,12 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - Trivial visible project commands may share a lightweight command codec.
 - Target-selecting project dialogs keep chooser policy and generic overwrite checks
   in the shared file-dialog family while leaving command-specific exceptions in the
-  concrete dialog.
+  concrete dialog. Their preview and submission strings come from the shared
+  state-owned `python_source()` path rather than dialog-local string assembly.
 - Figure creation surfaces use `FigureState` for GUI-side creation state.
+- Curve Fit command generation uses `CurveFitState.python_source()` for preview,
+  commit, live-update, and rollback/store behaviors while attached-display
+  patching stays on the shared `FigurePatchState` path.
 - Figure axis, trace, and Curve Fit attached-display dialogs now emit matplotlib
   patch Python from imported figure IR rather than using a separate semantic
   figure-action transport.

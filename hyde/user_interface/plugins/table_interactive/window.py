@@ -16,13 +16,6 @@ class TableState(HydeGuiState):
     def configure_defaults(self):
         self.set_command("open")
 
-    def _temporary_state(self, command=None, **settings):
-        state = copy.deepcopy(self.normalized_state())
-        if command is not None:
-            state["settings"]["command"] = command
-        state["settings"].update(settings)
-        return state
-
     def set_command(self, command):
         self.apply_action({"type": "set_command", "command": command})
 
@@ -69,10 +62,14 @@ class TableState(HydeGuiState):
         else:
             self.apply_action({"type": "clear", "path": ("settings", "request_id")})
 
-    def source_for_command(self, command, **settings):
-        return self.codec.state_to_python(
-            self._temporary_state(command=command, **settings)
-        )
+    def set_push_table_data(self, names, request_id):
+        self.set_items(names)
+        self.set_command("push_table_data")
+        self.set_request_id(request_id)
+
+    def set_publish_table_macros(self):
+        self.set_command("publish_table_macros")
+        self.set_request_id(None)
 
     def default_macro_name(self):
         settings = self.normalized_state()["settings"]
@@ -339,10 +336,9 @@ class TableWidget(HydeInteractiveWidget):
         self._current_request_id = request_id
         self._refresh_in_flight = True
         self._refresh_requested = False
-        refresh_command = self.table_state.source_for_command(
-            "push_table_data",
-            request_id=request_id,
-        )
+        refresh_state = TableState()
+        refresh_state.set_push_table_data(self.names, request_id)
+        refresh_command = refresh_state.python_source()
         for command in prefix:
             if not self.execute_hidden_command(command):
                 self._clear_refresh_in_flight()

@@ -41,7 +41,7 @@ class NewTableDialog(HydeDialogWidget):
         self._sync_state_from_widgets()
         payload = ""
         if self.table_state.normalized_state()["items"]:
-            payload = self.table_state.preview_python_source()
+            payload = self.table_state.python_source(log=False)
         self.set_preview_string(payload)
         self.refresh_shell()
 

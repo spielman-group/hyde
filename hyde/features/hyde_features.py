@@ -1,19 +1,8 @@
 import ast
 import copy
+import textwrap
 
-from hyde.features.base import FeatureCodec
-
-
-def _coerce_path(path):
-    return tuple(path or ())
-
-
-def _set_path(state, path, value):
-    target = state
-    path = _coerce_path(path)
-    for key in path[:-1]:
-        target = target[key]
-    target[path[-1]] = value
+from hyde.features.base import FeatureCodec, set_path
 
 
 class SimpleHydeCommandCodec(FeatureCodec):
@@ -97,9 +86,9 @@ class SimpleHydeCommandCodec(FeatureCodec):
         if action_type == "set_command":
             normalized["command"] = action["command"]
         elif action_type == "set":
-            _set_path(normalized, action["path"], action["value"])
+            set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            _set_path(normalized, action["path"], None)
+            set_path(normalized, action["path"], None)
         else:
             raise ValueError(f"Unsupported simple command action: {action_type!r}.")
 
@@ -141,6 +130,7 @@ class RuntimeCommandCodec(FeatureCodec):
         "reload_procedures",
         "remote_request",
         "callable_invocation",
+        "session_restore",
     }
 
     @classmethod
@@ -156,6 +146,7 @@ class RuntimeCommandCodec(FeatureCodec):
                 "request_filepath": None,
                 "callable_name": None,
                 "callable_args": [],
+                "session_source": None,
             },
             "items": [],
             "ui": {},
@@ -183,6 +174,7 @@ class RuntimeCommandCodec(FeatureCodec):
             "hyde_source_root",
             "request_filepath",
             "callable_name",
+            "session_source",
         ):
             value = settings.get(key)
             settings[key] = None if value in (None, "") else str(value)
@@ -217,6 +209,8 @@ class RuntimeCommandCodec(FeatureCodec):
                 raise ValueError(
                     "callable_invocation requires settings.callable_name."
                 )
+        elif command == "session_restore" and not settings["session_source"]:
+            raise ValueError("session_restore requires settings.session_source.")
         return normalized
 
     @classmethod
@@ -227,9 +221,9 @@ class RuntimeCommandCodec(FeatureCodec):
         if action_type == "set_command":
             normalized["command"] = action["command"]
         elif action_type == "set":
-            _set_path(normalized, action["path"], action["value"])
+            set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            _set_path(normalized, action["path"], None)
+            set_path(normalized, action["path"], None)
         else:
             raise ValueError(f"Unsupported runtime action: {action_type!r}.")
 
@@ -257,6 +251,21 @@ class RuntimeCommandCodec(FeatureCodec):
         if command == "callable_invocation":
             args = ", ".join(settings["callable_args"])
             return f"{settings['callable_name']}({args})"
+        if command == "session_restore":
+            indented_source = textwrap.indent(
+                f"{settings['session_source']}\n",
+                "    ",
+            )
+            return (
+                "import hyde\n"
+                "try:\n"
+                f"{indented_source}"
+                "except Exception:\n"
+                '    hyde.task_complete("session_restore", False)\n'
+                "    raise\n"
+                "else:\n"
+                '    hyde.task_complete("session_restore", True)\n'
+            )
         raise ValueError(f"Unsupported runtime command: {command!r}.")
 
 
@@ -355,9 +364,9 @@ class TableCodec(FeatureCodec):
         if action_type == "set_command":
             normalized["settings"]["command"] = action["command"]
         elif action_type == "set":
-            _set_path(normalized, action["path"], action["value"])
+            set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            _set_path(normalized, action["path"], None)
+            set_path(normalized, action["path"], None)
         elif action_type == "replace_items":
             normalized["items"] = list(action.get("items", []))
         elif action_type == "set_column_width":
@@ -536,9 +545,9 @@ class MutationCodec(FeatureCodec):
         if action_type == "set_command":
             normalized["settings"]["command"] = action["command"]
         elif action_type == "set":
-            _set_path(normalized, action["path"], action["value"])
+            set_path(normalized, action["path"], action["value"])
         elif action_type == "clear":
-            _set_path(normalized, action["path"], None)
+            set_path(normalized, action["path"], None)
         else:
             raise ValueError(f"Unsupported mutation action: {action_type!r}.")
 

@@ -166,7 +166,7 @@ class SaveGraphicsDialog(HydeFileDialog):
             return None
         return os.path.join(project_dir, "exports", basename)
 
-    def build_preview_payload(self, selected_path):
+    def build_preview_state(self, selected_path):
         selected_format = self.selected_export_format()
         state = FigureGraphicsExportState()
         state.set_figure_name(self.figure_name())
@@ -175,7 +175,7 @@ class SaveGraphicsDialog(HydeFileDialog):
         state.set_dpi(self.selected_dpi())
         state.set_transparent(self.selected_transparent())
         state.set_size_inches(self.selected_size_override_inches())
-        return state.preview_python_source()
+        return state
 
     def load_output_options_ui(self):
         content = self.load_ui("save_graphics_dialog.ui", module_name=__name__, row=1)

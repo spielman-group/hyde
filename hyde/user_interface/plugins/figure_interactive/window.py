@@ -9,7 +9,6 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 from hyde.features.matplotlib_features import (
     FigureCodec,
     FigureIRCodec,
-    figure_refresh_command_source,
     figure_ir_apply_title,
 )
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
@@ -43,13 +42,6 @@ class FigureState(HydeGuiState):
     def configure_defaults(self):
         self.set_command("create")
 
-    def _temporary_state(self, command=None, **settings):
-        state = self.normalized_state()
-        if command is not None:
-            state["settings"]["command"] = command
-        state["settings"].update(settings)
-        return state
-
     def set_command(self, command):
         self.apply_action({"type": "set_command", "command": command})
 
@@ -81,10 +73,49 @@ class FigureState(HydeGuiState):
             }
         )
 
-    def source_for_command(self, command, **settings):
-        return self.codec.state_to_python(
-            self._temporary_state(command=command, **settings)
+    def set_publish_figure_macros(self):
+        self.set_command("publish_figure_macros")
+        self.apply_action({"type": "clear", "path": ("settings", "figure_number")})
+        self.apply_action({"type": "clear", "path": ("settings", "figure_name")})
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "use_bound_values"),
+                "value": False,
+            }
         )
+
+    def set_close_figure(self, figure_number):
+        self.set_command("close")
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "figure_number"),
+                "value": int(figure_number),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "figure_name")})
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "use_bound_values"),
+                "value": False,
+            }
+        )
+
+    def set_refresh_figure(self, figure_name, *, use_bound_values=False):
+        self.set_command("refresh")
+        self.apply_action(
+            {"type": "set", "path": ("settings", "figure_name"), "value": figure_name}
+        )
+        self.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "use_bound_values"),
+                "value": bool(use_bound_values),
+            }
+        )
+        self.apply_action({"type": "clear", "path": ("settings", "figure_number")})
 
     def default_macro_name(self):
         settings = self.normalized_state()["settings"]
@@ -542,11 +573,11 @@ class FigureWindow(HydeInteractiveWidget):
 
     def _execute_refresh_command(self, *, use_bound_values):
         figure_name = self.snapshot_state.default_macro_name() or self.window_handle()
-        command = figure_refresh_command_source(
+        self.command_state.set_refresh_figure(
             figure_name,
             use_bound_values=use_bound_values,
         )
-        return self.execute_hidden_command(command)
+        return self.execute_hidden_command(self.command_state.python_source(log=False))
 
     def _clear_refresh_in_flight(self):
         self._refresh_timeout_timer.stop()
@@ -653,11 +684,9 @@ class FigureWindow(HydeInteractiveWidget):
             self.complete_interactive_close(event)
             return
         self._kernel_close_in_progress = True
+        self.command_state.set_close_figure(self.figure_number)
         if not self.execute_hidden_command(
-            self.command_state.source_for_command(
-                "close",
-                figure_number=self.figure_number,
-            )
+            self.command_state.python_source(log=False)
         ):
             self._kernel_close_in_progress = False
             LOGGER.warning(

@@ -540,9 +540,9 @@ class HydeFileDialog(HydeDialogWidget):
     def selected_path(self):
         return self.file_widget.selected_path()
 
-    def build_preview_payload(self, selected_path):
+    def build_preview_state(self, selected_path):
         del selected_path
-        return ""
+        return None
 
     def selection_validation_message(self, selected_path):
         del selected_path
@@ -561,7 +561,8 @@ class HydeFileDialog(HydeDialogWidget):
             self.set_preview_message(error_message)
             self.refresh_shell()
             return selected_path
-        payload = self.build_preview_payload(selected_path)
+        preview_state = self.build_preview_state(selected_path)
+        payload = "" if preview_state is None else preview_state.python_source(log=False)
         self.set_preview_string(payload)
         self.refresh_shell()
         return selected_path

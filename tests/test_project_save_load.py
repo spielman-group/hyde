@@ -385,12 +385,13 @@ class TestProjectStateHelpers(unittest.TestCase):
             )
 
             HydeApp.restore_project_session(restored_app)
+            session_source = (project_dir / "session.py").read_text(encoding="utf-8")
+            restore_state = RuntimeCommandState()
+            restore_state.set_session_restore_source(session_source)
 
             self.assertEqual(events[0][0], "project_loaded")
             self.assertEqual(events[1][0], "session_source")
-            self.assertIn("@hyde.figure(window_pos=(10, 20), register=False)", events[1][1])
-            self.assertIn("Figure0(delay)", events[1][1])
-            self.assertIn('hyde.task_complete("session_restore", True)', events[1][1])
+            self.assertEqual(events[1][1], restore_state.python_source())
             self.assertTrue(events[1][2])
 
     def test_on_project_state_result_surfaces_session_restore_warnings_after_save(self):
@@ -535,7 +536,9 @@ class TestProjectStateHelpers(unittest.TestCase):
             ]
             self.assertEqual(order, ["python_terminal_tool", "Table0", "logging"])
             self.assertTrue(terminal_subwindow.isMinimized())
-            self.assertIn('hyde.task_complete("session_restore", True)', events[0][1])
+            restore_state = RuntimeCommandState()
+            restore_state.set_session_restore_source("Table0()\n")
+            self.assertEqual(events[0][1], restore_state.python_source())
 
     def test_restore_project_session_skips_finalization_after_failed_session_restore(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -648,7 +651,9 @@ class TestProjectStateHelpers(unittest.TestCase):
             ]
             self.assertEqual(final_order, initial_order)
             self.assertFalse(terminal_subwindow.isMinimized())
-            self.assertIn('hyde.task_complete("session_restore", False)', events[0][1])
+            restore_state = RuntimeCommandState()
+            restore_state.set_session_restore_source("Table0()\n")
+            self.assertEqual(events[0][1], restore_state.python_source())
 
     def test_capture_session_records_named_mdi_window_order(self):
         main_window = QtWidgets.QMainWindow()
@@ -910,7 +915,11 @@ class TestProjectStateHelpers(unittest.TestCase):
                 visible_order,
                 ["Table0", "Figure0", "python_terminal_tool"],
             )
-            self.assertIn('hyde.task_complete("session_restore", True)', events[0][1])
+            restore_state = RuntimeCommandState()
+            restore_state.set_session_restore_source(
+                (project_dir / "session.py").read_text(encoding="utf-8")
+            )
+            self.assertEqual(events[0][1], restore_state.python_source())
 
             figure_workspace.clear()
             table_workspace.clear()

@@ -484,7 +484,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             state.set_transparent(dialog.selected_transparent())
             state.set_size_inches(dialog.selected_size_override_inches())
 
-            self.assertEqual(dialog.preview_string(), state.preview_python_source())
+            self.assertEqual(dialog.preview_string(), state.python_source(log=False))
 
     def test_do_it_exports_live_first_class_figure_to_default_pdf_target(self):
         class FigureContext:
