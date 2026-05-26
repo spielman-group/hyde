@@ -9,7 +9,6 @@ from hyde.paths import (
     HYDE_DIR,
     get_project_paths,
 )
-from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.main.project_state import (
     apply_mdi_window_order,
     try_read_history,
@@ -123,6 +122,7 @@ class HydeApp:
         self.splash = splash
         self.argv = argv or []
         self.current_project_dir = None
+        self.current_app_ir = self._build_current_app_ir()
         self.procedures_dir = None
         self.procedures_init = None
         self.filewatcher = None
@@ -197,6 +197,7 @@ class HydeApp:
                 VisibleCommandNotificationService(self)
             ),
             "get_current_project_dir": self.get_current_project_dir,
+            "get_current_app_ir": self.get_current_app_ir,
             "get_shutting_down": self.get_shutting_down,
             "set_shutting_down": self.set_shutting_down,
             "get_quit_command_sent": self.get_quit_command_sent,
@@ -231,6 +232,14 @@ class HydeApp:
 
     def get_current_project_dir(self):
         return self.current_project_dir
+
+    def _build_current_app_ir(self):
+        from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+
+        return HydeAppIR(current_project_dir=self.current_project_dir)
+
+    def get_current_app_ir(self):
+        return self.current_app_ir
 
     def get_procedures_init(self):
         return self.procedures_init
@@ -356,17 +365,7 @@ class HydeApp:
             return
         if name != "all" and not name.endswith(".py"):
             return
-        if self.current_project_dir is None:
-            return
-        state = RuntimeCommandState()
-        state.set_reload_procedures(
-            self.current_project_dir,
-            os.path.dirname(HYDE_DIR),
-            reset_namespace=False,
-        )
-        python_execution_service = self.plugin_service("python_execution_service")
-        if python_execution_service is not None:
-            python_execution_service.execute_hidden(state.python_source())
+        HydeApp.reload_procedures(self)
 
     def configure_persistent_subwindow(self, subwindow):
         subwindow.setWindowIcon(blank_window_icon())
@@ -423,6 +422,7 @@ class HydeApp:
     @inmain_decorator()
     def enter_no_project_state(self):
         self.current_project_dir = None
+        self.current_app_ir = self._build_current_app_ir()
         self.procedures_dir = None
         self.procedures_init = None
         self.stop_project_watcher()
@@ -437,6 +437,7 @@ class HydeApp:
         if self.current_project_dir is not None and os.path.abspath(self.current_project_dir) == project_dir:
             return
         self.current_project_dir, self.procedures_dir, self.procedures_init = get_project_paths(project_dir)
+        self.current_app_ir = self._build_current_app_ir()
         self.ui.setWindowTitle(f"Hyde - {os.path.basename(self.current_project_dir)}")
         self.restart_project_watcher()
         self.emit_plugin_event(
@@ -448,17 +449,26 @@ class HydeApp:
         )
 
     def reload_procedures(self):
-        if self.current_project_dir is None:
+        app_ir = getattr(self, "current_app_ir", None)
+        project_dir = getattr(app_ir, "current_project_dir", None)
+        if project_dir is None:
+            project_dir = self.current_project_dir
+        if project_dir is None:
             return
-        state = RuntimeCommandState()
-        state.set_reload_procedures(
-            self.current_project_dir,
+        if app_ir is None:
+            from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+
+            app_ir = HydeAppIR(current_project_dir=project_dir)
+        reload_ir = app_ir.with_reload_procedures(
+            project_dir,
             os.path.dirname(HYDE_DIR),
             reset_namespace=False,
         )
         python_execution_service = self.plugin_service("python_execution_service")
         if python_execution_service is not None:
-            python_execution_service.execute_hidden(state.python_source())
+            python_execution_service.execute_hidden(
+                app_ir.current_diff(reload_ir).python_source()
+            )
 
     @inmain_decorator()
     def finalize_startup(self):
@@ -672,9 +682,12 @@ class HydeApp:
         if str(session_source or "").strip():
             python_execution_service = self.plugin_service("python_execution_service")
             if python_execution_service is not None:
-                state = RuntimeCommandState()
-                state.set_session_restore_source(session_source)
-                if python_execution_service.execute_hidden(state.python_source()):
+                restore_ir = self.current_app_ir.with_session_restore_source(
+                    session_source
+                )
+                if python_execution_service.execute_hidden(
+                    self.current_app_ir.current_diff(restore_ir).python_source()
+                ):
                     return
             self._complete_session_restore(False)
         else:

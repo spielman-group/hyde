@@ -34,13 +34,14 @@ from unittest.mock import patch
 
 
 def build_table_macro_source(macro_name, names, name=None, geometry=None, column_widths=None):
-    from hyde.user_interface.plugins.table_interactive.window import TableState
+    from hyde.user_interface.plugins.table_interactive.window import TableIR
 
-    state = TableState()
-    state.set_items(names)
-    state.set_name(name)
-    state.set_geometry(geometry)
-    state.set_column_widths(column_widths or {})
+    state = TableIR(
+        names=tuple(names or ()),
+        name=name,
+        geometry=geometry,
+        column_widths=column_widths or {},
+    )
     return state.macro_source(macro_name)
 
 

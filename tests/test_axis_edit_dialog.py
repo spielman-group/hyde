@@ -8,15 +8,16 @@ from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.axis_edit_dialog import (
     AXIS_TAB_TITLES,
     AxisEditDialog,
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
-from hyde.user_interface.shared.figure import EditableFigureContext
+from hyde.user_interface.shared.figure import EditableFigureContext, FigureDialogIR
 from hyde.user_interface.shared.plugin import HydePluginManager
 
 
@@ -62,6 +63,7 @@ def make_plugin_host(plugin_manager):
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
+    app.get_current_app_ir = lambda: HydeAppIR(current_project_dir=None)
     app.lookup_menu_action = lambda location, name, path=(): (
         None
         if getattr(app, "menu_context", None) is None
@@ -92,11 +94,18 @@ def make_plugin_host(plugin_manager):
 
 
 def make_live_state(title="Figure0", items=("trace_a", "trace_b")):
-    state = FigureState()
-    state.set_title(title)
-    state.set_x_name("x")
-    state.set_items(list(items))
-    return state.normalized_state()
+    return {
+        "feature": "figure_command",
+        "settings": {
+            "command": "create",
+            "title": title,
+            "x_name": "x",
+            "subplot_code": "111",
+            "figsize": None,
+        },
+        "items": list(items),
+        "ui": {},
+    }
 
 
 def make_figure_ir():
@@ -419,7 +428,12 @@ class TestAxisEditDialog(unittest.TestCase):
             parent=mdi_area,
         )
         try:
-            self.assertIsNotNone(dialog.figure_session())
+            self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
+            self.assertIsInstance(dialog.widget_ir.opening_figure_ir, FigureIR)
+            self.assertIsInstance(dialog.widget_ir.current_figure_ir, FigureIR)
+            self.assertIsInstance(dialog.current_figure_ir, FigureIR)
+            self.assertNotIn("initial_ir", vars(dialog))
+            self.assertNotIn("current_ir", vars(dialog))
             self.assertEqual(
                 dialog.supported_trace_records()[0]["trace_id"],
                 "trace0",
@@ -436,6 +450,8 @@ class TestAxisEditDialog(unittest.TestCase):
                 dialog.applied_effective_state()["settings"]["title"],
                 "Figure0",
             )
+            self.assertEqual(dialog.widget_ir.opening_figure_ir.default_macro_name(), "Figure0")
+            self.assertEqual(dialog.widget_ir.current_figure_ir.default_macro_name(), "Figure0")
         finally:
             dialog.close()
 
@@ -459,6 +475,13 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.ui.axis_label_edit.editingFinished.emit()
 
             preview = dialog.lower_text_edit.toPlainText()
+            self.assertEqual(dialog.widget_ir.current_figure_ir.axis_label("x"), "Delay [s]")
+            self.assertEqual(
+                preview,
+                dialog.widget_ir.opening_figure_ir.current_diff(dialog.widget_ir.current_figure_ir)
+                .as_patch("Figure0")
+                .python_source(log=False),
+            )
             self.assertIn("fig = hyde.get_figure('Figure0')", preview)
             self.assertIn("ax = fig.axes[0]", preview)
             self.assertIn("ax.set_xlabel('Delay [s]')", preview)

@@ -9,7 +9,7 @@ from hyde.user_interface.shared.figure import COMM_TARGET, EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePlugin, blank_window_icon
 
 from .dialogs import NewFigureDialog
-from .window import FigureState, FigureWindow
+from .window import FigureIR, FigureWindow
 
 
 LOGGER = logging.getLogger("hyde")
@@ -252,10 +252,8 @@ class Plugin(HydePlugin):
         del data
         self.figure_macros = []
         self.rebuild_configured_window_macros_menu()
-        state = FigureState()
-        state.set_publish_figure_macros()
         self.services["python_execution_service"].execute_hidden(
-            state.python_source(log=False)
+            FigureIR().with_publish_figure_macros().python_source(log=False)
         )
 
     def on_project_loaded(self, data):

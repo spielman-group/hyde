@@ -13,12 +13,12 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.shared.figure import (
     COMM_TARGET,
     register_auxiliary_figure_comm_sink,
 )
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.plugins.kernel_runtime import (
     FrontendKernelService,
     Plugin as KernelRuntimePlugin,
@@ -103,11 +103,11 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIsNotNone(comm._on_msg)
         self.assertIsNotNone(comm._on_close)
 
-    def test_runtime_state_preserves_session_restore_python_source(self):
-        state = RuntimeCommandState()
-        state.set_session_restore_source("x = 1")
+    def test_app_ir_preserves_session_restore_python_source(self):
+        app_ir = HydeAppIR(current_project_dir="/tmp/demo.hy")
+        restore_ir = app_ir.with_session_restore_source("x = 1")
 
-        source = state.python_source(log=False)
+        source = app_ir.current_diff(restore_ir).python_source(log=False)
 
         self.assertIn("import hyde", source)
         self.assertIn("x = 1", source)
@@ -657,20 +657,29 @@ class TestRuntimeArchitecture(unittest.TestCase):
             ],
         )
 
-    def test_hyde_procedure_change_uses_hidden_execution_service(self):
-        queued = []
+    def test_hyde_procedure_change_matches_reload_procedures_current_app_ir_dispatch(self):
+        reload_calls = []
+        procedure_change_calls = []
         dummy_app = type("DummyApp", (), {})()
-        dummy_app.current_project_dir = "/tmp/project.hy"
-        dummy_app.plugin_service = lambda key: (
-            type(
-                "ExecutionService",
-                (),
-                {"execute_hidden": lambda self, code, silent=True: queued.append((code, silent))},
-            )()
-            if key == "python_execution_service"
-            else None
+        dummy_app.current_project_dir = None
+        dummy_app.current_app_ir = HydeAppIR(current_project_dir="/tmp/project.hy")
+        execution_service = type(
+            "ExecutionService",
+            (),
+            {
+                "execute_hidden": (
+                    lambda self, code, silent=True: current_queue.append((code, silent))
+                )
+            },
+        )()
+        dummy_app.plugin_service = (
+            lambda key: execution_service if key == "python_execution_service" else None
         )
 
+        current_queue = reload_calls
+        HydeApp.reload_procedures(dummy_app)
+
+        current_queue = procedure_change_calls
         HydeApp.on_procedure_change(
             dummy_app,
             "procedures/example.py",
@@ -678,13 +687,21 @@ class TestRuntimeArchitecture(unittest.TestCase):
             event="modified",
         )
 
-        self.assertEqual(len(queued), 1)
-        code, silent = queued[0]
-        self.assertTrue(silent)
-        self.assertIn("execute_procedures_bootstrap", code)
-        self.assertIn("/tmp/project.hy", code)
-        self.assertIn(os.path.dirname(HYDE_DIR), code)
-        self.assertIn("reset_namespace=False", code)
+        reload_ir = dummy_app.current_app_ir.with_reload_procedures(
+            "/tmp/project.hy",
+            os.path.dirname(HYDE_DIR),
+            reset_namespace=False,
+        )
+        self.assertEqual(
+            reload_calls,
+            [
+                (
+                    dummy_app.current_app_ir.current_diff(reload_ir).python_source(),
+                    True,
+                )
+            ],
+        )
+        self.assertEqual(procedure_change_calls, reload_calls)
 
     def test_hyde_procedure_change_is_safe_from_background_thread(self):
         queued = []
@@ -734,24 +751,28 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertEqual(len(queued), 1)
         self.assertTrue(queued[0][1])
 
-    def test_remote_request_server_uses_hidden_execution_with_non_silent_flag(self):
+    def test_remote_request_server_uses_hidden_execution_with_silent_hidden_lane(self):
         queued = []
         server = RemoteRequestServer.__new__(RemoteRequestServer)
         server.execute_hidden = (
             lambda code, silent=True: queued.append((code, silent)) or True
         )
+        server.current_app_ir = lambda: HydeAppIR(current_project_dir="/tmp/demo.hy")
 
         self.assertEqual(server.handler("hello"), "hello")
         self.assertEqual(server.handler("/path/to/file.h5"), "added successfully")
-        state = RuntimeCommandState()
-        state.set_remote_request("/path/to/file.h5")
-        self.assertEqual(queued, [(state.python_source(), False)])
+        app_ir = server.current_app_ir()
+        request_ir = app_ir.with_remote_request("/path/to/file.h5")
+        self.assertEqual(
+            queued,
+            [(app_ir.current_diff(request_ir).python_source(), True)],
+        )
 
-    def test_runtime_command_state_session_restore_wraps_session_source(self):
-        state = RuntimeCommandState()
-        state.set_session_restore_source("Table0()\nFigure0(delay)\n")
+    def test_app_ir_session_restore_wraps_session_source(self):
+        app_ir = HydeAppIR(current_project_dir="/tmp/demo.hy")
+        restore_ir = app_ir.with_session_restore_source("Table0()\nFigure0(delay)\n")
 
-        source = state.python_source()
+        source = app_ir.current_diff(restore_ir).python_source()
 
         self.assertIn("import hyde", source)
         self.assertIn("Table0()", source)

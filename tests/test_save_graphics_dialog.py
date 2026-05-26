@@ -16,17 +16,16 @@ import hyde
 from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_features import (
-    figure_ir_from_live_state,
     runtime_graphics_export_formats,
 )
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.save_graphics_dialog import Plugin as SaveGraphicsPlugin
 from hyde.user_interface.plugins.save_graphics_dialog.dialogs import (
-    FigureGraphicsExportState,
     SaveGraphicsDialog,
 )
 from hyde.user_interface.shared.plugin import HydePluginManager
@@ -53,6 +52,7 @@ def make_plugin_host(plugin_manager):
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
+    app.get_current_app_ir = lambda: HydeAppIR(current_project_dir=None)
     app.lookup_menu_action = lambda location, name, path=(): (
         None
         if getattr(app, "menu_context", None) is None
@@ -83,10 +83,12 @@ def make_plugin_host(plugin_manager):
 
 
 def make_active_figure_window(mdi_area, services, *, title="Figure0"):
-    state = FigureState()
-    state.set_title(title)
-    state.set_x_name("x")
-    state.set_items(["trace_a", "trace_b"])
+    figure_ir = (
+        FigureIR()
+        .with_title(title)
+        .with_x_name("x")
+        .with_items(["trace_a", "trace_b"])
+    )
     figure = FigureWindow(figure_number=7, services=dict(services))
     subwindow = mdi_area.addSubWindow(figure)
     figure.bind_subwindow(subwindow)
@@ -97,7 +99,7 @@ def make_active_figure_window(mdi_area, services, *, title="Figure0"):
             "title": title,
             "snapshot": {
                 "is_first_class": True,
-                "figure_ir": figure_ir_from_live_state(state.normalized_state()),
+                "figure_ir": figure_ir.normalized_state(),
                 "figure_defaults": None,
                 "live_state": None,
                 "trace_styles": None,
@@ -450,7 +452,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertIn("transparent=False", dialog.preview_string())
             self.assertIn("fig.set_size_inches(6.0, 4.0, forward=False)", dialog.preview_string())
 
-    def test_dialog_preview_matches_figure_graphics_export_state_for_current_selection(self):
+    def test_dialog_preview_matches_figure_ir_for_current_selection(self):
         class FigureContext:
             def figure_name(self):
                 return "Figure9"
@@ -476,15 +478,20 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             dialog.dpi_spin_box.setValue(450)
             self.qapp.processEvents()
 
-            state = FigureGraphicsExportState()
-            state.set_figure_name(dialog.figure_name())
-            state.set_output_path(dialog.selected_path())
-            state.set_output_format(dialog.selected_format_key)
-            state.set_dpi(dialog.selected_dpi())
-            state.set_transparent(dialog.selected_transparent())
-            state.set_size_inches(dialog.selected_size_override_inches())
+            state = dialog.build_preview_state(dialog.selected_path())
+            self.assertIsInstance(state, FigureIR)
+            self.assertIsInstance(dialog.widget_ir, FigureIR)
+            expected_state = FigureIR(figure_name=dialog.figure_name()).with_save_graphics(
+                dialog.selected_path(),
+                output_format=dialog.selected_format_key,
+                dpi=dialog.selected_dpi(),
+                transparent=dialog.selected_transparent(),
+                size_inches=dialog.selected_size_override_inches(),
+            )
 
-            self.assertEqual(dialog.preview_string(), state.python_source(log=False))
+            self.assertEqual(state.python_source(log=False), expected_state.python_source(log=False))
+            self.assertEqual(dialog.widget_ir.python_source(log=False), expected_state.python_source(log=False))
+            self.assertEqual(dialog.preview_string(), expected_state.python_source(log=False))
 
     def test_do_it_exports_live_first_class_figure_to_default_pdf_target(self):
         class FigureContext:

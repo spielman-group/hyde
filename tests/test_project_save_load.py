@@ -24,17 +24,16 @@ import tomllib
 
 import hyde
 import hyde.project_tools
-from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.shared.core import RuntimeCommandState
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.main.project_state import (
     capture_session,
     write_session,
 )
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.shared.plugin import HydeMDIContext, HydePlugin
 from hyde.user_interface.plugins.figure_interactive import FigureWorkspaceService
-from hyde.user_interface.plugins.figure_interactive.window import FigureState
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR
 from hyde.user_interface.plugins.table_interactive import TableWorkspaceService
 
 
@@ -231,7 +230,11 @@ class SessionRestoreToolWindowPlugin:
 
     def on_project_loaded(self, data):
         for key in self.window_keys:
-            self.helper.restore_tool_window(data["session"], key)
+            self.helper.restore_tool_window(
+                data["session"],
+                key,
+                mdi_key=key,
+            )
 
     def subwindow(self, key):
         return self.helper.mdi_subwindow(key)
@@ -354,6 +357,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app = type("RestoredApp", (), {})()
             restored_app.ui = QtWidgets.QMainWindow()
             restored_app.current_project_dir = str(project_dir)
+            restored_app.current_app_ir = HydeAppIR(current_project_dir=str(project_dir))
             restored_app._session_restore_presentation_deferred = False
             restored_app._session_restore_tool_windows = {}
             restored_app._session_restore_session = None
@@ -386,12 +390,15 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             HydeApp.restore_project_session(restored_app)
             session_source = (project_dir / "session.py").read_text(encoding="utf-8")
-            restore_state = RuntimeCommandState()
-            restore_state.set_session_restore_source(session_source)
+            app_ir = HydeAppIR(current_project_dir=str(project_dir))
+            restore_ir = app_ir.with_session_restore_source(session_source)
 
             self.assertEqual(events[0][0], "project_loaded")
             self.assertEqual(events[1][0], "session_source")
-            self.assertEqual(events[1][1], restore_state.python_source())
+            self.assertEqual(
+                events[1][1],
+                app_ir.current_diff(restore_ir).python_source(),
+            )
             self.assertTrue(events[1][2])
 
     def test_on_project_state_result_surfaces_session_restore_warnings_after_save(self):
@@ -437,9 +444,9 @@ class TestProjectStateHelpers(unittest.TestCase):
                         "format_version = 1",
                         "",
                         "[main_window]",
-                        "mdi_window_order = ['python_terminal', 'Table0', 'logging']",
+                        "mdi_window_order = ['python_terminal_tool', 'Table0', 'logging']",
                         "",
-                        "[tool_windows.python_terminal]",
+                        "[tool_windows.python_terminal_tool]",
                         "window_state = 'minimized'",
                         "geometry = [10, 20, 240, 160]",
                         "",
@@ -471,6 +478,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app = type("RestoredApp", (), {})()
             restored_app.ui = main_window
             restored_app.current_project_dir = str(project_dir)
+            restored_app.current_app_ir = HydeAppIR(current_project_dir=str(project_dir))
             restored_app._session_restore_presentation_deferred = False
             restored_app._session_restore_tool_windows = {}
             restored_app._session_restore_session = None
@@ -536,9 +544,12 @@ class TestProjectStateHelpers(unittest.TestCase):
             ]
             self.assertEqual(order, ["python_terminal_tool", "Table0", "logging"])
             self.assertTrue(terminal_subwindow.isMinimized())
-            restore_state = RuntimeCommandState()
-            restore_state.set_session_restore_source("Table0()\n")
-            self.assertEqual(events[0][1], restore_state.python_source())
+            app_ir = HydeAppIR(current_project_dir=str(project_dir))
+            restore_ir = app_ir.with_session_restore_source("Table0()\n")
+            self.assertEqual(
+                events[0][1],
+                app_ir.current_diff(restore_ir).python_source(),
+            )
 
     def test_restore_project_session_skips_finalization_after_failed_session_restore(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -550,9 +561,9 @@ class TestProjectStateHelpers(unittest.TestCase):
                         "format_version = 1",
                         "",
                         "[main_window]",
-                        "mdi_window_order = ['python_terminal', 'Table0', 'logging']",
+                        "mdi_window_order = ['python_terminal_tool', 'Table0', 'logging']",
                         "",
-                        "[tool_windows.python_terminal]",
+                        "[tool_windows.python_terminal_tool]",
                         "window_state = 'minimized'",
                         "geometry = [10, 20, 240, 160]",
                         "",
@@ -584,6 +595,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app = type("RestoredApp", (), {})()
             restored_app.ui = main_window
             restored_app.current_project_dir = str(project_dir)
+            restored_app.current_app_ir = HydeAppIR(current_project_dir=str(project_dir))
             restored_app._session_restore_presentation_deferred = False
             restored_app._session_restore_tool_windows = {}
             restored_app._session_restore_session = None
@@ -651,9 +663,12 @@ class TestProjectStateHelpers(unittest.TestCase):
             ]
             self.assertEqual(final_order, initial_order)
             self.assertFalse(terminal_subwindow.isMinimized())
-            restore_state = RuntimeCommandState()
-            restore_state.set_session_restore_source("Table0()\n")
-            self.assertEqual(events[0][1], restore_state.python_source())
+            app_ir = HydeAppIR(current_project_dir=str(project_dir))
+            restore_ir = app_ir.with_session_restore_source("Table0()\n")
+            self.assertEqual(
+                events[0][1],
+                app_ir.current_diff(restore_ir).python_source(),
+            )
 
     def test_capture_session_records_named_mdi_window_order(self):
         main_window = QtWidgets.QMainWindow()
@@ -723,11 +738,13 @@ class TestProjectStateHelpers(unittest.TestCase):
         )
 
     def _figure_ir_with_title(self, title):
-        state = FigureState()
-        state.set_title(title)
-        state.set_x_name("delay")
-        state.set_items(["fit_delay"])
-        return figure_ir_from_live_state(state.normalized_state())
+        return (
+            FigureIR()
+            .with_title(title)
+            .with_x_name("delay")
+            .with_items(["fit_delay"])
+            .normalized_state()
+        )
 
     def _figure_png_base64(self):
         image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
@@ -747,9 +764,9 @@ class TestProjectStateHelpers(unittest.TestCase):
                         "format_version = 1",
                         "",
                         "[main_window]",
-                        "mdi_window_order = ['logging', 'Table0', 'Figure0', 'python_terminal']",
+                        "mdi_window_order = ['logging', 'Table0', 'Figure0', 'python_terminal_tool']",
                         "",
-                        "[tool_windows.python_terminal]",
+                        "[tool_windows.python_terminal_tool]",
                         "window_state = 'minimized'",
                         "geometry = [10, 20, 240, 160]",
                         "",
@@ -799,6 +816,7 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_app = type("RestoredApp", (), {})()
             restored_app.ui = main_window
             restored_app.current_project_dir = str(project_dir)
+            restored_app.current_app_ir = HydeAppIR(current_project_dir=str(project_dir))
             restored_app._session_restore_presentation_deferred = False
             restored_app._session_restore_tool_windows = {}
             restored_app._session_restore_session = None
@@ -915,11 +933,14 @@ class TestProjectStateHelpers(unittest.TestCase):
                 visible_order,
                 ["Table0", "Figure0", "python_terminal_tool"],
             )
-            restore_state = RuntimeCommandState()
-            restore_state.set_session_restore_source(
+            app_ir = HydeAppIR(current_project_dir=str(project_dir))
+            restore_ir = app_ir.with_session_restore_source(
                 (project_dir / "session.py").read_text(encoding="utf-8")
             )
-            self.assertEqual(events[0][1], restore_state.python_source())
+            self.assertEqual(
+                events[0][1],
+                app_ir.current_diff(restore_ir).python_source(),
+            )
 
             figure_workspace.clear()
             table_workspace.clear()
@@ -1012,14 +1033,17 @@ class TestHydeStartup(unittest.TestCase):
         app = HydeApp(self.qapp, process_tree, DummySplash(), argv=[])
         try:
             wait_until(lambda: app._startup_complete, timeout=60, message="Hyde did not finish startup.")
+            procedures_plugin = app.plugin_manager.plugins["procedure_browser_tool"]
+            procedures_subwindow = procedures_plugin.mdi_subwindow("procedure_browser_tool")
             self.assertIsNone(app.current_project_dir)
             self.assertTrue(app.plugin_service("kernel_runtime_service").is_ready())
             self.assertIsNotNone(app.plugin_service("kernel_runtime_service").kernel_client())
             self.assertFalse(
                 app.plugin_service("visible_terminal_service").subwindow().isVisible()
             )
+            self.assertIsNotNone(procedures_subwindow)
             self.assertFalse(
-                app.mdi_context.subwindow("procedures").isVisible()
+                procedures_subwindow.isVisible()
             )
             app.plugin_service("namespace_view_service").ensure_widget()
             self.assertFalse(
@@ -1448,15 +1472,15 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             with open(os.path.join(project_dir, "procedures", "__init__.py"), "w", encoding="utf-8") as handle:
                 handle.write("import hyde\nKEEP = 3\n")
 
-            reload_state = RuntimeCommandState()
-            reload_state.set_reload_procedures(
+            app_ir = HydeAppIR(current_project_dir=project_dir)
+            reload_ir = app_ir.with_reload_procedures(
                 project_dir,
                 os.path.dirname(HYDE_DIR),
                 reset_namespace=False,
             )
             wait_for_code_ok(
                 client,
-                f"exec({reload_state.python_source()!r})\n"
+                f"exec({app_ir.current_diff(reload_ir).python_source()!r})\n"
                 "assert KEEP == 3\n"
                 "assert 'REMOVE_ME' not in globals()\n"
                 "assert user_value == 99\n",

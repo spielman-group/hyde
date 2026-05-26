@@ -64,7 +64,7 @@ class RemoveFromGraphDialog(HydeFigureDialogWidget):
         return tuple(self._visible_trace_rows)
 
     def _filtered_trace_rows(self, pattern_text):
-        trace_rows = self.supported_trace_records()
+        trace_rows = self._available_trace_rows()
         pattern = str(pattern_text or "")
         if not pattern:
             return tuple(trace_rows), ""
@@ -82,27 +82,33 @@ class RemoveFromGraphDialog(HydeFigureDialogWidget):
             )
         self.refresh_shell()
 
+    def _available_trace_rows(self):
+        opening_figure_ir = self.opening_figure_ir
+        if opening_figure_ir is None:
+            return self.supported_trace_records()
+        return opening_figure_ir.supported_trace_records()
+
     def _refresh_from_selection(self):
-        trace_records = self.supported_trace_records()
+        trace_records = self._available_trace_rows()
         if not trace_records:
-            self.figure_session().reset_current_state()
+            self.current_figure_ir = self.opening_figure_ir
             self.set_preview_message("No supported traces available to remove.")
             self._apply_filter_feedback()
             return
 
         if not self._visible_trace_rows:
-            self.figure_session().reset_current_state()
+            self.current_figure_ir = self.opening_figure_ir
             self.set_preview_message("No traces match the current filter.")
             self._apply_filter_feedback()
             return
 
         selected_trace_ids = self.selected_supported_trace_ids(self.ui.trace_list)
-        self.figure_session().reset_current_state()
+        self.current_figure_ir = self.opening_figure_ir
         if not selected_trace_ids:
             self.set_preview_message("Select one or more traces to remove.")
             self._apply_filter_feedback()
             return
 
-        self.figure_session().remove_traces(selected_trace_ids)
+        self.current_figure_ir = self.current_figure_ir.remove_traces(selected_trace_ids)
         self.refresh_figure_preview()
         self._apply_filter_feedback()

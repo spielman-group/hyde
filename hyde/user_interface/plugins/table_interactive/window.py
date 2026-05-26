@@ -1,96 +1,329 @@
-import copy
+import ast
+from dataclasses import dataclass, replace
 import os
 import uuid
 
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.hyde_features import TableCodec
+from hyde.features.hyde_features import table_ir_macro_source, table_ir_python_source
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
-from hyde.user_interface.shared.core import HydeGuiState, MutationState
+from hyde.user_interface.shared.core import HydeIR, HydeIRDiff
 
 
-class TableState(HydeGuiState):
-    codec = TableCodec
+def normalize_table_names(names):
+    return tuple(str(name) for name in (names or ()) if str(name))
 
-    def configure_defaults(self):
-        self.set_command("open")
 
-    def set_command(self, command):
-        self.apply_action({"type": "set_command", "command": command})
+def normalize_table_name(name):
+    return None if name in (None, "") else str(name)
 
-    def set_items(self, names):
-        self.apply_action({"type": "replace_items", "items": list(names)})
 
-    def set_name(self, name):
-        if name:
-            self.apply_action(
-                {"type": "set", "path": ("settings", "name"), "value": name}
-            )
+def normalize_table_geometry(geometry):
+    if geometry in (None, []):
+        return None
+    return tuple(int(value) for value in geometry)
+
+
+def normalize_table_column_widths(column_widths):
+    return {
+        str(name): int(width)
+        for name, width in dict(column_widths or {}).items()
+        if str(name) and width is not None
+    }
+
+
+@dataclass(frozen=True)
+class TableIR(HydeIR):
+    names: tuple[str, ...] = ()
+    command: str = "open"
+    name: str | None = None
+    geometry: tuple[int, int, int, int] | None = None
+    column_widths: dict[str, int] | None = None
+    request_id: str | None = None
+    var_name: str | None = None
+    value_text: str | None = None
+    index: int | None = None
+    indices: tuple[int, ...] | None = None
+    existing_names: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        object.__setattr__(self, "names", normalize_table_names(self.names))
+        object.__setattr__(self, "command", str(self.command or "open"))
+        object.__setattr__(self, "name", normalize_table_name(self.name))
+        object.__setattr__(self, "geometry", normalize_table_geometry(self.geometry))
+        object.__setattr__(
+            self,
+            "column_widths",
+            normalize_table_column_widths(self.column_widths),
+        )
+        if self.request_id in (None, ""):
+            object.__setattr__(self, "request_id", None)
         else:
-            self.apply_action({"type": "clear", "path": ("settings", "name")})
-
-    def set_geometry(self, geometry):
-        if geometry:
-            self.apply_action(
-                {
-                    "type": "set",
-                    "path": ("settings", "geometry"),
-                    "value": list(geometry),
-                }
-            )
+            object.__setattr__(self, "request_id", str(self.request_id))
+        object.__setattr__(self, "var_name", normalize_table_name(self.var_name))
+        if self.value_text is None:
+            object.__setattr__(self, "value_text", None)
         else:
-            self.apply_action({"type": "clear", "path": ("settings", "geometry")})
-
-    def set_column_widths(self, column_widths):
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "column_widths"),
-                "value": dict(column_widths or {}),
-            }
+            object.__setattr__(self, "value_text", str(self.value_text))
+        if self.index is None:
+            object.__setattr__(self, "index", None)
+        else:
+            object.__setattr__(self, "index", int(self.index))
+        if self.indices is None:
+            object.__setattr__(self, "indices", None)
+        else:
+            object.__setattr__(self, "indices", tuple(int(value) for value in self.indices))
+        object.__setattr__(
+            self,
+            "existing_names",
+            normalize_table_names(self.existing_names),
         )
 
-    def set_column_width(self, name, width):
-        self.apply_action({"type": "set_column_width", "name": name, "width": width})
+    def debug_state(self):
+        return {
+            "names": list(self.names),
+            "command": self.command,
+            "name": self.name,
+            "geometry": self.geometry,
+            "column_widths": dict(self.column_widths or {}),
+            "request_id": self.request_id,
+            "var_name": self.var_name,
+            "value_text": self.value_text,
+            "index": self.index,
+            "indices": None if self.indices is None else list(self.indices),
+            "existing_names": list(self.existing_names),
+        }
 
-    def set_request_id(self, request_id):
-        if request_id:
-            self.apply_action(
-                {"type": "set", "path": ("settings", "request_id"), "value": request_id}
-            )
-        else:
-            self.apply_action({"type": "clear", "path": ("settings", "request_id")})
+    def validate(self):
+        if self.command in {"open", "append", "push_table_data"} and not self.names:
+            raise ValueError(f"Table command {self.command!r} requires at least one item.")
+        if self.command == "append" and not self.name:
+            raise ValueError("Table append requires a target name.")
+        if self.command == "push_table_data" and not self.request_id:
+            raise ValueError("Table data push requires a request_id.")
+        if self.command not in {
+            "open",
+            "append",
+            "push_table_data",
+            "publish_table_macros",
+            "edit_value",
+            "append_value",
+            "create_array",
+            "delete_indices",
+        }:
+            raise ValueError(f"Unsupported table command: {self.command!r}.")
+        if self.command in {"edit_value", "append_value", "delete_indices"} and not self.var_name:
+            raise ValueError(f"Table command {self.command!r} requires var_name.")
+        if self.command in {"edit_value", "append_value", "create_array"}:
+            self.format_entry_literal(self.value_text)
+        if self.command == "create_array" and not self.var_name:
+            raise ValueError("Table create_array requires var_name.")
+        if self.command == "edit_value" and self.index is None:
+            raise ValueError("Table edit_value requires index.")
+        if self.command == "delete_indices" and self.indices is None:
+            raise ValueError("Table delete_indices requires indices.")
+        if self.geometry is not None and len(self.geometry) != 4:
+            raise ValueError("Table geometry must contain four integers.")
+        for width in self.column_widths.values():
+            if width <= 0:
+                raise ValueError("Table column widths must be positive integers.")
+        return self
 
-    def set_push_table_data(self, names, request_id):
-        self.set_items(names)
-        self.set_command("push_table_data")
-        self.set_request_id(request_id)
+    @staticmethod
+    def format_entry_literal(value_text):
+        text = str(value_text or "").strip()
+        if not text:
+            raise ValueError("Empty cell edits are not supported.")
+        try:
+            value = ast.literal_eval(text)
+        except Exception:
+            value = text
+        return repr(value)
 
-    def set_publish_table_macros(self):
-        self.set_command("publish_table_macros")
-        self.set_request_id(None)
+    @staticmethod
+    def suggest_new_array_name(existing_names, value_text):
+        existing = {str(name) for name in (existing_names or ())}
+        try:
+            value = ast.literal_eval(str(value_text).strip())
+        except Exception:
+            value = value_text
+        prefix = "string_array" if isinstance(value, str) else "array"
+        index = 0
+        while f"{prefix}{index}" in existing:
+            index += 1
+        return f"{prefix}{index}"
+
+    def with_names(self, names):
+        return replace(self, names=normalize_table_names(names))
+
+    def with_command(self, command):
+        return replace(self, command=command)
+
+    def with_name(self, name):
+        return replace(self, name=normalize_table_name(name))
+
+    def with_geometry(self, geometry):
+        return replace(self, geometry=normalize_table_geometry(geometry))
+
+    def with_column_widths(self, column_widths):
+        return replace(self, column_widths=normalize_table_column_widths(column_widths))
+
+    def with_column_width(self, name, width):
+        widths = dict(self.column_widths)
+        widths[str(name)] = int(width)
+        return replace(self, column_widths=widths)
+
+    def with_push_table_data(self, request_id):
+        return replace(self, command="push_table_data", request_id=str(request_id))
+
+    def with_edit_value(self, var_name, index, value_text):
+        return replace(
+            self,
+            command="edit_value",
+            var_name=var_name,
+            value_text=value_text,
+            index=index,
+            indices=None,
+            request_id=None,
+        )
+
+    def with_append_value(self, var_name, value_text):
+        return replace(
+            self,
+            command="append_value",
+            var_name=var_name,
+            value_text=value_text,
+            index=None,
+            indices=None,
+            request_id=None,
+        )
+
+    def with_create_array(self, value_text, existing_names):
+        return replace(
+            self,
+            command="create_array",
+            var_name=self.suggest_new_array_name(existing_names, value_text),
+            value_text=value_text,
+            index=None,
+            indices=None,
+            existing_names=tuple(existing_names or ()),
+            request_id=None,
+        )
+
+    def with_delete_indices(self, var_name, indices):
+        return replace(
+            self,
+            command="delete_indices",
+            var_name=var_name,
+            value_text=None,
+            index=None,
+            indices=tuple(indices or ()),
+            request_id=None,
+        )
+
+    def with_publish_table_macros(self):
+        return replace(
+            self,
+            names=(),
+            command="publish_table_macros",
+            request_id=None,
+        )
 
     def default_macro_name(self):
-        settings = self.normalized_state()["settings"]
-        return settings["name"] or "Table"
+        return self.name or "Table"
 
-    def recreation_function_source(
-        self,
-        macro_name,
-        *,
-        name=None,
-    ):
-        state = copy.deepcopy(self._state)
-        if name is not None:
-            state["settings"]["name"] = name
-        return self.codec.state_to_macro_source(
-            state,
-            macro_name,
+    def recreation_function_source(self, macro_name, *, name=None):
+        return table_ir_macro_source(
+            macro_name=macro_name,
+            names=self.names,
+            name=self.name if name is None else normalize_table_name(name),
+            geometry=self.geometry,
+            column_widths=self.column_widths,
         )
 
     def macro_source(self, macro_name):
         return self.recreation_function_source(macro_name)
+
+    def _python_source(self):
+        if self.command == "edit_value":
+            return f"{self.var_name}[{self.index}] = {self.format_entry_literal(self.value_text)}"
+        if self.command == "append_value":
+            literal = self.format_entry_literal(self.value_text)
+            return (
+                f"{self.var_name} = np.concatenate(("
+                f"{self.var_name}, np.array([{literal}], dtype={self.var_name}.dtype)"
+                f"))"
+            )
+        if self.command == "create_array":
+            literal = self.format_entry_literal(self.value_text)
+            return f"{self.var_name} = np.array([{literal}])"
+        if self.command == "delete_indices":
+            indices = sorted(set(self.indices or ()))
+            return f"{self.var_name} = np.delete({self.var_name}, {indices!r})"
+        return table_ir_python_source(
+            command=self.command,
+            names=self.names,
+            name=self.name,
+            geometry=self.geometry,
+            column_widths=self.column_widths,
+            request_id=self.request_id,
+        )
+
+
+@dataclass(frozen=True)
+class TableIRDiff(TableIR, HydeIRDiff):
+    initial_names: tuple[str, ...] = ()
+    initial_name: str | None = None
+    initial_geometry: tuple[int, int, int, int] | None = None
+    initial_column_widths: dict[str, int] | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        object.__setattr__(self, "initial_names", normalize_table_names(self.initial_names))
+        object.__setattr__(self, "initial_name", normalize_table_name(self.initial_name))
+        object.__setattr__(
+            self,
+            "initial_geometry",
+            normalize_table_geometry(self.initial_geometry),
+        )
+        object.__setattr__(
+            self,
+            "initial_column_widths",
+            normalize_table_column_widths(self.initial_column_widths),
+        )
+
+    @classmethod
+    def from_irs(cls, initial_ir, current_ir):
+        return cls(
+            names=current_ir.names,
+            command=current_ir.command,
+            name=current_ir.name,
+            geometry=current_ir.geometry,
+            column_widths=current_ir.column_widths,
+            request_id=current_ir.request_id,
+            var_name=current_ir.var_name,
+            value_text=current_ir.value_text,
+            index=current_ir.index,
+            indices=current_ir.indices,
+            existing_names=current_ir.existing_names,
+            initial_names=initial_ir.names,
+            initial_name=initial_ir.name,
+            initial_geometry=initial_ir.geometry,
+            initial_column_widths=initial_ir.column_widths,
+        )
+
+    def debug_state(self):
+        state = super().debug_state()
+        state.update(
+            {
+                "initial_names": list(self.initial_names),
+                "initial_name": self.initial_name,
+                "initial_geometry": self.initial_geometry,
+                "initial_column_widths": dict(self.initial_column_widths or {}),
+            }
+        )
+        return state
 
 
 class TableViewModel(QtCore.QAbstractTableModel):
@@ -250,12 +483,12 @@ class TableWidget(HydeInteractiveWidget):
         )
         if flags is not None:
             self.setWindowFlags(flags)
-        self.names = list(names)
-        self.table_state = TableState()
-        self.table_state.set_items(self.names)
-        self.table_state.set_geometry(geometry)
-        self.table_state.set_column_widths(column_widths or {})
-        self.mutation_state = MutationState()
+        self.widget_ir = TableIR(
+            names=tuple(names or ()),
+            name=handle,
+            geometry=geometry,
+            column_widths=column_widths,
+        )
         self._current_request_id = None
         self._refresh_in_flight = False
         self._refresh_requested = False
@@ -270,7 +503,7 @@ class TableWidget(HydeInteractiveWidget):
         self._pending_created_columns = []
         self._tracked_namespace_state = self.current_tracked_namespace_state()
 
-        self.model = TableViewModel(self.names)
+        self.model = TableViewModel(self.widget_ir.names)
         self.ui.tableView.setModel(self.model)
         self.ui.tableView.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.ui.tableView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
@@ -295,38 +528,40 @@ class TableWidget(HydeInteractiveWidget):
         QtCore.QTimer.singleShot(0, self.refresh_data)
 
     def append_columns(self, names, refresh=True):
+        current_names = list(self.widget_ir.names)
         for name in names:
-            if name not in self.names:
-                self.names.append(name)
-        self.model.set_names(self.names)
-        self.table_state.set_items(self.names)
+            if name not in current_names:
+                current_names.append(name)
+        self.widget_ir = self.widget_ir.with_names(current_names)
+        self.model.set_names(self.widget_ir.names)
         if refresh:
             self.refresh_data()
 
     def remove_columns(self, names, refresh=True):
-        removed = [name for name in names if name in self.names]
+        current_names = list(self.widget_ir.names)
+        removed = [name for name in names if name in current_names]
         if not removed:
             return
-        self.names = [name for name in self.names if name not in removed]
-        self.model.set_names(self.names)
-        self.table_state.set_items(self.names)
+        remaining_names = [name for name in current_names if name not in removed]
+        self.widget_ir = self.widget_ir.with_names(remaining_names)
+        self.model.set_names(self.widget_ir.names)
         self._update_selection_info()
-        if refresh and self.names:
+        if refresh and self.widget_ir.names:
             self.refresh_data()
 
     def on_stable_name_bound(self, stable_name):
-        self.table_state.set_name(stable_name)
+        self.widget_ir = self.widget_ir.with_name(stable_name)
 
     def bind_subwindow(self, subwindow, stable_name=None):
         super().bind_subwindow(subwindow, stable_name=stable_name)
-        geometry = self.table_state.normalized_state()["settings"]["geometry"]
+        geometry = self.widget_ir.geometry
         if geometry is not None:
             subwindow.setGeometry(QtCore.QRect(*geometry))
         self._remember_subwindow_geometry()
         self.capture_layout_state()
 
     def tracked_namespace_names(self):
-        return tuple(self.names) + tuple(self._pending_created_columns)
+        return tuple(self.widget_ir.names) + tuple(self._pending_created_columns)
 
     def _queue_refresh(self, prefix_commands=None):
         if self._closed:
@@ -336,9 +571,7 @@ class TableWidget(HydeInteractiveWidget):
         self._current_request_id = request_id
         self._refresh_in_flight = True
         self._refresh_requested = False
-        refresh_state = TableState()
-        refresh_state.set_push_table_data(self.names, request_id)
-        refresh_command = refresh_state.python_source()
+        refresh_command = self.widget_ir.with_push_table_data(request_id).python_source()
         for command in prefix:
             if not self.execute_hidden_command(command):
                 self._clear_refresh_in_flight()
@@ -421,14 +654,12 @@ class TableWidget(HydeInteractiveWidget):
                 for name in self._pending_created_columns
                 if name not in confirmed_columns
             ]
-        removed_columns = [
-            name for name in self.names if name not in view
-        ]
+        removed_columns = [name for name in self.widget_ir.names if name not in view]
         if removed_columns:
             self.remove_columns(removed_columns, refresh=False)
         if not self.update_tracked_namespace_state(view):
             return
-        if self.names:
+        if self.widget_ir.names:
             self.refresh_data()
 
     def _activate_value_editor(self):
@@ -549,10 +780,10 @@ class TableWidget(HydeInteractiveWidget):
         self.capture_layout_state()
 
     def _apply_saved_column_widths(self):
-        widths = self.table_state.normalized_state()["settings"]["column_widths"]
+        widths = self.widget_ir.column_widths
         if not widths:
             return
-        for column, name in enumerate(self.names, start=1):
+        for column, name in enumerate(self.widget_ir.names, start=1):
             width = widths.get(name)
             if width is not None:
                 self.ui.tableView.setColumnWidth(column, width)
@@ -561,41 +792,42 @@ class TableWidget(HydeInteractiveWidget):
         del old_size
         if section <= 0 or section >= self.model.active_column_count():
             return
-        name = self.names[section - 1]
-        self.table_state.set_column_width(name, new_size)
+        name = self.widget_ir.names[section - 1]
+        self.widget_ir = self.widget_ir.with_column_width(name, new_size)
 
     def capture_layout_state(self):
+        widget_ir = self.widget_ir
         if self._subwindow is not None:
-            self.table_state.set_name(self.window_handle())
+            widget_ir = widget_ir.with_name(self.window_handle())
             if not self._subwindow.isMinimized():
                 self._remember_subwindow_geometry()
             if self._last_normal_geometry is not None:
-                self.table_state.set_geometry(self._last_normal_geometry)
+                widget_ir = widget_ir.with_geometry(self._last_normal_geometry)
         widths = {}
-        for column, name in enumerate(self.names, start=1):
+        for column, name in enumerate(widget_ir.names, start=1):
             widths[name] = self.ui.tableView.columnWidth(column)
-        self.table_state.set_column_widths(widths)
+        self.widget_ir = widget_ir.with_column_widths(widths)
 
     def saveable_default_macro_name(self):
-        return self.table_state.default_macro_name()
+        return self.widget_ir.default_macro_name()
 
     def saveable_decorator_name(self):
         return "@hyde.table"
 
     def macro_definition_source(self, macro_name, *, handle):
-        return self.table_state.recreation_function_source(
+        return self.widget_ir.recreation_function_source(
             macro_name,
             name=handle,
         )
 
     def session_restore_definition_source(self, handle):
-        return self.table_state.recreation_function_source(
+        return self.widget_ir.recreation_function_source(
             handle,
             name=handle,
         )
 
     def session_restore_arguments(self):
-        return self.names
+        return self.widget_ir.names
 
     def _on_value_text_edited(self, text):
         del text
@@ -631,7 +863,7 @@ class TableWidget(HydeInteractiveWidget):
             if not self._value_edit_dirty:
                 self.ui.valueEdit.clear()
         else:
-            name = self.names[col - 1]
+            name = self.widget_ir.names[col - 1]
             column_length = len(self.model.data_cache.get(name, []))
             self.ui.cellInfoLabel.setText(f"{name}[{row}]")
             self.ui.valueEdit.setReadOnly(row > column_length)
@@ -651,7 +883,7 @@ class TableWidget(HydeInteractiveWidget):
             col = idx.column()
             if col <= 0 or col >= self.model.active_column_count():
                 continue
-            name = self.names[col - 1]
+            name = self.widget_ir.names[col - 1]
             values = self.model.data_cache.get(name, [])
             if idx.row() >= len(values):
                 continue
@@ -678,8 +910,10 @@ class TableWidget(HydeInteractiveWidget):
 
         commands = []
         for name, rows in sorted(rows_by_name.items()):
-            self.mutation_state.set_delete_indices(name, rows)
-            commands.append(self.mutation_state.python_source())
+            mutation_ir = self.widget_ir.with_delete_indices(name, rows)
+            commands.append(
+                TableIRDiff.from_irs(self.widget_ir, mutation_ir).python_source()
+            )
         if commands and not self._queue_refresh(commands):
             return
         self._value_edit_dirty = False
@@ -742,32 +976,40 @@ class TableWidget(HydeInteractiveWidget):
         val_text = self.ui.valueEdit.text()
 
         try:
+            base_ir = self.widget_ir
             if idx.column() == self.model.columnCount() - 1:
                 if row != 0:
                     return False
-                namespace_names = set(self.names)
+                namespace_names = set(base_ir.names)
                 python_variables_service = self.services.get("namespace_view_service")
                 if python_variables_service is not None:
                     namespace_names.update(
                         python_variables_service.namespace_view().keys()
                     )
-                new_name = self.mutation_state.set_create_array(
-                    val_text, namespace_names
+                mutation_ir = base_ir.with_create_array(
+                    val_text,
+                    namespace_names,
                 )
-                command = self.mutation_state.python_source()
-                pending_new_name = new_name
+                command = TableIRDiff.from_irs(base_ir, mutation_ir).python_source()
+                pending_new_name = mutation_ir.var_name
             else:
-                name = self.names[idx.column() - 1]
+                name = base_ir.names[idx.column() - 1]
                 column_length = len(self.model.data_cache.get(name, []))
                 pending_new_name = None
                 if row < column_length:
-                    self.mutation_state.set_edit_value(name, row, val_text)
-                    command = self.mutation_state.python_source()
+                    mutation_ir = base_ir.with_edit_value(
+                        name,
+                        row,
+                        val_text,
+                    )
                 elif row == column_length:
-                    self.mutation_state.set_append_value(name, val_text)
-                    command = self.mutation_state.python_source()
+                    mutation_ir = base_ir.with_append_value(
+                        name,
+                        val_text,
+                    )
                 else:
                     return False
+                command = TableIRDiff.from_irs(base_ir, mutation_ir).python_source()
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self, "Invalid Value", str(exc))
             return False

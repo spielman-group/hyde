@@ -15,11 +15,11 @@ It collects the selected live objects, table naming details, and the initial col
 mode, then generates the explicit Python command that asks the kernel to create the
 table.
 
-The dialog owns `TableState(HydeGuiState)` and uses `TableCodec` to generate
-`hyde.create_table(...)`. It is still a string factory, but all Python generation belongs to
-the `HydeGuiState` / `FeatureCodec` pair rather than to ad hoc widget helpers.
-`TableState` remains the shared table-specific state object owned by both the dialog
-and the table window, while reusable mutation state lives outside the table package.
+The dialog owns `TableIR` and generates `hyde.create_table(...)` from that IR.
+It is still a string factory, but all Python generation belongs to the IR object
+and the package-pure Hyde lowerers rather than to ad hoc widget helpers.
+`TableIR` remains the shared table-specific IR owned by both the dialog and the
+table window, while reusable mutation IR lives outside the dialog-specific path.
 
 ## Initial Deployment Scope
 
@@ -29,7 +29,7 @@ It includes:
 - selecting one or more eligible live objects from the current Hyde namespace
 - choosing the initial display mode for supported objects
 - entering an optional table title
-- maintaining a `TableState` instance representing that dialog state
+- maintaining a `TableIR` instance representing that dialog state
 - generating the `hyde.create_table(...)` command string
 - sending that command to the kernel so the kernel triggers table creation
 - opening the resulting table in the GUI after the kernel-side helper runs
@@ -81,7 +81,7 @@ Igor-style data folders.
 The only live operation in the initial deployment is table creation.
 
 - Target objects: selected 1D numeric array-like objects from the current namespace
-- Python-level effect: update `TableState` and dispatch `table_state.python_source()`
+- Python-level effect: update `TableIR` and dispatch `table_ir.python_source()`
 - Timing: confirmed before dispatch
 - Invalid or unsupported selections: the dialog refuses to generate a table command
 
@@ -91,13 +91,14 @@ selects the inputs and generates the table-creation command.
 ## Command Generation
 
 The dialog follows Hyde's string-factory rule.
-When the user clicks `Do It`, the GUI generates an explicit `hyde.create_table(...)` string
-through `TableState` / `TableCodec` and sends it to the kernel.
+When the user clicks `Do It`, the GUI generates an explicit
+`hyde.create_table(...)` string through `TableIR.python_source()` and sends it
+to the kernel.
 
 The kernel receives that command, creates the table through the kernel-facing Hyde
 helper, and then triggers the GUI to present the new table window.
 
-The dialog edits only the creation subset of `TableState`:
+The dialog edits only the creation subset of `TableIR`:
 
 - ordered selected item names
 - optional visible title

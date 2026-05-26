@@ -26,18 +26,19 @@ from hyde.matplotlib_backend import (
 )
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.shared.figure import (
     EditableFigureContext,
-    FigureEditSession,
+    FigureDialogIR,
 )
 from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.plugins.curve_fit_dialog import Plugin as CurveFitPlugin
 from hyde.user_interface.plugins.curve_fit_dialog.dialogs import (
     CurveFitDialog,
-    CurveFitState,
+    CurveFitIR,
 )
-from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
 
 
 DEFAULT_PROCEDURES_SOURCE = """\
@@ -81,6 +82,9 @@ def make_plugin_host(plugin_manager):
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
+    app.get_current_app_ir = lambda: HydeAppIR(
+        current_project_dir=app.get_current_project_dir()
+    )
     app.lookup_menu_action = lambda location, name, path=(): (
         None
         if getattr(app, "menu_context", None) is None
@@ -368,36 +372,34 @@ def attach_namespace_view_service(manager, view):
 class FakeEditableFigureContext:
     def __init__(self, *, figure_number=7, figure_ir=None):
         self.figure_number = int(figure_number)
-        self._figure_ir = (
-            copy.deepcopy(figure_ir_without_traces() if figure_ir is None else figure_ir)
-        )
-        self._session = FigureEditSession(
+        self._figure_ir = FigureIR(
+            figure_state=(
+                copy.deepcopy(
+                    figure_ir_without_traces() if figure_ir is None else figure_ir
+                )
+            ),
             figure_number=self.figure_number,
-            figure_ir=self._figure_ir,
         )
 
-    def open_session(self):
-        return self._session
+    def current_figure_ir(self):
+        return copy.deepcopy(self._figure_ir)
 
     def figure_name(self):
         return f"Figure{self.figure_number}"
 
-    def figure_ir(self):
-        return copy.deepcopy(self._figure_ir)
 
-
-class OpenSessionOnlyFigureContext:
-    def __init__(self, session, *, figure_name=None):
-        self.figure_number = int(session.figure_number)
-        self._session = session
+class FigureIROnlyContext:
+    def __init__(self, figure_ir, *, figure_name=None):
+        self._figure_ir = copy.deepcopy(figure_ir)
+        self.figure_number = int(self._figure_ir.figure_number)
         self._figure_name = (
             str(figure_name)
             if figure_name is not None
             else f"Figure{self.figure_number}"
         )
 
-    def open_session(self):
-        return self._session
+    def current_figure_ir(self):
+        return copy.deepcopy(self._figure_ir)
 
     def figure_name(self):
         return self._figure_name
@@ -1731,7 +1733,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             guessed_preview,
         )
 
-    def test_curve_fit_state_python_source_selects_preview_commit_live_store_and_restore_commands(
+    def test_curve_fit_ir_python_source_selects_preview_commit_live_store_and_restore_commands(
         self,
     ):
         array_metadata = {
@@ -1740,8 +1742,8 @@ class TestCurveFitPlugin(unittest.TestCase):
             "ndim": 1,
             "numpy_kind": "f",
         }
-        state = CurveFitState()
-        state.set_context(
+        widget_ir = CurveFitIR()
+        widget_ir.set_context(
             {
                 "fit_functions": [
                     {
@@ -1758,47 +1760,47 @@ class TestCurveFitPlugin(unittest.TestCase):
                 "trace_records": [],
             }
         )
-        state.apply_action(
+        widget_ir.apply_action(
             {
                 "type": "set",
                 "path": ("settings", "fit_function_name"),
                 "value": "line_fit",
             }
         )
-        state.apply_action(
+        widget_ir.apply_action(
             {"type": "set", "path": ("settings", "y_name"), "value": "signal"}
         )
-        state.set_x_name("x", "time")
-        state.set_fit_result_name("signal_fit_result", locked=True)
-        state.set_coefficient_field("slope", "initial_value", "2.0")
-        state.set_coefficient_field("offset", "initial_value", "1.0")
+        widget_ir.set_x_name("x", "time")
+        widget_ir.set_fit_result_name("signal_fit_result", locked=True)
+        widget_ir.set_coefficient_field("slope", "initial_value", "2.0")
+        widget_ir.set_coefficient_field("offset", "initial_value", "1.0")
 
-        state.set_preview_command(preview_target_name="_preview_fit")
-        preview_source = state.python_source(log=False)
+        widget_ir.set_preview_command(preview_target_name="_preview_fit")
+        preview_source = widget_ir.python_source(log=False)
 
-        state.set_commit_command()
-        commit_source = state.python_source(log=False)
+        widget_ir.set_commit_command()
+        commit_source = widget_ir.python_source(log=False)
 
-        state.set_live_command(
+        widget_ir.set_live_command(
             previous_target_name="old_fit_result",
             restore_store_name="_restore_store",
             missing_sentinel_name="_missing",
         )
-        live_source = state.python_source(log=False)
+        live_source = widget_ir.python_source(log=False)
 
-        state.set_store_target_command(
+        widget_ir.set_store_target_command(
             "signal_fit_result",
             restore_store_name="_restore_store",
             missing_sentinel_name="_missing",
         )
-        store_source = state.python_source(log=False)
+        store_source = widget_ir.python_source(log=False)
 
-        state.set_restore_target_command(
+        widget_ir.set_restore_target_command(
             "signal_fit_result",
             restore_store_name="_restore_store",
             missing_sentinel_name="_missing",
         )
-        restore_source = state.python_source(log=False)
+        restore_source = widget_ir.python_source(log=False)
 
         self.assertIn(
             "_preview_fit.best_fit = line_fit(x=time, slope=2.0, offset=1.0)",
@@ -1824,6 +1826,60 @@ class TestCurveFitPlugin(unittest.TestCase):
             "_hyde_lmfit_restore_target_state = _restore_store.pop(",
             restore_source,
         )
+
+    def test_curve_fit_ir_python_source_uses_owned_context_snapshot(self):
+        array_metadata = {
+            "python_type": "ndarray",
+            "numpy_type": "Array",
+            "ndim": 1,
+            "numpy_kind": "f",
+        }
+        context = {
+            "fit_functions": [
+                {
+                    "name": "line_fit",
+                    "callable_ref": "line_fit",
+                    "independent_vars": ["x"],
+                    "parameters": ["slope", "offset"],
+                }
+            ],
+            "namespace_view": {
+                "signal": dict(array_metadata),
+                "time": dict(array_metadata),
+            },
+            "trace_records": [],
+        }
+        widget_ir = CurveFitIR()
+        widget_ir.set_context(context)
+        widget_ir.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "fit_function_name"),
+                "value": "line_fit",
+            }
+        )
+        widget_ir.apply_action(
+            {"type": "set", "path": ("settings", "y_name"), "value": "signal"}
+        )
+        widget_ir.set_x_name("x", "time")
+        widget_ir.set_fit_result_name("signal_fit_result", locked=True)
+        widget_ir.set_coefficient_field("slope", "initial_value", "2.0")
+        widget_ir.set_coefficient_field("offset", "initial_value", "1.0")
+        widget_ir.set_preview_command(preview_target_name="_preview_fit")
+
+        context["fit_functions"][0]["callable_ref"] = "mutated_fit"
+
+        preview_source = widget_ir.python_source(log=False)
+
+        self.assertIn(
+            "_preview_fit = type('_HydeLmfitPreview', (), {})()",
+            preview_source,
+        )
+        self.assertIn(
+            "_preview_fit.best_fit = line_fit(x=time, slope=2.0, offset=1.0)",
+            preview_source,
+        )
+        self.assertNotIn("mutated_fit", preview_source)
 
     def test_curve_fit_dialog_data_options_update_preview_and_execution_mode_without_running(
         self,
@@ -2188,17 +2244,17 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_curve_fit_dialog_attached_display_works_with_open_session_only_context(
+    def test_curve_fit_dialog_attached_display_works_with_direct_figure_ir_context(
         self,
     ):
         attached_figure = AttachedFigureHarness(
             np.array([0.0, 1.0, 2.0, 3.0]),
             np.array([1.0, 3.0, 5.0, 7.0]),
         )
-        session = attached_figure.figure_window.open_edit_session()
+        figure_ir = EditableFigureContext(attached_figure.figure_window).current_figure_ir()
         _, _, harness, dialog = create_configured_line_fit_dialog(
-            figure_context=OpenSessionOnlyFigureContext(
-                session,
+            figure_context=FigureIROnlyContext(
+                figure_ir,
                 figure_name=attached_figure.figure_window.snapshot_state.default_macro_name(),
             )
         )
@@ -2666,9 +2722,15 @@ class TestCurveFitPlugin(unittest.TestCase):
             figure_window=attached_figure.figure_window
         )
         try:
+            self.assertIsInstance(dialog.widget_ir, CurveFitIR)
+            self.assertIsInstance(dialog.widget_ir.figure_dialog_ir, FigureDialogIR)
             opening_state = dialog.opening_effective_state()
             initial_applied_state = dialog.applied_effective_state()
-            self.assertIsNotNone(dialog.figure_session())
+            self.assertIsInstance(dialog.current_figure_ir, FigureIR)
+            self.assertEqual(
+                dialog.widget_ir.opening_figure_ir.default_macro_name(),
+                "CurveFitAttachedFigure",
+            )
             self.assertEqual(
                 [record["label"] for record in dialog.supported_trace_records()],
                 ["signal", "signal_fit_result"],
@@ -2709,6 +2771,42 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
+    def test_curve_fit_dialog_attached_lowering_uses_widget_ir_snapshots_without_live_widget_reachback(
+        self,
+    ):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            def fail_current_figure_ir():
+                raise AssertionError("attached lowering should use widget_ir snapshots")
+
+            dialog.figure_context.current_figure_ir = fail_current_figure_ir
+
+            dialog.widget_ir.set_context(dialog._context())
+            dialog.widget_ir.set_attached_display(show_fit=True, show_residuals=True)
+            dialog.widget_ir.set_emit_lmfit_source(False)
+            dialog.widget_ir.set_attached_display_lowering(root_name="signal_fit_result")
+
+            patch_code, target_state = dialog.widget_ir.resolved_python_bundle()
+
+            self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", patch_code)
+            self.assertIn("ax = fig.axes[0]", patch_code)
+            self.assertIsNotNone(target_state)
+            self.assertEqual(target_state.default_macro_name(), "CurveFitAttachedFigure")
+            self.assertEqual(
+                [record["label"] for record in target_state.supported_trace_records()],
+                ["signal", "signal_fit_result", "signal_fit_result_residuals"],
+            )
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
     def test_curve_fit_dialog_attached_live_update_uses_one_attached_display_command_block(
         self,
     ):
@@ -2742,7 +2840,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_curve_fit_dialog_live_update_and_reject_use_curve_fit_state_python_source(
+    def test_curve_fit_dialog_live_update_and_reject_use_widget_ir_python_source(
         self,
     ):
         attached_figure = AttachedFigureHarness(
@@ -2753,12 +2851,13 @@ class TestCurveFitPlugin(unittest.TestCase):
             figure_window=attached_figure.figure_window
         )
         try:
-            dialog.state.set_live_command(
+            dialog.widget_ir.set_context(dialog._context())
+            dialog.widget_ir.set_live_command(
                 previous_target_name=None,
                 restore_store_name=dialog._live_restore_store_name,
                 missing_sentinel_name=dialog._live_missing_sentinel_name,
             )
-            expected_live = dialog.state.python_source(log=False)
+            expected_live = dialog.widget_ir.python_source(log=False)
 
             harness.execution_service.calls.clear()
             dialog.suppress_screen_updates_checkbox.setChecked(False)
@@ -2769,12 +2868,13 @@ class TestCurveFitPlugin(unittest.TestCase):
                 expected_live,
             )
 
-            dialog.state.set_restore_target_command(
+            dialog.widget_ir.set_context(dialog._context())
+            dialog.widget_ir.set_restore_target_command(
                 "signal_fit_result",
                 restore_store_name=dialog._live_restore_store_name,
                 missing_sentinel_name=dialog._live_missing_sentinel_name,
             )
-            expected_restore = dialog.state.python_source(log=False)
+            expected_restore = dialog.widget_ir.python_source(log=False)
             call_count_before_reject = len(harness.execution_service.calls)
 
             dialog.reject()

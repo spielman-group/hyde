@@ -2,11 +2,10 @@ import unittest
 
 from qtutils.qt import QtWidgets
 
-from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
 from hyde.user_interface.plugins.figure_interactive.window import (
     FigureSnapshotState,
-    FigureState,
+    FigureIR,
     FigureWindow,
 )
 
@@ -19,26 +18,30 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def _live_state_with_title(self, title):
-        state = FigureState()
-        state.set_title(title)
-        state.set_x_name("delay")
-        state.set_items(["fit_delay", "raw_delay"])
-        return state.normalized_state()
+        return (
+            FigureIR()
+            .with_title(title)
+            .with_x_name("delay")
+            .with_items(["fit_delay", "raw_delay"])
+            .normalized_state()
+        )
 
     def _live_state_with_title_and_figsize(self, title, figsize):
-        state = FigureState()
-        state.set_title(title)
-        state.set_x_name("delay")
-        state.set_items(["fit_delay", "raw_delay"])
-        state.set_figsize(*figsize)
-        return state.normalized_state()
+        return (
+            FigureIR()
+            .with_title(title)
+            .with_x_name("delay")
+            .with_items(["fit_delay", "raw_delay"])
+            .with_figsize(*figsize)
+            .normalized_state()
+        )
 
     def test_figure_window_inherits_shared_shell(self):
         self.assertTrue(issubclass(FigureWindow, HydeToolWidget))
 
     def test_snapshot_state_derives_recreation_source_from_figure_ir(self):
         snapshot = FigureSnapshotState()
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        figure_ir = self._live_state_with_title("Figure0")
 
         snapshot.update(
             default_macro_name=None,
@@ -56,9 +59,43 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         self.assertNotIn("fig.canvas.draw_idle()", macro)
         self.assertNotIn("return fig", macro)
 
+    def test_figure_window_tracks_live_figure_ir_in_widget_ir_from_backend_payloads(self):
+        widget = FigureWindow(figure_number=1)
+        first_ir = self._live_state_with_title("Figure0")
+        second_ir = self._live_state_with_title("Figure1")
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": first_ir,
+                        "live_state": None,
+                    },
+                }
+            )
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": second_ir,
+                        "live_state": None,
+                    },
+                }
+            )
+
+            self.assertIsInstance(widget.widget_ir, FigureIR)
+            self.assertEqual(
+                widget.widget_ir.normalized_state()["settings"]["title"],
+                "Figure1",
+            )
+            self.assertNotIn("initial_ir", widget.__dict__)
+            self.assertNotIn("current_ir", widget.__dict__)
+        finally:
+            widget.force_close()
+
     def test_snapshot_state_preserves_figure_defaults_metadata(self):
         snapshot = FigureSnapshotState()
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        figure_ir = self._live_state_with_title("Figure0")
         figure_defaults = {
             "settings": {"title": None, "figsize": (6.4, 4.8)},
             "trace_styles": {"subplot0": {"trace0": {"color": "#123456"}}},
@@ -83,7 +120,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setWidget(widget)
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        figure_ir = self._live_state_with_title("Figure0")
         try:
             widget.update_payload(
                 {
@@ -112,7 +149,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Graph0"))
+        figure_ir = self._live_state_with_title("Graph0")
         try:
             widget.update_payload(
                 {
@@ -187,9 +224,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setWidget(widget)
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(
-            self._live_state_with_title_and_figsize("Figure0", (5.0, 3.0))
-        )
+        figure_ir = self._live_state_with_title_and_figsize("Figure0", (5.0, 3.0))
         try:
             widget.update_payload(
                 {
@@ -245,7 +280,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow = mdi_area.addSubWindow(widget)
         subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        figure_ir = self._live_state_with_title("Figure0")
         try:
             widget.update_payload(
                 {
@@ -314,7 +349,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow = mdi_area.addSubWindow(widget)
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+        figure_ir = self._live_state_with_title("Figure0")
         try:
             widget.update_payload(
                 {
@@ -353,7 +388,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("Graph0"))
+        figure_ir = self._live_state_with_title("Graph0")
         try:
             widget.update_payload(
                 {

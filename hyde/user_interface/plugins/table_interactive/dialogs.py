@@ -3,15 +3,15 @@ from qtutils.qt import QtWidgets
 from hyde.features.base import is_eligible_for_numeric_series
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 
-from .window import TableState
+from .window import TableIR
 
 
 class NewTableDialog(HydeDialogWidget):
     def __init__(self, objects_metadata, preselection=None, services=None, parent=None):
-        self.table_state = TableState()
         super().__init__(parent=parent, services=dict(services or {}))
         self.objects_metadata = objects_metadata or {}
         self.preselection = preselection or []
+        self.widget_ir = TableIR()
         self.setWindowTitle("New Table")
         self.load_ui("new_table_dialog.ui", module_name=__name__)
 
@@ -28,20 +28,17 @@ class NewTableDialog(HydeDialogWidget):
                 if name in self.preselection:
                     item.setSelected(True)
 
-    def _sync_state_from_widgets(self):
+    def _refresh_from_widgets(self):
         if self.ui is None:
             return
         selected_items = self.ui.objectList.selectedItems()
-        names = [item.text() for item in selected_items]
-        self.table_state.set_items(names)
-        title = self.ui.titleEdit.text().strip()
-        self.table_state.set_name(title or None)
-
-    def _refresh_from_widgets(self):
-        self._sync_state_from_widgets()
+        self.widget_ir = TableIR(
+            names=[item.text() for item in selected_items],
+            name=self.ui.titleEdit.text().strip() or None,
+        )
         payload = ""
-        if self.table_state.normalized_state()["items"]:
-            payload = self.table_state.python_source(log=False)
+        if self.widget_ir.names:
+            payload = self.widget_ir.python_source(log=False)
         self.set_preview_string(payload)
         self.refresh_shell()
 

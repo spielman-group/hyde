@@ -12,9 +12,6 @@ from labscript_utils.plugins import (
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
-from hyde.user_interface.shared.core import RuntimeCommandState
-
-
 LOGGER = logging.getLogger(__name__)
 SETUP_PRIORITY_BIND_SERVICES = DEFAULT_SETUP_PRIORITY
 SETUP_PRIORITY_PLUGIN_SETUP = DEFAULT_SETUP_PRIORITY + 10
@@ -116,6 +113,20 @@ class HydePlugin(BasePlugin):
     def service(self, key, default=None):
         return self.services.get(key, default)
 
+    def current_app_ir(self):
+        from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+
+        get_current_app_ir = self.services.get("get_current_app_ir")
+        if callable(get_current_app_ir):
+            app_ir = get_current_app_ir()
+            if isinstance(app_ir, HydeAppIR):
+                return app_ir
+        get_current_project_dir = self.services.get("get_current_project_dir")
+        current_project_dir = (
+            get_current_project_dir() if callable(get_current_project_dir) else None
+        )
+        return HydeAppIR(current_project_dir=current_project_dir)
+
     def get_session_toml_data(self):
         return {}
 
@@ -212,10 +223,10 @@ class HydePlugin(BasePlugin):
         return menu
 
     def _execute_macro(self, macro_name, macro_args):
-        state = RuntimeCommandState()
-        state.set_callable_invocation(macro_name, macro_args)
+        app_ir = self.current_app_ir()
+        macro_ir = app_ir.with_callable_invocation(macro_name, macro_args)
         self.service("python_execution_service").execute_visible(
-            state.python_source()
+            app_ir.current_diff(macro_ir).python_source()
         )
 
     def mdi_context(self):
@@ -262,7 +273,8 @@ class HydePlugin(BasePlugin):
             subwindow,
             fallback=key,
         )
-        info = session.get("tool_windows", {}).get(object_name, {})
+        tool_windows = session.get("tool_windows", {})
+        info = tool_windows.get(session_key, tool_windows.get(object_name, {}))
         presentation_deferred = False
         deferred_getter = self.service(
             "get_session_restore_presentation_deferred"

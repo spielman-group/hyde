@@ -33,6 +33,7 @@ from hyde.features.matplotlib_features import (
     graphics_output_transparency_supported,
     runtime_graphics_export_formats,
 )
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.project_tools import (
     HYDE_MATPLOTLIB_BACKEND,
     configure_gui_matplotlib_backend,
@@ -47,7 +48,8 @@ from hyde.user_interface.plugins.figure_interactive import (
 )
 from hyde.user_interface.plugins.figure_interactive.dialogs import NewFigureDialog
 from hyde.user_interface.plugins.figure_interactive.window import (
-    FigureState,
+    FigureIR,
+    FigureIRDiff,
     FigureWindow,
 )
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
@@ -130,7 +132,7 @@ class TestGraphicsExportFormats(unittest.TestCase):
                 "SaveFigure",
             )
 
-    def test_matplotlib_codec_lowers_command_ir_patch_and_export_variants(self):
+    def test_matplotlib_figure_lowerers_emit_only_matplotlib_python(self):
         figure_command = MatplotlibCodec.state_to_python(
             {
                 "feature": "figure_command",
@@ -143,7 +145,9 @@ class TestGraphicsExportFormats(unittest.TestCase):
                 "items": ["fit_delay"],
             }
         )
-        self.assertIn("@hyde.figure(register=False)", figure_command)
+        self.assertNotIn("@hyde", figure_command)
+        self.assertNotIn("hyde.", figure_command)
+        self.assertIn("fig = plt.figure('DelayGraph')", figure_command)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_command)
 
         figure_ir = figure_ir_from_live_state(
@@ -158,10 +162,6 @@ class TestGraphicsExportFormats(unittest.TestCase):
                 "items": ["fit_delay"],
             }
         )
-        figure_ir_source = MatplotlibCodec.state_to_python(figure_ir)
-        self.assertIn("fig = plt.figure('DelayGraph')", figure_ir_source)
-        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_ir_source)
-
         target_ir = MatplotlibCodec.update_state(
             figure_ir,
             {
@@ -181,7 +181,8 @@ class TestGraphicsExportFormats(unittest.TestCase):
                 },
             }
         )
-        self.assertIn("fig = hyde.get_figure('Figure9')", figure_patch)
+        self.assertNotIn("@hyde", figure_patch)
+        self.assertNotIn("hyde.", figure_patch)
         self.assertIn("ax.legend()", figure_patch)
 
         figure_export = MatplotlibCodec.state_to_python(
@@ -197,10 +198,45 @@ class TestGraphicsExportFormats(unittest.TestCase):
                 },
             }
         )
-        self.assertIn("fig = hyde.get_figure('Figure9')", figure_export)
+        self.assertNotIn("@hyde", figure_export)
+        self.assertNotIn("hyde.", figure_export)
         self.assertIn(
             "fig.savefig('/tmp/Figure9.png', format='png', dpi=450, transparent=True)",
             figure_export,
+        )
+
+    def test_figure_ir_owns_hyde_wrapping_for_create_patch_and_export_commands(self):
+        current_ir = (
+            FigureIR()
+            .with_title("DelayGraph")
+            .with_x_name("delay")
+            .with_items(["fit_delay"])
+        )
+
+        figure_command = current_ir.python_source(log=False)
+        self.assertIn("@hyde.figure(register=False)", figure_command)
+        self.assertIn("fig = plt.figure('DelayGraph')", figure_command)
+        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_command)
+
+        patch_source = current_ir.current_diff(
+            current_ir.set_legend_visible(True)
+        ).as_patch("Figure9").python_source(log=False)
+        self.assertIn("fig = hyde.get_figure('Figure9')", patch_source)
+        self.assertIn("ax = fig.axes[0]", patch_source)
+        self.assertIn("ax.legend()", patch_source)
+
+        figure_export = FigureIR(figure_name="Figure9").with_save_graphics(
+            "/tmp/Figure9.png",
+            output_format="png",
+            dpi=450,
+            transparent=True,
+            size_inches=(4.0, 2.5),
+        )
+        export_source = figure_export.python_source(log=False)
+        self.assertIn("fig = hyde.get_figure('Figure9')", export_source)
+        self.assertIn(
+            "fig.savefig('/tmp/Figure9.png', format='png', dpi=450, transparent=True)",
+            export_source,
         )
 
     def test_graphics_export_codec_lowers_state_to_savefig_command(self):
@@ -218,7 +254,7 @@ class TestGraphicsExportFormats(unittest.TestCase):
         )
 
         self.assertNotIn("import hyde", source)
-        self.assertIn("fig = hyde.get_figure('Figure9')", source)
+        self.assertNotIn("hyde.", source)
         self.assertIn("_hyde_original_size = tuple(fig.get_size_inches())", source)
         self.assertIn("fig.set_size_inches(4.0, 2.5, forward=False)", source)
         self.assertIn(
@@ -293,7 +329,7 @@ class TestGraphicsExportFormats(unittest.TestCase):
         )
 
         self.assertNotIn("import hyde", source)
-        self.assertIn("fig = hyde.get_figure('Figure9')", source)
+        self.assertNotIn("hyde.", source)
         self.assertIn("_hyde_original_size = tuple(fig.get_size_inches())", source)
         self.assertIn("fig.set_size_inches(4.0, 2.5, forward=False)", source)
         self.assertIn(
@@ -307,32 +343,50 @@ class TestGraphicsExportFormats(unittest.TestCase):
 
 
 class TestFigureCodec(unittest.TestCase):
-    def test_figure_state_generates_first_class_figure_builder_code(self):
-        state = FigureState()
-        state.set_title("DelayGraph")
-        state.set_x_name("delay")
-        state.set_items(["fit_delay", "raw_delay"])
+    def test_figure_ir_generates_first_class_figure_builder_code(self):
+        figure_ir = (
+            FigureIR()
+            .with_title("DelayGraph")
+            .with_x_name("delay")
+            .with_items(["fit_delay", "raw_delay"])
+        )
 
-        source = state.python_source()
+        source = figure_ir.python_source()
 
         self.assertIn("@hyde.figure(register=False)", source)
         self.assertIn("def _hyde_figure(delay, fit_delay, raw_delay):", source)
         self.assertIn("_hyde_figure(delay, fit_delay, raw_delay)", source)
         self.assertIn("del _hyde_figure", source)
         self.assertIn("fig = plt.figure('DelayGraph')", source)
-        self.assertIn("ax = fig.add_subplot(111)", source)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", source)
         self.assertIn("ax.plot(delay, raw_delay, label='raw_delay')", source)
-        self.assertIn("ax.legend()", source)
-        self.assertIn("fig.show()", source)
+        self.assertIsInstance(figure_ir.current_diff(), FigureIRDiff)
 
-    def test_figure_state_generates_decorated_macro_source(self):
-        state = FigureState()
-        state.set_title("DelayGraph")
-        state.set_x_name("delay")
-        state.set_items(["fit_delay"])
+    def test_figure_ir_generates_refresh_publish_and_close_commands(self):
+        self.assertEqual(
+            FigureIR().with_refresh_figure("DelayGraph", use_bound_values=True).python_source(
+                log=False
+            ),
+            "fig = hyde.get_figure('DelayGraph')\n"
+            "hyde.refresh_figure(fig, use_bound_values=True)",
+        )
+        self.assertEqual(
+            FigureIR().with_publish_figure_macros().python_source(log=False),
+            "hyde.recreation_registry.publish_registry('figure')",
+        )
+        self.assertEqual(
+            FigureIR().with_close_figure(3).python_source(log=False),
+            "plt.close(3)",
+        )
 
-        macro = state.macro_source("Graph0")
+    def test_figure_ir_generates_decorated_macro_source(self):
+        macro = (
+            FigureIR()
+            .with_title("DelayGraph")
+            .with_x_name("delay")
+            .with_items(["fit_delay"])
+            .macro_source("Graph0")
+        )
 
         self.assertIn("@hyde.figure", macro)
         self.assertIn("def Graph0(delay, fit_delay):", macro)
@@ -340,56 +394,21 @@ class TestFigureCodec(unittest.TestCase):
         self.assertIn("ax = fig.add_subplot(111)", macro)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
 
-    def test_figure_state_generates_empty_figure_builder_code(self):
-        state = FigureState()
-        state.set_title("EmptyFigure")
-        state.set_x_name("delay")
-
-        source = state.python_source()
-
-        self.assertIn("@hyde.figure(register=False)", source)
-        self.assertIn("def _hyde_figure():", source)
-        self.assertIn("_hyde_figure()", source)
-        self.assertIn("fig = plt.figure('EmptyFigure')", source)
-        self.assertIn("ax = fig.add_subplot(111)", source)
-        self.assertNotIn("ax.plot(", source)
-        self.assertNotIn("delay", source)
-        self.assertIn("fig.show()", source)
-
-    def test_figure_state_python_source_logs_through_standard_hyde_debug_channel(self):
-        state = FigureState()
-        state.set_title("DelayGraph")
-        state.set_x_name("delay")
-        state.set_items(["fit_delay"])
+    def test_figure_ir_python_source_logs_through_standard_hyde_debug_channel(self):
+        figure_ir = (
+            FigureIR()
+            .with_title("DelayGraph")
+            .with_x_name("delay")
+            .with_items(["fit_delay"])
+        )
 
         with self.assertLogs("hyde", level="DEBUG") as logs:
-            source = state.python_source()
+            source = figure_ir.python_source()
 
         output = "\n".join(logs.output)
-        self.assertIn("[Hyde state] FigureState", output)
+        self.assertIn("[Hyde state] FigureIR", output)
         self.assertIn("python:\n", output)
         self.assertIn(source, output)
-
-    def test_figure_state_generates_refresh_command_through_python_source(self):
-        state = FigureState()
-        state.set_refresh_figure("DelayGraph", use_bound_values=True)
-
-        self.assertEqual(
-            state.python_source(log=False),
-            "fig = hyde.get_figure('DelayGraph')\n"
-            "hyde.refresh_figure(fig, use_bound_values=True)",
-        )
-
-    def test_figure_state_generates_publish_and_close_commands_through_python_source(self):
-        state = FigureState()
-        state.set_publish_figure_macros()
-        self.assertEqual(
-            state.python_source(log=False),
-            "hyde.recreation_registry.publish_registry('figure')",
-        )
-
-        state.set_close_figure(3)
-        self.assertEqual(state.python_source(log=False), "plt.close(3)")
 
 
 class TestFigurePluginDispatch(unittest.TestCase):
@@ -470,8 +489,11 @@ class TestFigurePluginDispatch(unittest.TestCase):
             )
             self.assertEqual(
                 dialog.preview_string(),
-                dialog.figure_state.python_source(log=False),
+                dialog.widget_ir.python_source(log=False),
             )
+            self.assertIsInstance(dialog.widget_ir, FigureIR)
+            self.assertNotIn("initial_ir", vars(dialog))
+            self.assertNotIn("current_ir", vars(dialog))
             self.assertTrue(dialog.do_it_button.isEnabled())
             self.assertFalse(dialog.to_cmd_line_button.isEnabled())
             self.assertTrue(dialog.to_clip_button.isEnabled())
@@ -485,7 +507,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
             )
             self.assertEqual(
                 dialog.preview_string(),
-                dialog.figure_state.python_source(log=False),
+                dialog.widget_ir.python_source(log=False),
             )
             self.assertIn("fig = plt.figure('Delay Graph'", dialog.preview_string())
         finally:
@@ -528,6 +550,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
         executed = []
         plugin = HydePlugin({})
         plugin.services = {
+            "get_current_app_ir": lambda: HydeAppIR(current_project_dir="/tmp/demo.hy"),
             "python_execution_service": FakeExecutionService(
                 hidden_calls=[],
                 visible_calls=executed,
@@ -536,9 +559,11 @@ class TestFigurePluginDispatch(unittest.TestCase):
 
         Plugin._execute_macro(plugin, "Figure0", ("x", "y"))
 
-        self.assertEqual(executed, ["Figure0(x, y)"])
+        app_ir = plugin.services["get_current_app_ir"]()
+        macro_ir = app_ir.with_callable_invocation("Figure0", ("x", "y"))
+        self.assertEqual(executed, [app_ir.current_diff(macro_ir).python_source()])
 
-    def test_project_activation_publishes_figure_macros_from_figure_state(self):
+    def test_project_activation_publishes_figure_macros_from_figure_ir(self):
         execution = FakeExecutionService()
         plugin = Plugin({})
         plugin.services = {"python_execution_service": execution}
@@ -546,9 +571,8 @@ class TestFigurePluginDispatch(unittest.TestCase):
 
         plugin.on_project_activated(None)
 
-        state = FigureState()
-        state.set_publish_figure_macros()
-        self.assertEqual(execution.hidden_calls, [(state.python_source(log=False), True)])
+        expected = FigureIR().with_publish_figure_macros().python_source(log=False)
+        self.assertEqual(execution.hidden_calls, [(expected, True)])
 
 
 class TestFigureBackendSnapshot(unittest.TestCase):
@@ -564,18 +588,32 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         return pyplot
 
     def _live_state(self):
-        state = FigureState()
-        state.set_title("DelayGraph")
-        state.set_x_name("delay")
-        state.set_items(["fit_delay", "raw_delay"])
-        return state.normalized_state()
+        return {
+            "feature": "figure_command",
+            "settings": {
+                "command": "create",
+                "title": "DelayGraph",
+                "x_name": "delay",
+                "subplot_code": "111",
+                "figsize": None,
+            },
+            "items": ["fit_delay", "raw_delay"],
+            "ui": {},
+        }
 
     def _live_state_with_title(self, title):
-        state = FigureState()
-        state.set_title(title)
-        state.set_x_name("delay")
-        state.set_items(["fit_delay", "raw_delay"])
-        return state.normalized_state()
+        return {
+            "feature": "figure_command",
+            "settings": {
+                "command": "create",
+                "title": title,
+                "x_name": "delay",
+                "subplot_code": "111",
+                "figsize": None,
+            },
+            "items": ["fit_delay", "raw_delay"],
+            "ui": {},
+        }
 
     def test_figure_ir_trace_style_edit_preserves_broader_line2d_kwargs(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
@@ -645,14 +683,14 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             },
         )
 
-        source = figure_patch_source(source_ir, target_ir, figure_name="FigureA")
+        source = figure_patch_source(source_ir, target_ir)
 
         self.assertIn("line.set_linestyle('None')", source)
         self.assertIn("line.set_marker('o')", source)
         self.assertNotIn("ax.legend()", source)
         self.assertNotIn("ax.get_legend()", source)
 
-    def test_figure_patch_source_lowers_pure_trace_removals_to_remove_traces_helper(self):
+    def test_figure_patch_source_keeps_remove_only_trace_edits_package_pure(self):
         source_ir = figure_ir_from_live_state(
             self._live_state_with_title("FigureA")
         )
@@ -666,14 +704,25 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             },
         )
 
-        source = figure_patch_source(source_ir, target_ir, figure_name="FigureA")
+        source = figure_patch_source(source_ir, target_ir)
 
         self.assertNotIn("import hyde", source)
+        self.assertNotIn("hyde.", source)
+        self.assertIn("_hyde_line.remove()", source)
+
+    def test_figure_ir_diff_lowers_remove_only_trace_edits_through_hyde_helper(self):
+        opening_ir = FigureIR(
+            figure_state=figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        )
+        updated_ir = opening_ir.remove_traces(("trace0",))
+
+        source = opening_ir.current_diff(updated_ir).as_patch("FigureA").python_source(
+            log=False
+        )
+
         self.assertIn("fig = hyde.get_figure('FigureA')", source)
         self.assertIn("hyde.remove_traces(fig, 'trace0')", source)
-        self.assertNotIn("line.remove()", source)
-        self.assertNotIn("ax.legend()", source)
-        self.assertNotIn("ax.get_legend()", source)
+        self.assertNotIn("_hyde_line.remove()", source)
 
     def test_figure_ir_axis_edit_surface_lowers_axis_state_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
@@ -1428,9 +1477,12 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             self.assertEqual(len(widget.services["python_execution_service"].hidden_calls), 1)
             code, silent = widget.services["python_execution_service"].hidden_calls[0]
-            state = FigureState()
-            state.set_refresh_figure("DelayGraph", use_bound_values=False)
-            self.assertEqual(code, state.python_source(log=False))
+            self.assertEqual(
+                code,
+                FigureIR()
+                .with_refresh_figure("DelayGraph", use_bound_values=False)
+                .python_source(log=False),
+            )
             self.assertTrue(silent)
         finally:
             widget.close()
@@ -1473,9 +1525,12 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             self.assertEqual(len(execution.hidden_calls), 1)
             code, silent = execution.hidden_calls[0]
-            state = FigureState()
-            state.set_refresh_figure("DelayGraph", use_bound_values=False)
-            self.assertEqual(code, state.python_source(log=False))
+            self.assertEqual(
+                code,
+                FigureIR()
+                .with_refresh_figure("DelayGraph", use_bound_values=False)
+                .python_source(log=False),
+            )
             self.assertTrue(silent)
         finally:
             widget.close()
@@ -1532,9 +1587,12 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             self.assertEqual(len(execution.hidden_calls), 2)
             code, silent = execution.hidden_calls[1]
-            state = FigureState()
-            state.set_refresh_figure("DelayGraph", use_bound_values=False)
-            self.assertEqual(code, state.python_source(log=False))
+            self.assertEqual(
+                code,
+                FigureIR()
+                .with_refresh_figure("DelayGraph", use_bound_values=False)
+                .python_source(log=False),
+            )
             self.assertTrue(silent)
         finally:
             widget.close()
@@ -1649,9 +1707,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.close()
         self.qapp.processEvents()
 
-        state = FigureState()
-        state.set_close_figure(1)
-        self.assertEqual(queued, [(state.python_source(log=False), True)])
+        expected_close = FigureIR().with_close_figure(1).python_source(log=False)
+        self.assertEqual(queued, [(expected_close, True)])
 
         widget.close_from_kernel()
         widget.close_from_kernel()
@@ -1678,9 +1735,8 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.close()
         self.qapp.processEvents()
 
-        state = FigureState()
-        state.set_close_figure(1)
-        self.assertEqual(queued, [(state.python_source(log=False), True)])
+        expected_close = FigureIR().with_close_figure(1).python_source(log=False)
+        self.assertEqual(queued, [(expected_close, True)])
 
         widget.close_from_kernel()
         self.qapp.processEvents()
@@ -1731,9 +1787,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         subwindow.close()
         self.qapp.processEvents()
-        state = FigureState()
-        state.set_close_figure(1)
-        expected = (state.python_source(log=False), True)
+        expected = (FigureIR().with_close_figure(1).python_source(log=False), True)
         self.assertEqual(queued, [expected, expected])
         widget.close_from_kernel()
         self.qapp.processEvents()
@@ -2486,11 +2540,13 @@ class TestFigureWindowBoundaries(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def _figure_ir(self, *, items=("trace_a", "trace_b")):
-        state = FigureState()
-        state.set_title("Figure0")
-        state.set_x_name("x")
-        state.set_items(list(items))
-        return figure_ir_from_live_state(state.normalized_state())
+        return (
+            FigureIR()
+            .with_title("Figure0")
+            .with_x_name("x")
+            .with_items(list(items))
+            .normalized_state()
+        )
 
     def test_figure_window_reports_supported_trace_records_from_snapshot_ir(self):
         widget = FigureWindow(figure_number=1)
@@ -2572,11 +2628,13 @@ class TestFigureContextService(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def _figure_ir(self):
-        state = FigureState()
-        state.set_title("Figure0")
-        state.set_x_name("x")
-        state.set_items(["trace_a"])
-        return figure_ir_from_live_state(state.normalized_state())
+        return (
+            FigureIR()
+            .with_title("Figure0")
+            .with_x_name("x")
+            .with_items(["trace_a"])
+            .normalized_state()
+        )
 
     def test_active_editable_figure_returns_boundary_context(self):
         mdi_area = QtWidgets.QMdiArea()
@@ -2589,21 +2647,21 @@ class TestFigureContextService(unittest.TestCase):
         service = FigureContextService(type("Plugin", (), {"services": {"mdi_area": mdi_area}})())
         try:
             context = service.active_editable_figure()
-            session = context.open_session()
+            figure_ir = context.current_figure_ir()
 
             self.assertIsNotNone(context)
             self.assertEqual(context.figure_number, 1)
             self.assertTrue(context.has_supported_traces())
-            self.assertEqual(session.trace_ids(), ("trace0",))
+            self.assertEqual(figure_ir.trace_ids(), ("trace0",))
             self.assertEqual(
-                tuple(record["trace_id"] for record in session.supported_trace_records()),
+                tuple(record["trace_id"] for record in figure_ir.supported_trace_records()),
                 ("trace0",),
             )
         finally:
             widget.force_close()
 
 
-class TestEditableFigureSession(unittest.TestCase):
+class TestEditableFigureContext(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.qapp = QtWidgets.QApplication.instance()
@@ -2611,41 +2669,41 @@ class TestEditableFigureSession(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def _figure_ir(self):
-        state = FigureState()
-        state.set_title("Figure0")
-        state.set_x_name("x")
-        state.set_items(["trace_a"])
-        return figure_ir_from_live_state(state.normalized_state())
+        return (
+            FigureIR()
+            .with_title("Figure0")
+            .with_x_name("x")
+            .with_items(["trace_a"])
+            .normalized_state()
+        )
 
     def _editable_context(self):
         widget = FigureWindow(figure_number=1, services={})
         widget.update_payload({"snapshot": {"figure_ir": self._figure_ir()}})
         return EditableFigureContext(widget), widget
 
-    def test_open_session_returns_non_qt_boundary_without_raw_ir_contract(self):
+    def test_current_figure_ir_returns_detached_non_qt_boundary(self):
         context, widget = self._editable_context()
         try:
-            session = context.open_session()
-            second_session = context.open_session()
+            figure_ir = context.current_figure_ir()
+            second_figure_ir = context.current_figure_ir()
 
-            self.assertEqual(session.figure_number, 1)
-            self.assertFalse(isinstance(session, QtCore.QObject))
-            self.assertFalse(hasattr(session, "figure_ir"))
-            self.assertFalse(hasattr(session, "request_figure_action"))
-            self.assertFalse(hasattr(session, "apply_live"))
-            self.assertFalse(hasattr(session, "commit"))
-            self.assertFalse(hasattr(session, "revert"))
-            self.assertEqual(session.figure_title(), "Figure0")
-            self.assertEqual(session.trace_ids(), ("trace0",))
-            self.assertEqual(session.trace_style("trace0", "label"), "trace_a")
-            self.assertFalse(session.is_dirty())
+            self.assertEqual(figure_ir.figure_number, 1)
+            self.assertFalse(isinstance(figure_ir, QtCore.QObject))
+            self.assertFalse(hasattr(figure_ir, "request_figure_action"))
+            self.assertFalse(hasattr(figure_ir, "apply_live"))
+            self.assertFalse(hasattr(figure_ir, "commit"))
+            self.assertFalse(hasattr(figure_ir, "revert"))
+            self.assertEqual(figure_ir.figure_title(), "Figure0")
+            self.assertEqual(figure_ir.trace_ids(), ("trace0",))
+            self.assertEqual(figure_ir.trace_style("trace0", "label"), "trace_a")
 
-            session.set_axis_label("x", "Delay")
+            updated_ir = figure_ir.set_axis_label("x", "Delay")
 
-            self.assertTrue(session.is_dirty())
-            self.assertEqual(session.axis_label("x"), "Delay")
-            self.assertIn("ax.set_xlabel('Delay')", session.preview_source())
-            self.assertNotEqual(second_session.axis_label("x"), "Delay")
+            self.assertNotEqual(figure_ir.axis_label("x"), "Delay")
+            self.assertEqual(updated_ir.axis_label("x"), "Delay")
+            self.assertIn("ax.set_xlabel('Delay')", updated_ir.preview_source())
+            self.assertNotEqual(second_figure_ir.axis_label("x"), "Delay")
         finally:
             widget.force_close()
 

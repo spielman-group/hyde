@@ -1,6 +1,7 @@
 import unittest
 
-from hyde.user_interface.shared.figure import FigureDisplayHelper, FigureEditSession
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR
+from hyde.user_interface.shared.figure import FigureDisplayHelper
 
 
 class TestFigureDisplayHelper(unittest.TestCase):
@@ -89,13 +90,13 @@ class TestFigureDisplayHelper(unittest.TestCase):
             ],
         )
 
-    def test_figure_edit_session_uses_shared_trace_display_contract(self):
-        session = FigureEditSession(figure_number=1, figure_ir=self._figure_ir())
+    def test_figure_ir_uses_shared_trace_display_contract(self):
+        figure_ir = FigureIR(figure_state=self._figure_ir())
 
         self.assertEqual(
             [
                 (record["trace_id"], record["label"], record["display_name"])
-                for record in session.supported_trace_records()
+                for record in figure_ir.supported_trace_records()
             ],
             [
                 ("trace_label_x", "Amplitude", "Amplitude: signal vs time"),
@@ -104,3 +105,11 @@ class TestFigureDisplayHelper(unittest.TestCase):
                 ("trace_y_only", None, "counts"),
             ],
         )
+
+    def test_figure_ir_supports_direct_editing_and_lowering_on_its_own(self):
+        figure_ir = FigureIR(figure_state=self._figure_ir())
+
+        updated_ir = figure_ir.set_axis_label("x", "Time (s)")
+
+        self.assertEqual(updated_ir.axis_label("x"), "Time (s)")
+        self.assertIn("ax.set_xlabel('Time (s)')", updated_ir.preview_source())

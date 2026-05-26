@@ -8,17 +8,18 @@ from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
     TraceAppearanceDialog,
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
     RemoveFromGraphDialog,
 )
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
-from hyde.user_interface.shared.figure import EditableFigureContext
+from hyde.user_interface.shared.figure import EditableFigureContext, FigureDialogIR
 from hyde.user_interface.shared.plugin import HydePluginManager
 
 
@@ -64,6 +65,7 @@ def make_plugin_host(plugin_manager):
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
+    app.get_current_app_ir = lambda: HydeAppIR(current_project_dir=None)
     app.lookup_menu_action = lambda location, name, path=(): (
         None
         if getattr(app, "menu_context", None) is None
@@ -94,11 +96,18 @@ def make_plugin_host(plugin_manager):
 
 
 def make_live_state(title="Figure0", items=("trace_a", "trace_b")):
-    state = FigureState()
-    state.set_title(title)
-    state.set_x_name("x")
-    state.set_items(list(items))
-    return state.normalized_state()
+    return {
+        "feature": "figure_command",
+        "settings": {
+            "command": "create",
+            "title": title,
+            "x_name": "x",
+            "subplot_code": "111",
+            "figsize": None,
+        },
+        "items": list(items),
+        "ui": {},
+    }
 
 
 def make_figure_ir():
@@ -281,11 +290,17 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         dialog = TraceAppearanceDialog(EditableFigureContext(figure), services=figure.services, parent=mdi_area)
         try:
+            self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
+            self.assertIsInstance(dialog.widget_ir.opening_figure_ir, FigureIR)
+            self.assertIsInstance(dialog.widget_ir.current_figure_ir, FigureIR)
+            self.assertNotIn("initial_ir", vars(dialog))
+            self.assertNotIn("current_ir", vars(dialog))
             self.assertEqual(dialog.ui.trace_list.count(), 2)
             self.assertEqual(
                 dialog.ui.trace_list.currentItem().text(),
                 "trace_a: trace_a vs x",
             )
+            self.assertTrue(dialog.ui.live_update_checkbox.isChecked())
             self.assertEqual(dialog.ui.line_color_edit.text(), "#123456")
             self.assertEqual(dialog.ui.line_style_combo.currentData(), "--")
             self.assertEqual(dialog.ui.line_width_spin.value(), 2.5)
@@ -430,6 +445,13 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             dialog.ui.line_color_edit.editingFinished.emit()
 
             preview = dialog.lower_text_edit.toPlainText()
+            self.assertEqual(dialog.widget_ir.current_figure_ir.trace_style("trace0", "color"), "#abcdef")
+            self.assertEqual(
+                preview,
+                dialog.widget_ir.opening_figure_ir.current_diff(dialog.widget_ir.current_figure_ir)
+                .as_patch("Figure0")
+                .python_source(log=False),
+            )
             self.assertIn("line.set_color('#abcdef')", preview)
             self.assertNotIn("fig._hyde_ir", preview)
             self.assertNotIn("_figure_defaults_snapshot", preview)
@@ -558,6 +580,37 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         command = execution.hidden_calls[-1][0]
         self.assertIn("line = ax.lines[0]", command)
         self.assertIn("line.set_linestyle('None')", command)
+
+    def test_live_update_off_batches_until_do_it(self):
+        execution = FakeExecutionService()
+        mdi_area = QtWidgets.QMdiArea()
+        figure = make_active_figure_window(
+            mdi_area,
+            {
+                "mdi_area": mdi_area,
+                "python_execution_service": execution,
+                "visible_terminal_service": FakeVisibleTerminalService(),
+            },
+        )
+
+        dialog = TraceAppearanceDialog(
+            EditableFigureContext(figure),
+            services=figure.services,
+            parent=mdi_area,
+        )
+        try:
+            dialog.ui.live_update_checkbox.setChecked(False)
+            dialog.ui.line_color_edit.setText("#abcdef")
+            dialog.ui.line_color_edit.editingFinished.emit()
+            self.assertEqual(execution.hidden_calls, [])
+
+            expected = dialog.lower_text_edit.toPlainText()
+            dialog.do_it_button.click()
+        finally:
+            dialog.close()
+
+        self.assertEqual(len(execution.hidden_calls), 1)
+        self.assertEqual(execution.hidden_calls[0][0], expected)
 
     def test_cancel_executes_python_rollback_for_touched_trace(self):
         execution = FakeExecutionService()

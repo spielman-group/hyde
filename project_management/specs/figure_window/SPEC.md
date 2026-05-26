@@ -145,9 +145,10 @@ The Figure window itself is primarily a viewport. Supported live edits in the in
 deployment are launched from figure-related dialogs and target the kernel-owned IR for
 first-class figures.
 
-Those dialogs do not own raw figure draft dictionaries. They open one
-consumer-agnostic figure edit session from the active figure context and use that
-session's getters, mutators, and preview/source helpers to build canonical
+Those dialogs own workflow IR in their family-level `widget_ir`. That dialog IR is
+seeded from the active figure context and carries whatever `FigureIR` snapshots the
+workflow needs for preview, rollback, diffing, and lowering. `FigureIR` owns the
+figure getters, mutators, and preview/source helpers used to build canonical
 matplotlib patch Python.
 
 Those edits target:
@@ -200,8 +201,8 @@ Its command responsibilities are:
 The figure-specific meaning of `IR` should stay aligned with Hyde's existing
 state-control language:
 
-- for tables, "internal state" is the canonical state representation used by the GUI
-  state/codec pair to generate Python
+- for tables, "internal state" is the canonical state representation used by the
+  `TableIR` / `TableIRDiff` family to generate Python
 - for figures, "IR" is the same kind of canonical internal state representation, but
   it is authoritative in the kernel on the live figure because figures must remain
   synchronized with live matplotlib objects and future figure editors
@@ -210,9 +211,9 @@ Saved figure macros are generated from `fig._hyde_ir` only. They lower to ordina
 object-oriented matplotlib Python source and are written into the project's bounded
 macro block in `procedures/__init__.py`.
 
-The figure-edit session boundary is intentionally consumer-agnostic. Axis editing,
-trace appearance editing, and attached Curve Fit display all use the same session
-entry point and generic figure operations rather than consumer-specific figure
+`FigureIR` is the consumer-agnostic figure-edit boundary. Axis editing, trace
+appearance editing, and attached Curve Fit display all use shared `FigureIR`
+operations through dialog-owned workflow IR rather than consumer-specific figure
 services.
 
 Project session restore uses the same lower-level recreation-source builder in
@@ -265,24 +266,23 @@ This is a figure-wide rule, not an axis-dialog-specific rule. Any Hyde figure fe
 that produces user-facing matplotlib source must compare against the kernel-owned
 defaults snapshot rather than lowering a full effective state dump.
 
-## Edit Session Boundary
+## Dialog IR Boundary
 
-The active editable figure context exports one `open_session()` entry point.
+The active editable figure context identifies the live figure and provides the
+opening `FigureIR` snapshot needed to seed dialog workflows.
 
-That session:
+Dialog families then own their own workflow IR:
 
-- is ephemeral per dialog opening
-- is plain Python, not a Qt object
-- owns current/opening/revert figure edit state
-- exposes fine-grained getters over first-class figure state
-- exposes generic figure mutators, including trace and attribute-path line
-  operations needed by current figure consumers
-- owns preview/source generation
-- does not own a second transport lifecycle; dialogs execute the emitted hidden or
-  visible Python through Hyde's ordinary command interfaces
+- figure dialogs use `FigureDialogIR` in `widget_ir`
+- Curve Fit uses `CurveFitIR` in `widget_ir`
+- those dialog IRs carry any opening/current/applied `FigureIR` snapshots needed for
+  preview, rollback, diffing, and lowering
+- `FigureIR` owns the figure-family operations used by those workflows
+- dialogs execute emitted hidden or visible Python through Hyde's ordinary command
+  interfaces; they do not invent a second figure-edit transport
 
-Consumer dialogs may wrap those fine-grained getters into higher-level local helpers,
-but they do not treat raw `figure_ir` dictionaries as their edit contract.
+Any remaining compatibility wrapper is not the architectural owner of figure
+behavior.
 
 ## Synchronization
 
@@ -308,7 +308,7 @@ Resize behavior follows this sequence:
 
 Edit behavior follows this sequence:
 
-1. the dialog reads imported figure state through the active edit session
+1. the dialog reads imported figure state through its dialog-owned workflow IR
 2. the dialog lowers its current draft into a minimal matplotlib patch block
 3. Hyde executes that block through the ordinary hidden or visible command path
 4. the backend resyncs dirty first-class figures from the live matplotlib object graph

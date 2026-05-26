@@ -21,22 +21,23 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - The kernel-runtime and Python Terminal services are in place and exported through the
   current plugin architecture.
 
-### Feature codecs
-- Each supported feature-library surface now has one authoritative
-  `FeatureCodec`.
-- `MatplotlibCodec` is the one GUI-side codec truth for figure command
-  generation, figure IR normalization, figure patch lowering, and graphics
-  export lowering.
-- `HydeCodec` is the one GUI-side codec truth for Hyde-owned project-command,
-  runtime-command, table, and mutation generation.
-- Legacy names such as `FigureCodec`, `FigureIRCodec`, `RuntimeCommandCodec`,
-  and `TableCodec` now exist only as compatibility views over those canonical
-  codecs.
+### IR Contract
+- Hyde uses the `HydeIR` / `HydeIRDiff` contract, not the earlier prototype
+  codec/state architecture.
+- `HydeIRDiff` is a `HydeIR` subclass.
+- Every widget base family owns one base-level IR slot named `widget_ir`.
+- `HydeInteractiveWidget.widget_ir` is the live current object IR.
+- `HydeDialogWidget.widget_ir` and `HydeToolWidget.widget_ir` are their own IRs
+  and may contain external IR snapshots used for preview or command generation.
+- `python_source()` lives on IR objects, and `features/..._features.py` files are
+  package-pure lowerers only.
 
 ### Tables
 - `hyde.create_table(...)` opens or reopens a table by requested stable name.
 - `hyde.append_table(...)` appends objects to an existing open table.
 - `@hyde.table` is the recreation decorator.
+- `TableWidget.widget_ir` owns the live `TableIR`, and live edit/append/create/delete
+  mutations lower through the widget-owned `TableIR` / `TableIRDiff` path.
 - Open tables restore from `session.py`.
 - Session restore preserves stable table names and `window_state='minimized'`.
 
@@ -45,8 +46,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - Figure windows restore from `session.py` and preserve saved window metadata.
 - Figure windows now expose `Save Graphics...`, a figure-scoped `HydeFileDialog`
   export surface that defaults into the project-local `exports/` container and emits
-  preview-backed live-kernel `savefig(...)` commands generated through a dedicated
-  figure export state/codec path in the matplotlib feature layer.
+  preview-backed live-kernel `savefig(...)` commands generated from figure IR
+  through package-pure matplotlib lowerers.
 - Figure-working surfaces now share canonical trace `display_name` generation through
   the composed `FigureDisplayHelper` path rather than widget-local fallback strings.
 - Figure-window chrome now shows the current figure name plus canonical trace display
@@ -78,9 +79,14 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   reloads procedures, refreshes the catalog, and keeps the dialog open on success.
 - Curve Fit preview/commit uses one GUI-side coefficient model over kernel-owned fit
   results and attached figure state. Preview, `Do It`, live update, and
-  rollback/store command generation all flow through
-  `CurveFitState.python_source()`, while attached-display patching stays on the
-  shared figure-patch path.
+  rollback/store command generation all flow through its IR object's
+  `python_source()`, while attached-display patching stays on the shared
+  figure-patch path.
+
+### Hidden Execution
+- GUI-owned hidden work dispatches through the shared kernel-runtime execution path
+  with `silent=True`, including file-menu project commands, table refresh helpers,
+  file-watcher reload work, and remote requests from the lyse-compatible listener.
 
 ### Project persistence
 - Kernel objects save to `manifest.toml` + `data/`.

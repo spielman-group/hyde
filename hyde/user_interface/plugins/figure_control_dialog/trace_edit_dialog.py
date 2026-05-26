@@ -41,7 +41,7 @@ MARKER_CHOICES = [
 
 class TraceAppearanceDialog(HydeFigureDialogWidget):
     figure_patch_command_name = "trace_style_edit"
-    live_update_always_enabled = True
+    live_update_always_enabled = False
 
     def __init__(self, figure_context, services=None, parent=None):
         self._loading_controls = False
@@ -56,6 +56,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
 
     def _build_ui(self):
         self.load_ui("trace_edit_dialog.ui", module_name=__name__)
+        self.ui.live_update_checkbox.toggled.connect(self._on_live_update_toggled)
         self.ui.trace_list.currentRowChanged.connect(self._on_trace_changed)
         self.ui.hide_trace_checkbox.toggled.connect(self._on_hide_trace_toggled)
         self.ui.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -105,7 +106,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         record = self.supported_trace_record(trace_id)
         index = 0 if record is None else int(record.get("trace_index", 0))
         style = {
-            "color": self._session.trace_style(
+            "color": self.current_figure_ir.trace_style(
                 trace_id,
                 "color",
                 subplot_id=subplot_id,
@@ -114,7 +115,7 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         }
         style.update(
             {
-                name: self._session.trace_style(
+                name: self.current_figure_ir.trace_style(
                     trace_id,
                     name,
                     subplot_id=subplot_id,
@@ -181,19 +182,27 @@ class TraceAppearanceDialog(HydeFigureDialogWidget):
         record = self.supported_trace_record(trace_id)
         if record is None:
             return False
-        self._session.set_trace_style(
+        self.current_figure_ir = self.current_figure_ir.set_trace_style(
             record["trace_id"],
             subplot_id=record["subplot_id"],
             replace=replace,
             style=dict(patch),
         )
-        if not self.apply_live_update_figure_patch(mode="live_update"):
-            return False
+        if self.live_update_is_enabled():
+            if not self.apply_live_update_figure_patch(mode="live_update"):
+                return False
+        else:
+            self.refresh_figure_preview()
         if trace_id == self._current_trace_id():
             self._update_color_field_previews(trace_id)
         if reload_controls and trace_id == self._current_trace_id():
             self._load_controls_for_trace(trace_id)
         return True
+
+    def _on_live_update_toggled(self, checked):
+        if self._loading_controls or not checked:
+            return
+        self.apply_live_update_figure_patch(mode="live_update_enable")
 
     def _on_trace_changed(self, row):
         if row < 0:

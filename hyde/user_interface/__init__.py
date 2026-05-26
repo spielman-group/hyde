@@ -1,5 +1,5 @@
 # User Interface Package
 
-from hyde.user_interface.shared.core import HydeGuiState, MutationState
+from hyde.user_interface.shared.core import HydeIR, HydeIRDiff
 
-__all__ = ["HydeGuiState", "MutationState"]
+__all__ = ["HydeIR", "HydeIRDiff"]

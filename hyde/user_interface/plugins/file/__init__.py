@@ -3,12 +3,9 @@ from hyde.user_interface.shared.plugin import HydePlugin
 from .dialogs import (
     HealProjectDialog,
     LoadProjectDialog,
-    LoadProjectState,
     NewProjectDialog,
-    QuitState,
     SaveAsProjectDialog,
     SaveCopyProjectDialog,
-    SaveProjectState,
 )
 
 
@@ -110,10 +107,12 @@ class Plugin(HydePlugin):
         del checked
         if not self.services["get_current_project_dir"]():
             return False
+        app_ir = self.current_app_ir()
+        save_ir = app_ir.with_save_project()
         self.services["begin_project_operation"]("Saving Hyde project...")
         return bool(
             self.services["python_execution_service"].execute_hidden(
-                SaveProjectState().python_source()
+                app_ir.current_diff(save_ir).python_source()
             )
         )
 
@@ -132,10 +131,12 @@ class Plugin(HydePlugin):
             or self.services["get_quit_command_sent"]()
         ):
             return False
+        app_ir = self.current_app_ir()
+        quit_ir = app_ir.with_quit()
         self.services["set_quit_command_sent"](True)
         return bool(
             self.services["python_execution_service"].execute_hidden(
-                QuitState().python_source()
+                app_ir.current_diff(quit_ir).python_source()
             )
         )
 
@@ -162,9 +163,9 @@ class Plugin(HydePlugin):
     def on_request_project_load(self, data):
         project_dir = data.get("project_dir")
         if project_dir:
-            state = LoadProjectState()
-            state.set_project_dir(project_dir)
+            app_ir = self.current_app_ir()
+            load_ir = app_ir.with_load_project(project_dir)
             self.services["begin_project_operation"]("Loading Hyde project...")
             self.services["python_execution_service"].execute_hidden(
-                state.python_source()
+                app_ir.current_diff(load_ir).python_source()
             )

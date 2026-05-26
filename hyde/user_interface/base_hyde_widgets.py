@@ -55,6 +55,7 @@ class HydeToolWidget(QtWidgets.QWidget):
         self.mounted_child = None
         self._subwindow = None
         self._shutdown_requested = False
+        self.widget_ir = None
         self._persistent_close_filter = PersistentToolWindowFilter(self)
         self.ui = load_ui_for_owner(
             self,
@@ -178,6 +179,7 @@ class HydeDialogWidget(HydeDialog):
             self.ui_filename,
             module_name="hyde.user_interface",
         )
+        self.widget_ir = None
         self.mounted_child = None
         self._mounted_content_rows = {}
         self._preview_string = ""
@@ -544,6 +546,9 @@ class HydeFileDialog(HydeDialogWidget):
         del selected_path
         return None
 
+    def build_widget_ir(self, selected_path):
+        return self.build_preview_state(selected_path)
+
     def selection_validation_message(self, selected_path):
         del selected_path
         return None
@@ -558,11 +563,12 @@ class HydeFileDialog(HydeDialogWidget):
         selected_path = self.selected_path()
         error_message = self.validation_message(selected_path)
         if error_message is not None:
+            self.widget_ir = None
             self.set_preview_message(error_message)
             self.refresh_shell()
             return selected_path
-        preview_state = self.build_preview_state(selected_path)
-        payload = "" if preview_state is None else preview_state.python_source(log=False)
+        self.widget_ir = self.build_widget_ir(selected_path)
+        payload = "" if self.widget_ir is None else self.widget_ir.python_source(log=False)
         self.set_preview_string(payload)
         self.refresh_shell()
         return selected_path

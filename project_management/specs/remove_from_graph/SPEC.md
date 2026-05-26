@@ -149,9 +149,10 @@ command-driven model as the shipped axis, trace, and Curve Fit attached-display
 surfaces.
 
 On `Do It`, the GUI should resolve the selected stable trace IDs from the active
-figure context and emit one bounded command block through Hyde's shared figure
-lowering path. Because stable trace identity is Hyde-owned rather than ordinary
-matplotlib state, the canonical emitted command for this dialog uses Hyde's public
+figure context, build a `FigureIRDiff` between the opening and current `FigureIR`
+states, and emit one bounded command block through that shared figure-family lowering
+path. Because stable trace identity is Hyde-owned rather than ordinary matplotlib
+state, the canonical emitted command for this dialog uses Hyde's public
 `hyde.remove_traces(...)` helper instead of exposing `_hyde_trace_id` lookup code
 directly. `To Cmd Line` emits that same canonical block visibly.
 

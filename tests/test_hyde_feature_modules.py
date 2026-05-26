@@ -11,7 +11,13 @@ from hyde.features.base import (
 
 
 class TestHydeFeatureModuleLayout(unittest.TestCase):
-    def test_feature_modules_expose_one_canonical_codec_each(self):
+    def test_hyde_codec_rejects_non_hyde_mutation_feature_state(self):
+        from hyde.features.hyde_features import HydeCodec
+
+        with self.assertRaises(ValueError):
+            HydeCodec.default_state(feature="mutation")
+
+    def test_feature_modules_expose_one_package_local_codec_surface_each(self):
         for module_name, expected_codec in (
             ("hyde.features.hyde_features", "HydeCodec"),
             ("hyde.features.matplotlib_features", "MatplotlibCodec"),

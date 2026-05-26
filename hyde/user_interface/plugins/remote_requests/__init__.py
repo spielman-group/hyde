@@ -5,7 +5,7 @@ from labscript_utils.labconfig import LabConfig
 from labscript_utils.ls_zprocess import ZMQServer
 from zmq.error import ZMQError
 
-from hyde.user_interface.shared.core import RuntimeCommandState
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.shared.plugin import HydePlugin
 
 
@@ -19,8 +19,9 @@ def _remote_port():
 class RemoteRequestServer(ZMQServer):
     """Lyse-compatible request server owned by the remote-requests plugin."""
 
-    def __init__(self, execute_hidden, port):
+    def __init__(self, execute_hidden, port, current_app_ir=None):
         self.execute_hidden = execute_hidden
+        self.current_app_ir = current_app_ir or (lambda: HydeAppIR())
         super().__init__(port=port, bind_address="tcp://*")
 
     def handler(self, request_data):
@@ -31,9 +32,12 @@ class RemoteRequestServer(ZMQServer):
             if isinstance(request_data, bytes):
                 request_data = request_data.decode("utf8")
         if isinstance(request_data, str):
-            state = RuntimeCommandState()
-            state.set_remote_request(request_data)
-            if not self.execute_hidden(state.python_source(), silent=False):
+            app_ir = self.current_app_ir()
+            request_ir = app_ir.with_remote_request(request_data)
+            if not self.execute_hidden(
+                app_ir.current_diff(request_ir).python_source(),
+                silent=True,
+            ):
                 return "error: kernel unavailable"
             return "added successfully"
         return (
@@ -53,6 +57,7 @@ class Plugin(HydePlugin):
             self.server = RemoteRequestServer(
                 self.services["python_execution_service"].execute_hidden,
                 _remote_port(),
+                current_app_ir=self.services.get("get_current_app_ir"),
             )
         except ZMQError as exc:
             logging.getLogger("hyde").warning(

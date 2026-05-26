@@ -310,7 +310,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
         self.resize(target_width, max(self.height(), self.sizeHint().height()))
 
     def has_supported_axes(self):
-        return bool(self._session.subplot_ids())
+        return bool(self.current_figure_ir.subplot_ids())
 
     def _load_initial_axis(self):
         if not self.has_supported_axes():
@@ -327,7 +327,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
         self._load_selected_side()
 
     def _current_subplot(self):
-        subplot_ids = self._session.subplot_ids()
+        subplot_ids = self.current_figure_ir.subplot_ids()
         return None if not subplot_ids else subplot_ids[0]
 
     def _selected_context(self):
@@ -352,17 +352,17 @@ class AxisEditDialog(HydeFigureDialogWidget):
         subplot_id = context["subplot_id"]
         axis_name = context["axis_name"]
         side = context["side"]
-        limits = self._session.axis_limits(axis_name, subplot_id=subplot_id) or (
+        limits = self.current_figure_ir.axis_limits(axis_name, subplot_id=subplot_id) or (
             None,
             None,
         )
-        display_range = self._session.axis_value(
+        display_range = self.current_figure_ir.axis_value(
             axis_name,
             "ticks",
             "display_range",
             subplot_id=subplot_id,
         ) or (None, None)
-        limit_mode = self._session.axis_limit_mode(
+        limit_mode = self.current_figure_ir.axis_limit_mode(
             axis_name,
             subplot_id=subplot_id,
         ) or {}
@@ -371,11 +371,11 @@ class AxisEditDialog(HydeFigureDialogWidget):
         try:
             self._set_combo_data(
                 self.ui.axis_mode_combo,
-                self._session.axis_scale(axis_name, subplot_id=subplot_id),
+                self.current_figure_ir.axis_scale(axis_name, subplot_id=subplot_id),
             )
             self._set_combo_data(
                 self.ui.log_tick_mode_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "log_tick_mode",
                     subplot_id=subplot_id,
@@ -384,13 +384,13 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.axis_label_edit.setText(
                 _format_optional_text(
-                    self._session.axis_label(axis_name, subplot_id=subplot_id)
+                    self.current_figure_ir.axis_label(axis_name, subplot_id=subplot_id)
                 )
             )
             self.ui.axis_label_preview.setText(self.ui.axis_label_edit.text())
             self.ui.label_visible_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "label",
                         "visible",
@@ -401,7 +401,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             self._set_combo_data(
                 self.ui.label_side_combo,
                 _label_choice_for_side(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "label",
                         "side",
@@ -412,7 +412,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.label_position_mode_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "label",
                     "position_mode",
@@ -422,7 +422,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.label_position_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "label",
                         "position",
@@ -433,7 +433,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.label_offset_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "label",
                         "offset",
@@ -444,7 +444,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.label_rotation_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "label",
                         "rotation",
@@ -455,7 +455,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.line_spacing_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "label",
                         "line_spacing",
@@ -466,7 +466,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.axis_label_color_edit.set_committed_text(
                 _format_optional_text(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "label",
                         "color",
@@ -476,7 +476,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.autoscale_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "range",
                     "autoscale",
@@ -490,7 +490,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             self.ui.maximum_edit.setText(_format_optional_number(limits[1]))
             self.ui.reverse_axis_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "range",
                         "reverse",
@@ -500,7 +500,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.side_visible_checkbox.setChecked(
                 bool(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "spine_visible",
                         subplot_id=subplot_id,
@@ -509,7 +509,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.side_ticks_checkbox.setChecked(
                 bool(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "ticks_visible",
                         subplot_id=subplot_id,
@@ -518,7 +518,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.side_tick_labels_checkbox.setChecked(
                 bool(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "tick_labels_visible",
                         subplot_id=subplot_id,
@@ -527,7 +527,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.side_line_width_spin.setValue(
                 float(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "spine_width",
                         subplot_id=subplot_id,
@@ -536,11 +536,11 @@ class AxisEditDialog(HydeFigureDialogWidget):
                 )
             )
             self.ui.side_offset_spin.setValue(
-                float(self._session.subplot_margin(side, subplot_id=subplot_id) or 0.0)
+                float(self.current_figure_ir.subplot_margin(side, subplot_id=subplot_id) or 0.0)
             )
             self.ui.spine_offset_spin.setValue(
                 float(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "offset",
                         subplot_id=subplot_id,
@@ -550,7 +550,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.draw_on_top_checkbox.setChecked(
                 bool(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "draw_on_top",
                         subplot_id=subplot_id,
@@ -559,7 +559,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.side_color_edit.set_committed_text(
                 _format_optional_text(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "spine_color",
                         subplot_id=subplot_id,
@@ -568,7 +568,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.tick_label_color_edit.set_committed_text(
                 _format_optional_text(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "tick_label_color",
                         subplot_id=subplot_id,
@@ -577,7 +577,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.tick_label_rotation_spin.setValue(
                 float(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "tick_label_rotation",
                         subplot_id=subplot_id,
@@ -587,7 +587,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.tick_label_offset_spin.setValue(
                 float(
-                    self._session.axis_side_value(
+                    self.current_figure_ir.axis_side_value(
                         side,
                         "tick_label_offset",
                         subplot_id=subplot_id,
@@ -597,7 +597,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.major_tick_count_spin.setValue(
                 int(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "major",
@@ -609,7 +609,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.major_tick_step_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "major",
@@ -621,7 +621,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.major_tick_positions_edit.setText(
                 _format_float_list(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "major",
@@ -632,7 +632,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.major_tick_labels_edit.setText(
                 _format_text_list(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "major",
@@ -643,7 +643,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.major_tick_mode_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "ticks",
                     "major",
@@ -654,7 +654,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.minor_ticks_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "minor",
@@ -665,7 +665,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.tick_direction_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "ticks",
                     "direction",
@@ -675,7 +675,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.formatter_style_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "ticks",
                     "formatter",
@@ -686,7 +686,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.low_trip_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -698,7 +698,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.high_trip_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -710,7 +710,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.exponent_prescale_spin.setValue(
                 int(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -724,7 +724,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             self.ui.display_range_max_edit.setText(_format_optional_number(display_range[1]))
             self.ui.suppressed_values_edit.setText(
                 _format_float_list(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "suppressed_values",
@@ -734,7 +734,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.max_log_cycles_minor_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "max_log_cycles_minor",
@@ -745,7 +745,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.max_log_cycles_minor_labels_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "max_log_cycles_minor_labels",
@@ -756,7 +756,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.use_thousands_separator_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -767,7 +767,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.zero_as_zero_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -779,7 +779,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.trim_trailing_zeros_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -790,7 +790,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.trim_leading_zero_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -801,7 +801,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.prefer_exponent_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "ticks",
                         "formatter",
@@ -812,7 +812,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.grid_visible_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "grid",
                         "visible",
@@ -822,7 +822,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.grid_which_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "grid",
                     "which",
@@ -832,7 +832,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.grid_style_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "grid",
                     "linestyle",
@@ -842,7 +842,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.grid_width_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "grid",
                         "linewidth",
@@ -853,7 +853,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.grid_color_edit.set_committed_text(
                 _format_optional_text(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "grid",
                         "color",
@@ -863,7 +863,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.zero_line_visible_checkbox.setChecked(
                 bool(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "zero_line",
                         "visible",
@@ -873,7 +873,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self._set_combo_data(
                 self.ui.zero_line_style_combo,
-                self._session.axis_value(
+                self.current_figure_ir.axis_value(
                     axis_name,
                     "zero_line",
                     "linestyle",
@@ -883,7 +883,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.zero_line_width_spin.setValue(
                 float(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "zero_line",
                         "linewidth",
@@ -894,7 +894,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             )
             self.ui.zero_line_color_edit.set_committed_text(
                 _format_optional_text(
-                    self._session.axis_value(
+                    self.current_figure_ir.axis_value(
                         axis_name,
                         "zero_line",
                         "color",
@@ -965,7 +965,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
             }
         return {"display_range": (minimum, maximum), "valid": True, "message": ""}
 
-    def _apply_current_controls_to_session(self):
+    def _apply_current_controls_to_ir(self):
         context = self._selected_context()
         if context is None:
             return {"valid": False, "message": "No active axis selection."}
@@ -973,10 +973,10 @@ class AxisEditDialog(HydeFigureDialogWidget):
         subplot_id = context["subplot_id"]
         axis_name = context["axis_name"]
         side = context["side"]
-        axis_state = self._session.axis_value(axis_name, subplot_id=subplot_id)
-        side_state = self._session.axis_side_value(side, subplot_id=subplot_id)
+        axis_state = self.current_figure_ir.axis_value(axis_name, subplot_id=subplot_id)
+        side_state = self.current_figure_ir.axis_side_value(side, subplot_id=subplot_id)
         margins = {
-            margin_side: self._session.subplot_margin(
+            margin_side: self.current_figure_ir.subplot_margin(
                 margin_side,
                 subplot_id=subplot_id,
             )
@@ -1138,19 +1138,19 @@ class AxisEditDialog(HydeFigureDialogWidget):
         side_state["tick_label_offset"] = float(self.ui.tick_label_offset_spin.value())
 
         try:
-            self._session.set_axis_state(
+            self.current_figure_ir = self.current_figure_ir.set_axis_state(
                 axis_name,
                 axis_state,
                 subplot_id=subplot_id,
                 replace=True,
             )
-            self._session.set_axis_side_state(
+            self.current_figure_ir = self.current_figure_ir.set_axis_side_state(
                 side,
                 side_state,
                 subplot_id=subplot_id,
                 replace=True,
             )
-            self._session.set_subplot_margins(
+            self.current_figure_ir = self.current_figure_ir.set_subplot_margins(
                 subplot_id=subplot_id,
                 replace=True,
                 **margins,
@@ -1164,7 +1164,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
         if self._loading_controls:
             return
         self.ui.axis_label_preview.setText(self.ui.axis_label_edit.text())
-        result = self._apply_current_controls_to_session()
+        result = self._apply_current_controls_to_ir()
         self.refresh_figure_preview(result["message"])
         if not result["valid"]:
             return
@@ -1174,7 +1174,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
     def _on_live_update_toggled(self, checked):
         if self._loading_controls or not checked:
             return
-        result = self._apply_current_controls_to_session()
+        result = self._apply_current_controls_to_ir()
         self.refresh_figure_preview(result["message"])
         if result["valid"]:
             self.apply_live_update_figure_patch(mode="live_update_enable")
@@ -1210,7 +1210,7 @@ class AxisEditDialog(HydeFigureDialogWidget):
         context = self._selected_context()
         if context is None:
             return
-        resolved_limits = self._session.resolved_axis_limits(
+        resolved_limits = self.current_figure_ir.resolved_limits(
             context["axis_name"],
             subplot_id=context["subplot_id"],
         )

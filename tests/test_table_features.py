@@ -15,7 +15,6 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget, HydeToolWidget
-from hyde.user_interface.shared.core import MutationState
 from hyde.user_interface.plugins.table_interactive import (
     Plugin,
     TableFeatureService,
@@ -23,18 +22,17 @@ from hyde.user_interface.plugins.table_interactive import (
 )
 from hyde.user_interface.plugins.table_interactive.dialogs import NewTableDialog
 from hyde.user_interface.plugins.table_interactive.window import (
-    TableState,
+    TableIR,
+    TableIRDiff,
     TableWidget,
 )
 
-class TestTableCodec(unittest.TestCase):
-    def test_table_state_preserves_table_python_source(self):
-        state = TableState()
-        state.set_items(["delay2", "fit_delay2"])
-        state.set_name("Table7")
+class TestTableIR(unittest.TestCase):
+    def test_table_ir_preserves_table_python_source(self):
+        table_ir = TableIR(names=("delay2", "fit_delay2"), name="Table7")
 
         self.assertEqual(
-            state.python_source(),
+            table_ir.python_source(),
             "hyde.create_table(delay2, fit_delay2, name='Table7')",
         )
 
@@ -74,104 +72,105 @@ class TestTableCodec(unittest.TestCase):
                 window_state="minimized",
             )
 
-    def test_table_state_open_generation_includes_optional_layout_kwargs(self):
-        state = TableState()
-        state.set_items(["delay2", "fit_delay2"])
-        state.set_name("Table7")
-        state.set_geometry((5, 42, 510, 242))
-        state.set_column_widths({"delay2": 140, "fit_delay2": 262})
+    def test_table_ir_open_generation_includes_optional_layout_kwargs(self):
+        table_ir = TableIR(
+            names=("delay2", "fit_delay2"),
+            name="Table7",
+            geometry=(5, 42, 510, 242),
+            column_widths={"delay2": 140, "fit_delay2": 262},
+        )
 
-        source = state.python_source()
+        source = table_ir.python_source()
 
         self.assertIn("hyde.create_table(delay2, fit_delay2", source)
         self.assertIn("name='Table7'", source)
         self.assertIn("geometry=(5, 42, 510, 242)", source)
         self.assertIn("column_widths={'delay2': 140, 'fit_delay2': 262}", source)
 
-    def test_table_state_open_generation_omits_name_when_not_explicit(self):
-        state = TableState()
-        state.set_items(["delay2", "fit_delay2"])
-        state.set_geometry((5, 42, 510, 242))
+    def test_table_ir_open_generation_omits_name_when_not_explicit(self):
+        table_ir = TableIR(
+            names=("delay2", "fit_delay2"),
+            geometry=(5, 42, 510, 242),
+        )
 
-        source = state.python_source()
+        source = table_ir.python_source()
 
         self.assertIn("hyde.create_table(delay2, fit_delay2", source)
         self.assertNotIn("name=", source)
 
     def test_table_recreation_sources_preserve_requested_name(self):
-        state = TableState()
-        state.set_items(["delay2", "fit_delay2"])
-        state.set_name("Table0")
-        state.set_geometry((5, 42, 510, 242))
-        state.set_column_widths({"delay2": 140, "fit_delay2": 262})
+        table_ir = TableIR(
+            names=("delay2", "fit_delay2"),
+            name="Table0",
+            geometry=(5, 42, 510, 242),
+            column_widths={"delay2": 140, "fit_delay2": 262},
+        )
 
-        macro = state.macro_source("Table0")
-        session_function = state.recreation_function_source("Table0")
+        macro = table_ir.macro_source("Table0")
+        session_function = table_ir.recreation_function_source("Table0")
 
         self.assertIn("name='Table0'", macro)
         self.assertIn("name='Table0'", session_function)
 
-    def test_table_state_append_generation_uses_append_table_api(self):
-        state = TableState()
-        state.set_items(["delay2", "fit_delay2"])
-        state.set_command("append")
-        state.set_name("Table7")
+    def test_table_ir_append_generation_uses_append_table_api(self):
+        table_ir = TableIR(
+            names=("delay2", "fit_delay2"),
+            name="Table7",
+            command="append",
+        )
 
-        source = state.python_source()
+        source = table_ir.python_source()
 
         self.assertEqual(
             source,
             "hyde.append_table(delay2, fit_delay2, name='Table7')",
         )
 
-    def test_table_state_push_table_data_generation_uses_python_source(self):
-        state = TableState()
-        state.set_push_table_data(["delay2", "fit_delay2"], "request-7")
+    def test_table_ir_diff_push_table_data_generation_uses_python_source(self):
+        initial_ir = TableIR(names=("delay2", "fit_delay2"), name="Table7")
+        current_ir = initial_ir.with_push_table_data("request-7")
 
-        source = state.python_source()
+        table_diff = TableIRDiff.from_irs(initial_ir, current_ir)
+
+        self.assertIsInstance(table_diff, TableIRDiff)
+        source = table_diff.python_source()
 
         self.assertEqual(
             source,
             "hyde.execution.ipc.push_table_data(['delay2', 'fit_delay2'], 'request-7')",
         )
 
-    def test_table_state_publish_table_macros_generation_uses_python_source(self):
-        state = TableState()
-        state.set_publish_table_macros()
+    def test_table_ir_publish_table_macros_generation_uses_python_source(self):
+        table_ir = TableIR(command="publish_table_macros")
 
         self.assertEqual(
-            state.python_source(),
+            table_ir.python_source(),
             "hyde.recreation_registry.publish_registry('table')",
         )
 
-class TestMutationCodec(unittest.TestCase):
-    def test_mutation_state_preserves_delete_python_source(self):
-        state = MutationState()
-        state.set_delete_indices("array0", [4, 1])
+class TestTableIRMutations(unittest.TestCase):
+    def test_table_ir_preserves_delete_python_source(self):
+        mutation_ir = TableIR().with_delete_indices("array0", [4, 1])
 
-        self.assertEqual(state.python_source(), "array0 = np.delete(array0, [1, 4])")
+        self.assertEqual(mutation_ir.python_source(), "array0 = np.delete(array0, [1, 4])")
 
-    def test_mutation_state_generates_edit_append_new_array_and_delete_commands(self):
-        edit_state = MutationState()
-        edit_state.set_edit_value("array0", 1, "abc")
-        append_state = MutationState()
-        append_state.set_append_value("array0", "2")
-        create_state = MutationState()
-        create_state.set_create_array("abc", ["string_array0"])
-        delete_state = MutationState()
-        delete_state.set_delete_indices("array0", [4, 1])
+    def test_table_ir_generates_edit_append_new_array_and_delete_commands(self):
+        edit_ir = TableIR().with_edit_value("array0", 1, "abc")
+        append_ir = TableIR().with_append_value("array0", "2")
+        create_ir = TableIR().with_create_array("abc", ["string_array0"])
+        delete_ir = TableIR().with_delete_indices("array0", [4, 1])
 
-        self.assertEqual(edit_state.python_source(), "array0[1] = 'abc'")
+        self.assertEqual(edit_ir.python_source(), "array0[1] = 'abc'")
         self.assertEqual(
-            append_state.python_source(),
+            append_ir.python_source(),
             "array0 = np.concatenate((array0, np.array([2], dtype=array0.dtype)))",
         )
         self.assertEqual(
-            create_state.python_source(),
+            create_ir.python_source(),
             "string_array1 = np.array(['abc'])",
         )
         self.assertEqual(
-            delete_state.python_source(),
+            delete_ir.python_source(),
             "array0 = np.delete(array0, [1, 4])",
         )
 
@@ -185,11 +184,12 @@ class TestSaveWindowDialog(unittest.TestCase):
     def test_save_window_dialog_uses_provided_saveable(self):
         from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialog
 
-        state = TableState()
-        state.set_items(["delay2", "fit_delay2"])
-        state.set_name("Table_Fun")
-        state.set_geometry((5, 42, 510, 242))
-        state.set_column_widths({"fit_delay2": 262})
+        state = TableIR(
+            names=("delay2", "fit_delay2"),
+            name="Table_Fun",
+            geometry=(5, 42, 510, 242),
+            column_widths={"fit_delay2": 262},
+        )
 
         dialog = SaveWindowDialog(saveable=state)
         try:
@@ -206,8 +206,7 @@ class TestSaveWindowDialog(unittest.TestCase):
     def test_save_window_dialog_uses_prompt_buttons_without_tool_shell_footer(self):
         from hyde.user_interface.plugins.save_window_dialog import SaveWindowDialog
 
-        state = TableState()
-        state.set_items(["delay2"])
+        state = TableIR(names=("delay2",))
 
         dialog = SaveWindowDialog(saveable=state)
         try:
@@ -494,6 +493,29 @@ class TestNewTableDialog(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_new_table_dialog_owns_table_ir_in_widget_ir(self):
+        dialog = NewTableDialog(
+            {
+                "alpha": {
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "numpy_kind": "f",
+                    "ndim": 1,
+                },
+            },
+            preselection=["alpha"],
+        )
+        try:
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertIsInstance(dialog.widget_ir, TableIR)
+            self.assertEqual(dialog.widget_ir.names, ("alpha",))
+            self.assertFalse(hasattr(dialog, "initial_ir"))
+            self.assertFalse(hasattr(dialog, "current_ir"))
+        finally:
+            dialog.close()
+
     def test_new_table_dialog_disables_do_it_until_preview_exists(self):
         dialog = NewTableDialog(
             {
@@ -612,6 +634,18 @@ class TestTableWidget(unittest.TestCase):
             widget.close()
             parent.close()
 
+    def test_table_widget_owns_live_table_ir_in_widget_ir(self):
+        widget = TableWidget("Table0", ["a"])
+        try:
+            self.assertIsInstance(widget.widget_ir, TableIR)
+            self.assertEqual(widget.widget_ir.names, ("a",))
+            self.assertEqual(widget.widget_ir.name, "Table0")
+            self.assertFalse(hasattr(widget, "initial_ir"))
+            self.assertFalse(hasattr(widget, "current_ir"))
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
     def test_new_column_is_added_only_after_namespace_confirms_creation(self):
         executed = []
         queued = []
@@ -633,7 +667,7 @@ class TestTableWidget(unittest.TestCase):
             self.assertTrue(widget._submit_value_edit())
             self.assertEqual(executed, [])
             self.assertEqual(queued, [("array0 = np.array([5])", True)])
-            self.assertEqual(widget.names, ["a"])
+            self.assertEqual(list(widget.widget_ir.names), ["a"])
 
             namespace_service.emit(
                 {
@@ -642,7 +676,7 @@ class TestTableWidget(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(widget.names, ["a", "array0"])
+            self.assertEqual(list(widget.widget_ir.names), ["a", "array0"])
             self.assertGreaterEqual(len(queued), 2)
         finally:
             widget.shutdown_client()
@@ -697,6 +731,36 @@ class TestTableWidget(unittest.TestCase):
             widget.shutdown_client()
             widget.close()
 
+    def test_live_edit_submission_uses_table_ir_diff_logging_path(self):
+        executed = []
+        queued = []
+        namespace_service = FakeNamespaceViewService({"a": {"type": "ndarray"}})
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "python_execution_service": FakeExecutionService(queued, executed),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            widget.model.update_data({"a": [0]})
+            widget.ui.tableView.setCurrentIndex(widget.model.index(0, 1))
+            widget.ui.valueEdit.setReadOnly(False)
+            widget.ui.valueEdit.setText("9")
+
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                self.assertTrue(widget._submit_value_edit())
+
+            self.assertEqual(queued[0][0], "a[0] = 9")
+            output = "\n".join(logs.output)
+            self.assertIn("[Hyde state] TableIRDiff", output)
+            self.assertIn("'command': 'edit_value'", output)
+            self.assertIn("'initial_names': ['a']", output)
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
     def test_append_submission_queues_refresh_without_namespace_metadata_change(self):
         executed = []
         queued = []
@@ -727,6 +791,70 @@ class TestTableWidget(unittest.TestCase):
                 "hyde.execution.ipc.push_table_data(['a'],",
                 queued[1][0],
             )
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
+    def test_live_append_submission_uses_table_ir_diff_logging_path(self):
+        executed = []
+        queued = []
+        namespace_service = FakeNamespaceViewService({"a": {"type": "ndarray"}})
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "python_execution_service": FakeExecutionService(queued, executed),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            widget.model.update_data({"a": [1]})
+            widget.ui.tableView.setCurrentIndex(widget.model.index(1, 1))
+            widget.ui.valueEdit.setReadOnly(False)
+            widget.ui.valueEdit.setText("9")
+
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                self.assertTrue(widget._submit_value_edit())
+
+            self.assertEqual(
+                queued[0][0],
+                "a = np.concatenate((a, np.array([9], dtype=a.dtype)))",
+            )
+            output = "\n".join(logs.output)
+            self.assertIn("[Hyde state] TableIRDiff", output)
+            self.assertIn("'command': 'append_value'", output)
+            self.assertIn("'initial_names': ['a']", output)
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
+    def test_live_create_submission_uses_table_ir_diff_logging_path(self):
+        executed = []
+        queued = []
+        namespace_service = FakeNamespaceViewService({"a": {"type": "ndarray"}})
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "python_execution_service": FakeExecutionService(queued, executed),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            widget.model.update_data({"a": [1]})
+            widget.ui.tableView.setCurrentIndex(widget.model.index(0, 2))
+            widget.ui.valueEdit.setReadOnly(False)
+            widget.ui.valueEdit.setText("5")
+
+            with self.assertLogs("hyde", level="DEBUG") as logs:
+                self.assertTrue(widget._submit_value_edit())
+
+            self.assertEqual(queued, [("array0 = np.array([5])", True)])
+            output = "\n".join(logs.output)
+            self.assertIn("[Hyde state] TableIRDiff", output)
+            self.assertIn("'command': 'create_array'", output)
+            self.assertIn("'initial_names': ['a']", output)
+            self.assertIn("'existing_names': ['a']", output)
         finally:
             widget.shutdown_client()
             widget.close()
@@ -773,8 +901,8 @@ class TestTableWidget(unittest.TestCase):
 
             namespace_service.emit({})
 
-            self.assertEqual(widget.names, [])
-            self.assertEqual(widget.table_state.normalized_state()["items"], [])
+            self.assertEqual(list(widget.widget_ir.names), [])
+            self.assertEqual(widget.widget_ir.names, ())
             self.assertEqual(
                 widget.model.headerData(1, QtCore.Qt.Horizontal, QtCore.Qt.DisplayRole),
                 "",
@@ -812,7 +940,7 @@ class TestTableWidget(unittest.TestCase):
             widget.shutdown_client()
             widget.close()
 
-    def test_table_refresh_uses_table_state_python_source_for_hidden_push_command(self):
+    def test_table_refresh_uses_table_ir_python_source_for_hidden_push_command(self):
         queued = []
         namespace_service = FakeNamespaceViewService({"a": {"type": "ndarray"}})
         widget = TableWidget(
@@ -831,7 +959,7 @@ class TestTableWidget(unittest.TestCase):
             self.assertTrue(queued[0][1])
             self.assertIn("hyde.execution.ipc.push_table_data(['a'],", queued[0][0])
             output = "\n".join(logs.output)
-            self.assertIn("[Hyde state] TableState", output)
+            self.assertIn("[Hyde state] TableIR", output)
             self.assertIn("'command': 'push_table_data'", output)
         finally:
             widget.shutdown_client()
@@ -871,6 +999,37 @@ class TestTableWidget(unittest.TestCase):
             table.close()
             other.close()
             mdi_area.close()
+
+    def test_live_delete_submission_uses_table_ir_diff_logging_path(self):
+        executed = []
+        queued = []
+        namespace_service = FakeNamespaceViewService({"a": {"type": "ndarray"}})
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "python_execution_service": FakeExecutionService(queued, executed),
+                "namespace_view_service": namespace_service,
+            },
+        )
+        try:
+            widget.model.update_data({"a": [1, 2, 3]})
+
+            with patch.object(
+                QtWidgets.QMessageBox,
+                "question",
+                return_value=QtWidgets.QMessageBox.Yes,
+            ), self.assertLogs("hyde", level="DEBUG") as logs:
+                widget._delete_selected_data({"a": {2, 0}})
+
+            self.assertEqual(queued[0][0], "a = np.delete(a, [0, 2])")
+            output = "\n".join(logs.output)
+            self.assertIn("[Hyde state] TableIRDiff", output)
+            self.assertIn("'command': 'delete_indices'", output)
+            self.assertIn("'initial_names': ['a']", output)
+        finally:
+            widget.shutdown_client()
+            widget.close()
 
 
 class TestHydeInteractiveWidget(unittest.TestCase):
@@ -1142,7 +1301,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         self._drain_events()
 
         self.assertEqual(
-            table.table_state.normalized_state()["settings"]["geometry"],
+            table.widget_ir.geometry,
             (5, 42, 510, 242),
         )
         self.assertTrue(table.parentWidget().isMinimized())
@@ -1399,7 +1558,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         plugin.workspace.clear()
         self._drain_events()
 
-    def test_project_activation_uses_table_state_python_source_for_macro_publish(self):
+    def test_project_activation_uses_table_ir_python_source_for_macro_publish(self):
         mdi_area = QtWidgets.QMdiArea()
         plugin = Plugin({})
         execution = FakeExecutionService()
@@ -1419,7 +1578,7 @@ class TestTableWorkspaceService(unittest.TestCase):
             [("hyde.recreation_registry.publish_registry('table')", True)],
         )
         output = "\n".join(logs.output)
-        self.assertIn("[Hyde state] TableState", output)
+        self.assertIn("[Hyde state] TableIR", output)
         self.assertIn("'command': 'publish_table_macros'", output)
 
     def test_workspace_opens_minimized_table_window(self):

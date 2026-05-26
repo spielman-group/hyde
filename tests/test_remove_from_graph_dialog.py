@@ -17,17 +17,22 @@ from qtutils.qt import QtWidgets
 from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
 from hyde.matplotlib_backend import figure_snapshot_payload
 from hyde.user_interface.main import HydeApp
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
     TraceAppearanceDialog,
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import (
+    FigureIR,
+    FigureIRDiff,
+    FigureWindow,
+)
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
     RemoveFromGraphDialog,
 )
-from hyde.user_interface.shared.figure import EditableFigureContext
+from hyde.user_interface.shared.figure import EditableFigureContext, FigureDialogIR
 from hyde.user_interface.shared.plugin import HydePluginManager
 
 
@@ -80,6 +85,7 @@ def make_plugin_host(plugin_manager):
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
+    app.get_current_app_ir = lambda: HydeAppIR(current_project_dir=None)
     app.lookup_menu_action = lambda location, name, path=(): (
         None
         if getattr(app, "menu_context", None) is None
@@ -110,11 +116,18 @@ def make_plugin_host(plugin_manager):
 
 
 def make_live_state(title="Figure0", items=("trace_a", "trace_b")):
-    state = FigureState()
-    state.set_title(title)
-    state.set_x_name("x")
-    state.set_items(list(items))
-    return state.normalized_state()
+    return {
+        "feature": "figure_command",
+        "settings": {
+            "command": "create",
+            "title": title,
+            "x_name": "x",
+            "subplot_code": "111",
+            "figsize": None,
+        },
+        "items": list(items),
+        "ui": {},
+    }
 
 
 def make_figure_ir():
@@ -399,7 +412,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             dialog.close()
             live_figure.canvas.manager.destroy()
 
-    def test_remove_from_graph_preview_and_commit_match_figure_patch_state_python_source(self):
+    def test_remove_from_graph_preview_and_commit_match_figure_ir_diff_python_source(self):
         execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
@@ -417,14 +430,18 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             parent=mdi_area,
         )
         try:
+            self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
+            self.assertNotIn("initial_ir", vars(dialog))
+            self.assertNotIn("current_ir", vars(dialog))
             dialog.ui.trace_list.item(0).setSelected(True)
             self.qapp.processEvents()
 
-            patch_state = dialog.figure_patch_state(
-                dialog.preview_source_state(),
-                dialog.current_effective_state(),
+            patch_ir = dialog.figure_patch_state(
+                dialog.preview_source_ir(),
+                dialog.widget_ir.current_figure_ir,
             )
-            expected_command = patch_state.python_source(log=False)
+            self.assertIsInstance(patch_ir, FigureIRDiff)
+            expected_command = patch_ir.python_source(log=False)
 
             self.assertEqual(dialog.preview_string(), expected_command)
 
@@ -542,7 +559,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             dialog.close()
             live_figure.canvas.manager.destroy()
 
-    def test_figure_session_remove_traces_is_a_first_class_mutation(self):
+    def test_figure_ir_remove_traces_is_a_first_class_mutation(self):
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
             mdi_area,
@@ -553,15 +570,15 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             },
         )
 
-        session = figure.open_edit_session()
-        opening_state = session.opening_effective_state()
+        figure_ir = figure.current_ir
+        opening_state = figure_ir.effective_state()
 
-        session.remove_traces(("trace1", "trace0"))
+        updated_ir = figure_ir.remove_traces(("trace1", "trace0"))
 
-        self.assertEqual(session.trace_ids(), ())
-        self.assertEqual(session.supported_trace_records(), ())
+        self.assertEqual(updated_ir.trace_ids(), ())
+        self.assertEqual(updated_ir.supported_trace_records(), ())
         self.assertEqual(
-            session.current_effective_state()["layout"]["subplots"][0]["traces"],
+            updated_ir.effective_state()["layout"]["subplots"][0]["traces"],
             [],
         )
         self.assertEqual(

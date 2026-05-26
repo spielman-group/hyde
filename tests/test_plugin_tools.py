@@ -30,6 +30,7 @@ from hyde.user_interface.shared.plugin import (
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.logging_tool import Plugin as LoggingPlugin
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.plugins.procedure_browser_tool import Plugin as ProcedureBrowserPlugin
 from hyde.user_interface.plugins.python_variables_tool import Plugin as PythonVariablesPlugin
 from hyde.user_interface.plugins.python_terminal_tool import Plugin as PythonTerminalPlugin
@@ -69,6 +70,7 @@ def make_plugin_host(plugin_manager):
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
+    app.get_current_app_ir = lambda: HydeAppIR(current_project_dir=None)
     app.lookup_menu_action = lambda location, name, path=(): (
         None if getattr(app, "menu_context", None) is None
         else app.menu_context.lookup_action(location, name, path=path)
@@ -1700,6 +1702,7 @@ class TestPluginTools(unittest.TestCase):
         manager.plugins = {"demo": DemoPlugin({})}
         app = make_plugin_host(manager)
         app.get_current_project_dir = lambda: "/tmp/demo.hy"
+        app.get_current_app_ir = lambda: HydeAppIR(current_project_dir="/tmp/demo.hy")
         app.build_plugin_services = lambda: {
             **HydeApp.build_plugin_services(app),
             "python_execution_service": type(
@@ -1724,7 +1727,12 @@ class TestPluginTools(unittest.TestCase):
 
         plugin._macro_menu.actions()[0].trigger()
 
-        self.assertEqual(executed, ["Macro0(x, y)"])
+        app_ir = app.get_current_app_ir()
+        macro_ir = app_ir.with_callable_invocation("Macro0", ("x", "y"))
+        self.assertEqual(
+            executed,
+            [app_ir.current_diff(macro_ir).python_source()],
+        )
 
     def test_rebuild_window_macros_menu_populates_actions_with_tuple_args(self):
         plugin = HydePlugin({})

@@ -9,7 +9,7 @@ except ModuleNotFoundError as exc:
 
 from hyde.matplotlib_backend import apply_figure_action
 from hyde.features.matplotlib_features import figure_ir_from_live_state
-from hyde.user_interface.plugins.figure_interactive.window import FigureState, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 
 
@@ -30,11 +30,20 @@ class TestFigureCommActions(unittest.TestCase):
             pyplot.close("all")
 
     def _live_state_with_title(self, title):
-        state = FigureState()
-        state.set_title(title)
-        state.set_x_name("delay")
-        state.set_items(["fit_delay", "raw_delay"])
-        return state.normalized_state()
+        return figure_ir_from_live_state(
+            {
+                "feature": "figure_command",
+                "settings": {
+                    "command": "create",
+                    "title": title,
+                    "x_name": "delay",
+                    "subplot_code": "111",
+                    "figsize": None,
+                },
+                "items": ["fit_delay", "raw_delay"],
+                "ui": {},
+            }
+        )
 
     def _configure_pyplot(self):
         matplotlib.use("module://hyde.matplotlib_backend", force=True)
@@ -137,7 +146,7 @@ class TestFigureCommActions(unittest.TestCase):
             },
         )
         try:
-            figure_ir = figure_ir_from_live_state(self._live_state_with_title("Figure0"))
+            figure_ir = self._live_state_with_title("Figure0")
             window.update_payload(
                 {
                     "figure_number": 7,
@@ -156,9 +165,12 @@ class TestFigureCommActions(unittest.TestCase):
             self.assertEqual(sent, [(7, {"type": "resize_redraw", "width": 800, "height": 600})])
             self.assertEqual(len(hidden), 1)
             self.assertTrue(hidden[0][1])
-            state = FigureState()
-            state.set_refresh_figure("Figure0", use_bound_values=True)
-            self.assertEqual(hidden[0][0], state.python_source(log=False))
+            self.assertEqual(
+                hidden[0][0],
+                FigureIR()
+                .with_refresh_figure("Figure0", use_bound_values=True)
+                .python_source(log=False),
+            )
             output = "\n".join(logs.output)
             self.assertIn("[Hyde state] TransportDispatchState", output)
             self.assertNotIn("FigureRefreshState", output)

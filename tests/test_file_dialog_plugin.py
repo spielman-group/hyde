@@ -16,8 +16,10 @@ from qtutils.qt import QtGui, QtWidgets
 from hyde.user_interface.plugins.file import Plugin
 from hyde.user_interface.plugins.file.dialogs import (
     HealProjectDialog,
+    HydeAppIR,
     LoadProjectDialog,
     NewProjectDialog,
+    ProjectSelectionDialogIR,
     SaveAsProjectDialog,
     SaveCopyProjectDialog,
 )
@@ -138,13 +140,43 @@ class TestFileDialogPlugin(unittest.TestCase):
                 ],
             )
 
-    def test_load_project_state_preserves_python_source(self):
-        from hyde.user_interface.plugins.file.dialogs import LoadProjectState
+    def test_load_project_ir_diff_preserves_python_source(self):
+        initial_ir = HydeAppIR(current_project_dir="/tmp/current.hy")
+        current_ir = initial_ir.with_load_project("/tmp/demo.hy")
 
-        state = LoadProjectState()
-        state.set_project_dir("/tmp/demo.hy")
+        self.assertEqual(
+            initial_ir.current_diff(current_ir).python_source(),
+            "hyde.load_project('/tmp/demo.hy')",
+        )
 
-        self.assertEqual(state.python_source(), "hyde.load_project('/tmp/demo.hy')")
+    def test_load_project_dialog_owns_dialog_ir_and_carries_app_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "existing.hy")
+            os.makedirs(project_dir)
+            services = {
+                "ui": QtWidgets.QWidget(),
+                "python_execution_service": ExecutionService([]),
+                "get_current_app_ir": lambda: HydeAppIR(current_project_dir="/tmp/current.hy"),
+            }
+
+            dialog = LoadProjectDialog(services)
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
+
+            self.assertFalse(hasattr(dialog, "app_ir"))
+            self.assertIsInstance(dialog.widget_ir, ProjectSelectionDialogIR)
+            self.assertEqual(
+                dialog.widget_ir.current_project_dir(),
+                "/tmp/current.hy",
+            )
+            self.assertEqual(
+                dialog.widget_ir.python_source(log=False),
+                f"hyde.load_project({project_dir!r})",
+            )
+            self.assertEqual(
+                dialog.preview_string(),
+                dialog.widget_ir.python_source(log=False),
+            )
 
     def test_existing_project_dialogs_preview_and_dispatch_hidden_commands(self):
         with tempfile.TemporaryDirectory() as tmpdir:

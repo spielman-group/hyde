@@ -1,12 +1,15 @@
 # Hyde IR Control
 
-This document defines Hyde's GUI-side control pattern for command-emitting features.
+This document defines Hyde's GUI-side control pattern for command-emitting
+features.
 
-Across Hyde, `IR` means feature-specific internal representation/internal state that can
-lower to standard Python.
-It is not automatically kernel-owned. Ownership depends on the feature:
+Across Hyde, `IR` means feature-specific internal representation/internal state
+that can lower to standard Python. `HydeIR` is the GUI-side truth for a
+recreatable feature family, and `HydeIRDiff` is a real `HydeIR` subclass used
+for change-oriented lowering. IR is not automatically kernel-owned. Ownership
+depends on the feature:
 
-- table IR/state is GUI-owned long enough to generate commands and recreation source
+- table IR is GUI-owned long enough to generate commands and recreation source
 - figure IR is kernel-owned and attached to the live matplotlib `Figure`
 
 ## When This Applies
@@ -18,14 +21,22 @@ Use this pattern whenever a Hyde GUI surface:
 
 ## Core Rule
 
-A command-emitting GUI surface owns one or more Hyde-specific state objects by
-composition. Those state objects delegate normalization, validation, mutation, and
-lowering to a codec.
+A command-emitting GUI surface owns one or more Hyde-specific IR objects by
+composition. Those IR objects are the GUI-side truth and call package-pure
+feature lowerers as needed.
+
+`HydeGuiState` is retired. Hyde is `HydeIR`-based. Every widget base family
+owns one base-level IR slot named `widget_ir`.
+`HydeInteractiveWidget.widget_ir` is the live current object IR.
+`HydeDialogWidget.widget_ir` and `HydeToolWidget.widget_ir` are their own IRs
+and may contain external IR snapshots when the surface needs imported feature
+state to build previews or commands.
 
 The GUI surface does not:
 - directly mutate deep state dictionaries in many places
-- generate command Python outside `HydeGuiState.python_source()`
+- generate command Python outside `HydeIR.python_source()`
 - duplicate lowering logic in widget helpers
+- keep a second GUI-owned truth beside `widget_ir`
 - become the authoritative owner of scientific state
 
 ## Ownership Split
@@ -35,28 +46,28 @@ The GUI surface does not:
 - transient selection/focus state
 - creation of action dictionaries
 - user-facing warnings, confirmations, and dispatch decisions
-- one or more `HydeGuiState` instances
+- direct ownership of its family-level `widget_ir`
 
-### `HydeGuiState` owns
+### `HydeIR` owns
 - the current local edit session state
-- calls into its codec
-- normalized/validated state access
+- validation and deterministic mutation semantics
+- family-specific orchestration across package-pure lowerers
+- typed normalized state access
 - command lowering through `python_source()`
 - any separate reopen-source lowering such as `macro_source()`
 
-### `FeatureCodec` owns
-- canonical state schema
-- defaults
-- normalization
-- validation
-- deterministic mutation semantics
-- lowering to Python or recreation source
+### `HydeIRDiff` owns
+- diff-oriented state in the same family as its base IR
+- change-oriented lowering when the diff case differs from full recreation
 
-Each supported feature-library surface has one authoritative `FeatureCodec`.
-Hyde does not keep multiple parallel codecs inside one feature module as
-competing truths for one feature surface. The canonical codec owns the surface,
-and any retained legacy names are compatibility views rather than additional
-`FeatureCodec` authorities.
+### `xxx_features.py` lowerers own
+- package-local string lowering only
+- no top-level IR authority or cross-package orchestration
+
+The boundary is package-pure: `hyde_features.py` emits only Hyde strings,
+`matplotlib_features.py` emits only matplotlib strings, and analogous feature
+modules follow the same rule. Concrete IR classes may coordinate multiple
+package-pure lowerers when assembling final Python.
 
 ### Kernel/backend owns
 - authoritative scientific objects and values
@@ -66,9 +77,10 @@ and any retained legacy names are compatibility views rather than additional
 ## Placement Rules
 
 - Public runtime API belongs in `hyde/__init__.py`.
-- GUI state classes belong under `hyde/user_interface/...`.
-- Feature codecs belong under `hyde/features/...`.
-- Pure transport, queueing, and message envelopes stay outside codec classes.
+- GUI IR classes belong near the owning GUI family under
+  `hyde/user_interface/...`.
+- Feature lowerers belong under `hyde/features/...`.
+- Pure transport, queueing, and message envelopes stay outside IR classes.
 - Shared UI-family behavior may live in a feature-family widget base class. For
   first-class figure dialogs, prefer a shared `HydeDialogWidget` subclass over free
   helper functions when multiple dialogs need the same figure-dialog behavior.
@@ -85,20 +97,21 @@ and any retained legacy names are compatibility views rather than additional
 
 ## Shared Pattern
 
-Use one state class across GUI surfaces when they express the same semantic feature.
+Use one IR family across GUI surfaces when they express the same semantic
+feature.
 
 Current examples:
-- `NewTableDialog` and `TableWidget` both use `TableState`
-- table live data edits use shared `MutationState`
-- file/project dialogs use Hyde-owned simple command state classes inside the shared
+- the table interactive family shares `TableIR` / `TableIRDiff`
+- the figure interactive family shares `FigureIR` / `FigureIRDiff`
+- file/project dialogs use Hyde-owned app/file IR classes inside the shared
   file-dialog family
-- figure creation surfaces use `FigureState` for GUI-side creation state
 
-Split state classes only when the semantic schema truly diverges.
+Split IR families only when the semantic schema truly diverges.
 
 ## Mutation Rule
 
-Codec mutation must be action-based and deterministic, not ad hoc deep dict editing.
+IR mutation must be action-based and deterministic, not ad hoc deep dict
+editing.
 
 Typical actions are:
 - `set`
@@ -108,20 +121,19 @@ Typical actions are:
 - `remove_item`
 - command-specific state changes such as `set_command`
 
-The GUI constructs actions. The codec interprets them.
+The GUI constructs actions. The IR family interprets them and delegates
+package-specific string lowering to package-pure lowerers.
 
 ## Base Interface
 
-The shared codec contract is intentionally small:
+The shared IR contract is intentionally small:
 
-- `default_state()`
-- `normalize_state(state)`
-- `validate_state(state)`
-- `update_state(state, action)`
-- `state_to_python(state, context=None)`
-- optional `state_to_macro_source(state, macro_name, context=None)`
+- `python_source()`
+- optional `macro_source()`
+- family-specific constructors or diff builders on `HydeIR` /
+  `HydeIRDiff`
 
-For command-emitting GUI surfaces, `HydeGuiState.python_source()` is the one
+For command-emitting GUI surfaces, `HydeIR.python_source()` is the one
 authoritative command-generation method. Preview text shows that same generated
 string; Hyde does not grow separate preview-only Python-generation APIs.
 
@@ -143,18 +155,16 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 
 ## Current Concrete Guidance
 
-- Tables follow the full GUI-side IR/state/codec pattern.
-- Generic data mutation is intentionally shared through `MutationState` /
-  `MutationCodec` rather than being table-local.
-- Trivial visible project commands may share a lightweight command codec.
+- Tables follow the full GUI-side `TableIR` / `TableIRDiff` pattern.
+- Trivial visible project commands may share a lightweight Hyde-owned IR family.
 - Target-selecting project dialogs keep chooser policy and generic overwrite checks
   in the shared file-dialog family while leaving command-specific exceptions in the
   concrete dialog. Their preview and submission strings come from the shared
-  state-owned `python_source()` path rather than dialog-local string assembly.
-- Figure creation surfaces use `FigureState` for GUI-side creation state.
-- Curve Fit command generation uses `CurveFitState.python_source()` for preview,
+  IR-owned `python_source()` path rather than dialog-local string assembly.
+- Figure creation and recreation surfaces use the `FigureIR` family.
+- Curve Fit command generation uses its IR object's `python_source()` for preview,
   commit, live-update, and rollback/store behaviors while attached-display
-  patching stays on the shared `FigurePatchState` path.
+  patching stays on the shared figure IR family.
 - Figure axis, trace, and Curve Fit attached-display dialogs now emit matplotlib
   patch Python from imported figure IR rather than using a separate semantic
   figure-action transport.
@@ -169,12 +179,19 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - Runtime transport and feature-specific figure behavior belong in
   `ARCHITECTURE.md`, not in this generic control-pattern document.
 
+## Revision Rule
+
+When later work sharpens this contract, earlier docs and tests must be revised
+to match. Hyde does not preserve stale `HydeGuiState`-era guidance or
+superseded IR syntax as parallel truths.
+
 ## Design Bias
 
 Prefer the smallest clear shape:
 - one authoritative state owner
+- one base-level `widget_ir` slot per widget family
+- one IR class plus one diff subclass per recreatable interactive widget family
 - one lowering path per behavior
-- one `FeatureCodec` per supported feature-library surface
-- compatibility views only when needed to preserve callers during migration,
-  never as parallel codec truths
+- package-pure `xxx_features.py` lowerers rather than feature modules that mix
+  multiple Python package surfaces
 - composition over GUI/state multiple inheritance

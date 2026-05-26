@@ -10,7 +10,7 @@ from hyde.user_interface.shared.plugin import (
 from hyde.user_interface.shared.project import resolve_requested_name
 
 from .window import (
-    TableState,
+    TableIR,
     TableWidget,
 )
 
@@ -159,12 +159,13 @@ class TableFeatureService:
         if not names or active_table_handle is None:
             return False
 
-        state = TableState()
-        state.set_items(names)
-        state.set_command("append")
-        state.set_name(active_table_handle)
+        table_ir = TableIR(
+            names=tuple(names or ()),
+            name=active_table_handle,
+            command="append",
+        )
         self.plugin.services["python_execution_service"].execute_visible(
-            state.python_source()
+            table_ir.python_source()
         )
         return True
 
@@ -276,10 +277,9 @@ class Plugin(HydePlugin):
         del data
         self.table_macros = []
         self.rebuild_configured_window_macros_menu()
-        state = TableState()
-        state.set_publish_table_macros()
+        table_ir = TableIR().with_publish_table_macros()
         self.services["python_execution_service"].execute_hidden(
-            state.python_source()
+            table_ir.python_source()
         )
 
     def on_kernel_message(self, payload):

@@ -3,13 +3,13 @@ from qtutils.qt import QtWidgets
 from hyde.features.base import sorted_eligible_names
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
 
-from .window import FigureState
+from .window import FigureIR
 
 
 class NewFigureDialog(HydeDialogWidget):
     def __init__(self, objects_metadata, preselection=None, services=None, parent=None):
-        self.figure_state = FigureState()
         super().__init__(parent=parent, services=dict(services or {}))
+        self.widget_ir = FigureIR()
         self.objects_metadata = objects_metadata or {}
         self.preselection = list(preselection or [])
         self.setWindowTitle("New Figure")
@@ -43,20 +43,20 @@ class NewFigureDialog(HydeDialogWidget):
         if self.ui is None:
             return
         y_names = [item.text() for item in self.ui.yListWidget.selectedItems()]
-        self.figure_state.set_items(y_names)
-        self.figure_state.set_x_name(self.ui.xComboBox.currentData())
+        self.widget_ir = self.widget_ir.with_items(y_names)
+        self.widget_ir = self.widget_ir.with_x_name(self.ui.xComboBox.currentData())
         title = self.ui.titleEdit.text().strip()
-        self.figure_state.set_title(title or None)
-        self.figure_state.set_figsize(
+        self.widget_ir = self.widget_ir.with_title(title or None)
+        self.widget_ir = self.widget_ir.with_figsize(
             self.ui.widthSpinBox.value(),
             self.ui.heightSpinBox.value(),
         )
 
     def _refresh_from_widgets(self):
         self._sync_state_from_widgets()
-        self.set_preview_string(self.figure_state.python_source(log=False))
+        self.set_preview_string(self.widget_ir.python_source(log=False))
         self.refresh_shell()
 
     def normalized_state(self):
         self._sync_state_from_widgets()
-        return self.figure_state.normalized_state()
+        return self.widget_ir.normalized_state()

@@ -283,7 +283,7 @@ The table plugin currently persists:
 - stable table `objectName()` values through `name=<table_name>` in `session.py`
   restore blocks
 
-Table recreation source generated from `TableState` may also include:
+Table recreation source generated from `TableIR` may also include:
 
 - `geometry=(x, y, width, height)`
 - `column_widths={"array_name": width, ...}`
@@ -298,8 +298,8 @@ macro recreation solve different workflow needs.
 First-class figure persistence uses the same authoritative figure IR that
 powers saved figure recreation macros. In this context, figure IR means the figure
 feature's internal representation or internal state in the same sense that
-`TableState` is the table feature's internal state for the state-to-Python codec path.
-The figure feature makes the figure-specific architectural choice that this IR is
+`TableIR` is the table feature's internal state for the state-to-Python path. The
+figure feature makes the figure-specific architectural choice that this IR is
 kernel-owned and attached to the live figure.
 
 Figure project/session restore therefore follows these rules:

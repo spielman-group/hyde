@@ -20,10 +20,11 @@ from qtconsole.client import QtKernelClient
 from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.shared.core import RuntimeCommandState
+from hyde.user_interface.plugins.file.dialogs import HydeAppIR
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.plugins.python_variables_tool import (
     Plugin as PythonVariablesPlugin,
+    PythonVariablesIR,
     PythonVariables,
     PythonVariablesService,
 )
@@ -186,15 +187,15 @@ class TestPythonVariablesFinal(unittest.TestCase):
         self.shared_client = QtKernelClient(connection_file=self.connection_file)
         self.shared_client.load_connection_file()
         self.shared_client.start_channels()
-        bootstrap = RuntimeCommandState()
-        bootstrap.set_reload_procedures(
+        bootstrap = HydeAppIR(current_project_dir=self.project_dir)
+        reload_ir = bootstrap.with_reload_procedures(
             self.project_dir,
             os.path.dirname(HYDE_DIR),
             reset_namespace=True,
         )
         wait_for_code_ok(
             self.client,
-            bootstrap.python_source(),
+            bootstrap.current_diff(reload_ir).python_source(),
         )
 
         self.browser = PythonVariables(
@@ -247,29 +248,38 @@ class TestPythonVariablesFinal(unittest.TestCase):
         )
 
     def test_filter_behavior_and_info_toggle(self):
+        self.assertIsInstance(self.browser.widget_ir, PythonVariablesIR)
         self.assertTrue(self.browser.ui.infoPane.isVisible())
 
         self.browser.ui.variablesCheckBox.setChecked(False)
         self.browser.ui.stringsCheckBox.setChecked(False)
         process_events()
+        self.assertFalse(self.browser.widget_ir.variables)
+        self.assertFalse(self.browser.widget_ir.strings)
         self.assertEqual(sorted(current_names(self.browser)), ["arr", "df"])
 
         self.browser.ui.arraysCheckBox.setChecked(False)
         self.browser.ui.variablesCheckBox.setChecked(True)
         process_events()
+        self.assertFalse(self.browser.widget_ir.arrays)
+        self.assertTrue(self.browser.widget_ir.variables)
         self.assertEqual(current_names(self.browser), ["val"])
 
         self.browser.ui.variablesCheckBox.setChecked(False)
         self.browser.ui.stringsCheckBox.setChecked(True)
         process_events()
+        self.assertFalse(self.browser.widget_ir.variables)
+        self.assertTrue(self.browser.widget_ir.strings)
         self.assertEqual(current_names(self.browser), ["s"])
 
         self.browser.ui.infoCheckBox.setChecked(False)
         process_events()
+        self.assertFalse(self.browser.widget_ir.info)
         self.assertFalse(self.browser.ui.infoPane.isVisible())
 
         self.browser.ui.infoCheckBox.setChecked(True)
         process_events()
+        self.assertTrue(self.browser.widget_ir.info)
         self.assertTrue(self.browser.ui.infoPane.isVisible())
 
     def test_delete_action_removes_object_from_namespace_view(self):
@@ -311,6 +321,7 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         browser.ui.infoCheckBox = QtWidgets.QCheckBox(browser)
         browser.ui.deleteButton = QtWidgets.QPushButton(browser)
         browser.ui.plotCheckBox = QtWidgets.QCheckBox(browser)
+        browser.widget_ir = PythonVariablesIR()
         browser.model = QtGui.QStandardItemModel(0, 3, browser)
         browser.proxy_model = QtCore.QSortFilterProxyModel(browser)
         browser.proxy_model.setSourceModel(browser.model)
@@ -385,6 +396,63 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
             ],
         )
         self.assertEqual(table_feature.append_calls, [["arr", "arr2"]])
+
+    def test_delete_selected_dispatches_ir_owned_delete_python_source(self):
+        executed = []
+        browser = self._make_browser(
+            {
+                "arr": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "f"},
+                "arr2": {"python_type": "ndarray", "numpy_type": "Array", "ndim": 1, "numpy_kind": "i"},
+            }
+        )
+        browser.services["python_execution_service"] = type(
+            "ExecutionService",
+            (),
+            {"execute_hidden": lambda _self, code, silent=True: executed.append((code, silent))},
+        )()
+        self._force_selected_names(browser, ["arr", "arr2"])
+
+        original_question = QtWidgets.QMessageBox.question
+        QtWidgets.QMessageBox.question = lambda *args, **kwargs: QtWidgets.QMessageBox.Yes
+        try:
+            browser._delete_selected()
+        finally:
+            QtWidgets.QMessageBox.question = original_question
+
+        self.assertEqual(
+            executed,
+            [("del arr, arr2", True)],
+        )
+        self.assertEqual(
+            browser.widget_ir.session_state(),
+            {
+                "arrays": True,
+                "variables": True,
+                "strings": True,
+                "info": True,
+            },
+        )
+
+
+class TestPythonVariablesIR(unittest.TestCase):
+    def test_python_variables_ir_owns_view_state_and_delete_lowering(self):
+        widget_ir = PythonVariablesIR(
+            arrays=False,
+            variables=True,
+            strings=False,
+            info=False,
+        ).with_delete_names(["arr", "arr2"])
+
+        self.assertEqual(
+            widget_ir.session_state(),
+            {
+                "arrays": False,
+                "variables": True,
+                "strings": False,
+                "info": False,
+            },
+        )
+        self.assertEqual(widget_ir.python_source(log=False), "del arr, arr2")
 
 class TestPythonVariablesRefreshTracking(unittest.TestCase):
     @classmethod
@@ -762,6 +830,10 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
                     "strings": False,
                     "info": False,
                 },
+            )
+            self.assertEqual(
+                restored_widget.widget_ir.session_state(),
+                session["python_variables_tool"],
             )
             self.assertTrue(restored_subwindow.isVisible())
             self.assertEqual(current_names(restored_widget), ["scalar"])

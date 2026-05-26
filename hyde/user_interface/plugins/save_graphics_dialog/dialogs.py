@@ -3,12 +3,11 @@ import os
 from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.matplotlib_features import (
-    MatplotlibCodec,
     graphics_output_transparency_supported,
     runtime_graphics_export_formats,
 )
 from hyde.user_interface.base_hyde_widgets import HydeFileDialog
-from hyde.user_interface.shared.core import HydeGuiState
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR
 
 
 def sanitize_export_basename(name):
@@ -27,13 +26,18 @@ def figure_context_size_inches(figure_context, fallback=(6.4, 4.8)):
         size = getter()
         if size is not None:
             return (float(size[0]), float(size[1]))
-    open_session = getattr(figure_context, "open_session", None)
-    if callable(open_session):
-        session = open_session()
-        size = None if session is None else session.figure_size()
+    figure_window = getattr(figure_context, "_figure_window", None)
+    figure_ir = getattr(figure_window, "widget_ir", None)
+    if figure_ir is not None:
+        size = dict(figure_ir.normalized_state().get("settings", {}) or {}).get("figsize")
         if size not in (None, "") and len(size) == 2:
             return (float(size[0]), float(size[1]))
-    figure_window = getattr(figure_context, "_figure_window", None)
+    current_figure_ir = getattr(figure_context, "current_figure_ir", None)
+    if callable(current_figure_ir):
+        figure_ir = current_figure_ir()
+        size = None if figure_ir is None else figure_ir.figure_size()
+        if size not in (None, "") and len(size) == 2:
+            return (float(size[0]), float(size[1]))
     snapshot_state = getattr(figure_window, "snapshot_state", None)
     for state_getter_name in ("figure_ir", "figure_defaults"):
         state_getter = getattr(snapshot_state, state_getter_name, None)
@@ -45,75 +49,6 @@ def figure_context_size_inches(figure_context, fallback=(6.4, 4.8)):
         if size not in (None, "") and len(size) == 2:
             return (float(size[0]), float(size[1]))
     return tuple(float(value) for value in fallback)
-
-
-class FigureGraphicsExportState(HydeGuiState):
-    codec = MatplotlibCodec
-
-    def configure_defaults(self):
-        self._state = self.codec.default_state(
-            feature=self.codec.figure_graphics_export_feature
-        )
-
-    def set_figure_name(self, figure_name):
-        if figure_name:
-            self.apply_action(
-                {
-                    "type": "set",
-                    "path": ("settings", "figure_name"),
-                    "value": str(figure_name),
-                }
-            )
-        else:
-            self.apply_action({"type": "clear", "path": ("settings", "figure_name")})
-
-    def set_output_path(self, output_path):
-        if output_path:
-            self.apply_action(
-                {
-                    "type": "set",
-                    "path": ("settings", "output_path"),
-                    "value": str(output_path),
-                }
-            )
-        else:
-            self.apply_action({"type": "clear", "path": ("settings", "output_path")})
-
-    def set_output_format(self, output_format):
-        if output_format:
-            self.apply_action(
-                {
-                    "type": "set",
-                    "path": ("settings", "output_format"),
-                    "value": str(output_format),
-                }
-            )
-        else:
-            self.apply_action({"type": "clear", "path": ("settings", "output_format")})
-
-    def set_dpi(self, dpi):
-        self.apply_action({"type": "set", "path": ("settings", "dpi"), "value": int(dpi)})
-
-    def set_transparent(self, transparent):
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "transparent"),
-                "value": bool(transparent),
-            }
-        )
-
-    def set_size_inches(self, size_inches):
-        if size_inches is None:
-            self.apply_action({"type": "clear", "path": ("settings", "size_inches")})
-            return
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "size_inches"),
-                "value": (float(size_inches[0]), float(size_inches[1])),
-            }
-        )
 
 
 class SaveGraphicsDialog(HydeFileDialog):
@@ -173,14 +108,13 @@ class SaveGraphicsDialog(HydeFileDialog):
 
     def build_preview_state(self, selected_path):
         selected_format = self.selected_export_format()
-        state = FigureGraphicsExportState()
-        state.set_figure_name(self.figure_name())
-        state.set_output_path(selected_path)
-        state.set_output_format("pdf" if selected_format is None else selected_format.key)
-        state.set_dpi(self.selected_dpi())
-        state.set_transparent(self.selected_transparent())
-        state.set_size_inches(self.selected_size_override_inches())
-        return state
+        return FigureIR(figure_name=self.figure_name()).with_save_graphics(
+            selected_path,
+            output_format="pdf" if selected_format is None else selected_format.key,
+            dpi=self.selected_dpi(),
+            transparent=self.selected_transparent(),
+            size_inches=self.selected_size_override_inches(),
+        )
 
     def load_output_options_ui(self):
         content = self.load_ui("save_graphics_dialog.ui", module_name=__name__, row=1)

@@ -8,7 +8,7 @@ first-class figure to a graphics file.
 The dialog owns only transient export configuration. The authoritative export source is
 always the live kernel matplotlib `Figure` resolved from the opening figure identity.
 The dialog does not export cached GUI pixels, does not patch figure IR, and does not
-participate in figure-edit session workflows.
+participate in figure-dialog patch workflows.
 
 ## Entry Points
 
@@ -132,7 +132,7 @@ The `Size` section contains:
 The dialog follows Hyde's string-factory rule:
 
 - GUI state stays transient and UI-local
-- a figure export state/codec path owns export request normalization and lowering
+- the figure family's `FigureIR` path owns export request normalization and lowering
 - `hyde/features/matplotlib_features.py` owns the export-command lowering
 - execution runs against the live kernel figure looked up by stable Hyde figure name
 - `Do It` may dispatch the already generated preview string without regenerating it

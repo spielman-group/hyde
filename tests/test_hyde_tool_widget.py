@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
+from hyde.features.matplotlib_features import FigureIRCodec
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.base_hyde_widgets import (
     HydeDialogWidget,
@@ -19,9 +19,10 @@ from hyde.user_interface.base_hyde_widgets import (
     HydeToolWidget,
 )
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.figure_interactive.window import FigureState
-from hyde.user_interface.shared.core import HydeGuiState
-from hyde.user_interface.shared.figure import HydeFigureDialogWidget
+from hyde.user_interface.plugins.figure_interactive.window import FigureIR
+import hyde.user_interface as ui_package
+from hyde.user_interface.shared.core import HydeIR
+from hyde.user_interface.shared.figure import FigureDialogIR, HydeFigureDialogWidget
 
 
 class DemoToolWidget(HydeToolWidget):
@@ -139,41 +140,24 @@ class RecordingExecutionService:
         return True
 
 
-class DemoCommandCodec:
-    @staticmethod
-    def default_state():
-        return {"settings": {"path": None}}
-
-    @staticmethod
-    def normalize_state(state):
-        return copy.deepcopy(state)
-
-    @classmethod
-    def validate_state(cls, state):
-        normalized = cls.normalize_state(state)
-        if not normalized["settings"]["path"]:
-            raise ValueError("path is required")
-        return normalized
-
-    @staticmethod
-    def update_state(state, action):
-        updated = copy.deepcopy(state)
-        if action["type"] == "set_path":
-            updated["settings"]["path"] = action["path"]
-            return updated
-        raise ValueError(f"Unsupported action: {action!r}")
-
-    @staticmethod
-    def state_to_python(state, context=None):
-        del context
-        return f"emit({state['settings']['path']!r})"
-
-
-class DemoCommandState(HydeGuiState):
-    codec = DemoCommandCodec
+class DemoCommandIR(HydeIR):
+    def __init__(self, path=None):
+        self.path = None if path is None else os.path.abspath(path)
 
     def set_path(self, path):
-        self.apply_action({"type": "set_path", "path": os.path.abspath(path)})
+        self.path = os.path.abspath(path)
+        return self
+
+    def debug_state(self):
+        return {"settings": {"path": self.path}}
+
+    def validate(self):
+        if not self.path:
+            raise ValueError("path is required")
+        return self
+
+    def _python_source(self):
+        return f"emit({self.path!r})"
 
 
 class DemoFileDialog(HydeFileDialog):
@@ -183,7 +167,7 @@ class DemoFileDialog(HydeFileDialog):
     name_filters = ("Demo Packages (*.hy)",)
 
     def build_preview_state(self, selected_path):
-        state = DemoCommandState()
+        state = DemoCommandIR()
         state.set_path(selected_path)
         return state
 
@@ -208,7 +192,7 @@ class SuggestedPathFileDialog(HydeFileDialog):
         return self._suggested_path
 
     def build_preview_state(self, selected_path):
-        state = DemoCommandState()
+        state = DemoCommandIR()
         state.set_path(selected_path)
         return state
 
@@ -217,49 +201,30 @@ class CreatingSuggestedPathFileDialog(SuggestedPathFileDialog):
     create_suggested_directory = True
 
 
-class FakeFigureSession:
-    def __init__(self, opening_state, *, current_state=None, trace_records=()):
+class FakeFigureWindow:
+    def __init__(self, figure_ir):
         self.figure_number = 7
-        self._opening_state = copy.deepcopy(opening_state)
-        self._current_state = copy.deepcopy(
-            opening_state if current_state is None else current_state
-        )
-        self._trace_records = copy.deepcopy(tuple(trace_records))
-
-    def opening_effective_state(self):
-        return copy.deepcopy(self._opening_state)
-
-    def current_effective_state(self):
-        return copy.deepcopy(self._current_state)
-
-    def set_current_effective_state(self, state):
-        self._current_state = copy.deepcopy(state)
-
-    def supported_trace_records(self):
-        return copy.deepcopy(self._trace_records)
+        self.widget_ir = copy.deepcopy(figure_ir)
 
 
 class FakeFigureContext:
-    def __init__(self, session, *, figure_name="Figure0"):
-        self.figure_number = int(session.figure_number)
-        self._session = session
+    def __init__(self, figure_ir, *, figure_name="Figure0"):
+        self.figure_number = 7
+        self._figure_window = FakeFigureWindow(figure_ir)
         self._figure_name = str(figure_name)
-        self.open_session_calls = 0
-
-    def open_session(self):
-        self.open_session_calls += 1
-        return self._session
 
     def figure_name(self):
         return self._figure_name
 
 
 def make_demo_figure_ir(title="Figure0", items=("trace_a",)):
-    state = FigureState()
-    state.set_title(title)
-    state.set_x_name("x")
-    state.set_items(list(items))
-    return FigureIRCodec.validate_state(figure_ir_from_live_state(state.normalized_state()))
+    return FigureIRCodec.validate_state(
+        FigureIR()
+        .with_title(title)
+        .with_x_name("x")
+        .with_items(list(items))
+        .normalized_state()
+    )
 
 
 class TestHydeToolWidget(unittest.TestCase):
@@ -291,8 +256,8 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertIs(dialog.service("demo_service"), service)
         self.assertEqual(dialog.service("missing", "fallback"), "fallback")
 
-    def test_gui_state_python_source_can_skip_state_debug_logging_for_preview(self):
-        state = DemoCommandState()
+    def test_ir_python_source_can_skip_state_debug_logging_for_preview(self):
+        state = DemoCommandIR()
         state.set_path("/tmp/demo.hy")
 
         with patch(
@@ -304,6 +269,11 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertEqual(preview_source, "emit('/tmp/demo.hy')")
         self.assertEqual(committed_source, preview_source)
         log_debug.assert_called_once()
+
+    def test_user_interface_package_exports_only_current_ir_contract(self):
+        self.assertIn("HydeIR", ui_package.__all__)
+        self.assertIn("HydeIRDiff", ui_package.__all__)
+        self.assertNotIn("HydeGuiState", ui_package.__all__)
 
     def test_dialog_base_stores_services_without_tool_shell(self):
         service = object()
@@ -796,20 +766,7 @@ class TestHydeToolWidget(unittest.TestCase):
         opening_state = make_demo_figure_ir()
         updated_state = copy.deepcopy(opening_state)
         updated_state["layout"]["subplots"][0]["axes"]["x"]["label"]["text"] = "Delay"
-        session = FakeFigureSession(
-            opening_state,
-            current_state=updated_state,
-            trace_records=(
-                {
-                    "subplot_id": "subplot_1",
-                    "trace_id": "trace_1",
-                    "label": "trace_a",
-                    "x_name": "x",
-                    "y_name": "trace_a",
-                },
-            ),
-        )
-        figure_context = FakeFigureContext(session)
+        figure_context = FakeFigureContext(FigureIR(figure_state=opening_state))
         dialog = DemoFigureDialogWidget(
             figure_context=figure_context,
             services={"python_execution_service": execution_service},
@@ -817,18 +774,20 @@ class TestHydeToolWidget(unittest.TestCase):
         dialog.live_update_always_enabled = True
 
         try:
+            dialog.current_figure_ir = FigureIR(figure_state=updated_state)
             patch_state = dialog.figure_patch_state(
-                opening_state,
-                updated_state,
+                dialog.widget_ir.opening_figure_ir,
+                dialog.widget_ir.current_figure_ir,
             )
             expected_patch = patch_state.python_source(log=False)
 
             self.assertIs(dialog.figure_context, figure_context)
-            self.assertIs(dialog.figure_session(), session)
-            self.assertEqual(figure_context.open_session_calls, 1)
+            self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
+            self.assertNotIn("initial_ir", vars(dialog))
+            self.assertNotIn("current_ir", vars(dialog))
             self.assertEqual(
                 dialog.supported_trace_records()[0]["trace_id"],
-                "trace_1",
+                "trace0",
             )
 
             dialog.refresh_figure_preview()
@@ -842,7 +801,7 @@ class TestHydeToolWidget(unittest.TestCase):
             )
             self.assertEqual(dialog.preview_string(), expected_patch)
 
-            session.set_current_effective_state(opening_state)
+            dialog.current_figure_ir = copy.deepcopy(dialog.widget_ir.opening_figure_ir)
             self.assertTrue(dialog.apply_live_update_figure_patch(mode="live_update"))
             self.assertEqual(dialog.preview_string(), "")
 
@@ -851,8 +810,8 @@ class TestHydeToolWidget(unittest.TestCase):
             dialog.close()
 
         rollback_patch = dialog.figure_patch_state(
-            updated_state,
-            opening_state,
+            FigureIR(figure_state=updated_state),
+            FigureIR(figure_state=opening_state),
         ).python_source(log=False)
         self.assertEqual(
             execution_service.hidden_calls,
@@ -868,7 +827,7 @@ class TestHydeToolWidget(unittest.TestCase):
             dialog.refresh_figure_preview()
 
             self.assertIsNone(dialog.figure_context)
-            self.assertIsNone(dialog.figure_session())
+            self.assertIsNone(dialog.current_figure_ir)
             self.assertEqual(dialog.supported_trace_records(), ())
             self.assertEqual(dialog.preview_string(), "")
             self.assertEqual(dialog.lower_text_edit.toPlainText(), "")

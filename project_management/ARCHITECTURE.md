@@ -54,27 +54,31 @@ Anything exported from `hyde/__init__.py` is public kernel-facing API.
 The docstrings in `hyde/__init__.py` are the primary API documentation for that
 surface.
 
-`features/...` is not public API. It is the GUI state/codec translation layer that
-turns GUI state into Python strings or GUI-facing metadata. For the generic GUI-side
-state/codec pattern, see `IR-CONTROL.md`.
+`features/..._features.py` is not public API. Hyde uses package-pure lowerers:
+they lower Hyde IR into Python strings or GUI-facing metadata, but they do not
+own IR authority or cross-package orchestration. `hyde_features.py` is
+Hyde-only, `matplotlib_features.py` is matplotlib-only, and analogous feature
+modules follow the same rule. Cross-package orchestration belongs in concrete
+IR classes, not in feature modules. For the generic GUI-side IR ownership
+pattern, see `IR-CONTROL.md`.
 
-Across Hyde, each supported feature-library surface has one authoritative
-`FeatureCodec`. Hyde does not keep parallel codecs inside one feature module as
-competing truths for one feature surface. The current canonical examples are
-`MatplotlibCodec` for Hyde's matplotlib-backed figure surface and `HydeCodec`
-for Hyde-owned command generation. Legacy names such as `FigureIRCodec` or
-`TableCodec` may remain as compatibility views, but they are not additional
-`FeatureCodec` authorities.
+Across Hyde, the target GUI-side ownership contract is the `HydeIR` family, not
+`HydeGuiState`. `HydeIRDiff` is a `HydeIR` subclass used for change-oriented
+lowering. Every widget base family owns one base-level IR slot named
+`widget_ir`. `HydeInteractiveWidget.widget_ir` is the live current object IR.
+`HydeDialogWidget.widget_ir` and `HydeToolWidget.widget_ir` are their own IRs
+and may contain external IR snapshots when the UI needs imported object state
+to build commands or previews. Those snapshots do not move runtime authority
+out of the owning feature.
 
-Across Hyde, GUI-generated command Python comes from
-`HydeGuiState.python_source()`. Preview surfaces display that same generated string,
-and `Do It`, `To Cmd Line`, or `To Clip` may dispatch the cached preview payload
-without regenerating it.
+Across Hyde, GUI-generated command Python comes from `HydeIR.python_source()`.
+Preview surfaces display that same generated string, and `Do It`, `To Cmd Line`,
+or `To Clip` may dispatch the cached preview payload without regenerating it.
 
-Across Hyde, `IR` means feature-specific internal representation/internal state that can
-lower to standard Python. It is not always kernel-owned. Table state is GUI-owned long
-enough to emit commands. Figure IR is kernel-owned and attached to the live
-matplotlib `Figure`.
+Across Hyde, `IR` means feature-specific internal representation/internal state
+that can lower to standard Python. It is not automatically kernel-owned. Table
+IR is GUI-owned long enough to emit commands and recreation source. Figure IR is
+kernel-owned and attached to the live matplotlib `Figure`.
 
 ## Project Layout And Persistence
 
@@ -127,21 +131,24 @@ when a project is loaded.
 - Embedded `RichJupyterWidget`.
 - Uses the shared frontend `QtKernelClient`.
 - User-entered commands are visible.
-- Kernel-runtime-owned hidden work executes with `silent=True` and must not consume
-  visible prompt history.
+- Kernel-runtime-owned hidden work executes with `silent=True` and must not
+  consume visible prompt history.
 
 ### Python Variables
 - Uses Spyder's namespace-view comm path.
 - Browses kernel metadata only, not kernel objects themselves.
 - Launches tables through `hyde.create_table(...)`.
+- Delete-object dispatch lowers through the tool-owned `widget_ir` /
+  `python_source()` path.
 - Future figure actions must target first-class `@hyde.figure` workflows.
 
 ### Tables
 - Imperative entry points: `hyde.create_table(...)` for opening/reopening a table and
   `hyde.append_table(...)` for appending objects to an existing open table.
 - Explicit saved-macro/session decorator: `@hyde.table`.
-- GUI owns `TableState` and `MutationState` only long enough to generate commands and
-  recreation source.
+- `TableIR` / `TableIRDiff` own table construction, recreation, layout-bearing
+  requests, and live mutation command generation, with
+  `HydeInteractiveWidget.widget_ir` as the live current table IR.
 - Kernel remains authoritative for table data.
 - Project session restore reuses the same recreation-source path as explicit macros, but
   preserves stable names via `name=<table_name>` in `session.py`.
@@ -153,7 +160,7 @@ when a project is loaded.
   `HydeFileWidget` family in `hyde.user_interface.base_hyde_widgets`.
 - That shared file-dialog family owns chooser UI, preview refresh from the backing
   command string, generic target validation, and optional overwrite confirmation.
-- The backing command string for that family comes from the dialog state's
+- The backing command string for that family comes from the dialog IR object's
   `python_source()` path. `HydeFileDialog` subclasses extend the shared
   generation/submission path by overriding hooks and calling `super()` as needed
   rather than by creating alternate command-generation or submission paths.
@@ -201,9 +208,9 @@ when a project is loaded.
   command-generation model.
 - `Save Graphics...` is a preview-backed figure export surface. The dialog owns
   only transient file/output UI state; figure export command generation belongs
-  to a dedicated figure export state/codec path in the matplotlib feature
-  layer, and execution still targets the live kernel figure resolved by stable
-  Hyde figure name.
+  to the figure IR family through package-pure matplotlib lowerers, and
+  execution still targets the live kernel figure resolved by stable Hyde figure
+  name.
 - Explicit first-class figure refresh/regenerate also emits hidden Python through
   Hyde's normal command path using `hyde.refresh_figure(...)`. `resize_redraw`
   remains the narrow accepted backend control-traffic exception for viewport-driven
@@ -211,11 +218,12 @@ when a project is loaded.
 - Non-first-class figures do not use Hyde replay helpers or inferred GUI-owned live
   state. They remain ordinary matplotlib figures outside Hyde's first-class save/edit
   path.
-- Consumer plugins edit first-class figures through the figure-owned
-  `EditableFigureContext.open_session()` boundary exported by
-  `figure_interactive`.
-- That figure edit session now serves primarily as the figure-owned local draft/read
-  boundary used to build emitted matplotlib patch Python against imported figure IR.
+- Consumer plugins edit first-class figures through figure-owned IR snapshots and
+  figure-family operations exported by `figure_interactive`.
+- Figure behavior that belongs to the figure family lives on `FigureIR`, not in
+  figure-session escape hatches. If a figure-session helper survives during the
+  rewrite, it is transitional and must stay thin enough that `FigureIR` remains
+  the real owner of figure behavior.
 - Figure-working dialogs share UI-family behavior through a dedicated
   `HydeDialogWidget` subclass for figure work rather than through free shared helper
   functions. The intended shared surface for that family is a figure-dialog base class
@@ -242,13 +250,15 @@ when a project is loaded.
 - `New Fit Function...` is intentionally narrow: it appends one minimal valid
   `@hyde.fit_function` scaffold to `procedures/__init__.py`, triggers the normal
   procedures reload path, refreshes the catalog, and reselects the new function.
-- Curve Fit command generation flows through `CurveFitState.python_source()`
-  over the GUI-side codec work in `hyde.features.lmfit_features`; authoritative
-  fit results and any attached figure display objects live in the kernel/runtime
-  figure path, not in Qt state.
+- Curve Fit command generation flows through its IR object's
+  `python_source()` over the package-pure lowerers in
+  `hyde.features.lmfit_features`; authoritative fit results and any attached
+  figure display objects live in the kernel/runtime figure path, not in Qt
+  state.
 - When Curve Fit is attached to a first-class figure, attached display traces are
-  managed through the figure edit session boundary rather than by a dialog-local
-  figure trace manager.
+  managed through figure-family IR snapshots carried by `CurveFitIR`, not by a
+  dialog-local figure trace manager or by reaching back into a live figure widget
+  during lowering.
 
 ## Plugin Structure
 

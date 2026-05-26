@@ -22,8 +22,8 @@ The dialog remains generic. A saveable window owns the feature-specific recreati
 and the lowering path that turns that data into bounded Python source for
 `procedures/__init__.py`.
 
-For tables, that recreation data is the table feature's internal state
-(`TableState`), lowered through the table codec path.
+For tables, that recreation data is `TableIR`, lowered through the table
+feature's IR-owned Python path.
 
 For first-class figures, the analogous recreation data is the figure feature's IR
 attached to the live matplotlib `Figure`. In Hyde, `IR` here means feature-specific

@@ -106,19 +106,6 @@ def macro_ready_lines(lines):
     return [line for line in lines if line.strip() != "fig.canvas.draw_idle()"]
 
 
-def figure_command_prelude_lines(
-    figure_name,
-    *,
-    extra_imports=(),
-    include_axes=False,
-):
-    lines = [str(line) for line in tuple(extra_imports or ())]
-    lines.append(f"fig = hyde.get_figure({str(figure_name)!r})")
-    if include_axes:
-        lines.append("ax = fig.axes[0]")
-    return lines
-
-
 def runtime_graphics_export_filetypes():
     import matplotlib.pyplot as plt
 
@@ -275,8 +262,6 @@ class FigureGraphicsExportModel:
         if normalized["feature"] != cls.feature_name:
             raise ValueError(f"Expected feature={cls.feature_name!r}.")
         settings = normalized["settings"]
-        if not settings["figure_name"]:
-            raise ValueError("Graphics export requires settings.figure_name.")
         if not settings["output_path"]:
             raise ValueError("Graphics export requires settings.output_path.")
         options = graphics_output_options(
@@ -315,13 +300,10 @@ class FigureGraphicsExportModel:
             f"transparent={settings['transparent']!r})"
         )
         if settings["size_inches"] is None:
-            return "\n".join(
-                figure_command_prelude_lines(settings["figure_name"]) + [savefig_source]
-            )
+            return savefig_source
         width, height = settings["size_inches"]
         return "\n".join(
-            figure_command_prelude_lines(settings["figure_name"])
-            + [
+            [
                 "_hyde_original_size = tuple(fig.get_size_inches())",
                 "try:",
                 f"    fig.set_size_inches({width!r}, {height!r}, forward=False)",
@@ -341,11 +323,12 @@ def figure_graphics_export_command_source(
     transparent=False,
     size_inches=None,
 ):
+    del figure_name
     return MatplotlibCodec.state_to_python(
         {
             "feature": MatplotlibCodec.figure_graphics_export_feature,
             "settings": {
-                "figure_name": figure_name,
+                "figure_name": None,
                 "output_path": output_path,
                 "output_format": output_format,
                 "dpi": dpi,
@@ -411,8 +394,6 @@ class FigurePatchModel:
         if normalized["feature"] != cls.feature_name:
             raise ValueError(f"Expected feature={cls.feature_name!r}.")
         settings = normalized["settings"]
-        if not settings["figure_name"]:
-            raise ValueError("Figure patch requires settings.figure_name.")
         if settings["source_state"] is None:
             raise ValueError("Figure patch requires settings.source_state.")
         if settings["target_state"] is None:
@@ -441,7 +422,6 @@ class FigurePatchModel:
         return figure_patch_source(
             settings["source_state"],
             settings["target_state"],
-            figure_name=settings["figure_name"],
             refresh_trace_ids=settings["refresh_trace_ids"],
             refresh_legend=settings["refresh_legend"],
         )
@@ -452,9 +432,7 @@ class FigureCommandModel:
     state_version = 1
     _valid_commands = {
         "create",
-        "publish_figure_macros",
         "close",
-        "refresh",
     }
 
     @classmethod
@@ -532,8 +510,6 @@ class FigureCommandModel:
                 raise ValueError("Figure figsize values must be positive.")
         if command == "close" and not settings["figure_number"]:
             raise ValueError(f"Figure command {command!r} requires a figure number.")
-        if command == "refresh" and not settings["figure_name"]:
-            raise ValueError(f"Figure command {command!r} requires a figure name.")
         if settings["subplot_code"] != "111":
             raise ValueError("Initial Hyde figure editing only supports subplot code '111'.")
         return normalized
@@ -593,35 +569,14 @@ class FigureCommandModel:
         return tuple(ordered_unique(names))
 
     @classmethod
-    def wrapped_creation_lines(cls, state, helper_name="_hyde_figure"):
-        normalized = cls.validate_state(state)
-        parameters = list(cls.tracked_names(normalized))
-        lines = [f"@hyde.figure(register=False)", f"def {helper_name}({', '.join(parameters)}):"]
-        lines.extend(f"    {line}" for line in cls._creation_lines(normalized))
-        lines.append(f"{helper_name}({', '.join(parameters)})")
-        lines.append(f"del {helper_name}")
-        return lines
-
-    @classmethod
     def state_to_python(cls, state, context=None):
         del context
         normalized = cls.validate_state(state)
         command = normalized["settings"]["command"]
         if command == "create":
-            return "\n".join(cls.wrapped_creation_lines(normalized))
-        if command == "publish_figure_macros":
-            return "hyde.recreation_registry.publish_registry('figure')"
+            return "\n".join(cls._creation_lines(normalized))
         if command == "close":
             return f"plt.close({normalized['settings']['figure_number']})"
-        if command == "refresh":
-            settings = normalized["settings"]
-            return "\n".join(
-                figure_command_prelude_lines(settings["figure_name"])
-                + [
-                    "hyde.refresh_figure("
-                    f"fig, use_bound_values={settings['use_bound_values']!r})"
-                ]
-            )
         raise ValueError(f"Unsupported figure command: {command!r}.")
 
     @classmethod
@@ -632,9 +587,9 @@ class FigureCommandModel:
         body_lines = macro_ready_lines(cls._creation_lines(normalized))
         body = "\n".join(f"    {line}" for line in body_lines)
         return (
-            "@hyde.figure\n"
             f"def {macro_name}({', '.join(parameters)}):\n"
             f"{body}\n"
+            "    return fig\n"
         )
 def apply_figure_state(figure, state, namespace):
     normalized = MatplotlibCodec.normalize_state(state)
@@ -1917,9 +1872,9 @@ class FigureIRModel:
         )
         body = "\n".join(f"    {line}" for line in body_lines)
         return (
-            "@hyde.figure\n"
             f"def {macro_name}({parameters}):\n"
             f"{body}\n"
+            "    return fig\n"
         )
 
 
@@ -2433,53 +2388,6 @@ def figure_patch_remove_trace_lines(trace_id):
     ]
 
 
-def figure_patch_remove_trace_helper_source(
-    source_state,
-    target_state,
-    *,
-    figure_name,
-    refresh_trace_ids=(),
-):
-    if refresh_trace_ids:
-        return ""
-    source = MatplotlibCodec.validate_state(source_state)
-    target = MatplotlibCodec.validate_state(target_state)
-    source_subplots = list(source.get("layout", {}).get("subplots", ()) or ())
-    target_subplots = list(target.get("layout", {}).get("subplots", ()) or ())
-    if len(source_subplots) != 1 or len(target_subplots) != 1:
-        return ""
-    source_subplot = source_subplots[0]
-    target_subplot = target_subplots[0]
-
-    source_without_traces = dict(source_subplot)
-    source_without_traces["traces"] = ()
-    target_without_traces = dict(target_subplot)
-    target_without_traces["traces"] = ()
-    if source_without_traces != target_without_traces:
-        return ""
-
-    target_traces = {
-        str(trace["id"]): trace for trace in target_subplot.get("traces", ())
-    }
-    removed_trace_ids = []
-    for source_trace in source_subplot.get("traces", ()):
-        trace_id = str(source_trace["id"])
-        target_trace = target_traces.pop(trace_id, None)
-        if target_trace is None:
-            removed_trace_ids.append(trace_id)
-            continue
-        if source_trace != target_trace:
-            return ""
-    if target_traces or not removed_trace_ids:
-        return ""
-
-    joined_ids = ", ".join(repr(trace_id) for trace_id in removed_trace_ids)
-    return "\n".join(
-        figure_command_prelude_lines(figure_name)
-        + [f"hyde.remove_traces(fig, {joined_ids})"]
-    )
-
-
 def figure_patch_add_trace_lines(trace):
     arguments = []
     x_source = operand_to_python(trace["x_source"])
@@ -2504,20 +2412,11 @@ def figure_patch_source(
     source_state,
     target_state,
     *,
-    figure_name,
     refresh_trace_ids=(),
     refresh_legend=True,
 ):
     source = MatplotlibCodec.validate_state(source_state)
     target = MatplotlibCodec.validate_state(target_state)
-    helper_source = figure_patch_remove_trace_helper_source(
-        source,
-        target,
-        figure_name=figure_name,
-        refresh_trace_ids=refresh_trace_ids,
-    )
-    if helper_source:
-        return helper_source
     source_subplot = figure_patch_subplot(source, None)
     target_subplot = figure_patch_subplot(target, None)
     lines = []
@@ -2612,12 +2511,6 @@ def figure_patch_source(
         prelude.append("import matplotlib.ticker as mticker")
     if any("rcParams[" in line for line in lines):
         prelude.append("from matplotlib import rcParams")
-    prelude.extend(
-        figure_command_prelude_lines(
-            figure_name,
-            include_axes=True,
-        )
-    )
     return "\n".join(prelude + lines + ["fig.canvas.draw_idle()"])
 
 
@@ -2673,10 +2566,6 @@ class MatplotlibCodecView:
     @classmethod
     def tracked_names(cls, state):
         return MatplotlibCodec.tracked_names(cls._with_feature(state))
-
-    @classmethod
-    def wrapped_creation_lines(cls, state, helper_name="_hyde_figure"):
-        return FigureCommandModel.wrapped_creation_lines(cls._with_feature(state), helper_name)
 
     @classmethod
     def _with_feature(cls, state):
