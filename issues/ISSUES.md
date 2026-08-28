@@ -11,14 +11,13 @@ wrong ownership shape.
 
 - [x] Slice 0: Baseline Boundary Audit
 - [x] Slice 1: Move Pure Matplotlib Color Parsing To Feature Code
-- [ ] Slice 2: Move Figure State Authority To Feature Code
-      NOT COMPLETE. The names were copied into
-      `hyde/features/matplotlib_figure_state.py`, not moved out of
-      `hyde/features/matplotlib_features.py`. `FigureIRModel` still exists there
-      and `FigureIRAuthority` is an 80% verbatim clone of it, with 10 diverged
-      methods including `default_state`, `normalize_state`, and `validate_state`.
-      The four acceptance greps pass because none of them looked at
-      `matplotlib_features.py`. See `REFACTOR_STATUS.md`.
+- [x] Slice 2: Move Figure State Authority To Feature Code
+      Completed on the second pass. The first pass copied rather than moved;
+      `FigureIRModel` and the `MatplotlibCodecView` codec views are now deleted
+      and `MatplotlibCodec` routes `figure_ir` to `FigureIRAuthority`, so the
+      kernel and the GUI share one authority. `matplotlib_features.py` shrank
+      from 2,613 to 1,223 lines. See `REFACTOR_STATUS.md` for the three dropped
+      checks that were settled deliberately.
 - [x] Slice 3: Move Canonical Trace Records To Feature Code
 - [x] Slice 4: Reduce Figure Interactive Support To Plugin Support
 - [x] Slice 5: Feature-To-Plugin Boundary Checkpoint
@@ -33,9 +32,13 @@ wrong ownership shape.
 - [x] Slice 14: Add Durable Figure Boundary Tests
 - [x] Slice 15: Preserve Clean App/File, Table, And Python Variables Patterns
 - [x] Slice 16: Resync Docs And Refactor Status
-- [ ] Slice 17: Test Cleanup Pass (partial)
-- [ ] Slice 18: Final Completion Checkpoint (static checks pass; targeted test
-      run still outstanding)
+- [x] Slice 17: Test Cleanup Pass
+- [x] Slice 18: Final Completion Checkpoint
+      Targeted tests have now run in the `labscript` environment. Eleven of the
+      twelve suites pass. `tests.test_curve_fit` has 14 failures, every one of
+      them also present at the last commit and all in the attached-display path;
+      they are out of scope for these slices and tracked separately in
+      `REFACTOR_STATUS.md`.
 
 ## Global Rules
 
@@ -186,14 +189,21 @@ Update `hyde/user_interface/plugins/figure_interactive/window.py` to import
 
 ### Acceptance criteria
 
-- [ ] `hyde/features/matplotlib_figure_state.py` exists and imports no
+- [x] `hyde/features/matplotlib_figure_state.py` exists and imports no
       `hyde.user_interface.plugins` modules.
-- [ ] `hyde/features/matplotlib_ir.py` no longer imports from
+- [x] `hyde/features/matplotlib_ir.py` no longer imports from
       `hyde.user_interface.plugins.figure_interactive.matplotlib_support`.
-- [ ] `figure_interactive/window.py` imports `FigureIRAuthority` from
+- [x] `figure_interactive/window.py` imports `FigureIRAuthority` from
       `hyde.features.matplotlib_figure_state`.
 - [ ] `rg "FigureIRAuthority|figure_ir_default_state|figure_ir_with_defaults|supported_trace_style_state|trace_style_defaults_by_subplot" hyde/user_interface/plugins/figure_interactive/matplotlib_support.py`
       returns no matches.
+- [x] The source file lost roughly what the destination gained. A grep against
+      the destination alone cannot tell a move from a copy, which is how the
+      first pass at this slice passed while leaving `FigureIRModel` in place.
+      Check `git diff --numstat` on
+      `hyde/features/matplotlib_features.py` and confirm no top-level name is
+      defined in two modules under `hyde/features/`
+      (`tests/test_hyde_feature_modules.py::TestHydeFeatureModuleLayout::test_no_feature_module_redefines_another_feature_module_name`).
 
 ### What not to do
 
@@ -901,12 +911,16 @@ The final suite should preserve a small durable safety net around:
 
 ### Acceptance criteria
 
-- [ ] Every changed test has a clear public behavior or architecture-contract
+- [x] Every changed test has a clear public behavior or architecture-contract
       reason to exist.
-- [ ] Tests that only assert private helper wiring, private call order, or stale
+- [x] Tests that only assert private helper wiring, private call order, or stale
       fake fixture shape are removed or rewritten.
-- [ ] No production fallback is added solely to keep an old test passing.
-- [ ] Relevant targeted tests pass after cleanup.
+- [x] No production fallback is added solely to keep an old test passing. Two
+      stale fixtures were corrected instead: `FakeShell` gained the `enable_gui`
+      method matplotlib calls on the IPython shell it stands in for, and the
+      new-figure-dialog launcher test now patches the real import target.
+- [x] Relevant targeted tests pass after cleanup, except the 14 pre-existing
+      `tests.test_curve_fit` attached-display failures noted above.
 
 ### What not to do
 
@@ -948,9 +962,11 @@ refactor complete.
       returns no context-probing matches.
 - [x] `rg "_figure_window|snapshot_state|figure_ir\\(" hyde/user_interface/plugins/figure_control_dialog`
       returns no broad context fallback matches.
-- [ ] Run targeted tests in the `labscript` conda environment (NOT YET RUN -
-      the environment is being rebuilt; every other box in this slice was
-      verified statically):
+- [x] Run targeted tests in the `labscript` conda environment. Done. That
+      environment has no `pytest`; use
+      `QT_QPA_PLATFORM=offscreen python -m unittest <module>`. Eleven of the
+      twelve suites pass; `tests.test_curve_fit` carries 14 failures that are
+      all present at the last commit as well:
       `tests.test_hyde_feature_modules`,
       `tests.test_figure_display`,
       `tests.test_hyde_tool_widget`,

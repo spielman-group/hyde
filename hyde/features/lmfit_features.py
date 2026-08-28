@@ -155,7 +155,6 @@ def store_target_command(
 
 class LmfitCodec(FeatureCodec):
     feature_name = "lmfit"
-    state_version = 1
     _valid_commands = {
         "commit",
         "preview",
@@ -168,7 +167,6 @@ class LmfitCodec(FeatureCodec):
     def default_state(cls):
         return {
             "feature": cls.feature_name,
-            "state_version": cls.state_version,
             "command": "commit",
             "settings": {
                 "fit_function_name": None,
@@ -193,10 +191,6 @@ class LmfitCodec(FeatureCodec):
         normalized = copy.deepcopy(cls.default_state())
         if state:
             normalized["feature"] = state.get("feature", normalized["feature"])
-            normalized["state_version"] = state.get(
-                "state_version",
-                normalized["state_version"],
-            )
             normalized["command"] = state.get("command", normalized["command"])
             settings = state.get("settings", {})
             if isinstance(settings, dict):

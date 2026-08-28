@@ -269,7 +269,6 @@ def table_ir_macro_source(
 
 class ProjectCommandModel:
     feature_name = "hyde_command"
-    state_version = 1
     valid_commands = {
         "new_project",
         "load_project",
@@ -284,7 +283,6 @@ class ProjectCommandModel:
     def default_state(cls):
         return {
             "feature": cls.feature_name,
-            "state_version": cls.state_version,
             "command": None,
             "settings": {
                 "project_dir": None,
@@ -302,9 +300,6 @@ class ProjectCommandModel:
         normalized = copy.deepcopy(cls.default_state())
         if state:
             normalized["feature"] = state.get("feature", normalized["feature"])
-            normalized["state_version"] = state.get(
-                "state_version", normalized["state_version"]
-            )
             normalized["command"] = state.get("command")
             settings = state.get("settings", {})
             if isinstance(settings, dict):
@@ -383,7 +378,6 @@ class ProjectCommandModel:
 
 class HydeCodec(FeatureCodec):
     feature_name = "hyde"
-    state_version = 1
     project_command_feature = ProjectCommandModel.feature_name
 
     @classmethod

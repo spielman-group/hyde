@@ -6,6 +6,7 @@ import copy
 import io
 import inspect
 import logging
+import numbers
 import re
 import sys
 import textwrap
@@ -27,6 +28,8 @@ from hyde.features.matplotlib_features import (
     MatplotlibCodec,
     apply_figure_state,
     figure_ir_append_trace,
+)
+from hyde.features.matplotlib_figure_state import (
     figure_ir_apply_title,
     figure_ir_default_state,
     operand_from_runtime_value,
@@ -1007,6 +1010,13 @@ def _axis_zero_line_state_from_live(axis, axis_name, default_state):
     return state
 
 
+def _live_line_spacing(label_artist, default_line_spacing):
+    spacing = label_artist.get_linespacing()
+    if not isinstance(spacing, numbers.Real):
+        return float(default_line_spacing)
+    return float(spacing)
+
+
 def _axis_state_from_live(axis, axis_name, default_state):
     axis_axis = getattr(axis, _semantic_axis(axis_name))
     state = copy.deepcopy(default_state)
@@ -1027,8 +1037,8 @@ def _axis_state_from_live(axis, axis_name, default_state):
     state["label"]["side"] = str(label_position)
     state["label"]["offset"] = float(axis_axis.labelpad)
     state["label"]["rotation"] = float(label_artist.get_rotation())
-    state["label"]["line_spacing"] = float(
-        getattr(label_artist, "_linespacing", default_state["label"]["line_spacing"])
+    state["label"]["line_spacing"] = _live_line_spacing(
+        label_artist, default_state["label"]["line_spacing"]
     )
     state["label"]["color"] = _normalize_line_color(label_artist.get_color())
     position = label_artist.get_position()

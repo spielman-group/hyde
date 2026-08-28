@@ -106,6 +106,35 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
             f"Missing expected feature files: {sorted(required_files - feature_files)}",
         )
 
+    def test_no_feature_module_redefines_another_feature_module_name(self):
+        # A "move A to B" refactor that only greps B cannot tell a move from a
+        # copy. Two modules defining the same top-level name means two
+        # authorities, and the kernel and GUI can then normalize the same state
+        # through different copies of it.
+        definitions = {}
+        for path in sorted(FEATURES_DIR.glob("*.py")):
+            tree = ast.parse(path.read_text())
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                    names = [node.name]
+                elif isinstance(node, ast.Assign):
+                    names = [
+                        target.id
+                        for target in node.targets
+                        if isinstance(target, ast.Name)
+                    ]
+                else:
+                    continue
+                for name in names:
+                    definitions.setdefault(name, []).append(path.name)
+
+        duplicated = {
+            name: sorted(files)
+            for name, files in definitions.items()
+            if len(set(files)) > 1
+        }
+        self.assertEqual({}, duplicated)
+
     def test_hyde_features_is_an_importable_package(self):
         # Without __init__.py, setuptools drops hyde.features from every
         # non-editable install even though the IR authority lives there.

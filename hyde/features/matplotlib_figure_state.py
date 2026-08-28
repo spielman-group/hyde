@@ -1,10 +1,47 @@
 import copy
+import numbers
 
+import numpy as np
 from matplotlib import rcParams
 
 from hyde.features.base import ordered_unique
 from hyde.features.matplotlib_color import normalize_matplotlib_color_text
-from hyde.features.matplotlib_features import operand_to_python
+
+
+def operand_to_python(operand):
+    if operand is None:
+        return None
+    kind = operand.get("kind")
+    if kind == "name":
+        return operand["value"]
+    if kind == "literal":
+        return repr(operand["value"])
+    if kind == "array_literal":
+        return f"np.array({operand['value']!r})"
+    if kind == "attribute_path":
+        expression = operand_to_python(operand["root"])
+        for attribute in operand["path"]:
+            expression = f"getattr({expression}, {attribute!r})"
+        return expression
+    raise ValueError(f"Unsupported figure operand kind: {kind!r}.")
+
+
+def operand_from_runtime_value(value, named_values=None):
+    named_values = dict(named_values or {})
+    value_id = id(value)
+    if value_id in named_values:
+        return {"kind": "name", "value": named_values[value_id]}
+    if isinstance(value, (str, bytes)) or value is None or isinstance(value, numbers.Real):
+        return {"kind": "literal", "value": value}
+    try:
+        array = np.asarray(value)
+    except Exception:
+        return {"kind": "literal", "value": repr(value)}
+    if array.ndim == 0:
+        return {"kind": "literal", "value": array.item()}
+    if array.ndim == 1:
+        return {"kind": "array_literal", "value": array.tolist()}
+    raise ValueError("Hyde figure IR currently supports only 1D runtime operands.")
 
 
 def normalize_empty_choice(value):
@@ -422,9 +459,12 @@ def operand_names(operand):
 
 
 class FigureIRAuthority:
+    feature_name = "figure_ir"
+
     @classmethod
     def default_state(cls):
         return {
+            "feature": cls.feature_name,
             "settings": {"title": None, "figsize": None},
             "layout": {"kind": "single_subplot", "subplots": []},
             "opaque_nodes": [],
@@ -434,6 +474,7 @@ class FigureIRAuthority:
     def normalize_state(cls, state):
         normalized = copy.deepcopy(cls.default_state())
         if state:
+            normalized["feature"] = state.get("feature", normalized["feature"])
             settings = state.get("settings", {})
             if isinstance(settings, dict):
                 normalized["settings"].update(settings)
@@ -574,6 +615,8 @@ class FigureIRAuthority:
     @classmethod
     def validate_state(cls, state):
         normalized = cls.normalize_state(state)
+        if normalized["feature"] != cls.feature_name:
+            raise ValueError(f"Expected feature={cls.feature_name!r}.")
         figsize = normalized["settings"].get("figsize")
         if figsize is not None and (figsize[0] <= 0 or figsize[1] <= 0):
             raise ValueError("Figure IR figsize values must be positive.")

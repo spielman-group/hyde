@@ -14,6 +14,7 @@ from hyde.features.hyde_features import (
     publish_registry_source,
     remove_traces_source,
 )
+from hyde.features.base import normalize_optional_text
 from hyde.user_interface.shared.core import HydeIR, HydeIRDiff
 from hyde.features.matplotlib_figure_records import supported_trace_records
 from hyde.features.matplotlib_figure_state import (
@@ -36,12 +37,6 @@ def canonicalize_figure_window_name(name, fallback_number):
     if match is not None:
         return f"Figure{match.group(1)}"
     return text
-
-
-def normalize_optional_text(value):
-    if value in (None, ""):
-        return None
-    return str(value)
 
 
 def normalize_figure_number(value):
@@ -723,9 +718,9 @@ class FigureIR(HydeIR):
     ):
         updated_ir = self
         resolved_subplot_id = self._resolve_subplot_id(subplot_id)
-        normalized_display_name = self._normalize_optional_text(display_name)
+        normalized_display_name = normalize_optional_text(display_name)
         normalized_root_name = (
-            self._normalize_optional_text(root_name) or normalized_display_name
+            normalize_optional_text(root_name) or normalized_display_name
         )
         normalized_owner_roots = self._normalized_root_names(
             owner_root_names,
@@ -880,7 +875,7 @@ class FigureIR(HydeIR):
             )
             if display_name is None:
                 return None
-            root_name = self._normalize_optional_text(root.get("value"))
+            root_name = normalize_optional_text(root.get("value"))
             if (
                 normalized_roots
                 and root_name not in normalized_roots
@@ -927,14 +922,14 @@ class FigureIR(HydeIR):
                 str(value) for value in component if str(value or "").strip()
             )
         else:
-            normalized = self._normalize_optional_text(component)
+            normalized = normalize_optional_text(component)
             path = () if normalized is None else (normalized,)
         if not path:
             raise ValueError("Attribute-path trace component path cannot be empty.")
         return path
 
     def _attribute_path_display_name(self, trace_id, id_suffix):
-        normalized_trace_id = self._normalize_optional_text(trace_id)
+        normalized_trace_id = normalize_optional_text(trace_id)
         if normalized_trace_id is None:
             return None
         normalized_suffix = str(id_suffix or "")
@@ -948,14 +943,10 @@ class FigureIR(HydeIR):
     def _normalized_root_names(self, root_names, *extra_root_names):
         normalized = set()
         for root_name in tuple(root_names or ()) + tuple(extra_root_names):
-            normalized_root = self._normalize_optional_text(root_name)
+            normalized_root = normalize_optional_text(root_name)
             if normalized_root is not None:
                 normalized.add(normalized_root)
         return normalized
-
-    def _normalize_optional_text(self, value):
-        text = str(value or "").strip()
-        return text or None
 
     def _attribute_path_line_trace(
         self,
@@ -968,10 +959,10 @@ class FigureIR(HydeIR):
         style,
     ):
         trace_kwargs = dict(style or {})
-        normalized_label = self._normalize_optional_text(label)
+        normalized_label = normalize_optional_text(label)
         if normalized_label is not None:
             trace_kwargs["label"] = normalized_label
-        normalized_x_name = self._normalize_optional_text(x_name)
+        normalized_x_name = normalize_optional_text(x_name)
         return {
             "id": str(trace_id),
             "kind": "line",

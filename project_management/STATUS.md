@@ -128,10 +128,9 @@ Behavior-level IR ownership cleanup remains later work.
   and figures after successful `session.py` completion.
 
 ## Remaining Near-Term Gaps
-- collapse the duplicate figure IR authority: `FigureIRAuthority` in
-  `hyde/features/matplotlib_figure_state.py` is an 80% verbatim copy of
-  `FigureIRModel` in `hyde/features/matplotlib_features.py`, and the kernel and
-  GUI currently normalize figure IR through different copies
+- investigate the 14 pre-existing `tests/test_curve_fit.py` attached-display
+  failures: the attached display adds one trace where the tests expect two or
+  three; unrelated to the figure IR authority collapse
 - do the behavior-level IR pass now that the file-shape refactor has landed
 - define the final Python Terminal output policy for silent kernel-runtime execution
 - expand broader table interaction coverage

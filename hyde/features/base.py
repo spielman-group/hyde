@@ -76,7 +76,6 @@ def sorted_eligible_names(objects_metadata):
 
 class FeatureCodec(ABC):
     feature_name = None
-    state_version = 1
 
     @classmethod
     @abstractmethod

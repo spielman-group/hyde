@@ -12,8 +12,8 @@ that remained ambiguous.
 
 ## Current Assessment
 
-Most of the figure-family boundary work landed. One slice did not, and the
-acceptance criteria did not detect it.
+The figure-family boundary work has landed, including the duplicate figure IR
+authority that Slice 2 originally copied instead of moved.
 
 Landed and verified:
 
@@ -31,57 +31,60 @@ Landed and verified:
 - `SaveGraphicsDialog` uses `EditableFigureContext.current_size_inches()`
 - `CurveFitIR` no longer imports `FigureDisplayHelper`
 - the actual widget class hierarchy matches `STYLE.md`
+- `FigureIRAuthority` is the single figure IR authority for both processes
 
-Not landed:
+## Resolved: Duplicate Figure IR Authority
 
-- Slice 2 copied figure IR authority instead of moving it. See
-  **Open Defect: Duplicate Figure IR Authority** below.
+Slice 2 created `hyde/features/matplotlib_figure_state.py` by copying out of
+`hyde/features/matplotlib_features.py` without removing anything from the
+source, so Hyde carried two figure IR authorities across the process boundary:
+the kernel normalized `fig._hyde_ir` through `MatplotlibCodec` / `FigureIRModel`
+and the GUI through `FigureIRAuthority`.
 
-## Open Defect: Duplicate Figure IR Authority
+The duplication was not only a divergence risk. `FigureIRModel._range_lines`
+carried a doubled `@classmethod` decorator, which Python 3.13 and later reject
+as non-callable, so every kernel-side figure IR lowering that reached axis state
+raised `TypeError`. The GUI copy of the same method was correct. One authority
+worked and one did not, and only the tests exercising the kernel copy failed.
 
-`hyde/features/matplotlib_figure_state.py` was created by copying out of
-`hyde/features/matplotlib_features.py`. Nothing was removed from the source
-file, so Hyde now carries two figure IR authorities.
+`FigureIRAuthority` is now the only figure IR authority. `FigureIRModel`,
+`MatplotlibCodecView`, `FigureIRCodec`, `FigureGraphicsExportCodec`,
+`FigureCodec`, and `FigurePatchCodec` are gone. `MatplotlibCodec` keeps its
+multi-feature dispatch role and routes `figure_ir` to `FigureIRAuthority`, so
+both processes reach the same code.
 
-Evidence:
+`matplotlib_features.py` went from 2,613 to 1,223 lines while
+`matplotlib_figure_state.py` grew by 43. The source lost roughly what the audit
+measured as duplicated, which is the check the original Slice 2 acceptance
+criteria could not perform.
 
-- `matplotlib_features.py` changed by +11/-4 lines while a 1,175-line "moved"
-  module appeared beside it
-- `FigureIRAuthority` (685 lines) is an 80% verbatim copy of `FigureIRModel`
-  (898 lines), which still exists in `matplotlib_features.py`
-- 26 shared method names: 16 byte-identical, 10 diverged
-- 18 module-level names are defined in both files: 13 byte-identical, 5 diverged
-- ~1,224 of the 2,613 lines in `matplotlib_features.py` are duplicated
+### Decisions Recorded
 
-The two authorities are split across the process boundary, so the kernel and the
-GUI disagree:
+The three checks `FigureIRAuthority` had silently dropped were settled
+deliberately rather than by accident:
 
-- `hyde/matplotlib_backend.py` (kernel) builds `fig._hyde_ir` through
-  `MatplotlibCodec` / `FigureIRModel`, which include `feature` and
-  `state_version`
-- `hyde/features/matplotlib_ir.py` (`FigureIR`, GUI) normalizes through
-  `FigureIRAuthority`, whose `default_state()` omits both keys and whose
-  `normalize_state()` strips them from kernel-produced state
-- `FigureIRAuthority.validate_state()` dropped the feature-kind check, so the
-  GUI path accepts a state of the wrong feature kind that the kernel path
-  rejects
-- the two copies of `operand_names` disagree on return type, whitespace
-  handling, and empty values, and `operand_names` feeds `tracked_names`
+- **`feature` key: restored.** `FigureIRAuthority.feature_name` is
+  `"figure_ir"`, `default_state()` emits the key, and `normalize_state()`
+  preserves an incoming one. The kernel and the GUI now produce byte-identical
+  state dictionaries.
+- **Feature-kind check in `validate_state()`: restored.** A state of another
+  feature kind raises `ValueError`. Recorded as a current decision rather than a
+  permanent one.
+- **`state_version`: dropped.** Nothing in the repository ever read it, figure
+  IR is not persisted to a versioned on-disk artifact, and `IR-CONTROL.md` rules
+  out migration frameworks by default. It has since been removed from the
+  sibling models too, so the state envelope stays uniform: `FeatureCodec` in
+  `hyde/features/base.py` and the `hyde_features`, `lmfit_features`, and
+  remaining `matplotlib_features` models no longer declare or emit it.
+  `feature` / `feature_name` is a different key and is kept everywhere, because
+  `MatplotlibCodec` dispatches on it.
 
-The four Slice 2 acceptance greps all pass because none of them inspected
-`matplotlib_features.py`.
+### Dependency Direction
 
-### Resolving it
-
-`IR-CONTROL.md` already decides the ownership: `xxx_features.py` lowerers own
-"package-local string lowering only - no top-level IR authority". So
-`FigureIRAuthority` is the surviving authority and `FigureIRModel` goes. This is
-a split rather than a delete, because `FigureIRAuthority` currently also carries
-`state_to_python` and the `_*_lines` lowering helpers.
-
-The three checks that `FigureIRAuthority` dropped - `feature`, `state_version`,
-and the feature-kind validation - need a deliberate keep-or-drop decision rather
-than being lost by accident.
+`matplotlib_features.py` now imports from `matplotlib_figure_state.py`, not the
+reverse. The figure operand node helpers `operand_to_python` and
+`operand_from_runtime_value` moved to `matplotlib_figure_state.py` alongside the
+operand schema they serve, which is what makes that direction acyclic.
 
 ## Completed Ownership Work
 
@@ -103,6 +106,16 @@ code never imports a GUI plugin module to learn a target name.
 closure that models parent-package execution. Following only explicit
 `from X import Y` edges is what let `hyde/matplotlib_backend.py` reach `qtutils`
 through the `__init__.py` of a Qt-free-looking plugin submodule.
+
+### One Definition Per Name
+
+`tests/test_hyde_feature_modules.py` also asserts that no two modules under
+`hyde/features/` define the same top-level name. A "move A to B" slice whose
+acceptance criteria only grep B cannot tell a move from a copy; this guard can.
+It found `normalize_optional_text` defined in both `base.py` and
+`matplotlib_ir.py` with divergent whitespace handling, plus a third identical
+copy as a private method on a class in `matplotlib_ir.py`. All three collapsed
+onto `base.normalize_optional_text`.
 
 ### Canonical Trace Records
 
@@ -143,38 +156,104 @@ remain reference patterns:
 - Python Variables delete dispatch lowers through transient `HydeAppIR`
 - Python Variables view/filter state remains widget-local
 
+### Test Cleanup
+
+The tests changed during the refactor were reviewed against the Slice 17
+criteria. The suite keeps behavior and explicit-architecture-contract tests and
+lost one refactor-history sentinel:
+
+- deleted `test_figure_ir_runtime_path_no_longer_uses_matplotlib_codec_authority`,
+  which patched four `MatplotlibCodec` methods to raise so it could assert
+  `FigureIR` did not call them. It asserted a call path rather than an outcome,
+  and now that both routes reach `FigureIRAuthority` the path it forbade would
+  produce identical results. `TestFigureIRAuthorityIsShared` covers the real
+  intent positively, by asserting the two entry points agree.
+- rewrote the graphics-export macro-source test to go through
+  `MatplotlibCodec.state_to_macro_source`, the surviving public surface, instead
+  of a deleted codec view.
+- repointed the figure dialog fixtures onto `FigureIRAuthority`, the authority
+  the dialogs actually run on.
+
+Two stale test fixtures were corrected rather than accommodated in production,
+per `AGENTS.md`:
+
+- `FakeShell` gained `enable_gui`, which matplotlib's
+  `install_repl_displayhook` calls on the IPython shell it is standing in for.
+- the new-figure-dialog launcher test patched
+  `figure_interactive.NewFigureDialog`, a module-level name that never existed;
+  the launcher imports it from `.dialogs` inside the method.
+
+Kept deliberately:
+
+- the AST check that `figure_dialog_IR.py` is Qt-free and does not define
+  `HydeFigureDialogWidget`. It lives inside `hyde/user_interface/`, so the
+  kernel-side import closure guard does not cover it, and the separation is an
+  explicit `IR-CONTROL.md` contract.
+- the trace-dialog check that patches `exec_` to raise. That asserts a
+  user-visible outcome, that no dialog opens when there are no supported traces.
+- `test_hyde_feature_module_owns_hyde_figure_lowerers`, which asserts emitted
+  Python strings rather than import shape.
+
+## Test Status
+
+The `labscript` conda environment works
+(`/Users/ispielma/miniforge3/envs/labscript`, Python 3.14.7, matplotlib 3.11.1).
+It has no `pytest`; run suites with `unittest` and `QT_QPA_PLATFORM=offscreen`.
+
+Slice 18 targeted suites, compared against a worktree at the last commit:
+
+| Suite | At `HEAD` | Now |
+| --- | --- | --- |
+| `test_hyde_feature_modules` | 3 pass | 9 pass |
+| `test_figure_display` | 1 error | 3 pass |
+| `test_hyde_tool_widget` | 35 pass | 36 pass |
+| `test_axis_edit_dialog` | 13 errors | 14 pass |
+| `test_trace_edit_dialog` | 14 errors | 15 pass |
+| `test_remove_from_graph_dialog` | 11 errors | 12 pass |
+| `test_save_graphics_dialog` | 1 error | 15 pass |
+| `test_curve_fit` | 7 failures, 20 errors | 14 failures |
+| `test_file_dialog_plugin` | 13 pass | 14 pass |
+| `test_table_features` | 62 pass | 62 pass |
+| `test_python_variables_final` | 14 pass | 15 pass |
+| `test_matplotlib_features` | 6 failures, 24 errors | 86 pass |
+
+No test fails now that was not already failing at `HEAD`.
+
+The rest of the suite (`test_figure_comm_actions`, `test_kernel_launcher`,
+`test_kernel_runtime`, `test_kernel_signals`, `test_matplotlib_color_picker`,
+`test_plugin_tools`, `test_project_save_load`, `test_window_macros`,
+`test_figure_window_session_save`) passes.
+
+### matplotlib 3.11 Compatibility
+
+`hyde/matplotlib_backend.py` read axis label line spacing as
+`float(getattr(label_artist, "_linespacing", default))`. In matplotlib 3.11
+`Text` linespacing defaults to the string `'normal'`, meaning "use the font's
+natural spacing", so that `float()` raised `ValueError` and took out the whole
+live figure IR reimport path. Hyde IR stores a numeric multiplier, so a
+non-numeric live value now maps back to the IR default. This was the single root
+cause behind most of the errors in the `HEAD` column above.
+
 ## Remaining Work
 
-### Collapse The Duplicate Figure IR Authority
+### Curve Fit Dialog Failures
 
-See **Open Defect** above. Blocks any honest completion claim for Slice 2.
+`tests/test_curve_fit.py` has 14 failures, all present at `HEAD` and all in the
+attached-display path. They are dominated by trace-count mismatches on the live
+figure (`1 != 2` seven times, `1 != 3` three times), so the attached display is
+adding one trace where the tests expect two or three. This is unrelated to the
+IR authority collapse and is not covered by any slice in `issues/ISSUES.md`; the
+preceding session's large `curve_fit_dialog/dialogs.py` reduction is the likely
+origin. It needs its own investigation.
 
-The dialog tests no longer reference `FigureIRCodec`, so `FigureIRModel` and its
-`FigureIRCodec` view can now be removed without rewriting those fixtures.
-`FigureCodec` and `FigurePatchCodec` in `matplotlib_features.py` are currently
-unreferenced and should be settled as part of that same pass rather than removed
-piecemeal beforehand.
+### Behaviour-Level IR Pass
 
-### Slice 17: Test Cleanup Pass
-
-Partially done. Completed so far:
-
-- the numeric-series helper test now compares classification results across
-  callers instead of asserting helper identity
-- figure dialog tests build fixtures with `FigureIRAuthority`, the authority the
-  dialogs actually run on, instead of `FigureIRCodec`
-
-Still to do: review the remaining tests changed during the refactor and keep
-only durable public behavior or explicit architecture-boundary checks.
-
-### Slice 18: Final Completion Checkpoint
-
-All static checks pass. The targeted test run has not happened because the
-`labscript` conda environment is being rebuilt.
+The file-shape and ownership refactor has landed. The behaviour-level IR pass
+described in `project_management/STATUS.md` is the next substantive step.
 
 ## Current Bottom Line
 
-The figure-family boundary shape is correct except for the duplicate figure IR
-authority, which is a real kernel/GUI divergence and not a tidiness issue. The
-refactor is not complete until that duplication is collapsed, Slice 17 finishes,
-and the Slice 18 targeted tests run.
+The duplicate figure IR authority is collapsed, Slice 17 is complete, and the
+Slice 18 targeted suites have actually run. Eleven of the twelve targeted suites
+pass. The twelfth, `test_curve_fit`, carries 14 pre-existing attached-display
+failures that predate this work and belong to their own investigation.

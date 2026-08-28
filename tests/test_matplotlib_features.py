@@ -24,8 +24,7 @@ from hyde.matplotlib_backend import (
 )
 from hyde.features.matplotlib_features import (
     MatplotlibCodec,
-    FigureIRCodec,
-    FigureGraphicsExportCodec,
+    FigureGraphicsExportModel,
     figure_ir_from_live_state,
     figure_graphics_export_command_source,
     figure_patch_source,
@@ -47,6 +46,7 @@ from hyde.user_interface.plugins.figure_interactive import (
     Plugin,
 )
 from hyde.user_interface.plugins.figure_interactive.dialogs import NewFigureDialog
+from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.features.matplotlib_ir import FigureIR, FigureIRDiff
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
@@ -102,6 +102,10 @@ class FakeShellEvents:
 class FakeShell:
     def __init__(self):
         self.events = FakeShellEvents()
+        self.enabled_gui = []
+
+    def enable_gui(self, gui=None):
+        self.enabled_gui.append(gui)
 
 
 class TestGraphicsExportFormats(unittest.TestCase):
@@ -116,8 +120,9 @@ class TestGraphicsExportFormats(unittest.TestCase):
 
     def test_graphics_export_macro_source_raises_not_implemented(self):
         with self.assertRaises(NotImplementedError):
-            FigureGraphicsExportCodec.state_to_macro_source(
+            MatplotlibCodec.state_to_macro_source(
                 {
+                    "feature": MatplotlibCodec.figure_graphics_export_feature,
                     "settings": {
                         "figure_name": "Figure9",
                         "output_path": "/tmp/Figure9.png",
@@ -236,8 +241,8 @@ class TestGraphicsExportFormats(unittest.TestCase):
             export_source,
         )
 
-    def test_graphics_export_codec_lowers_state_to_savefig_command(self):
-        source = FigureGraphicsExportCodec.state_to_python(
+    def test_graphics_export_lowers_state_to_savefig_command(self):
+        source = FigureGraphicsExportModel.state_to_python(
             {
                 "settings": {
                     "figure_name": "Figure9",
@@ -408,6 +413,81 @@ class TestFigureCodec(unittest.TestCase):
         self.assertIn(source, output)
 
 
+class TestFigureIRAuthorityIsShared(unittest.TestCase):
+    """The kernel and the GUI must normalize figure IR through one authority.
+
+    The kernel reaches figure IR through `MatplotlibCodec`; the GUI reaches it
+    through `FigureIRAuthority`. While those were separate copies they silently
+    diverged on the `feature` key and on wrong-kind validation, so the same
+    state normalized differently on either side of the process boundary.
+    """
+
+    def _live_figure_ir(self):
+        return figure_ir_from_live_state(
+            {
+                "feature": "figure_command",
+                "settings": {
+                    "command": "create",
+                    "title": "DelayGraph",
+                    "x_name": "delay",
+                    "subplot_code": "111",
+                    "figsize": (5.0, 3.0),
+                },
+                "items": ["fit_delay", "raw_delay"],
+                "ui": {},
+            }
+        )
+
+    def test_default_state_matches_across_the_process_boundary(self):
+        self.assertEqual(
+            MatplotlibCodec.default_state(feature=MatplotlibCodec.figure_ir_feature),
+            FigureIRAuthority.default_state(),
+        )
+
+    def test_validated_state_matches_across_the_process_boundary(self):
+        figure_ir = self._live_figure_ir()
+
+        self.assertEqual(
+            MatplotlibCodec.validate_state(figure_ir),
+            FigureIRAuthority.validate_state(figure_ir),
+        )
+
+    def test_lowering_and_tracked_names_match_across_the_process_boundary(self):
+        figure_ir = self._live_figure_ir()
+
+        self.assertEqual(
+            MatplotlibCodec.state_to_python(figure_ir),
+            FigureIRAuthority.state_to_python(figure_ir),
+        )
+        self.assertEqual(
+            tuple(MatplotlibCodec.tracked_names(figure_ir)),
+            tuple(FigureIRAuthority.tracked_names(figure_ir)),
+        )
+
+    def test_axis_edits_lower_identically_across_the_process_boundary(self):
+        action = {
+            "type": "set_axis_label",
+            "subplot_id": "subplot0",
+            "axis": "x",
+            "label": {"text": "Delay"},
+        }
+        figure_ir = self._live_figure_ir()
+
+        self.assertEqual(
+            MatplotlibCodec.update_state(figure_ir, action),
+            FigureIRAuthority.update_state(figure_ir, action),
+        )
+
+    def test_authority_rejects_a_state_of_another_feature_kind(self):
+        with self.assertRaisesRegex(ValueError, "Expected feature='figure_ir'"):
+            FigureIRAuthority.validate_state(
+                {
+                    "feature": "figure_patch",
+                    "layout": {"kind": "single_subplot", "subplots": []},
+                }
+            )
+
+
 class TestFigurePluginDispatch(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -445,7 +525,10 @@ class TestFigurePluginDispatch(unittest.TestCase):
             def exec_(self):
                 return True
 
-        with patch("hyde.user_interface.plugins.figure_interactive.NewFigureDialog", FakeDialog):
+        with patch(
+            "hyde.user_interface.plugins.figure_interactive.dialogs.NewFigureDialog",
+            FakeDialog,
+        ):
             self.assertTrue(service.show_new_figure_dialog({"arr": {}}, parent=None))
 
         self.assertIs(captured["services"], plugin.services)
@@ -615,7 +698,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_figure_ir_trace_style_edit_preserves_broader_line2d_kwargs(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
-        updated = FigureIRCodec.update_state(
+        updated = FigureIRAuthority.update_state(
             figure_ir,
             {
                 "type": "set_trace_style",
@@ -646,7 +729,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(trace_kwargs["markeredgecolor"], "black")
         self.assertEqual(trace_kwargs["markeredgewidth"], 2.0)
 
-        source = FigureIRCodec.state_to_python(updated)
+        source = FigureIRAuthority.state_to_python(updated)
         self.assertIn("visible=False", source)
         self.assertIn("alpha=0.25", source)
         self.assertIn("linestyle='None'", source)
@@ -665,9 +748,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             source_ir["layout"]["subplots"][0]["traces"][0]
         ]
         source_ir["layout"]["subplots"][0]["legend"] = False
-        source_ir = FigureIRCodec.validate_state(source_ir)
+        source_ir = FigureIRAuthority.validate_state(source_ir)
 
-        target_ir = FigureIRCodec.update_state(
+        target_ir = FigureIRAuthority.update_state(
             source_ir,
             {
                 "type": "set_trace_style",
@@ -691,7 +774,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         source_ir = figure_ir_from_live_state(
             self._live_state_with_title("FigureA")
         )
-        target_ir = FigureIRCodec.update_state(
+        target_ir = FigureIRAuthority.update_state(
             source_ir,
             {
                 "type": "set_trace",
@@ -724,7 +807,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_figure_ir_axis_edit_surface_lowers_axis_state_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
-        with_bottom_hidden = FigureIRCodec.update_state(
+        with_bottom_hidden = FigureIRAuthority.update_state(
             figure_ir,
             {
                 "type": "set_axis_side_state",
@@ -737,7 +820,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 },
             },
         )
-        with_x_axis = FigureIRCodec.update_state(
+        with_x_axis = FigureIRAuthority.update_state(
             with_bottom_hidden,
             {
                 "type": "set_axis_state",
@@ -778,7 +861,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 },
             },
         )
-        with_right_side = FigureIRCodec.update_state(
+        with_right_side = FigureIRAuthority.update_state(
             with_x_axis,
             {
                 "type": "set_axis_side_state",
@@ -793,7 +876,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 },
             },
         )
-        updated = FigureIRCodec.update_state(
+        updated = FigureIRAuthority.update_state(
             with_right_side,
             {
                 "type": "set_axis_state",
@@ -828,7 +911,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertFalse(subplot["axis_sides"]["top"]["ticks_visible"])
         self.assertEqual(subplot["axis_sides"]["right"]["tick_label_color"], "#00aa00")
 
-        source = FigureIRCodec.state_to_python(updated)
+        source = FigureIRAuthority.state_to_python(updated)
         self.assertIn("import matplotlib.ticker as mticker", source)
         self.assertIn("ax.set_xscale('log', base=2)", source)
         self.assertIn("ax.set_xlim(1.0, 8.0)", source)
@@ -854,7 +937,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_figure_ir_lowers_partial_axis_ranges_and_resolved_side_state_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
-        with_top_layer = FigureIRCodec.update_state(
+        with_top_layer = FigureIRAuthority.update_state(
             figure_ir,
             {
                 "type": "set_axis_side_state",
@@ -865,7 +948,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 },
             },
         )
-        updated = FigureIRCodec.update_state(
+        updated = FigureIRAuthority.update_state(
             with_top_layer,
             {
                 "type": "set_axis_state",
@@ -880,7 +963,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 },
             },
         )
-        updated = FigureIRCodec.update_state(
+        updated = FigureIRAuthority.update_state(
             updated,
             {
                 "type": "set_axis_state",
@@ -896,7 +979,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             },
         )
 
-        source = FigureIRCodec.state_to_python(updated)
+        source = FigureIRAuthority.state_to_python(updated)
 
         self.assertIn("ax.autoscale(enable=True, axis='x')", source)
         self.assertIn("ax.set_xlim(left=0.0)", source)
@@ -910,7 +993,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_figure_ir_lowers_subplot_margins_to_python(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
-        updated = FigureIRCodec.update_state(
+        updated = FigureIRAuthority.update_state(
             figure_ir,
             {
                 "type": "set_subplot_margins",
@@ -930,7 +1013,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             {"left": 0.12, "bottom": 0.2, "right": 0.97, "top": 0.98},
         )
 
-        source = FigureIRCodec.state_to_python(updated)
+        source = FigureIRAuthority.state_to_python(updated)
 
         self.assertIn(
             "fig.subplots_adjust(left=0.12, bottom=0.2, right=0.97, top=0.98)",
@@ -941,14 +1024,14 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
         defaults = _figure_defaults_snapshot(figure_ir)
 
-        source = FigureIRCodec.state_to_python(
+        source = FigureIRAuthority.state_to_python(
             figure_ir,
             context={"figure_defaults": defaults},
         )
 
         self.assertNotIn("label.set_visible(False)", source)
 
-        hidden = FigureIRCodec.update_state(
+        hidden = FigureIRAuthority.update_state(
             figure_ir,
             {
                 "type": "set_axis_state",
@@ -957,7 +1040,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 "state": {"label": {"visible": False}},
             },
         )
-        hidden_source = FigureIRCodec.state_to_python(
+        hidden_source = FigureIRAuthority.state_to_python(
             hidden,
             context={"figure_defaults": defaults},
         )
@@ -967,7 +1050,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
     def test_set_axis_label_action_does_not_hide_blank_label_artist(self):
         figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
 
-        cleared = FigureIRCodec.update_state(
+        cleared = FigureIRAuthority.update_state(
             figure_ir,
             {
                 "type": "set_axis_label",
