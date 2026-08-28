@@ -2,6 +2,7 @@ import copy
 import contextlib
 import io
 import os
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -116,6 +117,15 @@ def make_plugin_host(plugin_manager):
 class ProcedureExecutionHarness:
     def __init__(self, plugin):
         self.plugin = plugin
+        # execute_procedures_bootstrap deliberately chdirs into the project and
+        # puts it on sys.path, and deliberately never undoes that: a running
+        # Hyde GUI resolves `procedures/` imports from there. This harness
+        # points that behaviour at a temporary directory it later deletes, so
+        # it has to restore the process itself. Leaving the CWD inside a
+        # deleted directory makes os.getcwd() raise, which kills every test
+        # module imported after this one in the same process.
+        self.entry_cwd = os.getcwd()
+        self.entry_sys_path = list(sys.path)
         self.tempdir = tempfile.TemporaryDirectory()
         self.project_dir = self.tempdir.name
         self.procedures_dir = os.path.join(self.project_dir, "procedures")
@@ -128,6 +138,10 @@ class ProcedureExecutionHarness:
     def close(self):
         hyde.gui_mode(False)
         hyde.recreation_registry.clear(kind="fit_function")
+        # Restore before the delete: chdir out of the directory first, or the
+        # process is left standing in a path that no longer exists.
+        os.chdir(self.entry_cwd)
+        sys.path[:] = self.entry_sys_path
         self.tempdir.cleanup()
 
     def write_procedures(self, extra_source):
@@ -584,6 +598,57 @@ def create_configured_line_fit_dialog(
     )
     configure_line_fit_dialog(dialog)
     return manager, app, harness, dialog
+
+
+class TestProcedureExecutionHarnessLeavesTheProcessUsable(unittest.TestCase):
+    """The harness runs the product's real project bootstrap, which is designed
+    to chdir into the project directory and put it on sys.path and to stay
+    there, because that is how a running Hyde GUI resolves `procedures/`
+    imports. The harness borrows that behaviour against a temporary directory
+    it then deletes, so it -- not the product -- has to put the process back.
+
+    Without this, every test module loaded afterwards in the same process dies
+    at import with FileNotFoundError from `os.getcwd()`, and the leaked
+    sys.path entries pile up one pair per test.
+    """
+
+    def test_harness_close_restores_cwd_and_sys_path(self):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
+        plugin = manager.plugins["curve_fit_dialog"]
+
+        original_cwd = os.getcwd()
+        original_sys_path = list(sys.path)
+
+        harness = ProcedureExecutionHarness(plugin)
+        project_dir = harness.project_dir
+        try:
+            harness.reload_procedures()
+            # The bootstrap really did move the process, or this test is vacuous.
+            self.assertEqual(os.path.realpath(os.getcwd()), os.path.realpath(project_dir))
+            self.assertIn(os.path.join(os.getcwd(), "procedures"), sys.path)
+        finally:
+            harness.close()
+
+        self.assertEqual(os.getcwd(), original_cwd)
+        self.assertEqual(sys.path, original_sys_path)
+        self.assertFalse(os.path.exists(project_dir))
+
+    def test_module_run_leaks_no_temporary_directories_onto_sys_path(self):
+        # The blast radius check: whatever this module does internally, a later
+        # module in the same process must still be able to import. Python keeps
+        # its own absent entries on sys.path (the stdlib zip), so this looks
+        # only for leaked temporary project directories.
+        os.getcwd()
+        temp_root = os.path.realpath(tempfile.gettempdir())
+        leaked = [
+            entry
+            for entry in sys.path
+            if entry
+            and os.path.realpath(entry).startswith(temp_root)
+            and not os.path.exists(entry)
+        ]
+        self.assertEqual([], leaked)
 
 
 class TestCurveFitPlugin(unittest.TestCase):

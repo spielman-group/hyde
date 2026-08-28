@@ -211,13 +211,15 @@ Slice 18 targeted suites, compared against a worktree at the last commit:
 | `test_trace_edit_dialog` | 14 errors | 15 pass |
 | `test_remove_from_graph_dialog` | 11 errors | 12 pass |
 | `test_save_graphics_dialog` | 1 error | 15 pass |
-| `test_curve_fit` | 7 failures, 20 errors | 14 failures |
+| `test_curve_fit` | 7 failures, 20 errors | 60 pass |
 | `test_file_dialog_plugin` | 13 pass | 14 pass |
 | `test_table_features` | 62 pass | 62 pass |
 | `test_python_variables_final` | 14 pass | 15 pass |
 | `test_matplotlib_features` | 6 failures, 24 errors | 86 pass |
 
-No test fails now that was not already failing at `HEAD`.
+No test fails now that was not already failing at `HEAD`, and the whole suite
+now passes: **500 tests across all 21 modules, 0 failures, 0 errors** in a
+single process, in 58 seconds.
 
 The rest of the suite (`test_figure_comm_actions`, `test_kernel_launcher`,
 `test_kernel_runtime`, `test_kernel_signals`, `test_matplotlib_color_picker`,
@@ -234,17 +236,47 @@ live figure IR reimport path. Hyde IR stores a numeric multiplier, so a
 non-numeric live value now maps back to the IR default. This was the single root
 cause behind most of the errors in the `HEAD` column above.
 
+### Test Harness CWD And sys.path Pollution
+
+The 14 `tests/test_curve_fit.py` failures that this document previously listed
+as an unexplained pre-existing attached-display regression had nothing to do
+with the attached display. They were caused by the test harness.
+
+`ProcedureExecutionHarness` runs the product's real
+`execute_procedures_bootstrap`, which deliberately `chdir`s into the project
+directory and puts it on `sys.path` and deliberately never undoes that: a
+running Hyde GUI resolves `procedures/` imports from there. The harness pointed
+that behaviour at a `TemporaryDirectory` it then deleted, without restoring
+either. Two consequences:
+
+- the process was left standing in a deleted directory, so `os.getcwd()` raised
+  `FileNotFoundError`
+- `sys.path` grew from 8 entries to 115, 107 of them dangling into deleted
+  temporary directories, two per test
+
+Within `test_curve_fit` itself that broke the tests running after the first
+offending one, which is where the trace-count mismatches came from. Across a
+single-process whole-suite run it was worse: `tests.test_curve_fit` is second of
+twenty-one alphabetically, so the other nineteen modules all failed to load, and
+any subprocess spawned afterwards inherited the dangling CWD and died during
+import. `zprocess` calls `os.getcwd()` at import time, which made the failure
+look like a `zprocess` or kernel-launcher problem rather than a test-harness one.
+
+The fix is in the harness, not the product, per `AGENTS.md`: capture the CWD and
+`sys.path` in `__init__`, and restore both in `close()` *before*
+`tempdir.cleanup()`. Restoring after the delete still leaves a window.
+`TestProcedureExecutionHarnessLeavesTheProcessUsable` pins this, and asserting
+it required no production change.
+
+Confirmed by removing only the restore, in memory, and re-running the module: 54
+errors without it, 0 with it.
+
+Note that `python -m unittest discover -s tests -t .` does not work in this
+repository, because `tests/` has no `__init__.py`, so it is a namespace package.
+That is what steered everyone toward per-module runs, which gave every module a
+fresh process and hid this bug completely.
+
 ## Remaining Work
-
-### Curve Fit Dialog Failures
-
-`tests/test_curve_fit.py` has 14 failures, all present at `HEAD` and all in the
-attached-display path. They are dominated by trace-count mismatches on the live
-figure (`1 != 2` seven times, `1 != 3` three times), so the attached display is
-adding one trace where the tests expect two or three. This is unrelated to the
-IR authority collapse and is not covered by any slice in `issues/ISSUES.md`; the
-preceding session's large `curve_fit_dialog/dialogs.py` reduction is the likely
-origin. It needs its own investigation.
 
 ### Behaviour-Level IR Pass
 
@@ -254,6 +286,6 @@ described in `project_management/STATUS.md` is the next substantive step.
 ## Current Bottom Line
 
 The duplicate figure IR authority is collapsed, Slice 17 is complete, and the
-Slice 18 targeted suites have actually run. Eleven of the twelve targeted suites
-pass. The twelfth, `test_curve_fit`, carries 14 pre-existing attached-display
-failures that predate this work and belong to their own investigation.
+Slice 18 targeted suites have actually run. All twelve pass, and so does the
+rest of the suite: 500 tests across 21 modules, 0 failures, 0 errors, in one
+process.

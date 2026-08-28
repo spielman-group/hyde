@@ -34,11 +34,12 @@ wrong ownership shape.
 - [x] Slice 16: Resync Docs And Refactor Status
 - [x] Slice 17: Test Cleanup Pass
 - [x] Slice 18: Final Completion Checkpoint
-      Targeted tests have now run in the `labscript` environment. Eleven of the
-      twelve suites pass. `tests.test_curve_fit` has 14 failures, every one of
-      them also present at the last commit and all in the attached-display path;
-      they are out of scope for these slices and tracked separately in
-      `REFACTOR_STATUS.md`.
+      Targeted tests have run in the `labscript` environment and all twelve
+      suites pass, as does the rest of the suite: 500 tests across 21 modules,
+      0 failures, 0 errors, in a single process. The 14 `tests.test_curve_fit`
+      failures first seen here were not an attached-display regression; they
+      came from the test harness leaking the process CWD and `sys.path` into
+      deleted temporary directories. See `REFACTOR_STATUS.md`.
 
 ## Global Rules
 
@@ -919,8 +920,8 @@ The final suite should preserve a small durable safety net around:
       stale fixtures were corrected instead: `FakeShell` gained the `enable_gui`
       method matplotlib calls on the IPython shell it stands in for, and the
       new-figure-dialog launcher test now patches the real import target.
-- [x] Relevant targeted tests pass after cleanup, except the 14 pre-existing
-      `tests.test_curve_fit` attached-display failures noted above.
+- [x] Relevant targeted tests pass after cleanup, and so does every other test
+      module.
 
 ### What not to do
 
@@ -962,11 +963,12 @@ refactor complete.
       returns no context-probing matches.
 - [x] `rg "_figure_window|snapshot_state|figure_ir\\(" hyde/user_interface/plugins/figure_control_dialog`
       returns no broad context fallback matches.
-- [x] Run targeted tests in the `labscript` conda environment. Done. That
-      environment has no `pytest`; use
-      `QT_QPA_PLATFORM=offscreen python -m unittest <module>`. Eleven of the
-      twelve suites pass; `tests.test_curve_fit` carries 14 failures that are
-      all present at the last commit as well:
+- [x] Run targeted tests in the `labscript` conda environment. Done; all twelve
+      pass. That environment has no `pytest`; use
+      `QT_QPA_PLATFORM=offscreen python -m unittest <module>`. Note that
+      `unittest discover` does not work here because `tests/` has no
+      `__init__.py`, and that running modules one at a time hides
+      cross-module state leaks:
       `tests.test_hyde_feature_modules`,
       `tests.test_figure_display`,
       `tests.test_hyde_tool_widget`,
