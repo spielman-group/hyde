@@ -1,5 +1,6 @@
 import os
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -179,6 +180,52 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
         self.assertEqual(len([action for action in actions if action.isSeparator()]), 1)
         self.assertTrue(actions[-2].isSeparator())
         self.assertEqual(actions[-1].text(), "Save Graphics...")
+
+    def test_figure_actions_are_disabled_without_an_active_figure(self):
+        # These actions need a first-class figure. Before menu preconditions
+        # were live they stayed permanently enabled and silently did nothing.
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {
+            "figure": FigurePlugin({}),
+            "save_graphics_dialog": SaveGraphicsPlugin({}),
+            "figure_control_dialog": FigureControlPlugin({}),
+            "remove_from_graph_dialog": RemoveFromGraphPlugin({}),
+        }
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+
+        figure_context = [None]
+        for plugin in manager.plugins.values():
+            services = getattr(plugin, "services", None)
+            if isinstance(services, dict):
+                services["figure_context_service"] = types.SimpleNamespace(
+                    active_editable_figure=lambda: figure_context[0]
+                )
+
+        app.menu_context.refresh_enabled_states()
+        without_figure = {
+            action.text(): action.isEnabled()
+            for action in app.ui.menuFigure.actions()
+            if not action.isSeparator()
+        }
+
+        figure_context[0] = make_save_graphics_context(title="Figure9")
+        app.menu_context.refresh_enabled_states()
+        with_figure = {
+            action.text(): action.isEnabled()
+            for action in app.ui.menuFigure.actions()
+            if not action.isSeparator()
+        }
+
+        for name in (
+            "Save Graphics...",
+            "Modify Axis...",
+            "Modify Data Appearance...",
+            "Remove from Graph...",
+        ):
+            with self.subTest(action=name):
+                self.assertFalse(without_figure[name], f"{name} should need a figure")
+                self.assertTrue(with_figure[name], f"{name} should enable with a figure")
 
     def test_save_graphics_action_opens_dialog_for_active_figure(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")

@@ -8,7 +8,7 @@ figure graphics-output path that `Save Graphics...` already owns.
 
 ## Progress Checklist
 
-- [ ] Slice 1: Enable And Disable Menu Actions From Live Preconditions
+- [x] Slice 1: Enable And Disable Menu Actions From Live Preconditions
 - [ ] Slice 2: Copy The Active Figure As PDF
 - [ ] Slice 3: Add The Edit Menu With Copy And Its Shortcut
 - [ ] Slice 4: Offer Copy As Over The Clipboard-Capable Format Set
@@ -151,17 +151,17 @@ no separate shortcut-handling path.
 
 ### Acceptance criteria
 
-- [ ] A contribution may supply `enabled` as a callable, and the menu machinery
+- [x] A contribution may supply `enabled` as a callable, and the menu machinery
       calls it to decide the action's state.
-- [ ] Static boolean and absent `enabled` values keep working unchanged.
-- [ ] Menu-bar actions re-evaluate when their menu is about to be shown, and
+- [x] Static boolean and absent `enabled` values keep working unchanged.
+- [x] Menu-bar actions re-evaluate when their menu is about to be shown, and
       when the active MDI window changes.
-- [ ] Context-menu actions reflect the current precondition on every popup.
-- [ ] A disabled action does not fire on its keyboard shortcut.
-- [ ] `Figure` menu figure actions, including `Save Graphics...`, appear disabled
+- [x] Context-menu actions reflect the current precondition on every popup.
+- [x] A disabled action does not fire on its keyboard shortcut.
+- [x] `Figure` menu figure actions, including `Save Graphics...`, appear disabled
       when no first-class figure is active and enabled when one is. This is
       observable before any copy code exists.
-- [ ] Every existing menu contribution still renders in the same order, groups,
+- [x] Every existing menu contribution still renders in the same order, groups,
       and separators as before.
 
 ### Blocked by

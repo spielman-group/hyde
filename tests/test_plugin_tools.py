@@ -14,6 +14,7 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
+from PyQt5.QtTest import QTest
 from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 
 from hyde.user_interface.main import HydeApp, connect_logger_to_output_sink
@@ -1522,6 +1523,151 @@ class TestPluginTools(unittest.TestCase):
 
         popup_menu.actions()[0].trigger()
         self.assertEqual(triggered, ["figure"])
+
+    def test_callable_enabled_gates_menu_action_from_a_live_precondition(self):
+        # Menus render once at startup, so a static `enabled` flag can only ever
+        # describe the state at launch. Figure actions need to reflect whether a
+        # figure is active right now.
+        figure_active = [False]
+        main_window = QtWidgets.QMainWindow()
+        persistent_menu = RecordingMenu("Figure", main_window)
+        context = HydeMenuContext()
+        context.register_location("figure", persistent_menu)
+        context.contributions = [
+            (
+                "demo",
+                {
+                    "location": "figure",
+                    "name": "Needs Figure",
+                    "action": lambda: None,
+                    "enabled": lambda: figure_active[0],
+                },
+            )
+        ]
+        context.render()
+
+        action = context.lookup_action("figure", "Needs Figure")
+        self.assertIsNotNone(action)
+        self.assertFalse(action.isEnabled())
+
+        figure_active[0] = True
+        context.refresh_enabled_states()
+        self.assertTrue(action.isEnabled())
+
+        figure_active[0] = False
+        context.refresh_enabled_states()
+        self.assertFalse(action.isEnabled())
+
+    def test_static_and_absent_enabled_values_keep_working(self):
+        main_window = QtWidgets.QMainWindow()
+        persistent_menu = RecordingMenu("Figure", main_window)
+        context = HydeMenuContext()
+        context.register_location("figure", persistent_menu)
+        context.contributions = [
+            ("demo", {"location": "figure", "name": "Default", "action": lambda: None}),
+            ("demo", {"location": "figure", "name": "On", "action": lambda: None, "enabled": True}),
+            ("demo", {"location": "figure", "name": "Off", "action": lambda: None, "enabled": False}),
+        ]
+        context.render()
+        context.refresh_enabled_states()
+
+        states = {
+            name: context.lookup_action("figure", name).isEnabled()
+            for name in ("Default", "On", "Off")
+        }
+        self.assertEqual({"Default": True, "On": True, "Off": False}, states)
+
+    def test_menu_about_to_show_refreshes_enabled_states(self):
+        # The menu bar is rendered once, so opening a menu is the moment its
+        # items must re-check their preconditions.
+        figure_active = [False]
+        main_window = QtWidgets.QMainWindow()
+        persistent_menu = RecordingMenu("Figure", main_window)
+        context = HydeMenuContext()
+        context.register_location("figure", persistent_menu)
+        context.contributions = [
+            (
+                "demo",
+                {
+                    "location": "figure",
+                    "name": "Needs Figure",
+                    "action": lambda: None,
+                    "enabled": lambda: figure_active[0],
+                },
+            )
+        ]
+        context.render()
+        action = context.lookup_action("figure", "Needs Figure")
+
+        figure_active[0] = True
+        persistent_menu.aboutToShow.emit()
+        self.assertTrue(action.isEnabled())
+
+    def test_popup_menu_reflects_the_current_precondition(self):
+        # build_popup_menu re-renders the tree, so context menus need no extra
+        # refresh hook -- but they must evaluate the callable, not skip it.
+        figure_active = [False]
+        main_window = QtWidgets.QMainWindow()
+        persistent_menu = RecordingMenu("Figure", main_window)
+        context = HydeMenuContext()
+        context.register_location("figure", persistent_menu)
+        context.contributions = [
+            (
+                "demo",
+                {
+                    "location": "figure",
+                    "name": "Needs Figure",
+                    "action": lambda: None,
+                    "enabled": lambda: figure_active[0],
+                },
+            )
+        ]
+        context.render()
+
+        disabled_popup = context.build_popup_menu("figure", parent=main_window)
+        self.assertFalse(disabled_popup.actions()[0].isEnabled())
+
+        figure_active[0] = True
+        enabled_popup = context.build_popup_menu("figure", parent=main_window)
+        self.assertTrue(enabled_popup.actions()[0].isEnabled())
+
+    def test_disabled_action_does_not_fire_on_its_shortcut(self):
+        # Correct enablement is what gates the keyboard, so there is no separate
+        # shortcut-gating path to maintain.
+        fired = []
+        allowed = [False]
+        main_window = QtWidgets.QMainWindow()
+        main_window.show()
+        persistent_menu = RecordingMenu("Edit", main_window)
+        context = HydeMenuContext()
+        context.register_location("edit", persistent_menu)
+        context.contributions = [
+            (
+                "demo",
+                {
+                    "location": "edit",
+                    "name": "Copy",
+                    "action": lambda: fired.append("copy"),
+                    "shortcut": QtGui.QKeySequence.Copy,
+                    "enabled": lambda: allowed[0],
+                },
+            )
+        ]
+        context.render()
+        main_window.addAction(context.lookup_action("edit", "Copy"))
+        try:
+            context.refresh_enabled_states()
+            QTest.keyClick(main_window, QtCore.Qt.Key_C, QtCore.Qt.ControlModifier)
+            QtWidgets.QApplication.instance().processEvents()
+            self.assertEqual([], fired)
+
+            allowed[0] = True
+            context.refresh_enabled_states()
+            QTest.keyClick(main_window, QtCore.Qt.Key_C, QtCore.Qt.ControlModifier)
+            QtWidgets.QApplication.instance().processEvents()
+            self.assertEqual(["copy"], fired)
+        finally:
+            main_window.close()
 
     def test_setup_plugins_renders_contextual_menu_contributions_and_uses_fresh_popup_menu(self):
         triggered = []

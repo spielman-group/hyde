@@ -15,6 +15,7 @@ class Plugin(HydePlugin):
                 "order": 10,
                 "name": "Save Graphics...",
                 "action": self.show_save_graphics_dialog,
+                "enabled": self.has_active_editable_figure,
             }
         ]
 
@@ -29,6 +30,9 @@ class Plugin(HydePlugin):
             parent=self.services.get("ui"),
         )
         return dialog.exec_() == QtWidgets.QDialog.Accepted
+
+    def has_active_editable_figure(self):
+        return self._active_editable_figure() is not None
 
     def _active_editable_figure(self):
         figure_context_service = self.services.get("figure_context_service")

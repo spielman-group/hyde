@@ -319,6 +319,12 @@ class HydeApp:
         }
         self.plugin_manager.setup_contexts(plugin_data)
         self.menu_context.render()
+        # Opening a menu refreshes its own items, but a keyboard shortcut never
+        # opens one. Refresh on activation so a shortcut is gated by the window
+        # the user is actually looking at.
+        self.ui.mdiArea.subWindowActivated.connect(
+            lambda _subwindow: self.menu_context.refresh_enabled_states()
+        )
         self.hide_menu("figure")
         self.hide_menu("table")
         self.plugin_manager.setup_complete(plugin_data)

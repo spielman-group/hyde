@@ -15,6 +15,7 @@ class Plugin(HydePlugin):
                 "order": 10,
                 "name": "Modify Data Appearance...",
                 "action": self.show_trace_appearance_dialog,
+                "enabled": self.has_active_editable_figure,
             },
             {
                 "location": "figure",
@@ -22,6 +23,7 @@ class Plugin(HydePlugin):
                 "order": 20,
                 "name": "Modify Axis...",
                 "action": self.show_axis_edit_dialog,
+                "enabled": self.has_active_editable_figure,
             }
         ]
 
@@ -38,6 +40,9 @@ class Plugin(HydePlugin):
             AxisEditDialog,
             lambda dialog: dialog.has_supported_axes(),
         )
+
+    def has_active_editable_figure(self):
+        return self._active_editable_figure() is not None
 
     def _active_editable_figure(self):
         figure_context_service = self.services.get("figure_context_service")

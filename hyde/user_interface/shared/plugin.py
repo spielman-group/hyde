@@ -453,6 +453,24 @@ class HydeToolWindowService:
         return self.plugin.destroy_mdi_widget(self.window_key)
 
 
+def resolve_menu_enabled(enabled):
+    """Resolve a menu contribution's `enabled` value to a boolean.
+
+    A contribution may declare `enabled` as a callable so that its state tracks
+    a live precondition, such as whether a first-class figure is active. Menus
+    are rendered once, so a static flag can only describe the state at launch.
+    """
+    if not callable(enabled):
+        return bool(enabled)
+    try:
+        return bool(enabled())
+    except Exception:
+        # A broken precondition must not take the menu down with it. Disabling
+        # is the safe reading: the action reports itself unavailable rather than
+        # offering an operation whose precondition could not be established.
+        return False
+
+
 class HydeMenuContext(MenuContext):
     """Hyde-local menu context that retains rendered QAction objects."""
 
@@ -461,6 +479,13 @@ class HydeMenuContext(MenuContext):
         self._actions = {}
         self._grouped_contributions = {}
         self._group_orders = {}
+        self._live_enabled = {}
+
+    def refresh_enabled_states(self):
+        """Re-evaluate every callable precondition in the rendered menus."""
+        for entries in list(self._live_enabled.values()):
+            for action, enabled in entries:
+                action.setEnabled(resolve_menu_enabled(enabled))
 
     def lookup_action(self, location, name, path=()):
         if isinstance(path, str):
@@ -540,7 +565,9 @@ class HydeMenuContext(MenuContext):
 
                 enabled = contribution.get("enabled", True)
                 if hasattr(action, "setEnabled"):
-                    action.setEnabled(enabled)
+                    action.setEnabled(resolve_menu_enabled(enabled))
+                if callable(enabled) and register_actions:
+                    self._live_enabled.setdefault(menu, []).append((action, enabled))
 
                 if register_actions:
                     self._register_action(location, path, name, action)
@@ -604,9 +631,20 @@ class HydeMenuContext(MenuContext):
         self._grouped_contributions = grouped
         self._group_orders = group_orders
 
+        self._live_enabled = {}
         for name, menu in self.locations.items():
             menu.clear()
             self._render_menu_tree(name, menu, register_actions=True)
+
+        for menu in self._live_enabled:
+            about_to_show = getattr(menu, "aboutToShow", None)
+            if about_to_show is None:
+                continue
+            try:
+                about_to_show.disconnect(self.refresh_enabled_states)
+            except (TypeError, RuntimeError):
+                pass
+            about_to_show.connect(self.refresh_enabled_states)
 
 
 class HydeMDIContext:

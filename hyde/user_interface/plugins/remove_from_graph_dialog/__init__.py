@@ -14,6 +14,7 @@ class Plugin(HydePlugin):
                 "order": 0,
                 "name": "Remove from Graph...",
                 "action": self.show_remove_from_graph_dialog,
+                "enabled": self.has_active_editable_figure,
             }
         ]
 
@@ -28,6 +29,9 @@ class Plugin(HydePlugin):
             parent=self.services.get("ui"),
         )
         return dialog.exec_() == QtWidgets.QDialog.Accepted
+
+    def has_active_editable_figure(self):
+        return self._active_editable_figure() is not None
 
     def _active_editable_figure(self):
         figure_context_service = self.services.get("figure_context_service")
