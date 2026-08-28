@@ -54,6 +54,7 @@ def make_plugin_host(plugin_manager):
     main_window = QtWidgets.QMainWindow()
     main_window.setMenuBar(QtWidgets.QMenuBar())
     main_window.menuFile = main_window.menuBar().addMenu("File")
+    main_window.menuEdit = main_window.menuBar().addMenu("Edit")
     main_window.menuAnalysis = main_window.menuBar().addMenu("Analysis")
     main_window.menuWindow = main_window.menuBar().addMenu("Windows")
     main_window.menuFigure = RecordingMenu("Figure", main_window.menuBar())
@@ -1483,7 +1484,8 @@ class TestPluginTools(unittest.TestCase):
         self.assertFalse(app.ui.menuTable.menuAction().isVisible())
         self.assertEqual(
             [action.text() for action in app.ui.menuBar().actions()],
-            ["File", "Analysis", "Windows", "Figure", "Table"],
+            ["File", "Edit",
+                "Analysis", "Windows", "Figure", "Table"],
         )
 
         manager.services["show_menu"]("figure")

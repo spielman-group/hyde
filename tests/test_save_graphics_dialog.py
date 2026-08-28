@@ -15,7 +15,7 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("matplotlib is required") from exc
 
 import hyde
-from qtutils.qt import QtWidgets
+from qtutils.qt import QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import (
     runtime_graphics_export_formats,
@@ -44,6 +44,7 @@ def make_plugin_host(plugin_manager):
     main_window = QtWidgets.QMainWindow()
     main_window.setMenuBar(QtWidgets.QMenuBar())
     main_window.menuFile = main_window.menuBar().addMenu("File")
+    main_window.menuEdit = main_window.menuBar().addMenu("Edit")
     main_window.menuAnalysis = main_window.menuBar().addMenu("Analysis")
     main_window.menuWindow = main_window.menuBar().addMenu("Windows")
     main_window.menuFigure = QtWidgets.QMenu("Figure", main_window.menuBar())
@@ -337,6 +338,99 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
     def test_a_format_with_no_clipboard_representation_yields_no_payload(self):
         self.assertIsNone(clipboard_mime_data(b"junk", output_format="raw"))
         self.assertIsNone(clipboard_mime_type_for_format("rgba"))
+
+
+class TestEditMenuCopy(unittest.TestCase):
+    """Edit is a shell-owned menu location, like File and Figure.
+
+    It exists so table copy and terminal copy can later contribute into it
+    without renegotiating who owns the menu.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def _host_with_figure(self, figure_context):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {
+            "figure": FigurePlugin({}),
+            "save_graphics_dialog": SaveGraphicsPlugin({}),
+        }
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+        for plugin in manager.plugins.values():
+            services = getattr(plugin, "services", None)
+            if isinstance(services, dict):
+                services["figure_context_service"] = types.SimpleNamespace(
+                    active_editable_figure=lambda: figure_context[0]
+                )
+                services["python_execution_service"] = types.SimpleNamespace(
+                    execute_hidden=lambda code, silent=True: self.executed.append(code)
+                )
+        return app
+
+    def setUp(self):
+        self.executed = []
+
+    def test_edit_menu_exists_and_carries_copy_with_the_platform_shortcut(self):
+        figure_context = [None]
+        app = self._host_with_figure(figure_context)
+
+        self.assertTrue(hasattr(app.ui, "menuEdit"))
+        self.assertEqual("Edit", app.ui.menuEdit.title())
+
+        copy_action = app.menu_context.lookup_action("edit", "Copy")
+        self.assertIsNotNone(copy_action)
+        self.assertEqual(
+            QtGui.QKeySequence(QtGui.QKeySequence.Copy).toString(),
+            copy_action.shortcut().toString(),
+        )
+
+    def test_edit_menu_appears_after_file_in_the_menu_bar(self):
+        app = self._host_with_figure([None])
+        titles = [
+            action.menu().title()
+            for action in app.ui.menuBar().actions()
+            if action.menu() is not None
+        ]
+
+        self.assertEqual(titles[:2], ["File", "Edit"])
+
+    def test_edit_copy_needs_an_active_figure(self):
+        figure_context = [None]
+        app = self._host_with_figure(figure_context)
+        copy_action = app.menu_context.lookup_action("edit", "Copy")
+
+        app.menu_context.refresh_enabled_states()
+        self.assertFalse(copy_action.isEnabled())
+
+        figure_context[0] = make_save_graphics_context(title="Graph12")
+        app.menu_context.refresh_enabled_states()
+        self.assertTrue(copy_action.isEnabled())
+
+    def test_edit_copy_emits_the_same_command_as_the_figure_menu_entry(self):
+        figure_context = [make_save_graphics_context(title="Graph12")]
+        app = self._host_with_figure(figure_context)
+        app.menu_context.refresh_enabled_states()
+
+        app.menu_context.lookup_action("edit", "Copy").trigger()
+        from_edit = list(self.executed)
+
+        self.executed.clear()
+        app.menu_context.lookup_action("figure", "Copy").trigger()
+        from_figure = list(self.executed)
+
+        self.assertEqual(
+            [
+                "fig = hyde.get_figure('Graph12')\n"
+                "hyde.copy_figure(fig, format='pdf', dpi='figure')"
+            ],
+            from_edit,
+        )
+        self.assertEqual(from_edit, from_figure)
 
 
 class TestSaveGraphicsPlugin(unittest.TestCase):

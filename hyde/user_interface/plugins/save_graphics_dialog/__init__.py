@@ -1,6 +1,6 @@
 import base64
 
-from qtutils.qt import QtCore, QtWidgets
+from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.shared.plugin import HydePlugin
@@ -29,6 +29,16 @@ class Plugin(HydePlugin):
                 "name": "Copy",
                 "action": self.copy_active_figure,
                 "enabled": self.has_active_editable_figure,
+            },
+            {
+                "location": "edit",
+                "group": "clipboard",
+                "group_order": 0,
+                "order": 0,
+                "name": "Copy",
+                "action": self.copy_active_figure,
+                "enabled": self.has_active_editable_figure,
+                "shortcut": QtGui.QKeySequence.Copy,
             },
         ]
 

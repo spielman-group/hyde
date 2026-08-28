@@ -151,6 +151,7 @@ class HydeApp:
         self.ui.mdiArea.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.ui.mdiArea.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.ui.menuFile.clear()
+        self.ui.menuEdit.clear()
         self.ui.menuWindow.clear()
         self.ui.menuFigure.clear()
         self.ui.menuTable.clear()
@@ -299,6 +300,7 @@ class HydeApp:
     def setup_plugins(self):
         self.menu_context = HydeMenuContext(logger=logging.getLogger("hyde"))
         self.menu_context.register_location("file", self.ui.menuFile)
+        self.menu_context.register_location("edit", self.ui.menuEdit)
         self.menu_context.register_location("analysis", self.ui.menuAnalysis)
         self.menu_context.register_location("window", self.ui.menuWindow)
         self.menu_context.register_location("figure", self.ui.menuFigure)

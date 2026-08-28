@@ -10,7 +10,7 @@ figure graphics-output path that `Save Graphics...` already owns.
 
 - [x] Slice 1: Enable And Disable Menu Actions From Live Preconditions
 - [x] Slice 2: Copy The Active Figure As PDF
-- [ ] Slice 3: Add The Edit Menu With Copy And Its Shortcut
+- [x] Slice 3: Add The Edit Menu With Copy And Its Shortcut
 - [ ] Slice 4: Offer Copy As Over The Clipboard-Capable Format Set
 - [ ] Slice 5: Copy PGF As Text
 - [ ] Slice 6: Attach A PNG Companion Representation
@@ -244,13 +244,13 @@ and terminal copy can later contribute into it without renegotiating ownership.
 
 ### Acceptance criteria
 
-- [ ] An Edit menu exists in the menu bar, positioned conventionally, and is
+- [x] An Edit menu exists in the menu bar, positioned conventionally, and is
       registered as a menu location plugins can contribute to.
-- [ ] `Edit > Copy` copies the active figure as PDF, identically to the Figure
+- [x] `Edit > Copy` copies the active figure as PDF, identically to the Figure
       menu entry.
-- [ ] The platform copy shortcut triggers the same action.
-- [ ] Both are disabled, and the shortcut inert, when no figure is active.
-- [ ] No existing menu changes contents or order.
+- [x] The platform copy shortcut triggers the same action.
+- [x] Both are disabled, and the shortcut inert, when no figure is active.
+- [x] No existing menu changes contents or order.
 
 ### Blocked by
 
