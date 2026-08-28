@@ -1,9 +1,8 @@
 from qtutils.qt import QtWidgets
 
+from hyde.features.matplotlib_ir import FigureIR
 from hyde.features.base import sorted_eligible_names
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
-
-from .window import FigureIR
 
 
 class NewFigureDialog(HydeDialogWidget):

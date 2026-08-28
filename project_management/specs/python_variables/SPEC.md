@@ -223,7 +223,8 @@ Python Variables launches the table widget through the New Table dialog and the
 kernel-facing `hyde.create_table(...)` API.
 
 - `Edit` opens the New Table dialog with the selected array-like objects
-- `Append to Table` appends the selected array-like objects to the active table
+- `Append to Table` resolves the active table and uses that table widget's live
+  `TableIR` / `TableIRDiff` path to emit the append command
 
 If no table is active, `Append to Table` is unavailable.
 If the selection is not compatible with the initial table widget, both table actions
@@ -241,6 +242,10 @@ Examples of the intended pattern include:
 - copying a valid Python expression for the selected object
 - creating a new table with `hyde.create_table(arr1, arr2)`
 - appending to an existing table with `hyde.append_table(arr1, name="Table0")`
+
+When `Append to Table` is available, Python Variables does not invent a second
+table-mutation ownership path. The active table widget's live IR / diff path owns
+the emitted append command.
 
 GUI state that is only needed to generate the command string may be transient, but it is never authoritative scientific state.
 

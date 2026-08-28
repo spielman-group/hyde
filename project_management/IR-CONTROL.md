@@ -39,6 +39,32 @@ The GUI surface does not:
 - keep a second GUI-owned truth beside `widget_ir`
 - become the authoritative owner of scientific state
 
+## IR File Shape
+
+For every Python package with a Hyde lowerer in `hyde/features`, Hyde uses a
+matching package-IR module beside that lowerer:
+
+- `hyde/features/hyde_features.py` pairs with `hyde/features/hyde_ir.py`
+- `hyde/features/matplotlib_features.py` pairs with
+  `hyde/features/matplotlib_ir.py`
+- `hyde/features/lmfit_features.py` pairs with `hyde/features/lmfit_ir.py`
+
+Those package IR modules are feature-side runtime surfaces, not `shared/`
+surfaces.
+Together, a package-level `*_IR.py` file and its `features/..._features.py`
+lowerer constitute Hyde's complete IR + lowering toolset for that package.
+
+At the widget level, every widget owns one `widget_ir`. That `widget_ir` may be:
+
+- a package-level IR imported from `hyde/features/<package>_ir.py`, when the
+  widget belongs to one package-owned feature family
+- a class-level workflow IR in plugin-local `<widget>_IR.py`, when the widget
+  composes multiple package IR families
+
+`CurveFitIR` is the canonical example of a class-level workflow IR: it owns the
+Curve Fit dialog workflow and composes package-level IR families rather than
+pretending to be the package-level matplotlib or lmfit IR itself.
+
 ## Ownership Split
 
 ### GUI surface owns
@@ -55,6 +81,13 @@ The GUI surface does not:
 - typed normalized state access
 - command lowering through `python_source()`
 - any separate reopen-source lowering such as `macro_source()`
+
+Concrete IR authority belongs on the IR class or on small plugin-local support
+modules that serve that IR family. Do not hide feature authority in `shared/`
+modules.
+
+This file-shape rule is first-class. Hyde does not treat it as optional cleanup
+or a naming preference.
 
 ### `HydeIRDiff` owns
 - diff-oriented state in the same family as its base IR
@@ -77,10 +110,17 @@ package-pure lowerers when assembling final Python.
 ## Placement Rules
 
 - Public runtime API belongs in `hyde/__init__.py`.
-- GUI IR classes belong near the owning GUI family under
-  `hyde/user_interface/...`.
+- Package-level IR belongs in `hyde/features/<package>_ir.py`.
+- Widget-level workflow IR belongs in plugin-local `<widget>_IR.py` near the
+  owning GUI family under `hyde/user_interface/plugins/...`.
 - Feature lowerers belong under `hyde/features/...`.
 - Pure transport, queueing, and message envelopes stay outside IR classes.
+- Widget-local workflow IRs that compose package IRs belong in plugin-local
+  `<widget>_IR.py` files, not in `shared/`.
+- Supporting material that carries runtime authority for one IR family belongs in
+  that plugin directory, not in `hyde/user_interface/shared/`.
+- `hyde/user_interface/shared/` is reserved for neutral scaffolding, base widget
+  families, and genuinely neutral helpers that do not own feature authority.
 - Shared UI-family behavior may live in a feature-family widget base class. For
   first-class figure dialogs, prefer a shared `HydeDialogWidget` subclass over free
   helper functions when multiple dialogs need the same figure-dialog behavior.
@@ -89,11 +129,11 @@ package-pure lowerers when assembling final Python.
   `hyde.user_interface.base_hyde_widgets` rather than dialog-local chooser logic.
 - `HydeFileDialog` subclasses should extend that shared generation/submission path
   through hook overrides and `super()` rather than alternate dialog-local paths.
-- Shared user-facing display metadata may live in a composed feature support class
-  when it is not scientific state and when multiple surfaces need one canonical
-  representation. For first-class figures, canonical figure-element display names
-  should be owned by shared figure helper tooling such as `FigureDisplayHelper`,
-  used through composition, not by duplicated widget-local formatting logic.
+- Shared user-facing display metadata may live in feature-side support code when it
+  is not scientific state and multiple surfaces need one canonical representation.
+  For first-class figures, canonical figure-element display names come from the
+  feature-side matplotlib trace-record helpers. Plugin-local helpers may delegate to
+  that contract for UI composition, but should not duplicate the formatting logic.
 
 ## Shared Pattern
 
@@ -103,8 +143,8 @@ feature.
 Current examples:
 - the table interactive family shares `TableIR` / `TableIRDiff`
 - the figure interactive family shares `FigureIR` / `FigureIRDiff`
-- file/project dialogs use Hyde-owned app/file IR classes inside the shared
-  file-dialog family
+- file/project dialogs use `HydeAppIR` directly as `widget_ir` inside the
+  shared file-dialog family
 
 Split IR families only when the semantic schema truly diverges.
 

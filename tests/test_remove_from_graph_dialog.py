@@ -14,25 +14,24 @@ import hyde
 
 from qtutils.qt import QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
+from hyde.features.matplotlib_features import figure_ir_from_live_state
+from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.matplotlib_backend import figure_snapshot_payload
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
     TraceAppearanceDialog,
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import (
-    FigureIR,
-    FigureIRDiff,
-    FigureWindow,
-)
+from hyde.features.matplotlib_ir import FigureIR, FigureIRDiff
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
     RemoveFromGraphDialog,
 )
-from hyde.user_interface.shared.figure import EditableFigureContext, FigureDialogIR
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_IR import FigureDialogIR
+from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
 
 
@@ -131,11 +130,11 @@ def make_live_state(title="Figure0", items=("trace_a", "trace_b")):
 
 
 def make_figure_ir():
-    return FigureIRCodec.validate_state(figure_ir_from_live_state(make_live_state()))
+    return FigureIRAuthority.validate_state(figure_ir_from_live_state(make_live_state()))
 
 
 def make_figure_ir_without_supported_traces():
-    return FigureIRCodec.validate_state(figure_ir_from_live_state(make_live_state(items=())))
+    return FigureIRAuthority.validate_state(figure_ir_from_live_state(make_live_state(items=())))
 
 
 def make_active_figure_window(

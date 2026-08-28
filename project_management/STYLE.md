@@ -22,6 +22,13 @@
 - Branch naming follows the same split:
   - `plugins/<plugin_name>` for plugin-scoped work
   - `refactor` for cross-cutting refactors
+- For package-owned IR families, the IR module lives beside the lowerer as
+  `hyde/features/<package>_ir.py`, paired with
+  `hyde/features/<package>_features.py`.
+- For widget-local workflow IR families that compose multiple packages, the
+  plugin-local IR module name is `<widget>_IR.py`.
+- Non-neutral supporting material for an IR family should live in another
+  plugin-local module, not under `hyde.user_interface.shared`.
 
 ## UI Boundary
 - If non-UI callbacks touch Qt widgets, route them onto the main thread.
@@ -68,7 +75,8 @@ QtWidgets
 - When multiple dialogs in one feature family share behavior, prefer a shared widget
   base class over free helper functions. For first-class figure dialogs, the default
   pattern is a `HydeDialogWidget` subclass dedicated to figure work, such as
-  `HydeFigureDialogWidget`, with concrete dialogs inheriting from that class.
+  plugin-local `HydeFigureDialogWidget`, with concrete dialogs inheriting from
+  that class.
 - Target-selecting project and file dialogs should follow the same pattern through
   shared `HydeFileDialog` / `HydeFileWidget` infrastructure in
   `hyde.user_interface.base_hyde_widgets`. Keep generic chooser policy and optional
@@ -76,9 +84,9 @@ QtWidgets
   concrete dialog. `File -> Save` remains a direct hidden dispatch rather than a
   chooser dialog.
 - When multiple figure-facing surfaces need one canonical user-facing name for traces
-  or analogous figure elements, prefer shared figure helper tooling such as
-  `FigureDisplayHelper`, used through composition, over duplicated widget-local
-  string formatting.
+  or analogous figure elements, use the feature-side matplotlib trace-record
+  contract directly or through plugin-local helper tooling that delegates to it.
+  Do not duplicate widget-local string formatting.
 - Canonical trace display names follow this contract:
   - `{label}: {y} vs {x}` when `label` and `x` exist
   - `{label}: {y}` when `label` exists and `x` does not
@@ -94,8 +102,8 @@ QtWidgets
 - Treat code-built widget trees as exceptions that need a concrete reason, such as a
   third-party runtime widget or a layout that is materially impossible or misleading
   to express in Qt Designer.
-- For color selection, prefer the shared matplotlib-aware color picker in
-  `hyde.user_interface.matplotlib_color_picker`.
+- For color selection, prefer the plugin-local matplotlib-aware color picker in
+  the figure dialog family rather than feature-local color widgets.
 - New Hyde color-entry surfaces should normally use `MatplotlibColorDialog` and/or
   `MatplotlibColorLineEdit` rather than raw `QColorDialog`, plain `QLineEdit`
   color fields, or feature-local color picker widgets.

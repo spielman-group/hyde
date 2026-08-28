@@ -2090,8 +2090,15 @@ def figure_ir_append_trace(figure_ir, trace):
 
 
 def figure_patch_subplot(state, subplot_id):
-    normalized = MatplotlibCodec.validate_state(state)
-    return MatplotlibCodec._resolve_subplot(normalized, subplot_id)
+    subplots = list(dict(state or {}).get("layout", {}).get("subplots", []) or [])
+    if not subplots:
+        raise ValueError("Figure IR does not contain any subplots.")
+    if subplot_id in (None, ""):
+        return subplots[0]
+    for subplot in subplots:
+        if subplot.get("id") == str(subplot_id):
+            return subplot
+    raise ValueError(f"Unknown figure subplot id: {subplot_id!r}.")
 
 
 def figure_patch_reset_color(target, default_expr):
@@ -2415,8 +2422,8 @@ def figure_patch_source(
     refresh_trace_ids=(),
     refresh_legend=True,
 ):
-    source = MatplotlibCodec.validate_state(source_state)
-    target = MatplotlibCodec.validate_state(target_state)
+    source = copy.deepcopy(source_state)
+    target = copy.deepcopy(target_state)
     source_subplot = figure_patch_subplot(source, None)
     target_subplot = figure_patch_subplot(target, None)
     lines = []

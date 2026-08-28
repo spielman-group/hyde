@@ -30,10 +30,10 @@ from hyde.user_interface.main.project_state import (
     capture_session,
     write_session,
 )
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.shared.plugin import HydeMDIContext, HydePlugin
 from hyde.user_interface.plugins.figure_interactive import FigureWorkspaceService
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR
+from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.plugins.table_interactive import TableWorkspaceService
 
 

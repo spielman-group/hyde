@@ -1,9 +1,7 @@
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.shared.figure import (
-    HydeFigureDialogWidget,
-    MatplotlibColorLineEdit,
-)
+from .figure_dialog_widget import HydeFigureDialogWidget
+from .matplotlib_widgets import MatplotlibColorLineEdit
 
 AXIS_TAB_TITLES = [
     "Axis",

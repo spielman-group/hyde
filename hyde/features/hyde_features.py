@@ -1,4 +1,6 @@
 import copy
+import keyword
+import textwrap
 
 from hyde.features.base import FeatureCodec, set_path
 
@@ -30,6 +32,155 @@ def save_project_source(project_dir=None, *, mode="save", overwrite=False):
 
 def quit_source():
     return "hyde.quit()"
+
+
+def reload_procedures_source(
+    project_dir,
+    hyde_source_root,
+    *,
+    reset_namespace=False,
+):
+    return (
+        "import sys\n"
+        f"if {hyde_source_root!r} not in sys.path:\n"
+        f"    sys.path.insert(0, {hyde_source_root!r})\n"
+        "from hyde.project_tools import execute_procedures_bootstrap\n"
+        f"execute_procedures_bootstrap({project_dir!r}, "
+        f"{hyde_source_root!r}, "
+        f"reset_namespace={bool(reset_namespace)!r})\n"
+    )
+
+
+def remote_request_source(request_filepath):
+    return f"remote({request_filepath!r})"
+
+
+def callable_invocation_source(callable_name, callable_args=()):
+    args = ", ".join(str(value) for value in tuple(callable_args or ()))
+    return f"{callable_name}({args})"
+
+
+def session_restore_source(session_source):
+    indented_source = textwrap.indent(f"{session_source}\n", "    ")
+    return (
+        "import hyde\n"
+        "try:\n"
+        f"{indented_source}"
+        "except Exception:\n"
+        '    hyde.task_complete("session_restore", False)\n'
+        "    raise\n"
+        "else:\n"
+        '    hyde.task_complete("session_restore", True)\n'
+    )
+
+
+def normalize_namespace_names(namespace_names):
+    return tuple(
+        str(name).strip()
+        for name in tuple(namespace_names or ())
+        if str(name).strip()
+    )
+
+
+def validate_namespace_names(namespace_names):
+    normalized_names = normalize_namespace_names(namespace_names)
+    if not normalized_names:
+        raise ValueError("delete_namespace_names requires at least one namespace name.")
+    for name in normalized_names:
+        if not name.isidentifier() or keyword.iskeyword(name):
+            raise ValueError(f"Invalid Python variable name: {name!r}")
+    return normalized_names
+
+
+def delete_namespace_names_source(namespace_names):
+    return f"del {', '.join(validate_namespace_names(namespace_names))}"
+
+
+def hyde_app_python_source(
+    *,
+    command,
+    target_project_dir=None,
+    save_mode="save",
+    load=True,
+    overwrite=False,
+    project_dir=None,
+    hyde_source_root=None,
+    reset_namespace=False,
+    request_filepath=None,
+    callable_name=None,
+    callable_args=(),
+    session_source=None,
+    namespace_names=(),
+):
+    if command == "new_project":
+        return new_project_source(
+            target_project_dir,
+            load=load,
+            overwrite=overwrite,
+        )
+    if command == "load_project":
+        return load_project_source(target_project_dir)
+    if command == "heal_project":
+        return heal_project_source(target_project_dir)
+    if command == "save_project":
+        if save_mode == "save":
+            return save_project_source(mode="save")
+        return save_project_source(
+            target_project_dir,
+            mode=save_mode,
+            overwrite=overwrite,
+        )
+    if command == "quit":
+        return quit_source()
+    if command == "reload_procedures":
+        return reload_procedures_source(
+            project_dir,
+            hyde_source_root,
+            reset_namespace=reset_namespace,
+        )
+    if command == "remote_request":
+        return remote_request_source(request_filepath)
+    if command == "callable_invocation":
+        return callable_invocation_source(callable_name, callable_args)
+    if command == "session_restore":
+        return session_restore_source(session_source)
+    if command == "delete_namespace_names":
+        return delete_namespace_names_source(namespace_names)
+    raise ValueError(f"Unsupported Hyde app command: {command!r}.")
+
+
+def publish_registry_source(registry_name):
+    return f"hyde.recreation_registry.publish_registry({str(registry_name)!r})"
+
+
+def figure_decorator_source(*, register=True):
+    if register:
+        return "@hyde.figure"
+    return "@hyde.figure(register=False)"
+
+
+def figure_lookup_prelude_lines(figure_name, *, include_axes=False):
+    lines = [f"fig = hyde.get_figure({str(figure_name)!r})"]
+    if include_axes:
+        lines.append("ax = fig.axes[0]")
+    return lines
+
+
+def figure_refresh_source(figure_name, *, use_bound_values=False):
+    return "\n".join(
+        figure_lookup_prelude_lines(figure_name)
+        + [
+            f"hyde.refresh_figure(fig, use_bound_values={bool(use_bound_values)!r})"
+        ]
+    )
+
+
+def remove_traces_source(figure_name, trace_ids):
+    joined_ids = ", ".join(repr(str(trace_id)) for trace_id in tuple(trace_ids or ()))
+    return "\n".join(
+        figure_lookup_prelude_lines(figure_name)
+        + [f"hyde.remove_traces(fig, {joined_ids})"]
+    )
 
 
 VALID_TABLE_COMMANDS = {
@@ -125,6 +276,7 @@ class ProjectCommandModel:
         "heal_project",
         "save_project",
         "quit",
+        "delete_namespace_names",
     }
     valid_save_modes = {"save", "save_as", "copy"}
 
@@ -139,6 +291,7 @@ class ProjectCommandModel:
                 "mode": "save",
                 "load": True,
                 "overwrite": False,
+                "namespace_names": [],
             },
             "items": [],
             "ui": {},
@@ -166,6 +319,9 @@ class ProjectCommandModel:
         settings["mode"] = str(settings.get("mode", "save"))
         settings["load"] = bool(settings.get("load", True))
         settings["overwrite"] = bool(settings.get("overwrite", False))
+        settings["namespace_names"] = list(
+            normalize_namespace_names(settings.get("namespace_names", ()))
+        )
         return normalized
 
     @classmethod
@@ -188,6 +344,8 @@ class ProjectCommandModel:
                 raise ValueError(f"Unsupported save mode: {mode!r}.")
             if mode != "save" and not settings["project_dir"]:
                 raise ValueError(f"{mode} requires settings.project_dir.")
+        if command == "delete_namespace_names":
+            validate_namespace_names(settings["namespace_names"])
 
         return normalized
 
@@ -213,27 +371,14 @@ class ProjectCommandModel:
         normalized = cls.validate_state(state)
         command = normalized["command"]
         settings = normalized["settings"]
-
-        if command == "new_project":
-            return (
-                f"hyde.new_project({settings['project_dir']!r}, "
-                f"load={settings['load']!r}, overwrite={settings['overwrite']!r})"
-            )
-        if command == "load_project":
-            return f"hyde.load_project({settings['project_dir']!r})"
-        if command == "heal_project":
-            return f"hyde.heal_project({settings['project_dir']!r})"
-        if command == "save_project":
-            arguments = []
-            if settings["project_dir"] is not None:
-                arguments.append(repr(settings["project_dir"]))
-            arguments.append(f"mode={settings['mode']!r}")
-            if settings["mode"] != "save":
-                arguments.append(f"overwrite={settings['overwrite']!r}")
-            return f"hyde.save_project({', '.join(arguments)})"
-        if command == "quit":
-            return "hyde.quit()"
-        raise ValueError(f"Unsupported Hyde command: {command!r}.")
+        return hyde_app_python_source(
+            command=command,
+            target_project_dir=settings["project_dir"],
+            save_mode=settings["mode"],
+            load=settings["load"],
+            overwrite=settings["overwrite"],
+            namespace_names=settings["namespace_names"],
+        )
 
 
 class HydeCodec(FeatureCodec):
@@ -314,43 +459,3 @@ class HydeCodec(FeatureCodec):
         return normalized
 
 
-class HydeCodecView:
-    feature_name = None
-
-    @classmethod
-    def default_state(cls):
-        return HydeCodec.default_state(feature=cls.feature_name)
-
-    @classmethod
-    def normalize_state(cls, state):
-        return HydeCodec.normalize_state(cls.with_feature(state))
-
-    @classmethod
-    def validate_state(cls, state):
-        return HydeCodec.validate_state(cls.with_feature(state))
-
-    @classmethod
-    def update_state(cls, state, action):
-        return HydeCodec.update_state(cls.with_feature(state), action)
-
-    @classmethod
-    def state_to_python(cls, state, context=None):
-        return HydeCodec.state_to_python(cls.with_feature(state), context=context)
-
-    @classmethod
-    def state_to_macro_source(cls, state, macro_name, context=None):
-        return HydeCodec.state_to_macro_source(
-            cls.with_feature(state),
-            macro_name,
-            context=context,
-        )
-
-    @classmethod
-    def with_feature(cls, state):
-        normalized = {} if state is None else copy.deepcopy(state)
-        normalized["feature"] = cls.feature_name
-        return normalized
-
-
-class SimpleHydeCommandCodec(HydeCodecView):
-    feature_name = HydeCodec.project_command_feature

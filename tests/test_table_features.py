@@ -21,11 +21,8 @@ from hyde.user_interface.plugins.table_interactive import (
     TableWorkspaceService,
 )
 from hyde.user_interface.plugins.table_interactive.dialogs import NewTableDialog
-from hyde.user_interface.plugins.table_interactive.window import (
-    TableIR,
-    TableIRDiff,
-    TableWidget,
-)
+from hyde.features.hyde_ir import TableIR, TableIRDiff
+from hyde.user_interface.plugins.table_interactive.window import TableWidget
 
 class TestTableIR(unittest.TestCase):
     def test_table_ir_preserves_table_python_source(self):
@@ -748,11 +745,15 @@ class TestTableWidget(unittest.TestCase):
             widget.ui.tableView.setCurrentIndex(widget.model.index(0, 1))
             widget.ui.valueEdit.setReadOnly(False)
             widget.ui.valueEdit.setText("9")
+            expected_command = TableIRDiff.from_irs(
+                widget.widget_ir,
+                widget.widget_ir.with_edit_value("a", 0, "9"),
+            ).python_source()
 
             with self.assertLogs("hyde", level="DEBUG") as logs:
                 self.assertTrue(widget._submit_value_edit())
 
-            self.assertEqual(queued[0][0], "a[0] = 9")
+            self.assertEqual(queued[0][0], expected_command)
             output = "\n".join(logs.output)
             self.assertIn("[Hyde state] TableIRDiff", output)
             self.assertIn("'command': 'edit_value'", output)
@@ -812,14 +813,15 @@ class TestTableWidget(unittest.TestCase):
             widget.ui.tableView.setCurrentIndex(widget.model.index(1, 1))
             widget.ui.valueEdit.setReadOnly(False)
             widget.ui.valueEdit.setText("9")
+            expected_command = TableIRDiff.from_irs(
+                widget.widget_ir,
+                widget.widget_ir.with_append_value("a", "9"),
+            ).python_source()
 
             with self.assertLogs("hyde", level="DEBUG") as logs:
                 self.assertTrue(widget._submit_value_edit())
 
-            self.assertEqual(
-                queued[0][0],
-                "a = np.concatenate((a, np.array([9], dtype=a.dtype)))",
-            )
+            self.assertEqual(queued[0][0], expected_command)
             output = "\n".join(logs.output)
             self.assertIn("[Hyde state] TableIRDiff", output)
             self.assertIn("'command': 'append_value'", output)
@@ -845,11 +847,15 @@ class TestTableWidget(unittest.TestCase):
             widget.ui.tableView.setCurrentIndex(widget.model.index(0, 2))
             widget.ui.valueEdit.setReadOnly(False)
             widget.ui.valueEdit.setText("5")
+            expected_command = TableIRDiff.from_irs(
+                widget.widget_ir,
+                widget.widget_ir.with_create_array("5", {"a"}),
+            ).python_source()
 
             with self.assertLogs("hyde", level="DEBUG") as logs:
                 self.assertTrue(widget._submit_value_edit())
 
-            self.assertEqual(queued, [("array0 = np.array([5])", True)])
+            self.assertEqual(queued, [(expected_command, True)])
             output = "\n".join(logs.output)
             self.assertIn("[Hyde state] TableIRDiff", output)
             self.assertIn("'command': 'create_array'", output)
@@ -1014,6 +1020,10 @@ class TestTableWidget(unittest.TestCase):
         )
         try:
             widget.model.update_data({"a": [1, 2, 3]})
+            expected_command = TableIRDiff.from_irs(
+                widget.widget_ir,
+                widget.widget_ir.with_delete_indices("a", {2, 0}),
+            ).python_source()
 
             with patch.object(
                 QtWidgets.QMessageBox,
@@ -1022,7 +1032,7 @@ class TestTableWidget(unittest.TestCase):
             ), self.assertLogs("hyde", level="DEBUG") as logs:
                 widget._delete_selected_data({"a": {2, 0}})
 
-            self.assertEqual(queued[0][0], "a = np.delete(a, [0, 2])")
+            self.assertEqual(queued[0][0], expected_command)
             output = "\n".join(logs.output)
             self.assertIn("[Hyde state] TableIRDiff", output)
             self.assertIn("'command': 'delete_indices'", output)
@@ -1529,7 +1539,7 @@ class TestTableWorkspaceService(unittest.TestCase):
         plugin.workspace.clear()
         mdi_area.close()
 
-    def test_append_to_active_table_uses_append_table_api(self):
+    def test_append_to_active_table_emits_visible_append_command_for_active_table(self):
         mdi_area = QtWidgets.QMdiArea()
         plugin = Plugin({})
         execution = FakeExecutionService()

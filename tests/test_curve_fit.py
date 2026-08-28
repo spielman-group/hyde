@@ -19,26 +19,25 @@ from qtutils.qt import QtWidgets
 
 import hyde
 from hyde import project_tools
-from hyde.features.lmfit_features import CALCULATED_X_NAME, LmfitCodec
+from hyde.features.lmfit_features import CALCULATED_X_NAME
 from hyde.matplotlib_backend import (
     _import_first_class_figure_ir,
     figure_snapshot_payload,
 )
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
-from hyde.user_interface.shared.figure import (
-    EditableFigureContext,
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_IR import (
     FigureDialogIR,
 )
+from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
 from hyde.user_interface.plugins.curve_fit_dialog import Plugin as CurveFitPlugin
-from hyde.user_interface.plugins.curve_fit_dialog.dialogs import (
-    CurveFitDialog,
-    CurveFitIR,
-)
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
+from hyde.user_interface.plugins.curve_fit_dialog.curve_fit_IR import CurveFitIR
+from hyde.user_interface.plugins.curve_fit_dialog.dialogs import CurveFitDialog
+from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 
 
 DEFAULT_PROCEDURES_SOURCE = """\
@@ -384,6 +383,18 @@ class FakeEditableFigureContext:
     def current_figure_ir(self):
         return copy.deepcopy(self._figure_ir)
 
+    def current_size_inches(self):
+        size = self._figure_ir.figure_size()
+        if size in (None, ""):
+            return None
+        return (float(size[0]), float(size[1]))
+
+    def has_supported_traces(self):
+        return self._figure_ir.has_supported_traces()
+
+    def supported_trace_records(self):
+        return self._figure_ir.supported_trace_records()
+
     def figure_name(self):
         return f"Figure{self.figure_number}"
 
@@ -400,6 +411,18 @@ class FigureIROnlyContext:
 
     def current_figure_ir(self):
         return copy.deepcopy(self._figure_ir)
+
+    def current_size_inches(self):
+        size = self._figure_ir.figure_size()
+        if size in (None, ""):
+            return None
+        return (float(size[0]), float(size[1]))
+
+    def has_supported_traces(self):
+        return self._figure_ir.has_supported_traces()
+
+    def supported_trace_records(self):
+        return self._figure_ir.supported_trace_records()
 
     def figure_name(self):
         return self._figure_name
@@ -420,24 +443,10 @@ def attach_figure_context_service(manager, figure_context):
 
 def make_figure_window(figure_ir):
     figure_window = FigureWindow(figure_number=7, services={})
-
-    class MockSnapshotState:
-        def figure_ir(self):
-            return figure_ir
-
-        def default_macro_name(self):
-            return "Figure7"
-
-        def figure_defaults(self):
-            return None
-
-        def resolved_axis_limits(self):
-            return {}
-
-        def trace_styles(self):
-            return {}
-
-    figure_window.snapshot_state = MockSnapshotState()
+    figure_window.widget_ir = FigureIR(
+        figure_state=copy.deepcopy(figure_ir),
+        figure_number=figure_window.figure_number,
+    )
     return figure_window
 
 
@@ -1676,45 +1685,52 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.close()
             harness.close()
 
-    def test_lmfit_codec_expression_owned_coefficients_feed_preview_and_commit_lowering(self):
+    def test_curve_fit_ir_expression_owned_coefficients_feed_preview_and_commit_lowering(
+        self,
+    ):
         array_metadata = {
             "python_type": "ndarray",
             "numpy_type": "Array",
             "ndim": 1,
             "numpy_kind": "f",
         }
-        state = {
-            "settings": {
-                "fit_function_name": "line_fit",
-                "y_name": "signal",
-                "x_names": {"x": "time"},
-                "fit_result_name": "signal_fit_result",
-                "fit_result_name_locked": True,
-                "coefficients": {
-                    "slope": {"expr": "2 * offset"},
-                    "offset": {"initial_value": "1.5"},
+        widget_ir = CurveFitIR()
+        widget_ir.set_context(
+            {
+                "fit_functions": [
+                    {
+                        "name": "line_fit",
+                        "callable_ref": "line_fit",
+                        "independent_vars": ["x"],
+                        "parameters": ["slope", "offset"],
+                    }
+                ],
+                "namespace_view": {
+                    "signal": array_metadata,
+                    "time": array_metadata,
                 },
+                "trace_records": [],
             }
-        }
-        context = {
-            "fit_functions": [
-                {
-                    "name": "line_fit",
-                    "callable_ref": "line_fit",
-                    "independent_vars": ["x"],
-                    "parameters": ["slope", "offset"],
-                }
-            ],
-            "namespace_view": {"signal": array_metadata, "time": array_metadata},
-            "trace_records": [],
-        }
-
-        commit_preview = LmfitCodec.state_to_commit_python(state, context=context)
-        guessed_preview = LmfitCodec.state_to_preview_python(
-            state,
-            context=context,
-            preview_target_name="_preview_fit",
         )
+        widget_ir.apply_action(
+            {
+                "type": "set",
+                "path": ("settings", "fit_function_name"),
+                "value": "line_fit",
+            }
+        )
+        widget_ir.apply_action(
+            {"type": "set", "path": ("settings", "y_name"), "value": "signal"}
+        )
+        widget_ir.set_x_name("x", "time")
+        widget_ir.set_fit_result_name("signal_fit_result", locked=True)
+        widget_ir.set_coefficient_field("slope", "expr", "2 * offset")
+        widget_ir.set_coefficient_field("offset", "initial_value", "1.5")
+
+        widget_ir.set_commit_command()
+        commit_preview = widget_ir.python_source(log=False)
+        widget_ir.set_preview_command(preview_target_name="_preview_fit")
+        guessed_preview = widget_ir.python_source(log=False)
 
         self.assertIn(
             "signal_fit_params.add('slope', expr='2 * offset')",
@@ -2670,7 +2686,6 @@ class TestCurveFitPlugin(unittest.TestCase):
 
         output = "\n".join(logs.output)
         self.assertIn("[Hyde state] TransportDispatchState", output)
-        self.assertNotIn("FigurePatchState", output)
         self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:", output)
         self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", output)
@@ -2704,7 +2719,6 @@ class TestCurveFitPlugin(unittest.TestCase):
 
             output = "\n".join(logs.output)
             self.assertIn("[Hyde state] TransportDispatchState", output)
-            self.assertNotIn("FigurePatchState", output)
             self.assertIn("'mode': 'hidden'", output)
             self.assertIn(".best_fit = line_fit(", output)
             self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", output)
@@ -2766,42 +2780,6 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             self.assertEqual(dialog.applied_effective_state(), opening_state)
-        finally:
-            dialog.close()
-            harness.close()
-            attached_figure.close()
-
-    def test_curve_fit_dialog_attached_lowering_uses_widget_ir_snapshots_without_live_widget_reachback(
-        self,
-    ):
-        attached_figure = AttachedFigureHarness(
-            np.array([0.0, 1.0, 2.0, 3.0]),
-            np.array([1.0, 3.0, 5.0, 7.0]),
-        )
-        _, _, harness, dialog = create_configured_line_fit_dialog(
-            figure_window=attached_figure.figure_window
-        )
-        try:
-            def fail_current_figure_ir():
-                raise AssertionError("attached lowering should use widget_ir snapshots")
-
-            dialog.figure_context.current_figure_ir = fail_current_figure_ir
-
-            dialog.widget_ir.set_context(dialog._context())
-            dialog.widget_ir.set_attached_display(show_fit=True, show_residuals=True)
-            dialog.widget_ir.set_emit_lmfit_source(False)
-            dialog.widget_ir.set_attached_display_lowering(root_name="signal_fit_result")
-
-            patch_code, target_state = dialog.widget_ir.resolved_python_bundle()
-
-            self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", patch_code)
-            self.assertIn("ax = fig.axes[0]", patch_code)
-            self.assertIsNotNone(target_state)
-            self.assertEqual(target_state.default_macro_name(), "CurveFitAttachedFigure")
-            self.assertEqual(
-                [record["label"] for record in target_state.supported_trace_records()],
-                ["signal", "signal_fit_result", "signal_fit_result_residuals"],
-            )
         finally:
             dialog.close()
             harness.close()

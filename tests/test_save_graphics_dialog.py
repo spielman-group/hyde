@@ -19,10 +19,12 @@ from hyde.features.matplotlib_features import (
     runtime_graphics_export_formats,
 )
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
+from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.save_graphics_dialog import Plugin as SaveGraphicsPlugin
 from hyde.user_interface.plugins.save_graphics_dialog.dialogs import (
@@ -110,6 +112,40 @@ def make_active_figure_window(mdi_area, services, *, title="Figure0"):
     return figure
 
 
+def make_save_graphics_context(*, title="Figure9", size_inches=(6.4, 4.8)):
+    figure_ir = FigureIR().with_title(title)
+    if size_inches is not None:
+        figure_ir = figure_ir.with_figsize(*size_inches)
+    figure = FigureWindow(figure_number=7, services={})
+    figure.widget_ir = FigureIR(
+        figure_state=figure_ir.normalized_state(),
+        figure_number=figure.figure_number,
+    )
+    return EditableFigureContext(figure)
+
+
+class RecordingEditableFigureContext(EditableFigureContext):
+    def __init__(self, *, title="ExplicitContextFigure", size_inches=(8.0, 3.5)):
+        figure_ir = FigureIR().with_title(title).with_figsize(*size_inches)
+        figure = FigureWindow(figure_number=7, services={})
+        figure.widget_ir = FigureIR(
+            figure_state=figure_ir.normalized_state(),
+            figure_number=figure.figure_number,
+        )
+        super().__init__(figure)
+        self._recorded_figure_name = title
+        self._recorded_size_inches = tuple(size_inches)
+        self.calls = []
+
+    def figure_name(self):
+        self.calls.append("figure_name")
+        return self._recorded_figure_name
+
+    def current_size_inches(self):
+        self.calls.append("current_size_inches")
+        return self._recorded_size_inches
+
+
 class TestSaveGraphicsPlugin(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -174,10 +210,6 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
         self.assertIs(app.ui.mdiArea.activeSubWindow().widget(), figure)
 
     def test_dialog_defaults_to_project_exports_directory_with_pdf_preview(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
@@ -185,7 +217,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             expected_path = os.path.join(exports_dir, "Figure9.pdf")
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9"),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -201,16 +233,12 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertIn("format='pdf'", dialog.preview_string())
 
     def test_dialog_lists_runtime_formats_and_defaults_to_first_available_format(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9"),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -244,16 +272,12 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             )
 
     def test_selecting_new_format_updates_file_target_filter_and_preview(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9"),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -284,16 +308,12 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertIn("format='png'", dialog.preview_string())
 
     def test_format_change_preserves_deliberate_user_entered_suffix_variant(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9"),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -335,19 +355,12 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             )
 
     def test_dialog_exposes_output_options_and_same_size_defaults(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
-            def current_size_inches(self):
-                return (5.0, 3.0)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9", size_inches=(5.0, 3.0)),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -366,19 +379,12 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertNotIn("set_size_inches(", dialog.preview_string())
 
     def test_switching_to_custom_size_updates_preview_without_preserving_hidden_draft(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
-            def current_size_inches(self):
-                return (5.0, 3.0)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9", size_inches=(5.0, 3.0)),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -409,19 +415,12 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertNotIn("fig.set_size_inches(7.5, 4.5, forward=False)", dialog.preview_string())
 
     def test_transparent_toggle_disables_for_jpg_and_format_change_keeps_custom_size(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
-            def current_size_inches(self):
-                return (5.0, 3.0)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9", size_inches=(5.0, 3.0)),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -453,19 +452,12 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertIn("fig.set_size_inches(6.0, 4.0, forward=False)", dialog.preview_string())
 
     def test_dialog_preview_matches_figure_ir_for_current_selection(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
-
-            def current_size_inches(self):
-                return (5.0, 3.0)
-
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
             os.makedirs(project_dir, exist_ok=True)
 
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9", size_inches=(5.0, 3.0)),
                 services={"get_current_project_dir": lambda: project_dir},
             )
             dialog.show()
@@ -493,11 +485,101 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertEqual(dialog.widget_ir.python_source(log=False), expected_state.python_source(log=False))
             self.assertEqual(dialog.preview_string(), expected_state.python_source(log=False))
 
-    def test_do_it_exports_live_first_class_figure_to_default_pdf_target(self):
-        class FigureContext:
-            def figure_name(self):
-                return "Figure9"
+    def test_footer_actions_reuse_the_same_preview_backed_payload(self):
+        class ExecutionService:
+            def __init__(self):
+                self.hidden_calls = []
+                self.visible_calls = []
 
+            def execute_hidden(self, code, silent=True):
+                self.hidden_calls.append((str(code), bool(silent)))
+                return True
+
+            def execute_visible(self, code):
+                self.visible_calls.append(str(code))
+                return True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir, exist_ok=True)
+            execution_service = ExecutionService()
+            clipboard = QtWidgets.QApplication.clipboard()
+            clipboard.clear()
+
+            dialog = SaveGraphicsDialog(
+                make_save_graphics_context(title="Figure9", size_inches=(5.0, 3.0)),
+                services={
+                    "get_current_project_dir": lambda: project_dir,
+                    "python_execution_service": execution_service,
+                    "visible_terminal_service": execution_service,
+                },
+            )
+            dialog.show()
+            self.qapp.processEvents()
+
+            dialog.custom_size_radio.setChecked(True)
+            dialog.width_spin_box.setValue(6.0)
+            dialog.height_spin_box.setValue(4.0)
+            dialog.transparent_checkbox.setChecked(True)
+            dialog.dpi_spin_box.setValue(450)
+            self.qapp.processEvents()
+
+            expected_payload = dialog.widget_ir.python_source(log=False)
+            self.assertEqual(dialog.preview_string(), expected_payload)
+
+            dialog.to_clip_button.click()
+            dialog.to_cmd_line_button.click()
+            dialog.do_it_button.click()
+            self.qapp.processEvents()
+
+            self.assertEqual(clipboard.text(), expected_payload)
+            self.assertEqual(execution_service.visible_calls, [expected_payload])
+            self.assertEqual(execution_service.hidden_calls, [(expected_payload, True)])
+
+    def test_dialog_uses_editable_context_current_size_for_same_size_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir, exist_ok=True)
+
+            dialog = SaveGraphicsDialog(
+                make_save_graphics_context(title="Figure9", size_inches=(7.5, 4.25)),
+                services={"get_current_project_dir": lambda: project_dir},
+            )
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertTrue(dialog.same_size_radio.isChecked())
+            self.assertEqual(dialog.width_spin_box.value(), 7.5)
+            self.assertEqual(dialog.height_spin_box.value(), 4.25)
+            self.assertNotIn("set_size_inches(", dialog.preview_string())
+
+    def test_dialog_uses_editable_context_for_default_target_size_and_preview(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "demo.hy")
+            os.makedirs(project_dir, exist_ok=True)
+            figure_context = RecordingEditableFigureContext()
+
+            dialog = SaveGraphicsDialog(
+                figure_context,
+                services={"get_current_project_dir": lambda: project_dir},
+            )
+            dialog.show()
+            self.qapp.processEvents()
+
+            self.assertIn("current_size_inches", figure_context.calls)
+            self.assertIn("figure_name", figure_context.calls)
+            self.assertEqual(
+                dialog.selected_path(),
+                os.path.join(project_dir, "exports", "ExplicitContextFigure.pdf"),
+            )
+            self.assertEqual(dialog.width_spin_box.value(), 8.0)
+            self.assertEqual(dialog.height_spin_box.value(), 3.5)
+            self.assertIn(
+                "fig = hyde.get_figure('ExplicitContextFigure')",
+                dialog.preview_string(),
+            )
+
+    def test_do_it_exports_live_first_class_figure_to_default_pdf_target(self):
         class EvaluatingExecutionService:
             def __init__(self):
                 self.hidden_calls = []
@@ -525,7 +607,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             os.makedirs(project_dir, exist_ok=True)
             execution_service = EvaluatingExecutionService()
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="Figure9"),
                 services={
                     "get_current_project_dir": lambda: project_dir,
                     "python_execution_service": execution_service,
@@ -545,10 +627,6 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertIn(repr(output_path), execution_service.hidden_calls[0][0])
 
     def test_do_it_resolves_the_live_kernel_figure_at_export_time(self):
-        class FigureContext:
-            def figure_name(self):
-                return "FigureLiveKernel"
-
         class EvaluatingExecutionService:
             def __init__(self):
                 self.hidden_calls = []
@@ -576,7 +654,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             os.makedirs(project_dir, exist_ok=True)
             execution_service = EvaluatingExecutionService()
             dialog = SaveGraphicsDialog(
-                FigureContext(),
+                make_save_graphics_context(title="FigureLiveKernel"),
                 services={
                     "get_current_project_dir": lambda: project_dir,
                     "python_execution_service": execution_service,

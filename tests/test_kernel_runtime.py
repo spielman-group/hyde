@@ -13,12 +13,12 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.shared.figure import (
-    COMM_TARGET,
+from hyde.execution.comms import FIGURE_COMM_TARGET
+from hyde.user_interface.plugins.figure_interactive.matplotlib_support import (
     register_auxiliary_figure_comm_sink,
 )
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.kernel_runtime import (
     FrontendKernelService,
     Plugin as KernelRuntimePlugin,
@@ -96,7 +96,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
 
         self.assertTrue(register_auxiliary_figure_comm_sink(client, "runtime_helper"))
 
-        handler = client.comm_manager.targets[COMM_TARGET]
+        handler = client.comm_manager.targets[FIGURE_COMM_TARGET]
         comm = FakeAuxComm("aux-1")
         handler(comm, {"content": {"data": {"figure_number": 1}}})
 

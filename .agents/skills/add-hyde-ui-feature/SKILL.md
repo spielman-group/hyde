@@ -1,6 +1,8 @@
 ---
 name: add-hyde-ui-feature
-description: Create or revise a Hyde frontend feature specification from a feature spec folder containing screenshots, drawings, SPEC.md, or IGOR.md. Use when Codex needs to translate ambiguous screenshot or Igor-style behavior into Hyde-native UI requirements, especially for features under `project_management/specs/` that involve live kernel state, explicit exclusions, or editable widget behavior.
+description: Create or revise a Hyde frontend feature specification from a feature spec folder containing screenshots, drawings, SPEC.md, or IGOR.md. Use when translating ambiguous screenshot or Igor-style behavior into Hyde-native UI requirements, especially for features under `project_management/specs/` that involve live kernel state, explicit exclusions, or editable widget behavior.
+metadata:
+  uuid: "bf3da239-2d23-400b-86f6-18fa6b3f232d"
 ---
 
 # Add Hyde UI Feature
@@ -16,10 +18,12 @@ This skill is the front end of the workflow. The normal path is:
 
 1. `add-hyde-ui-feature`
 2. `grill-me`
-3. `to-prd`
-4. use the widget-shape skill plus `to-issues`
-5. `hyde-simplify`
-6. implementation with `tdd` plus the widget-shape skill
+3. `to-prd-and-issues`
+4. pair the widget-shape skill with that issue work
+5. implementation with `tdd` plus the widget-shape skill
+6. `test-cleanup`
+
+The shared widget contract lives in `.agents/protocols/hyde/widget-family.md`.
 
 Widget-shape mapping:
 
@@ -87,7 +91,9 @@ Widget-shape mapping:
 ## Output Requirements
 - Create or update `project_management/specs/<feature>/SPEC.md`.
 - If the feature spec folder does not exist, create it and add `SPEC.md`.
-- Use nearby Hyde spec folders for format and granularity when helpful, especially `project_management/specs/data_browser/`.
+- Use nearby Hyde spec folders for format and granularity when helpful.
+  `project_management/specs/save_graphics_dialog/` is a clean dialog example;
+  `project_management/specs/table/` shows a spec paired with an `IGOR.md` source.
 - Keep `SPEC.md` free of implementation history, migrations, or discarded alternatives.
 - Separate initial deployment behavior from future work whenever the artifacts imply a larger eventual feature.
 - In `Window Layout`, include ASCII layout sketches whenever layout fidelity matters.
@@ -102,6 +108,11 @@ Widget-shape mapping:
   - `Command Generation`
   - `Synchronization`
   - `Explicit Exclusions`
+- In `Command Generation`, name the IR that owns generation: which package IR from
+  `hyde/features/<package>_ir.py` the surface uses, or the plugin-local
+  `<widget>_IR.py` workflow IR it needs when it composes several. Hyde generates
+  all GUI command Python through `HydeIR.python_source()`, so a spec that leaves
+  this open invites dialog-local string assembly.
 - When the feature is expected to be a `HydeDialogWidget`, state whether the lower
   preview pane shows the executable backing string directly or may display alternate
   text while `Do It` / `To Cmd Line` / `To Clip` still use the backing string.

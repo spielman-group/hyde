@@ -2,12 +2,13 @@ import os
 
 from qtutils.qt import QtCore, QtWidgets
 
+from hyde.features.matplotlib_ir import FigureIR
 from hyde.features.matplotlib_features import (
     graphics_output_transparency_supported,
     runtime_graphics_export_formats,
 )
 from hyde.user_interface.base_hyde_widgets import HydeFileDialog
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR
+from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 
 
 def sanitize_export_basename(name):
@@ -20,35 +21,10 @@ def sanitize_export_basename(name):
     return text or "Figure"
 
 
-def figure_context_size_inches(figure_context, fallback=(6.4, 4.8)):
-    getter = getattr(figure_context, "current_size_inches", None)
-    if callable(getter):
-        size = getter()
-        if size is not None:
-            return (float(size[0]), float(size[1]))
-    figure_window = getattr(figure_context, "_figure_window", None)
-    figure_ir = getattr(figure_window, "widget_ir", None)
-    if figure_ir is not None:
-        size = dict(figure_ir.normalized_state().get("settings", {}) or {}).get("figsize")
-        if size not in (None, "") and len(size) == 2:
-            return (float(size[0]), float(size[1]))
-    current_figure_ir = getattr(figure_context, "current_figure_ir", None)
-    if callable(current_figure_ir):
-        figure_ir = current_figure_ir()
-        size = None if figure_ir is None else figure_ir.figure_size()
-        if size not in (None, "") and len(size) == 2:
-            return (float(size[0]), float(size[1]))
-    snapshot_state = getattr(figure_window, "snapshot_state", None)
-    for state_getter_name in ("figure_ir", "figure_defaults"):
-        state_getter = getattr(snapshot_state, state_getter_name, None)
-        if not callable(state_getter):
-            continue
-        state = dict(state_getter() or {})
-        settings = dict(state.get("settings", {}) or {})
-        size = settings.get("figsize")
-        if size not in (None, "") and len(size) == 2:
-            return (float(size[0]), float(size[1]))
-    return tuple(float(value) for value in fallback)
+def require_editable_figure_context(figure_context):
+    if not isinstance(figure_context, EditableFigureContext):
+        raise TypeError("SaveGraphicsDialog requires an EditableFigureContext.")
+    return figure_context
 
 
 class SaveGraphicsDialog(HydeFileDialog):
@@ -59,15 +35,15 @@ class SaveGraphicsDialog(HydeFileDialog):
     fallback_figure_size_inches = (6.4, 4.8)
 
     def __init__(self, figure_context, services=None, parent=None):
-        self.figure_context = figure_context
+        self.figure_context = require_editable_figure_context(figure_context)
         self.export_formats = runtime_graphics_export_formats()
         self.selected_format_key = (
             None if not self.export_formats else self.export_formats[0].key
         )
-        self._opening_figure_size_inches = figure_context_size_inches(
-            self.figure_context,
-            fallback=self.fallback_figure_size_inches,
-        )
+        context_size = self.figure_context.current_size_inches()
+        if context_size is None:
+            context_size = self.fallback_figure_size_inches
+        self._opening_figure_size_inches = tuple(float(value) for value in context_size)
         selected_format = self.selected_export_format()
         self.name_filters = (
             ()

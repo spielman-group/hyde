@@ -1,13 +1,11 @@
 import unittest
+from unittest.mock import patch
 
 from qtutils.qt import QtWidgets
 
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
-from hyde.user_interface.plugins.figure_interactive.window import (
-    FigureSnapshotState,
-    FigureIR,
-    FigureWindow,
-)
+from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.plugins.figure_interactive.window import FigureSnapshotState, FigureWindow
 
 
 class TestFigureWindowSessionSave(unittest.TestCase):
@@ -58,6 +56,40 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         self.assertIn("fig.show()", macro)
         self.assertNotIn("fig.canvas.draw_idle()", macro)
         self.assertNotIn("return fig", macro)
+
+    def test_figure_ir_runtime_path_no_longer_uses_matplotlib_codec_authority(self):
+        opening_ir = (
+            FigureIR()
+            .with_title("Figure0")
+            .with_x_name("delay")
+            .with_items(["fit_delay", "raw_delay"])
+        )
+        updated_ir = opening_ir.set_axis_label("x", "Delay [s]")
+
+        with patch(
+            "hyde.features.matplotlib_features.MatplotlibCodec.validate_state",
+            side_effect=AssertionError("validate_state should not be used by FigureIR"),
+        ), patch(
+            "hyde.features.matplotlib_features.MatplotlibCodec.update_state",
+            side_effect=AssertionError("update_state should not be used by FigureIR"),
+        ), patch(
+            "hyde.features.matplotlib_features.MatplotlibCodec.tracked_names",
+            side_effect=AssertionError("tracked_names should not be used by FigureIR"),
+        ), patch(
+            "hyde.features.matplotlib_features.MatplotlibCodec.state_to_python",
+            side_effect=AssertionError("state_to_python should not be used by FigureIR"),
+        ):
+            create_source = opening_ir.python_source(log=False)
+            preview_source = updated_ir.preview_source()
+            patch_source = (
+                opening_ir.current_diff(updated_ir)
+                .as_patch("Figure0")
+                .python_source(log=False)
+            )
+
+        self.assertIn("fig = plt.figure('Figure0')", create_source)
+        self.assertIn("ax.set_xlabel('Delay [s]')", preview_source)
+        self.assertIn("fig = hyde.get_figure('Figure0')", patch_source)
 
     def test_figure_window_tracks_live_figure_ir_in_widget_ir_from_backend_payloads(self):
         widget = FigureWindow(figure_number=1)

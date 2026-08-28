@@ -114,7 +114,7 @@ its normal `procedures/__init__.py` bootstrap and saved-object restore.
 ### `terminal/history.py`
 Stores visible command history only.
 
-Muted GUI micro-mutations and runtime-helper-owned silent execution are excluded.
+Muted GUI micro-mutations and kernel-runtime-owned silent execution are excluded.
 
 ## Editable Operations
 

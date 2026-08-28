@@ -305,7 +305,7 @@ GUI behavior:
 ## Lane 2A: GUI -> Kernel (Visible Command Session)
 
 ### Transport
-- `hyde/user_interface/main/frontend_kernel.py`
+- `hyde/user_interface/plugins/kernel_runtime/__init__.py`
 - `hyde/user_interface/plugins/python_terminal_tool/__init__.py`
 - `qtconsole.client.QtKernelClient`
 - shared connection file: `kernel-hyde.json`
@@ -315,7 +315,7 @@ This is the user's visible interactive console session.
 
 ### Behavior
 - the Python Terminal is a minimal `RichJupyterWidget`
-- it attaches to the GUI-owned shared frontend `QtKernelClient`
+- it attaches to the kernel-runtime-owned shared frontend `QtKernelClient`
 - user-entered Python is sent directly to the kernel over standard Jupyter `execute_request`
 - this session owns the visible rich IPython prompt/history behavior seen by the user
 - the user may access Hyde's supported feature surface in the kernel via `import hyde`
@@ -334,7 +334,7 @@ This is the user's visible interactive console session.
 
 ### Transport
 - `hyde/user_interface/plugins/kernel_runtime/__init__.py`
-- `hyde/user_interface/main/frontend_kernel.py`
+- exported `python_execution_service` / `FrontendKernelService`
 - shared connection file: `kernel-hyde.json`
 
 ### Purpose
@@ -422,7 +422,7 @@ or bounded Hyde figure helpers such as `hyde.refresh_figure(...)`.
 ## External Lyse-Compatible Listener
 
 ### Transport
-- `hyde/user_interface/main/runtime_helper.py`
+- `hyde/user_interface/plugins/remote_requests/__init__.py`
 - `labscript_utils.ls_zprocess.ZMQServer`
 - port source: `LabConfig().get('ports', 'lyse')`, with fallback `42519`
 

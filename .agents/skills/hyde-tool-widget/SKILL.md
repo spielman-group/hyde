@@ -1,111 +1,70 @@
 ---
 name: hyde-tool-widget
 description: Create or normalize HydeToolWidget-based plugins around Hyde's standard persistent tool-window shape. Use when building a new Hyde tool plugin, converting an existing tool plugin to the shared HydeToolWidget shell and mounting contract, or removing tool-local wrapper structure so window identity, close policy, and mounted-child ownership live in the base class by default.
+metadata:
+  uuid: "6d1dda7e-4132-431e-91f2-35b0600d57e8"
 ---
 
 # Hyde Tool Widget
 
-Use this skill when the target UI surface is a `HydeToolWidget`.
+Use this skill when the target UI surface is a `HydeToolWidget`: creating a new
+tool-style plugin from a spec, or normalizing an existing one.
 
-This skill covers two jobs:
+Always read `.agents/protocols/hyde/widget-family.md` first. It carries the shared
+workflow, the `widget_ir` / `python_source()` contract, ownership split, override
+discipline, and test expectations. This file covers only what is specific to the
+persistent tool shell.
 
-- creating a new tool-style plugin from a spec
-- normalizing an existing tool-style plugin to Hyde's standard persistent tool shape
+If the feature spec does not exist or is stale, use `add-hyde-ui-feature` first.
 
-This skill participates in the normal widget workflow:
+For the tool checklist, read [references/tool-pattern.md](references/tool-pattern.md).
+For a starting skeleton, copy `assets/template_plugin/` and rename the placeholders.
 
-1. `add-hyde-ui-feature`
-2. `grill-me`
-3. `to-prd`
-4. use `hyde-tool-widget` and `to-issues` together to produce `issues/...md`
-5. `hyde-simplify`
-6. implement the resulting issues with `tdd` and `hyde-tool-widget`
+## Tool Shell Contract
 
-If the feature spec does not exist or is stale, use `add-hyde-ui-feature` first and
-then return here.
+`HydeToolWidget` owns the outer persistent shell:
 
-## Required Context
+- the outer `hyde_window_widget.ui` shell
+- mounted-child plumbing through `mount_child_widget(...)`
+- subwindow binding and stable window identity
+- hide-vs-close policy declared through `close_policy()`
 
-Read these before changing code:
+The plugin owns the content widget, its signal wiring, and domain behavior.
 
-1. `AGENTS.md`
-2. `project_management/ARCHITECTURE.md`
-3. `project_management/IR-CONTROL.md`
-4. `project_management/STYLE.md`
-5. `project_management/PLAN.md`
-6. `project_management/STATUS.md`
+Do not hand-build a second outer shell in plugin code, and do not bypass
+`close_policy()` with ad hoc close handling.
 
-Then read only the feature spec and code relevant to the tool.
-
-For the standard tool pattern and a concrete checklist, read
-[references/tool-pattern.md](references/tool-pattern.md).
-
-If you need a starting skeleton, copy from
-`assets/template_plugin/` and then rename the placeholder package/module names.
-
-## Core Contract
-
-Treat `HydeToolWidget` as the owner of the outer persistent tool shell.
-
-Default rule:
-
-- the base owns the outer `hyde_window_widget.ui` shell
-- the plugin mounts one child/content widget through `mount_child_widget(...)`
-- subwindow binding and stable window identity are base-owned
-- hide-vs-close policy is declared through `close_policy()`, not ad hoc close wiring
-
-Do not hand-build a second outer shell in plugin code.
+Most persistent tools should subclass `HydeToolWindowPlugin`, which already
+contributes the Window-menu action, the MDI descriptor, and the show/hide
+lifecycle from class attributes plus `create_tool_window_widget(...)`. Do not
+re-register that menu action manually.
 
 ## Workflow
 
-1. Identify the actual widget surface.
-   Confirm the target should be a `HydeToolWidget`, not a dialog or interactive
+1. Confirm the surface really is a `HydeToolWidget`, not a dialog or interactive
    widget.
-2. Inventory existing subclass structure.
-   Look for duplicated shell layout, manual subwindow binding, local close-policy
-   logic, or pass-through wrappers around `mount_child_widget(...)`.
-3. Remove trivial shell duplication first.
-   Keep plugin code focused on the content widget and domain behavior.
-4. Keep static layout in `.ui`.
-   Use Python for signal wiring, dynamic population, and service integration.
-5. Keep command generation and validation in the feature layer when the tool emits
-   Python or owns domain lowering.
-6. Validate the tool contract with behavior tests.
-   Prefer tests that prove mounted-child behavior, subwindow identity, and close
-   policy over helper wiring.
-
-## Planning Handoff
-
-When this skill is paired with `to-issues`, make sure the implementation plan says:
-
-- whether the plugin is a standard persistent tool or a close-on-dismiss exception
-- whether the tool mounts one main child widget or owns its layout directly
-- whether the plugin owns its domain package or calls a feature owner elsewhere
-- whether the launcher only opens/shows the tool or duplicates tool-owned behavior
-- which tests must prove subwindow identity, mounted-child behavior, and close policy
-
-## New Plugin Shape
-
-For a new tool plugin, prefer this structure:
-
-- plugin package `__init__.py` registers and opens/shows the tool
-- `window.py` contains the `HydeToolWidget` subclass or its mounted child widget
-- static layout lives in `.ui` files
-- domain lowering/validation lives in `hyde/features/..._features.py` when needed
-- the base shell owns persistence and mounted-child plumbing
+2. Inventory the subclass for duplicated shell layout, manual subwindow binding,
+   local close-policy logic, or wrappers around `mount_child_widget(...)`.
+3. Remove that shell duplication before adding anything.
+4. Keep the tool's own state as UI state. If the tool emits Python, that Python
+   comes from `widget_ir.python_source()`.
+5. Prove the contract with tests on mounted-child behavior, subwindow identity,
+   and close policy.
 
 ## Normalization Targets
 
-When normalizing an existing plugin, prefer these end states:
-
 - no duplicated outer shell layout in Python when the base already owns it
 - no local subwindow identifier plumbing when `bind_subwindow(...)` is enough
-- no duplicate mounted-child wrapper when `mount_child_widget(...)` is enough
+- no mounted-child wrapper when `mount_child_widget(...)` is enough
 - no tool-local hide/close behavior that bypasses `close_policy()`
+- no menu/descriptor registration that `HydeToolWindowPlugin` already provides
 
-## Output Rules
+## Planning Handoff
 
-- Keep the patch small and local to the tool/plugin unless the base class clearly
-  needs a small shared improvement.
-- Update the relevant spec if the tool contract changes.
-- If you change the shared tool-shell contract, update the base-widget tests too.
+When paired with issue work, make the plan state:
+
+- whether the plugin is a standard persistent tool or a close-on-dismiss exception
+- whether it mounts one main child widget or owns its layout directly
+- what its `widget_ir` is, if it emits Python at all
+- whether the launcher only opens/shows the tool or duplicates tool-owned behavior
+- which tests prove subwindow identity, mounted-child behavior, and close policy

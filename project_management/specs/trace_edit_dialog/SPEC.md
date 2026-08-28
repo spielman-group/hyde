@@ -49,8 +49,8 @@ information needed to seed the dialog, emit bounded matplotlib patch blocks, and
 restore the opening trace appearance if the user clicks `Cancel`.
 
 This dialog belongs to the `figure_control_dialog` plugin. That plugin owns the
-trace-edit dialog and the reusable dialog-family helpers that later figure control
-dialogs will need, such as:
+trace-edit dialog and uses the shared figure-dialog family for reusable behavior
+that later figure control dialogs also need, such as:
 
 - validating that a figure window is currently the active MDI window
 - collecting the active figure and trace snapshot needed to seed controls
@@ -141,9 +141,9 @@ the figure runtime transport. The new plugin contributes actions through the nor
   needed for `Cancel` revert behavior.
 - `Cancel` is implemented by executing a rollback patch for the opening trace
   appearance rather than by mutating live matplotlib objects directly in the GUI.
-- Shared helper logic for active-figure validation, snapshot seeding, command
-  emission/logging, and refresh coordination lives with the dialog plugin so later
-  figure control dialogs can reuse it.
+- Shared figure-dialog-family behavior for active-figure validation,
+  `FigureDialogIR` snapshot seeding, command emission/logging, and refresh
+  coordination lives on the shared dialog base rather than as dialog-local helpers.
 - The first version excludes behaviors that require unsupported semantics, even if they
   appear in Igor's dialog or screenshot family.
 

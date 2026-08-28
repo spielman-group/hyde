@@ -34,9 +34,10 @@
   tool-window container, mounted-child support, and persistent hide-on-close behavior.
   It does not add a separate terminal-specific entry field, toolbar, clear button, or
   history dropdown around the console.
-- The GUI owns one shared frontend `QtKernelClient` in `frontend_kernel.py`, loads
-  `kernel-hyde.json`, starts the normal Jupyter channels, and exposes that client to
-  the Python Terminal and other frontend services.
+- The `kernel_runtime` plugin owns one shared frontend `QtKernelClient` /
+  `FrontendKernelService`, loads `kernel-hyde.json`, starts the normal Jupyter
+  channels, and exposes that client to the Python Terminal and other frontend
+  services.
 - User-entered commands travel directly from the mounted rich IPython console to the
   kernel over that shared frontend client session.
 - `procedures/__init__.py` execution is owned by the kernel-runtime plugin, which

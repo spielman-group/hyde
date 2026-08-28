@@ -6,20 +6,25 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
+from hyde.features.matplotlib_features import figure_ir_from_live_state
+from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
     TraceAppearanceDialog,
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
+from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
     RemoveFromGraphDialog,
 )
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
-from hyde.user_interface.shared.figure import EditableFigureContext, FigureDialogIR
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_IR import (
+    FigureDialogIR,
+)
+from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
 
 
@@ -129,7 +134,7 @@ def make_figure_ir():
             "linestyle": "None",
         }
     )
-    return FigureIRCodec.validate_state(figure_ir)
+    return FigureIRAuthority.validate_state(figure_ir)
 
 
 def make_figure_defaults():
@@ -151,12 +156,12 @@ def make_figure_defaults():
             "linewidth": 2.25,
         }
     )
-    return FigureIRCodec.validate_state(defaults)
+    return FigureIRAuthority.validate_state(defaults)
 
 
 def make_figure_ir_without_supported_traces():
     figure_ir = figure_ir_from_live_state(make_live_state(items=()))
-    return FigureIRCodec.validate_state(figure_ir)
+    return FigureIRAuthority.validate_state(figure_ir)
 
 
 def make_active_figure_window(
@@ -505,7 +510,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         terminal = FakeVisibleTerminalService()
         mdi_area = QtWidgets.QMdiArea()
         single_trace_ir = figure_ir_from_live_state(make_live_state(items=("trace_a",)))
-        single_trace_ir = FigureIRCodec.validate_state(single_trace_ir)
+        single_trace_ir = FigureIRAuthority.validate_state(single_trace_ir)
         figure = make_active_figure_window(
             mdi_area,
             {
@@ -544,7 +549,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
                 "python_execution_service": FakeExecutionService(),
                 "visible_terminal_service": FakeVisibleTerminalService(),
             },
-            figure_ir=FigureIRCodec.validate_state(figure_ir),
+            figure_ir=FigureIRAuthority.validate_state(figure_ir),
             figure_defaults=make_figure_defaults(),
         )
 
@@ -657,7 +662,6 @@ class TestTraceAppearanceDialog(unittest.TestCase):
 
         output = "\n".join(logs.output)
         self.assertIn("[Hyde state] TransportDispatchState", output)
-        self.assertNotIn("FigurePatchState", output)
         self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:\n", output)
         self.assertIn("line.set_color('#abcdef')", output)

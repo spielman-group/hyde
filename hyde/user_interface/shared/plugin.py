@@ -11,6 +11,7 @@ from labscript_utils.plugins import (
 )
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
 LOGGER = logging.getLogger(__name__)
 SETUP_PRIORITY_BIND_SERVICES = DEFAULT_SETUP_PRIORITY
@@ -114,8 +115,6 @@ class HydePlugin(BasePlugin):
         return self.services.get(key, default)
 
     def current_app_ir(self):
-        from hyde.user_interface.plugins.file.dialogs import HydeAppIR
-
         get_current_app_ir = self.services.get("get_current_app_ir")
         if callable(get_current_app_ir):
             app_ir = get_current_app_ir()

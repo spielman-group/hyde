@@ -9,8 +9,8 @@
 - [x] Reuse the existing namespace metadata path for object pickers.
 - [x] Reuse the existing first-class figure target-discovery path used by
   `Modify Data Appearance`.
-- [x] Give the dialog one GUI-side fit state object and one fit codec under Hyde's
-  normal state/control pattern.
+- [x] Give the dialog one first-class `CurveFitIR` workflow object in `widget_ir`
+  under Hyde's normal IR-control pattern.
 - [x] Support `@hyde.fit_function` discovery as the only fit-function catalog path.
 - [x] Support multivariate fits as a first-class capability.
 - [x] Make the `lmfit` result object the authoritative fit output.
@@ -281,11 +281,13 @@ The dialog has two preview modes:
 - `Commands`
 - `Equation`
 
-The dialog owns one GUI-side fit state object and one fit codec. The codec:
+The dialog owns one GUI-side `CurveFitIR` workflow object in `widget_ir`.
+`CurveFitIR`:
 
-- normalizes state
-- validates state
-- builds command preview source
+- normalizes and validates dialog state
+- carries any opening/current/applied `FigureIR` snapshots needed for attached-
+  display preview and rollback
+- orchestrates package-pure lowering for command preview source
 - builds equation preview content from the selected function definition body when
   source is available
 
@@ -337,10 +339,11 @@ The synchronization contract is:
 - the fit result object is the authoritative fit output
 - graph displays are renderings derived from that fit result object
 - object pickers reuse the existing Python Variables metadata path
-- figure target discovery reuses the existing first-class figure snapshot path used by
-  `Modify Data Appearance`
+- figure target discovery reuses the existing first-class figure dialog context path,
+  with attached figure state entering Curve Fit as `FigureIR` snapshots carried by
+  `CurveFitIR`
 
-The dialog may cache only:
+`CurveFitIR` and the surrounding dialog may cache only:
 
 - transient normalized fit configuration
 - preview text

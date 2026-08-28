@@ -10,8 +10,6 @@ import tempfile
 
 BEGIN_MARKER = "# --- Hyde Window Macros: BEGIN ---"
 END_MARKER = "# --- Hyde Window Macros: END ---"
-BEGIN_FIT_FUNCTIONS_MARKER = "# --- Hyde Fit Functions: BEGIN ---"
-END_FIT_FUNCTIONS_MARKER = "# --- Hyde Fit Functions: END ---"
 
 
 class MacroStoreError(ValueError):
@@ -115,15 +113,6 @@ def inspect_macro_conflict(path, name):
     return inspect_bounded_conflict(path, name, BEGIN_MARKER, END_MARKER)
 
 
-def inspect_fit_function_conflict(path, name):
-    return inspect_bounded_conflict(
-        path,
-        name,
-        BEGIN_FIT_FUNCTIONS_MARKER,
-        END_FIT_FUNCTIONS_MARKER,
-    )
-
-
 def bounded_matches(text, name, begin_marker, end_marker):
     lines = text.splitlines(keepends=True)
     bounds = find_marker_bounds(lines, begin_marker, end_marker)
@@ -205,16 +194,6 @@ def update_macro_source(path, name, macro_source):
     return update_bounded_source(path, name, macro_source, BEGIN_MARKER, END_MARKER)
 
 
-def update_fit_function_source(path, name, function_source):
-    return update_bounded_source(
-        path,
-        name,
-        function_source,
-        BEGIN_FIT_FUNCTIONS_MARKER,
-        END_FIT_FUNCTIONS_MARKER,
-    )
-
-
 def write_bounded_source(path, name, definition_source, begin_marker, end_marker):
     updated = update_bounded_source(
         path,
@@ -242,16 +221,6 @@ def write_bounded_source(path, name, definition_source, begin_marker, end_marker
 
 def write_macro_source(path, name, macro_source):
     return write_bounded_source(path, name, macro_source, BEGIN_MARKER, END_MARKER)
-
-
-def write_fit_function_source(path, name, function_source):
-    return write_bounded_source(
-        path,
-        name,
-        function_source,
-        BEGIN_FIT_FUNCTIONS_MARKER,
-        END_FIT_FUNCTIONS_MARKER,
-    )
 
 
 def numbered_suffix(prefix, name, *, omit_zero=False):

@@ -1,25 +1,33 @@
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.plugins.plugin_tools import PluginFeature, add_menu_action
+from hyde.user_interface.shared.plugin import HydePlugin
 
 from .dialogs import ExampleDialog
 
 
-class Plugin(PluginFeature):
-    def on_plugin_available(self, name):
-        if name != "app_ready":
-            return
-        add_menu_action(
-            self,
-            menu_location="analysis",
-            action_name="Open Example Dialog",
-            callback=self.open_dialog,
+class Plugin(HydePlugin):
+    """Dialog surface.
+
+    Menu entries come from `get_menu_contributions()`. Valid `location` values
+    are `file`, `window`, `analysis`, `table`, and `figure`.
+    """
+
+    def get_menu_contributions(self):
+        return [
+            {
+                "location": "analysis",
+                "group": "example",
+                "group_order": 100,
+                "order": 10,
+                "name": "Example Dialog...",
+                "action": self.show_example_dialog,
+            }
+        ]
+
+    def show_example_dialog(self, checked=False):
+        del checked
+        dialog = ExampleDialog(
+            services=self.services,
+            parent=self.service("ui"),
         )
-
-    def open_dialog(self):
-        dialog = ExampleDialog(services=self.services, parent=self.parent_widget())
-        dialog.exec_()
-
-    def parent_widget(self):
-        mdi_area = self.service("mdi_area")
-        return None if mdi_area is None else mdi_area
+        return dialog.exec_() == QtWidgets.QDialog.Accepted

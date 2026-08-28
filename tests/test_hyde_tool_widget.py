@@ -1,5 +1,7 @@
+import ast
 import copy
 import os
+from pathlib import Path
 import sys
 import tempfile
 import unittest
@@ -9,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec
+from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.base_hyde_widgets import (
     HydeDialogWidget,
@@ -19,10 +21,15 @@ from hyde.user_interface.base_hyde_widgets import (
     HydeToolWidget,
 )
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR
+from hyde.features.matplotlib_ir import FigureIR
 import hyde.user_interface as ui_package
 from hyde.user_interface.shared.core import HydeIR
-from hyde.user_interface.shared.figure import FigureDialogIR, HydeFigureDialogWidget
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_IR import (
+    FigureDialogIR,
+)
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_widget import (
+    HydeFigureDialogWidget,
+)
 
 
 class DemoToolWidget(HydeToolWidget):
@@ -201,24 +208,33 @@ class CreatingSuggestedPathFileDialog(SuggestedPathFileDialog):
     create_suggested_directory = True
 
 
-class FakeFigureWindow:
-    def __init__(self, figure_ir):
-        self.figure_number = 7
-        self.widget_ir = copy.deepcopy(figure_ir)
-
-
 class FakeFigureContext:
     def __init__(self, figure_ir, *, figure_name="Figure0"):
         self.figure_number = 7
-        self._figure_window = FakeFigureWindow(figure_ir)
+        self._figure_ir = copy.deepcopy(figure_ir)
         self._figure_name = str(figure_name)
 
     def figure_name(self):
         return self._figure_name
 
+    def current_figure_ir(self):
+        return copy.deepcopy(self._figure_ir)
+
+    def current_size_inches(self):
+        size = self._figure_ir.figure_size()
+        if size in (None, ""):
+            return None
+        return (float(size[0]), float(size[1]))
+
+    def has_supported_traces(self):
+        return self._figure_ir.has_supported_traces()
+
+    def supported_trace_records(self):
+        return self._figure_ir.supported_trace_records()
+
 
 def make_demo_figure_ir(title="Figure0", items=("trace_a",)):
-    return FigureIRCodec.validate_state(
+    return FigureIRAuthority.validate_state(
         FigureIR()
         .with_title(title)
         .with_x_name("x")
@@ -256,24 +272,45 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertIs(dialog.service("demo_service"), service)
         self.assertEqual(dialog.service("missing", "fallback"), "fallback")
 
-    def test_ir_python_source_can_skip_state_debug_logging_for_preview(self):
-        state = DemoCommandIR()
-        state.set_path("/tmp/demo.hy")
-
-        with patch(
-            "hyde.user_interface.shared.core.log_hyde_state_debug"
-        ) as log_debug:
-            preview_source = state.python_source(log=False)
-            committed_source = state.python_source()
-
-        self.assertEqual(preview_source, "emit('/tmp/demo.hy')")
-        self.assertEqual(committed_source, preview_source)
-        log_debug.assert_called_once()
-
     def test_user_interface_package_exports_only_current_ir_contract(self):
         self.assertIn("HydeIR", ui_package.__all__)
         self.assertIn("HydeIRDiff", ui_package.__all__)
         self.assertNotIn("HydeGuiState", ui_package.__all__)
+
+    def test_figure_dialog_ir_stays_qt_free_and_widget_base_stays_in_widget_module(self):
+        ir_path = (
+            Path(__file__).parents[1]
+            / "hyde/user_interface/plugins/figure_control_dialog/figure_dialog_IR.py"
+        )
+        widget_path = (
+            Path(__file__).parents[1]
+            / "hyde/user_interface/plugins/figure_control_dialog/figure_dialog_widget.py"
+        )
+        ir_tree = ast.parse(ir_path.read_text())
+        widget_tree = ast.parse(widget_path.read_text())
+
+        ir_import_modules = {
+            node.module
+            for node in ast.walk(ir_tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        ir_import_names = {
+            alias.name
+            for node in ast.walk(ir_tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+        ir_class_names = {
+            node.name for node in ast.walk(ir_tree) if isinstance(node, ast.ClassDef)
+        }
+        widget_class_names = {
+            node.name for node in ast.walk(widget_tree) if isinstance(node, ast.ClassDef)
+        }
+
+        self.assertFalse(any(name.startswith("qtutils") for name in ir_import_modules))
+        self.assertFalse(any(name.startswith("Qt") for name in ir_import_names))
+        self.assertNotIn("HydeFigureDialogWidget", ir_class_names)
+        self.assertIn("HydeFigureDialogWidget", widget_class_names)
 
     def test_dialog_base_stores_services_without_tool_shell(self):
         service = object()
@@ -619,10 +656,14 @@ class TestHydeToolWidget(unittest.TestCase):
 
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
+            selected_path = dialog.refresh_from_file_selection()
             dialog.do_it_button.click()
 
             expected_payload = f"emit({os.path.abspath(project_dir)!r})"
+            self.assertEqual(selected_path, os.path.abspath(project_dir))
             self.assertIs(dialog.mounted_child, dialog.file_widget)
+            self.assertIsInstance(dialog.widget_ir, DemoCommandIR)
+            self.assertEqual(dialog.widget_ir.python_source(log=False), expected_payload)
             self.assertEqual(
                 dialog.file_widget.selectedNameFilter(),
                 "Demo Packages (*.hy)",
@@ -779,7 +820,7 @@ class TestHydeToolWidget(unittest.TestCase):
                 dialog.widget_ir.opening_figure_ir,
                 dialog.widget_ir.current_figure_ir,
             )
-            expected_patch = patch_state.python_source(log=False)
+            explicit_patch = patch_state.python_source(log=False)
 
             self.assertIs(dialog.figure_context, figure_context)
             self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
@@ -790,6 +831,8 @@ class TestHydeToolWidget(unittest.TestCase):
                 "trace0",
             )
 
+            expected_patch = dialog.widget_ir.python_source(log=False)
+            self.assertEqual(expected_patch, explicit_patch)
             dialog.refresh_figure_preview()
 
             self.assertEqual(dialog.preview_string(), expected_patch)
@@ -833,6 +876,10 @@ class TestHydeToolWidget(unittest.TestCase):
             self.assertEqual(dialog.lower_text_edit.toPlainText(), "")
         finally:
             dialog.close()
+
+    def test_figure_dialog_rejects_context_without_explicit_interface(self):
+        with self.assertRaises(TypeError):
+            DemoFigureDialogWidget(figure_context=object())
 
     def test_bind_subwindow_uses_window_identifier_as_default_object_name(self):
         mdi_area = QtWidgets.QMdiArea()

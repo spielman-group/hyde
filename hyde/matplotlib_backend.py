@@ -32,7 +32,7 @@ from hyde.features.matplotlib_features import (
     operand_from_runtime_value,
 )
 from hyde.user_interface.shared.project import resolve_requested_name
-from hyde.user_interface.shared.figure import COMM_TARGET
+from hyde.execution.comms import FIGURE_COMM_TARGET
 
 
 _BUILD_SESSION_LOCAL = threading.local()
@@ -859,18 +859,6 @@ def _resolve_live_axis(figure, subplot_id=None):
     raise ValueError(f"Unknown live subplot id: {subplot_id!r}.")
 
 
-def _resolve_live_line(axis, trace_id=None):
-    lines = list(axis.lines)
-    if not lines:
-        raise ValueError("Figure axis does not contain any traces.")
-    if trace_id in (None, ""):
-        return lines[0]
-    for line in lines:
-        if getattr(line, "_hyde_trace_id", None) == str(trace_id):
-            return line
-    raise ValueError(f"Unknown live trace id: {trace_id!r}.")
-
-
 def _figure_trace_styles(figure, figure_ir):
     styles = {}
     normalized = MatplotlibCodec.validate_state(figure_ir)
@@ -1181,35 +1169,6 @@ def _import_first_class_figure_ir(figure, namespace=None):
     return MatplotlibCodec.validate_state(imported), (
         None if not warnings else warnings[0]
     )
-
-
-def _apply_line_style(line, kwargs):
-    if "visible" in kwargs:
-        line.set_visible(bool(kwargs["visible"]))
-    if "alpha" in kwargs:
-        line.set_alpha(kwargs["alpha"])
-    if "color" in kwargs:
-        line.set_color(kwargs["color"])
-    if "drawstyle" in kwargs:
-        line.set_drawstyle(kwargs["drawstyle"])
-    if "marker" in kwargs:
-        marker = kwargs["marker"]
-        line.set_marker("None" if marker in (None, "", "none") else marker)
-    if "markersize" in kwargs:
-        line.set_markersize(kwargs["markersize"])
-    if "markerfacecolor" in kwargs:
-        line.set_markerfacecolor(kwargs["markerfacecolor"])
-    if "markeredgecolor" in kwargs:
-        line.set_markeredgecolor(kwargs["markeredgecolor"])
-    if "markeredgewidth" in kwargs:
-        line.set_markeredgewidth(kwargs["markeredgewidth"])
-    if "linestyle" in kwargs:
-        linestyle = kwargs["linestyle"]
-        line.set_linestyle("None" if linestyle in (None, "", "none") else linestyle)
-    if "linewidth" in kwargs:
-        line.set_linewidth(kwargs["linewidth"])
-    if "label" in kwargs:
-        line.set_label(kwargs["label"])
 
 
 def _semantic_axis(axis_name):
@@ -1573,7 +1532,7 @@ class FigureManagerHyde(FigureManagerBase):
                 self.num,
             )
         payload = self._payload(event="open")
-        comm = Comm(target_name=COMM_TARGET, data=payload)
+        comm = Comm(target_name=FIGURE_COMM_TARGET, data=payload)
         comm.on_msg(self._on_comm_message)
         comm.on_close(self._on_comm_close)
         self._comm = comm

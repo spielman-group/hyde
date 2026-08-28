@@ -4,12 +4,9 @@ from functools import partial
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore
 
+from hyde.execution.comms import FIGURE_COMM_TARGET
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
-from hyde.user_interface.shared.figure import COMM_TARGET, EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePlugin, blank_window_icon
-
-from .dialogs import NewFigureDialog
-from .window import FigureIR, FigureWindow
 
 
 LOGGER = logging.getLogger("hyde")
@@ -21,6 +18,8 @@ class FigureWorkspaceService:
         self.figures = {}
 
     def open_or_update_figure(self, payload):
+        from .window import FigureWindow
+
         figure_number = int(payload.get("figure_number"))
         snapshot = dict(payload.get("snapshot", {}) or {})
         if not snapshot.get("is_first_class", False):
@@ -98,6 +97,8 @@ class FigureFeatureService:
         self.plugin = plugin
 
     def show_new_figure_dialog(self, objects_metadata, preselection=None, parent=None):
+        from .dialogs import NewFigureDialog
+
         dialog = NewFigureDialog(
             objects_metadata,
             preselection=preselection,
@@ -122,6 +123,9 @@ class FigureContextService:
         self.plugin = plugin
 
     def active_editable_figure(self):
+        from .window import FigureWindow
+        from .context import EditableFigureContext
+
         figure_window = active_interactive_window(self.plugin.services, FigureWindow)
         if figure_window is None or not figure_window.is_editable_figure_ready():
             return None
@@ -190,6 +194,8 @@ class Plugin(HydePlugin):
         )
 
     def on_subwindow_activated(self, subwindow):
+        from .window import FigureWindow
+
         show_menu = self.services.get("show_menu")
         hide_menu = self.services.get("hide_menu")
         widget = None if subwindow is None else subwindow.widget()
@@ -250,6 +256,8 @@ class Plugin(HydePlugin):
 
     def on_project_activated(self, data):
         del data
+        from hyde.features.matplotlib_ir import FigureIR
+
         self.figure_macros = []
         self.rebuild_configured_window_macros_menu()
         self.services["python_execution_service"].execute_hidden(
@@ -288,7 +296,7 @@ class Plugin(HydePlugin):
         if kernel_client is self._registered_kernel_client:
             return
         if not kernel_runtime_service.register_comm_target(
-            COMM_TARGET,
+            FIGURE_COMM_TARGET,
             self._on_figure_comm_open,
         ):
             return

@@ -1,0 +1,8 @@
+schema: 1
+exclude:
+  - .DS_Store
+  - __pycache__/**
+  - "*.pyc"
+requires:
+  protocols:
+    - hyde/widget-family.md

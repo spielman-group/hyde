@@ -1,10 +1,11 @@
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.shared.figure import (
-    HydeFigureDialogWidget,
+from hyde.features.matplotlib_figure_state import (
     SUPPORTED_TRACE_STYLE_DEFAULTS,
     default_trace_color,
 )
+
+from .figure_dialog_widget import HydeFigureDialogWidget
 
 LINE_STYLE_CHOICES = [
     ("Solid", "-"),

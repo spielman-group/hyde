@@ -1,35 +1,18 @@
 # HydeInteractiveWidget Pattern
 
-Use this as the default target shape for Hyde interactive plugins.
+Default target shape for Hyde interactive plugins. Shared ownership, IR, and
+override rules live in `.agents/protocols/hyde/widget-family.md`; this file is the
+interactive-specific checklist.
 
-This reference is used in two modes:
-
-- implementation mode: build or normalize the interactive code
-- planning mode: help `to-issues` capture the intended standard shape before code
-  exists
-
-## Ownership Split
-
-`HydeInteractiveWidget` should own:
+## What The Base Owns
 
 - stable window naming
 - subwindow binding
-- geometry/window-state capture
+- geometry and window-state capture
 - macro/session-restore scaffolding
 - tracked namespace-state bookkeeping
 
-The subclass should own:
-
-- the actual interactive content
-- domain refresh behavior
-- explicit saveable source methods
-- domain behavior and command generation
-
 ## Good Override Reasons
-
-Keep a subclass override only when it adds real local policy.
-
-Examples:
 
 - `tracked_namespace_names()` declares which namespace objects drive refreshes
 - `on_stable_name_bound(...)` must update domain state from the final stable name
@@ -37,39 +20,28 @@ Examples:
 
 ## Bad Override Reasons
 
-Delete structure that only:
-
-- reimplements stable-name plumbing
-- duplicates window-state capture
-- wraps existing save/restore helpers without adding policy
-- mirrors tracked namespace state locally without a real need
-
-## Feature Ownership
-
-Use `hyde/features/..._features.py` for:
-
-- validation
-- command lowering
-- package-specific logic
-
-Two common cases:
-
-1. The interactive widget owns the domain package or surface.
-2. The interactive widget uses a package/domain owned elsewhere and should call that
-   feature owner.
+- reimplementing stable-name plumbing
+- duplicating window-state capture
+- wrapping existing save/restore helpers without adding policy
+- mirroring tracked namespace state locally without a real need
 
 ## New Plugin Checklist
 
-- plugin package name follows Hyde suffix taxonomy
+- package name ends in `_interactive`
 - static layout is in `.ui`
-- interactive subclass extends `HydeInteractiveWidget`
+- the widget subclasses `HydeInteractiveWidget`
+- `widget_ir` holds the live current object IR for the window
 - stable window naming is base-owned
-- save/restore source is explicit and tested
+- creation adds the window to the MDI area with delete-on-close, binds the
+  subwindow, and registers it with the plugin's workspace service
+- save/restore source lowers from `widget_ir` and is tested
 - namespace-driven refresh behavior is explicit and tested
 
-## Existing Plugin Normalization Checklist
+## Normalization Checklist
 
 - remove duplicated stable-name plumbing
 - remove duplicated save/restore wrapper layers
 - collapse namespace tracking onto the base contract
-- move domain lowering into the feature layer if duplicated in the widget
+- move any locally assembled command text onto `widget_ir`
+- move package-local string lowering into `hyde/features/<package>_features.py`,
+  keeping validation and state normalization on the IR class

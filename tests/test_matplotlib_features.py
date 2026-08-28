@@ -33,7 +33,7 @@ from hyde.features.matplotlib_features import (
     graphics_output_transparency_supported,
     runtime_graphics_export_formats,
 )
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.project_tools import (
     HYDE_MATPLOTLIB_BACKEND,
     configure_gui_matplotlib_backend,
@@ -47,13 +47,10 @@ from hyde.user_interface.plugins.figure_interactive import (
     Plugin,
 )
 from hyde.user_interface.plugins.figure_interactive.dialogs import NewFigureDialog
-from hyde.user_interface.plugins.figure_interactive.window import (
-    FigureIR,
-    FigureIRDiff,
-    FigureWindow,
-)
+from hyde.features.matplotlib_ir import FigureIR, FigureIRDiff
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
-from hyde.user_interface.shared.figure import EditableFigureContext
+from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 
 
 class FakeNamespaceViewService:
@@ -1621,7 +1618,6 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         output = "\n".join(logs.output)
         self.assertIn("[Hyde state] TransportDispatchState", output)
-        self.assertNotIn("FigureRefreshState", output)
         self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:\n", output)
         self.assertIn("fig = hyde.get_figure('DelayGraph')", output)

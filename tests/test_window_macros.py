@@ -34,7 +34,7 @@ from unittest.mock import patch
 
 
 def build_table_macro_source(macro_name, names, name=None, geometry=None, column_widths=None):
-    from hyde.user_interface.plugins.table_interactive.window import TableIR
+    from hyde.features.hyde_ir import TableIR
 
     state = TableIR(
         names=tuple(names or ()),

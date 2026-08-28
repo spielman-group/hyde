@@ -230,7 +230,7 @@
   <customwidget>
    <class>MatplotlibColorLineEdit</class>
    <extends>QLineEdit</extends>
-   <header>hyde.user_interface.shared.figure</header>
+   <header>hyde.user_interface.plugins.figure_control_dialog.matplotlib_widgets</header>
   </customwidget>
  </customwidgets>
  <resources/>

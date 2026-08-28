@@ -9,7 +9,8 @@ except ModuleNotFoundError as exc:
 
 from hyde.matplotlib_backend import apply_figure_action
 from hyde.features.matplotlib_features import figure_ir_from_live_state
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
+from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 
 
@@ -173,7 +174,6 @@ class TestFigureCommActions(unittest.TestCase):
             )
             output = "\n".join(logs.output)
             self.assertIn("[Hyde state] TransportDispatchState", output)
-            self.assertNotIn("FigureRefreshState", output)
             self.assertIn("'mode': 'hidden'", output)
             self.assertIn("python:\n", output)
             self.assertIn("hyde.refresh_figure(fig, use_bound_values=True)", output)

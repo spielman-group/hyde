@@ -5,6 +5,7 @@ from qtutils.qt import QtWidgets, QtCore
 from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 from labscript_utils.filewatcher import FileWatcher
 
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.paths import (
     HYDE_DIR,
     get_project_paths,
@@ -234,8 +235,6 @@ class HydeApp:
         return self.current_project_dir
 
     def _build_current_app_ir(self):
-        from hyde.user_interface.plugins.file.dialogs import HydeAppIR
-
         return HydeAppIR(current_project_dir=self.current_project_dir)
 
     def get_current_app_ir(self):
@@ -456,8 +455,6 @@ class HydeApp:
         if project_dir is None:
             return
         if app_ir is None:
-            from hyde.user_interface.plugins.file.dialogs import HydeAppIR
-
             app_ir = HydeAppIR(current_project_dir=project_dir)
         reload_ir = app_ir.with_reload_procedures(
             project_dir,

@@ -1,497 +1,15 @@
-import copy
-from dataclasses import replace as dataclass_replace
-
 from qtutils.qt import QtCore, QtWidgets
 
 from hyde.features.lmfit_features import (
     CALCULATED_X_NAME,
-    LmfitCodec,
     attached_display_label,
 )
-from hyde.user_interface.shared.core import HydeIR
-from hyde.user_interface.shared.figure import (
-    FigureDialogIR,
-    FigureDisplayHelper,
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_widget import (
     HydeFigureDialogWidget,
 )
 
 from .fit_function_scaffolding import CurveFitCatalogError
-
-
-class CurveFitIR(HydeIR):
-    codec = LmfitCodec
-    display_helper = FigureDisplayHelper()
-
-    def __init__(self, *, figure_dialog_ir=None, state=None):
-        self.figure_dialog_ir = (
-            FigureDialogIR()
-            if figure_dialog_ir is None
-            else copy.deepcopy(figure_dialog_ir)
-        )
-        self._state = self.codec.default_state() if state is None else self.codec.normalize_state(state)
-        self._context = {}
-        self.show_fit = False
-        self.show_residuals = False
-        self._emit_lmfit_source = True
-        self._emit_attached_display = False
-        self._attached_display_root_name = None
-        self.set_commit_command()
-
-    @classmethod
-    def from_figure_context(cls, figure_context):
-        return cls(figure_dialog_ir=FigureDialogIR.from_figure_context(figure_context))
-
-    def debug_state(self):
-        return {
-            "state": self.codec.normalize_state(self._state),
-            "context": copy.deepcopy(self._context),
-            "show_fit": bool(self.show_fit),
-            "show_residuals": bool(self.show_residuals),
-            "emit_lmfit_source": bool(self._emit_lmfit_source),
-            "emit_attached_display": bool(self._emit_attached_display),
-            "attached_display_root_name": self._attached_display_root_name,
-            "figure_dialog_ir": self.figure_dialog_ir.debug_state(),
-        }
-
-    def validate(self):
-        self.codec.validate_state(self._state)
-        return self
-
-    def normalized_state(self):
-        return self.codec.normalize_state(self._state)
-
-    def present_state(self):
-        return self.codec.present_state(self._state, context=self._context)
-
-    def set_context(self, context):
-        self._context = copy.deepcopy(context or {})
-        return self
-
-    def apply_action(self, action):
-        self._state = self.codec.update_state(self._state, action)
-        return self
-
-    def set_command(self, command):
-        self._emit_lmfit_source = True
-        self._emit_attached_display = False
-        self._attached_display_root_name = None
-        self.apply_action({"type": "set_command", "command": str(command)})
-        return self
-
-    def set_commit_command(self):
-        self.set_command("commit")
-        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
-        self.apply_action({"type": "clear", "path": ("settings", "target_name")})
-        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
-        return self
-
-    def set_preview_command(self, *, preview_target_name):
-        self.set_command("preview")
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "preview_target_name"),
-                "value": str(preview_target_name),
-            }
-        )
-        self.apply_action({"type": "clear", "path": ("settings", "target_name")})
-        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
-        return self
-
-    def set_live_command(
-        self,
-        *,
-        previous_target_name,
-        restore_store_name,
-        missing_sentinel_name,
-    ):
-        self.set_command("live")
-        if previous_target_name:
-            self.apply_action(
-                {
-                    "type": "set",
-                    "path": ("settings", "previous_target_name"),
-                    "value": str(previous_target_name),
-                }
-            )
-        else:
-            self.apply_action(
-                {"type": "clear", "path": ("settings", "previous_target_name")}
-            )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "restore_store_name"),
-                "value": str(restore_store_name),
-            }
-        )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "missing_sentinel_name"),
-                "value": str(missing_sentinel_name),
-            }
-        )
-        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
-        self.apply_action({"type": "clear", "path": ("settings", "target_name")})
-        return self
-
-    def set_store_target_command(
-        self,
-        target_name,
-        *,
-        restore_store_name,
-        missing_sentinel_name,
-    ):
-        self.set_command("store_target")
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "target_name"),
-                "value": str(target_name),
-            }
-        )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "restore_store_name"),
-                "value": str(restore_store_name),
-            }
-        )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "missing_sentinel_name"),
-                "value": str(missing_sentinel_name),
-            }
-        )
-        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
-        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
-        return self
-
-    def set_restore_target_command(
-        self,
-        target_name,
-        *,
-        restore_store_name,
-        missing_sentinel_name,
-    ):
-        self.set_command("restore_target")
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "target_name"),
-                "value": str(target_name),
-            }
-        )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "restore_store_name"),
-                "value": str(restore_store_name),
-            }
-        )
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "missing_sentinel_name"),
-                "value": str(missing_sentinel_name),
-            }
-        )
-        self.apply_action({"type": "clear", "path": ("settings", "preview_target_name")})
-        self.apply_action({"type": "clear", "path": ("settings", "previous_target_name")})
-        return self
-
-    def set_x_name(self, independent_var, x_name):
-        path = ("settings", "x_names", str(independent_var))
-        if x_name:
-            self.apply_action({"type": "set", "path": path, "value": x_name})
-        else:
-            self.apply_action({"type": "clear", "path": path})
-        return self
-
-    def set_fit_result_name(self, fit_result_name, *, locked):
-        if fit_result_name:
-            self.apply_action(
-                {
-                    "type": "set",
-                    "path": ("settings", "fit_result_name"),
-                    "value": fit_result_name,
-                }
-            )
-        else:
-            self.apply_action({"type": "clear", "path": ("settings", "fit_result_name")})
-        self.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "fit_result_name_locked"),
-                "value": bool(locked and fit_result_name),
-            }
-        )
-        return self
-
-    def set_coefficient_field(self, parameter_name, field_name, value):
-        path = ("settings", "coefficients", str(parameter_name), str(field_name))
-        if field_name == "vary":
-            self.apply_action({"type": "set", "path": path, "value": bool(value)})
-            return self
-        if str(value or "").strip():
-            self.apply_action(
-                {"type": "set", "path": path, "value": str(value).strip()}
-            )
-        else:
-            self.apply_action({"type": "clear", "path": path})
-        return self
-
-    def set_attached_display(self, *, show_fit=None, show_residuals=None):
-        if show_fit is not None:
-            self.show_fit = bool(show_fit)
-        if show_residuals is not None:
-            self.show_residuals = bool(show_residuals)
-        return self
-
-    def set_emit_lmfit_source(self, enabled):
-        self._emit_lmfit_source = bool(enabled)
-        return self
-
-    def set_attached_display_lowering(self, *, root_name=None, enabled=True):
-        self._emit_attached_display = bool(enabled)
-        self._attached_display_root_name = (
-            None if root_name in (None, "") else str(root_name).strip()
-        )
-        return self
-
-    def clear_attached_display_lowering(self):
-        return self.set_attached_display_lowering(root_name=None, enabled=False)
-
-    @property
-    def opening_figure_ir(self):
-        return self.figure_dialog_ir.opening_figure_ir
-
-    @property
-    def current_figure_ir(self):
-        return self.figure_dialog_ir.current_figure_ir
-
-    def set_current_figure_ir(self, figure_ir):
-        self.figure_dialog_ir = self.figure_dialog_ir.with_current_figure_ir(figure_ir)
-        return self
-
-    @property
-    def applied_figure_ir(self):
-        return self.figure_dialog_ir.applied_figure_ir
-
-    def set_applied_figure_ir(self, figure_ir):
-        self.figure_dialog_ir = self.figure_dialog_ir.with_applied_figure_ir(figure_ir)
-        return self
-
-    def opening_effective_state(self):
-        state = self.figure_dialog_ir.opening_effective_state()
-        return None if state is None else copy.deepcopy(state)
-
-    def applied_effective_state(self):
-        state = self.figure_dialog_ir.applied_effective_state()
-        return None if state is None else copy.deepcopy(state)
-
-    def current_effective_state(self):
-        state = self.figure_dialog_ir.current_effective_state()
-        return None if state is None else copy.deepcopy(state)
-
-    def supported_trace_records(self):
-        return self.figure_dialog_ir.supported_trace_records()
-
-    def figure_patch_state(
-        self,
-        source_ir,
-        target_ir,
-        *,
-        refresh_trace_ids=(),
-        refresh_legend=True,
-    ):
-        return self.figure_dialog_ir.figure_patch_state(
-            source_ir,
-            target_ir,
-            refresh_trace_ids=refresh_trace_ids,
-            refresh_legend=refresh_legend,
-        )
-
-    def attached_display_state_from_effective(self, effective_state):
-        if effective_state is None:
-            return None
-        layout = dict(effective_state.get("layout", {}) or {})
-        subplots = list(layout.get("subplots", []) or [])
-        if not subplots:
-            return None
-        subplot = dict(subplots[0] or {})
-        subplot_id = str(subplot.get("id") or "subplot0")
-        fit_trace = None
-        residual_trace = None
-        fit_root_name = None
-        residual_root_name = None
-        fit_result_name = None
-        for trace in list(subplot.get("traces", []) or []):
-            y_source = dict(trace.get("y_source") or {})
-            if y_source.get("kind") != "attribute_path":
-                continue
-            root = dict(y_source.get("root") or {})
-            path = tuple(y_source.get("path") or ())
-            trace_label = self.display_helper.trace_label(trace)
-            if path == ("best_fit",):
-                fit_trace = dict(trace)
-                fit_root_name = root.get("value")
-                fit_result_name = trace_label or fit_result_name
-            elif path == ("residual",):
-                residual_trace = dict(trace)
-                residual_root_name = root.get("value")
-                fit_result_name = (
-                    fit_result_name
-                    or (
-                        None
-                        if trace_label is None
-                        else trace_label.replace("_residuals", "").strip() or None
-                    )
-                )
-        return {
-            "subplot_id": subplot_id,
-            "show_fit": fit_trace is not None,
-            "show_residuals": residual_trace is not None,
-            "fit_trace_id": None if fit_trace is None else fit_trace.get("id"),
-            "fit_trace": fit_trace,
-            "fit_root_name": fit_root_name,
-            "residual_trace_id": None if residual_trace is None else residual_trace.get("id"),
-            "residual_trace": residual_trace,
-            "residual_root_name": residual_root_name,
-            "fit_result_name": fit_result_name,
-        }
-
-    def current_attached_display_state(self):
-        display_state = self.attached_display_state_from_effective(
-            self.applied_effective_state()
-        )
-        if display_state is None:
-            return None
-        fit_result_name = None
-        if self.show_fit or self.show_residuals:
-            fit_result_name = str(
-                self.present_state().get("fit_result_name") or ""
-            ).strip()
-        return {
-            "subplot_id": display_state["subplot_id"],
-            "show_fit": bool(self.show_fit),
-            "show_residuals": bool(self.show_residuals),
-            "fit_result_name": fit_result_name or None,
-        }
-
-    def attached_plot_x_name(self):
-        x_rows = list(self.present_state().get("x_rows") or [])
-        if not x_rows:
-            return None
-        x_name = x_rows[0].get("value")
-        if x_name == CALCULATED_X_NAME:
-            return None
-        return x_name
-
-    def sync_attached_display_draft(self, *, root_name):
-        target_ir = self.applied_figure_ir or self.current_figure_ir
-        if target_ir is None:
-            return self.applied_figure_ir
-        desired_state = self.current_attached_display_state()
-        if desired_state is None:
-            return self.applied_figure_ir
-        has_plot = bool(desired_state["show_fit"] or desired_state["show_residuals"])
-        fit_result_name = (
-            str(desired_state.get("fit_result_name") or "").strip() if has_plot else None
-        )
-        resolved_root_name = (
-            str(root_name).strip() if root_name is not None else fit_result_name
-        )
-        current_display = self.attached_display_state_from_effective(
-            self.applied_effective_state()
-        ) or {}
-        owner_root_names = (
-            self.normalized_state()["settings"].get("preview_target_name"),
-            current_display.get("fit_result_name"),
-            current_display.get("fit_root_name"),
-            current_display.get("residual_root_name"),
-            resolved_root_name,
-        )
-        draft_ir = target_ir.set_attribute_path_lines(
-            fit_result_name,
-            subplot_id=desired_state["subplot_id"],
-            root_name=resolved_root_name,
-            x_name=self.attached_plot_x_name(),
-            owner_root_names=owner_root_names,
-            components=(
-                {
-                    "component": "best_fit",
-                    "visible": desired_state["show_fit"],
-                    "label": (
-                        None
-                        if fit_result_name is None
-                        else attached_display_label(fit_result_name, "best_fit")
-                    ),
-                    "style": {"linestyle": "--"},
-                },
-                {
-                    "component": "residual",
-                    "visible": desired_state["show_residuals"],
-                    "id_suffix": "_residuals",
-                    "label": (
-                        None
-                        if fit_result_name is None
-                        else attached_display_label(fit_result_name, "residual")
-                    ),
-                    "style": {"linestyle": ":"},
-                },
-            ),
-        )
-        return dataclass_replace(draft_ir, figure_state=draft_ir.effective_state())
-
-    def attached_display_command_source(self, *, root_name):
-        target_state = self.sync_attached_display_draft(root_name=root_name)
-        resolved_root_name = (
-            str(root_name).strip() if root_name is not None else None
-        )
-        refresh_trace_ids = ()
-        preview_target_name = self.normalized_state()["settings"].get("preview_target_name")
-        target_display = self.attached_display_state_from_effective(
-            None if target_state is None else target_state.effective_state()
-        ) or {}
-        if resolved_root_name == preview_target_name:
-            refresh_ids = []
-            if target_display.get("show_fit") and target_display.get("fit_trace_id"):
-                refresh_ids.append(target_display["fit_trace_id"])
-            if (
-                target_display.get("show_residuals")
-                and target_display.get("residual_trace_id")
-            ):
-                refresh_ids.append(target_display["residual_trace_id"])
-            refresh_trace_ids = tuple(refresh_ids)
-        patch_state = self.figure_patch_state(
-            self.applied_effective_state(),
-            target_state,
-            refresh_trace_ids=refresh_trace_ids,
-        )
-        patch_code = "" if patch_state is None else patch_state.python_source(log=False)
-        return patch_code, target_state
-
-    def resolved_python_bundle(self):
-        command_parts = []
-        if self._emit_lmfit_source:
-            lmfit_source = self.codec.state_to_python(self._state, context=self._context)
-            if str(lmfit_source or "").strip():
-                command_parts.append(str(lmfit_source).strip())
-        target_state = None
-        if self._emit_attached_display:
-            patch_code, target_state = self.attached_display_command_source(
-                root_name=self._attached_display_root_name
-            )
-            if str(patch_code or "").strip():
-                command_parts.append(str(patch_code).strip())
-        return "\n".join(command_parts), target_state
-
-    def _python_source(self):
-        source, _target_state = self.resolved_python_bundle()
-        return source
+from .curve_fit_IR import CurveFitIR
 
 
 class CurveFitDialog(HydeFigureDialogWidget):
@@ -539,6 +57,8 @@ class CurveFitDialog(HydeFigureDialogWidget):
         self._loading_controls = False
         self._current_model = None
         self._live_error_message = ""
+        self._preview_mode = "Commands"
+        self._suppress_screen_updates = True
         super().__init__(
             parent=parent,
             services=dict(services or {}),
@@ -632,8 +152,7 @@ class CurveFitDialog(HydeFigureDialogWidget):
         return bool(model.get("valid")) and not bool(self._live_error_message)
 
     def can_send_to_cmd_line(self):
-        model = self._current_model or {}
-        if str(model.get("preview_mode") or "Commands") != "Commands":
+        if self._preview_mode != "Commands":
             return False
         return self.service("visible_terminal_service") is not None
 
@@ -750,9 +269,37 @@ class CurveFitDialog(HydeFigureDialogWidget):
             self.x_data_form.removeRow(0)
         self.x_data_rows = []
 
+    def _x_data_row_widgets_match(self, rows):
+        if len(self.x_data_rows) != len(rows):
+            return False
+        for row_widgets, row in zip(self.x_data_rows, rows):
+            combo = row_widgets["combo"]
+            if row_widgets["name"] != row["name"]:
+                return False
+            if combo.count() != len(row["options"]):
+                return False
+            for index, option in enumerate(row["options"]):
+                if combo.itemText(index) != option:
+                    return False
+        return True
+
+    def _sync_x_data_row_values(self, rows):
+        for row_widgets, row in zip(self.x_data_rows, rows):
+            combo = row_widgets["combo"]
+            blocker = QtCore.QSignalBlocker(combo)
+            try:
+                index = combo.findText(row["value"] or "")
+                combo.setCurrentIndex(index)
+            finally:
+                del blocker
+
     def _rebuild_x_data_rows(self, model):
+        rows = list(model["x_rows"])
+        if self._x_data_row_widgets_match(rows):
+            self._sync_x_data_row_values(rows)
+            return
         self._clear_x_data_rows()
-        for row in model["x_rows"]:
+        for row in rows:
             combo = QtWidgets.QComboBox(self.x_data_container)
             for option in row["options"]:
                 combo.addItem(option)
@@ -856,16 +403,14 @@ class CurveFitDialog(HydeFigureDialogWidget):
             weighting_index = self.weighting_combo.findText(model["weighting_name"])
             self.weighting_combo.setCurrentIndex(weighting_index)
             self.suppress_screen_updates_checkbox.setChecked(
-                bool(model["suppress_screen_updates"])
+                self._suppress_screen_updates
             )
 
             self.fit_result_target_combo.clear()
             for option in model["fit_result_options"]:
                 self.fit_result_target_combo.addItem(option)
             self.fit_result_target_combo.setEditText(model["fit_result_name"])
-            preview_index = self.preview_mode_combo.findText(
-                str(model.get("preview_mode") or "Commands")
-            )
+            preview_index = self.preview_mode_combo.findText(self._preview_mode)
             self.preview_mode_combo.setCurrentIndex(preview_index)
 
             self._update_status_label(model["status_message"])
@@ -926,11 +471,18 @@ class CurveFitDialog(HydeFigureDialogWidget):
     ):
         self.widget_ir.set_context(self._context())
         self._current_attached_display_state()
-        self.widget_ir.set_emit_lmfit_source(bool(include_preview_object))
+        command_parts = []
         if include_preview_object:
             self.widget_ir.set_preview_command(preview_target_name=self._preview_target_name)
-        self.widget_ir.set_attached_display_lowering(root_name=root_name)
-        return self.widget_ir.resolved_python_bundle()
+            preview_code = self.widget_ir.python_source(log=False)
+            if str(preview_code or "").strip():
+                command_parts.append(str(preview_code).strip())
+        patch_code, target_state = self.widget_ir.attached_display_command_source(
+            root_name=root_name
+        )
+        if str(patch_code or "").strip():
+            command_parts.append(str(patch_code).strip())
+        return "\n".join(command_parts), target_state
 
     def _execute_attached_display_command(self, code, *, mode, target_state):
         return self.apply_figure_patch_command(
@@ -948,8 +500,6 @@ class CurveFitDialog(HydeFigureDialogWidget):
         if self.execution_mode() == "suppressed":
             self.widget_ir.set_context(self._context())
             self.widget_ir.set_commit_command()
-            self.widget_ir.set_emit_lmfit_source(True)
-            self.widget_ir.clear_attached_display_lowering()
             commit_command = self.widget_ir.python_source(log=False)
             if str(commit_command or "").strip():
                 command_lines.append(str(commit_command))
@@ -965,9 +515,8 @@ class CurveFitDialog(HydeFigureDialogWidget):
 
     def _sync_preview_strings(self):
         model = self._current_model or {}
-        preview_mode = str(model.get("preview_mode") or "Commands")
         display_text = self._backing_command_source()
-        if preview_mode == "Equation":
+        if self._preview_mode == "Equation":
             display_text = str(model.get("equation_preview") or "")
         self.set_preview_string(
             self._backing_command_source(),
@@ -992,8 +541,6 @@ class CurveFitDialog(HydeFigureDialogWidget):
         if command is None and self.execution_mode() == "suppressed":
             self.widget_ir.set_context(self._context())
             self.widget_ir.set_commit_command()
-            self.widget_ir.set_emit_lmfit_source(True)
-            self.widget_ir.clear_attached_display_lowering()
             command = self.widget_ir.python_source(log=False)
         needs_rollback_snapshot = (
             bool(str(command or "").strip())
@@ -1008,8 +555,6 @@ class CurveFitDialog(HydeFigureDialogWidget):
                 restore_store_name=self._live_restore_store_name,
                 missing_sentinel_name=self._live_missing_sentinel_name,
             )
-            self.widget_ir.set_emit_lmfit_source(True)
-            self.widget_ir.clear_attached_display_lowering()
             snapshot_command = self.widget_ir.python_source(log=False)
             if snapshot_command and not python_execution_service.execute_hidden(
                 snapshot_command
@@ -1038,8 +583,6 @@ class CurveFitDialog(HydeFigureDialogWidget):
                         restore_store_name=self._live_restore_store_name,
                         missing_sentinel_name=self._live_missing_sentinel_name,
                     )
-                    self.widget_ir.set_emit_lmfit_source(True)
-                    self.widget_ir.clear_attached_display_lowering()
                     rollback_command = self.widget_ir.python_source(log=False)
                     if rollback_command:
                         python_execution_service.execute_hidden(rollback_command)
@@ -1172,8 +715,6 @@ class CurveFitDialog(HydeFigureDialogWidget):
             restore_store_name=self._live_restore_store_name,
             missing_sentinel_name=self._live_missing_sentinel_name,
         )
-        self.widget_ir.set_emit_lmfit_source(True)
-        self.widget_ir.clear_attached_display_lowering()
         live_command = self.widget_ir.python_source(log=False)
         success, message = self._run_commit_path(
             live_command,
@@ -1253,13 +794,7 @@ class CurveFitDialog(HydeFigureDialogWidget):
     def _on_suppress_screen_updates_toggled(self, checked):
         if self._loading_controls:
             return
-        self.widget_ir.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "suppress_screen_updates"),
-                "value": bool(checked),
-            }
-        )
+        self._suppress_screen_updates = bool(checked)
         self._after_relevant_state_change()
 
     def _on_show_fit_toggled(self, checked):
@@ -1285,14 +820,8 @@ class CurveFitDialog(HydeFigureDialogWidget):
     def _on_preview_mode_changed(self, preview_mode):
         if self._loading_controls:
             return
-        self.widget_ir.apply_action(
-            {
-                "type": "set",
-                "path": ("settings", "preview_mode"),
-                "value": str(preview_mode),
-            }
-        )
-        self._refresh_from_state()
+        self._preview_mode = "Equation" if str(preview_mode) == "Equation" else "Commands"
+        self.refresh_shell()
 
     def _on_coefficient_text_changed(self, parameter_name, field_name, value):
         if self._loading_controls:
@@ -1307,9 +836,7 @@ class CurveFitDialog(HydeFigureDialogWidget):
         self._after_relevant_state_change()
 
     def execution_mode(self):
-        if self._current_model is None:
-            return "suppressed"
-        return str(self._current_model.get("execution_mode") or "suppressed")
+        return "suppressed" if self._suppress_screen_updates else "live"
 
     def reject(self):
         python_execution_service = self.services.get("python_execution_service")
@@ -1323,8 +850,6 @@ class CurveFitDialog(HydeFigureDialogWidget):
                 restore_store_name=self._live_restore_store_name,
                 missing_sentinel_name=self._live_missing_sentinel_name,
             )
-            self.widget_ir.set_emit_lmfit_source(True)
-            self.widget_ir.clear_attached_display_lowering()
             rollback_command = self.widget_ir.python_source(log=False)
             if rollback_command:
                 python_execution_service.execute_hidden(rollback_command)

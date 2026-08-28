@@ -1,25 +1,26 @@
-from hyde.user_interface.plugins.plugin_tools import PluginFeature
+from hyde.user_interface.shared.plugin import HydeToolWindowPlugin
 
 from .window import ExampleTool
 
 
-class Plugin(PluginFeature):
-    def open_tool(self):
-        mdi_context = self.service("mdi_context")
-        if mdi_context is None:
-            return None
-        return mdi_context.show("example_tool")
+class Plugin(HydeToolWindowPlugin):
+    """Persistent tool window.
 
-    def descriptors(self):
-        return {
-            "example_tool": {
-                "context": "mdi",
-                "key": "example_tool",
-                "title": "Example Tool",
-                "factory": lambda parent=None, data=None: ExampleTool(
-                    parent=parent,
-                    services=self.services,
-                    window_identifier="example_tool",
-                ),
-            }
-        }
+    `HydeToolWindowPlugin` already contributes the Window-menu action, the MDI
+    window descriptor, and the show/hide lifecycle. Declare the class
+    attributes and build the widget; do not re-register the menu action.
+    """
+
+    session_key = "example_tool"
+    window_title = "Example Tool"
+    menu_name = "Example Tool"
+    window_size = (600, 400)
+    menu_order = 50
+    creation_policy = "lazy"
+
+    def create_tool_window_widget(self, parent=None):
+        return ExampleTool(
+            parent=parent,
+            services=self.services,
+            window_identifier=self.session_key,
+        )

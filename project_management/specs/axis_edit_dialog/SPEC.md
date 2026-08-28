@@ -359,12 +359,13 @@ The lower pane is a read-only draft preview/status surface:
   because the product rule here is a clean equivalent, not a rough approximation.
 - Date/time and category-axis semantics are excluded. Tabs remain present; only those
   truly non-equivalent controls stay out.
-- The feature adds shared reusable modules for:
+- The feature uses the shared figure-dialog family for:
   - active first-class-figure resolution and gating
   - common command emission/logging
-  - common edit-session snapshot plus `Live Update`, apply, and rollback behavior
+  - common `FigureDialogIR` snapshot handling plus `Live Update`, apply, and
+    rollback behavior
   - preview-pane and clipboard export plumbing
-- The feature adds an axis-specific draft state/codec layer that:
+- The feature adds an axis-specific dialog IR / draft-state layer that:
   - normalizes widget values
   - preserves incomplete local-only edits when `Live Update` is off or a field is mid-edit
   - validates numeric and text input

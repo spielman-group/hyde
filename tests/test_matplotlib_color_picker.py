@@ -6,10 +6,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.shared.figure import (
+from hyde.features.matplotlib_color import normalize_matplotlib_color_text
+from hyde.user_interface.plugins.figure_control_dialog.matplotlib_widgets import (
     MatplotlibColorDialog,
     MatplotlibColorLineEdit,
-    normalize_matplotlib_color_text,
 )
 
 

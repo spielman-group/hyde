@@ -1,5 +1,4 @@
 import copy
-import keyword
 import os
 import time
 
@@ -7,8 +6,8 @@ from qtutils import inmain_decorator
 from qtutils.qt import QtWidgets, QtCore, QtGui
 from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.base import is_eligible_for_numeric_series
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
-from hyde.user_interface.shared.core import HydeIR
 from hyde.user_interface.shared.plugin import HydeToolWindowPlugin, HydeToolWindowService
 
 NAMESPACE_VIEW_SETTINGS = {
@@ -24,60 +23,6 @@ NAMESPACE_VIEW_SETTINGS = {
     "exclude_callables_and_modules": True,
     "filter_on": True,
 }
-
-
-class PythonVariablesIR(HydeIR):
-    def __init__(
-        self,
-        *,
-        arrays=True,
-        variables=True,
-        strings=True,
-        info=True,
-        delete_names=(),
-    ):
-        self.arrays = bool(arrays)
-        self.variables = bool(variables)
-        self.strings = bool(strings)
-        self.info = bool(info)
-        self.delete_names = tuple(str(name) for name in delete_names if str(name).strip())
-
-    def with_view_state(self, *, arrays, variables, strings, info):
-        return type(self)(
-            arrays=arrays,
-            variables=variables,
-            strings=strings,
-            info=info,
-            delete_names=self.delete_names,
-        )
-
-    def with_delete_names(self, names):
-        return type(self)(
-            arrays=self.arrays,
-            variables=self.variables,
-            strings=self.strings,
-            info=self.info,
-            delete_names=tuple(names),
-        )
-
-    def session_state(self):
-        return {
-            "arrays": self.arrays,
-            "variables": self.variables,
-            "strings": self.strings,
-            "info": self.info,
-        }
-
-    def validate(self):
-        for name in self.delete_names:
-            if not name.isidentifier() or keyword.iskeyword(name):
-                raise ValueError(f"Invalid Python variable name: {name!r}")
-        return self
-
-    def _python_source(self):
-        if not self.delete_names:
-            return ""
-        return f"del {', '.join(self.delete_names)}"
 
 
 class SpyderFrontendComm(CommBase):
@@ -163,12 +108,6 @@ class PythonVariables(HydeToolWidget):
         self.model.setHorizontalHeaderLabels(["Name", "Type", "Value"])
         self.proxy_model = NamespaceFilterProxyModel()
         self.proxy_model.setSourceModel(self.model)
-        self.widget_ir = PythonVariablesIR(
-            arrays=self.ui.arraysCheckBox.isChecked(),
-            variables=self.ui.variablesCheckBox.isChecked(),
-            strings=self.ui.stringsCheckBox.isChecked(),
-            info=self.ui.infoCheckBox.isChecked(),
-        )
         self.ui.treeView.setModel(self.proxy_model)
         self.ui.treeView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.ui.treeView.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
@@ -195,7 +134,7 @@ class PythonVariables(HydeToolWidget):
         self.ui.treeView.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.ui.plotCheckBox.setEnabled(False)
 
-        self._apply_widget_ir_view_state()
+        self._apply_view_state()
         self._initialize_namespace_sync()
 
     def _initialize_namespace_sync(self):
@@ -259,17 +198,15 @@ class PythonVariables(HydeToolWidget):
         return copy.deepcopy(getattr(self, "_last_view", {}) or {})
 
     def get_session_toml_data(self):
-        return self.widget_ir.session_state()
+        return self.view_state()
 
     def restore_session_toml_data(self, info):
-        self.widget_ir = self.widget_ir.with_view_state(
+        self.set_view_state(
             arrays=bool(info.get("arrays", True)),
             variables=bool(info.get("variables", True)),
             strings=bool(info.get("strings", True)),
             info=bool(info.get("info", True)),
         )
-        self._sync_controls_from_widget_ir()
-        self._apply_widget_ir_view_state()
 
     def shutdown(self):
         if self._closed:
@@ -298,35 +235,40 @@ class PythonVariables(HydeToolWidget):
             value_item = QtGui.QStandardItem(metadata.get("view", ""))
             name_item.setData({"name": name, **metadata}, QtCore.Qt.UserRole)
             self.model.appendRow([name_item, type_item, value_item])
-        self._apply_widget_ir_view_state()
+        self._apply_view_state()
 
-    def _sync_controls_from_widget_ir(self):
+    def view_state(self):
+        return {
+            "arrays": self.ui.arraysCheckBox.isChecked(),
+            "variables": self.ui.variablesCheckBox.isChecked(),
+            "strings": self.ui.stringsCheckBox.isChecked(),
+            "info": self.ui.infoCheckBox.isChecked(),
+        }
+
+    def set_view_state(self, *, arrays, variables, strings, info):
         for widget, checked in (
-            (self.ui.arraysCheckBox, self.widget_ir.arrays),
-            (self.ui.variablesCheckBox, self.widget_ir.variables),
-            (self.ui.stringsCheckBox, self.widget_ir.strings),
-            (self.ui.infoCheckBox, self.widget_ir.info),
+            (self.ui.arraysCheckBox, arrays),
+            (self.ui.variablesCheckBox, variables),
+            (self.ui.stringsCheckBox, strings),
+            (self.ui.infoCheckBox, info),
         ):
             blocker = QtCore.QSignalBlocker(widget)
             widget.setChecked(bool(checked))
             del blocker
+        self._apply_view_state()
+        return self.view_state()
 
-    def _apply_widget_ir_view_state(self):
+    def _apply_view_state(self):
+        state = self.view_state()
         self.proxy_model.update_filters(
-            arrays=self.widget_ir.arrays,
-            variables=self.widget_ir.variables,
-            strings=self.widget_ir.strings,
+            arrays=state["arrays"],
+            variables=state["variables"],
+            strings=state["strings"],
         )
-        self.ui.infoPane.setVisible(self.widget_ir.info)
+        self.ui.infoPane.setVisible(state["info"])
 
     def _on_view_state_changed(self):
-        self.widget_ir = self.widget_ir.with_view_state(
-            arrays=self.ui.arraysCheckBox.isChecked(),
-            variables=self.ui.variablesCheckBox.isChecked(),
-            strings=self.ui.stringsCheckBox.isChecked(),
-            info=self.ui.infoCheckBox.isChecked(),
-        )
-        self._apply_widget_ir_view_state()
+        self._apply_view_state()
 
     def _on_selection_changed(self, selected, deselected):
         del selected, deselected
@@ -408,7 +350,7 @@ class PythonVariables(HydeToolWidget):
         python_execution_service = self.services.get("python_execution_service")
         if python_execution_service is None:
             return
-        payload = self.widget_ir.with_delete_names(names).python_source(log=False)
+        payload = HydeAppIR().with_delete_names(names).python_source(log=False)
         if payload:
             python_execution_service.execute_hidden(payload)
 

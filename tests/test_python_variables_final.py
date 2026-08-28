@@ -20,11 +20,10 @@ from qtconsole.client import QtKernelClient
 from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.plugins.python_variables_tool import (
     Plugin as PythonVariablesPlugin,
-    PythonVariablesIR,
     PythonVariables,
     PythonVariablesService,
 )
@@ -248,38 +247,38 @@ class TestPythonVariablesFinal(unittest.TestCase):
         )
 
     def test_filter_behavior_and_info_toggle(self):
-        self.assertIsInstance(self.browser.widget_ir, PythonVariablesIR)
+        self.assertIsNone(self.browser.widget_ir)
         self.assertTrue(self.browser.ui.infoPane.isVisible())
 
         self.browser.ui.variablesCheckBox.setChecked(False)
         self.browser.ui.stringsCheckBox.setChecked(False)
         process_events()
-        self.assertFalse(self.browser.widget_ir.variables)
-        self.assertFalse(self.browser.widget_ir.strings)
+        self.assertFalse(self.browser.ui.variablesCheckBox.isChecked())
+        self.assertFalse(self.browser.ui.stringsCheckBox.isChecked())
         self.assertEqual(sorted(current_names(self.browser)), ["arr", "df"])
 
         self.browser.ui.arraysCheckBox.setChecked(False)
         self.browser.ui.variablesCheckBox.setChecked(True)
         process_events()
-        self.assertFalse(self.browser.widget_ir.arrays)
-        self.assertTrue(self.browser.widget_ir.variables)
+        self.assertFalse(self.browser.ui.arraysCheckBox.isChecked())
+        self.assertTrue(self.browser.ui.variablesCheckBox.isChecked())
         self.assertEqual(current_names(self.browser), ["val"])
 
         self.browser.ui.variablesCheckBox.setChecked(False)
         self.browser.ui.stringsCheckBox.setChecked(True)
         process_events()
-        self.assertFalse(self.browser.widget_ir.variables)
-        self.assertTrue(self.browser.widget_ir.strings)
+        self.assertFalse(self.browser.ui.variablesCheckBox.isChecked())
+        self.assertTrue(self.browser.ui.stringsCheckBox.isChecked())
         self.assertEqual(current_names(self.browser), ["s"])
 
         self.browser.ui.infoCheckBox.setChecked(False)
         process_events()
-        self.assertFalse(self.browser.widget_ir.info)
+        self.assertFalse(self.browser.ui.infoCheckBox.isChecked())
         self.assertFalse(self.browser.ui.infoPane.isVisible())
 
         self.browser.ui.infoCheckBox.setChecked(True)
         process_events()
-        self.assertTrue(self.browser.widget_ir.info)
+        self.assertTrue(self.browser.ui.infoCheckBox.isChecked())
         self.assertTrue(self.browser.ui.infoPane.isVisible())
 
     def test_delete_action_removes_object_from_namespace_view(self):
@@ -319,9 +318,13 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         browser.ui.variablesCheckBox = QtWidgets.QCheckBox(browser)
         browser.ui.stringsCheckBox = QtWidgets.QCheckBox(browser)
         browser.ui.infoCheckBox = QtWidgets.QCheckBox(browser)
+        browser.ui.arraysCheckBox.setChecked(True)
+        browser.ui.variablesCheckBox.setChecked(True)
+        browser.ui.stringsCheckBox.setChecked(True)
+        browser.ui.infoCheckBox.setChecked(True)
         browser.ui.deleteButton = QtWidgets.QPushButton(browser)
         browser.ui.plotCheckBox = QtWidgets.QCheckBox(browser)
-        browser.widget_ir = PythonVariablesIR()
+        browser.widget_ir = None
         browser.model = QtGui.QStandardItemModel(0, 3, browser)
         browser.proxy_model = QtCore.QSortFilterProxyModel(browser)
         browser.proxy_model.setSourceModel(browser.model)
@@ -369,7 +372,7 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         self.assertEqual(table_feature.new_table_calls, [])
         self.assertEqual(table_feature.append_calls, [])
 
-    def test_table_dispatch_uses_all_selected_eligible_names(self):
+    def test_table_actions_forward_all_selected_eligible_names(self):
         table_feature = RecordingTableFeature(has_active_table=True)
         browser = self._make_browser(
             {
@@ -397,7 +400,7 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         )
         self.assertEqual(table_feature.append_calls, [["arr", "arr2"]])
 
-    def test_delete_selected_dispatches_ir_owned_delete_python_source(self):
+    def test_delete_selected_dispatches_transient_hyde_app_ir_delete_python_source(self):
         executed = []
         browser = self._make_browser(
             {
@@ -419,12 +422,15 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         finally:
             QtWidgets.QMessageBox.question = original_question
 
-        self.assertEqual(
-            executed,
-            [("del arr, arr2", True)],
+        expected_payload = HydeAppIR().with_delete_names(["arr", "arr2"]).python_source(
+            log=False
         )
         self.assertEqual(
-            browser.widget_ir.session_state(),
+            executed,
+            [(expected_payload, True)],
+        )
+        self.assertEqual(
+            browser.get_session_toml_data(),
             {
                 "arrays": True,
                 "variables": True,
@@ -432,27 +438,21 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
                 "info": True,
             },
         )
+        self.assertFalse(hasattr(browser, "app_ir"))
+        self.assertIsNone(browser.widget_ir)
 
 
-class TestPythonVariablesIR(unittest.TestCase):
-    def test_python_variables_ir_owns_view_state_and_delete_lowering(self):
-        widget_ir = PythonVariablesIR(
-            arrays=False,
-            variables=True,
-            strings=False,
-            info=False,
-        ).with_delete_names(["arr", "arr2"])
-
-        self.assertEqual(
-            widget_ir.session_state(),
-            {
-                "arrays": False,
-                "variables": True,
-                "strings": False,
-                "info": False,
-            },
+class TestHydeAppIRDeleteCommands(unittest.TestCase):
+    def test_hyde_app_ir_lowers_delete_namespace_names(self):
+        app_ir = HydeAppIR(current_project_dir="/tmp/demo.hy").with_delete_names(
+            ["arr", "arr2"]
         )
-        self.assertEqual(widget_ir.python_source(log=False), "del arr, arr2")
+
+        self.assertEqual(app_ir.python_source(log=False), "del arr, arr2")
+
+    def test_hyde_app_ir_rejects_invalid_delete_namespace_names(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Python variable name"):
+            HydeAppIR().with_delete_names(["arr", "for"]).python_source(log=False)
 
 class TestPythonVariablesRefreshTracking(unittest.TestCase):
     @classmethod
@@ -832,9 +832,10 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
                 },
             )
             self.assertEqual(
-                restored_widget.widget_ir.session_state(),
+                restored_widget.get_session_toml_data(),
                 session["python_variables_tool"],
             )
+            self.assertIsNone(restored_widget.widget_ir)
             self.assertTrue(restored_subwindow.isVisible())
             self.assertEqual(current_names(restored_widget), ["scalar"])
             self.assertFalse(restored_widget.ui.infoCheckBox.isChecked())

@@ -2,7 +2,7 @@ import re
 
 from qtutils.qt import QtWidgets
 
-from hyde.user_interface.shared.figure import HydeFigureDialogWidget
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_widget import HydeFigureDialogWidget
 
 
 class RemoveFromGraphDialog(HydeFigureDialogWidget):

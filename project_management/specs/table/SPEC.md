@@ -123,6 +123,7 @@ Python Variables uses this API in two ways:
 
 - `Edit` opens the New Table dialog with the selected arrays
 - `Append to Table` appends the selected arrays to the currently active table through
+  the active table widget's live `TableIR` / `TableIRDiff` path, which emits
   `hyde.append_table(...)`
 
 Append is only valid when an existing table is active. If no target table is active,

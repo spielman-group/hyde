@@ -204,6 +204,11 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Claude Code
+#  Local agent config. Skills live in .agents/skills and are tracked there;
+#  .claude/skills is only a symlink so Claude Code can discover them.
+.claude/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

@@ -1,9 +1,8 @@
 from qtutils.qt import QtWidgets
 
 from hyde.features.base import is_eligible_for_numeric_series
+from hyde.features.hyde_ir import TableIR
 from hyde.user_interface.base_hyde_widgets import HydeDialogWidget
-
-from .window import TableIR
 
 
 class NewTableDialog(HydeDialogWidget):

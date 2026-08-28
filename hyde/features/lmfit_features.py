@@ -86,37 +86,6 @@ def fit_result_default_name(y_name, existing_names):
     return candidate
 
 
-def attached_display_trace(
-    result_name,
-    x_name,
-    trace_id,
-    component,
-    label,
-    style,
-    *,
-    root_name=None,
-):
-    normalized_result_name = normalize_optional_text(result_name)
-    if normalized_result_name is None:
-        raise ValueError("Curve Fit attached displays require a fit result name.")
-    normalized_root_name = normalize_optional_text(root_name) or normalized_result_name
-    return {
-        "id": str(trace_id),
-        "kind": "line",
-        "x_source": (
-            None
-            if x_name in (None, "", CALCULATED_X_NAME)
-            else {"kind": "name", "value": str(x_name)}
-        ),
-        "y_source": {
-            "kind": "attribute_path",
-            "root": {"kind": "name", "value": normalized_root_name},
-            "path": [str(component)],
-        },
-        "kwargs": {"label": str(label), **dict(style or {})},
-    }
-
-
 def attached_display_label(result_name, component):
     normalized_result_name = normalize_optional_text(result_name)
     if normalized_result_name is None:
@@ -126,28 +95,6 @@ def attached_display_label(result_name, component):
     if component == "residual":
         return f"{normalized_result_name}_residuals"
     raise ValueError(f"Unsupported attached display component: {component!r}.")
-
-
-def attached_display_trace_id(result_name, component):
-    normalized_result_name = normalize_optional_text(result_name)
-    if normalized_result_name is None:
-        raise ValueError("Curve Fit attached displays require a fit result name.")
-    if component == "best_fit":
-        return normalized_result_name
-    if component == "residual":
-        return f"{normalized_result_name}_residuals"
-    raise ValueError(f"Unsupported attached display component: {component!r}.")
-
-
-def resolve_attached_display_trace_id(
-    result_name,
-    component,
-    existing_trace_ids,
-    *,
-    requested_trace_id=None,
-):
-    del existing_trace_ids, requested_trace_id
-    return attached_display_trace_id(result_name, component)
 
 
 def restore_target_command(
@@ -230,10 +177,8 @@ class LmfitCodec(FeatureCodec):
                 "from_target": False,
                 "coefficients": {},
                 "weighting_name": None,
-                "suppress_screen_updates": True,
                 "fit_result_name": None,
                 "fit_result_name_locked": False,
-                "preview_mode": "Commands",
                 "preview_target_name": None,
                 "target_name": None,
                 "previous_target_name": None,
@@ -301,19 +246,12 @@ class LmfitCodec(FeatureCodec):
         settings["weighting_name"] = (
             None if weighting_name in (None, "") else str(weighting_name).strip()
         )
-        settings["suppress_screen_updates"] = bool(
-            settings.get("suppress_screen_updates")
-        )
         fit_result_name = settings.get("fit_result_name")
         settings["fit_result_name"] = (
             None if fit_result_name in (None, "") else str(fit_result_name).strip()
         )
         settings["fit_result_name_locked"] = bool(
             settings.get("fit_result_name_locked")
-        )
-        preview_mode = str(settings.get("preview_mode", "Commands") or "Commands")
-        settings["preview_mode"] = (
-            "Equation" if preview_mode == "Equation" else "Commands"
         )
         settings["preview_target_name"] = normalize_optional_text(
             settings.get("preview_target_name")
@@ -838,7 +776,6 @@ class LmfitCodec(FeatureCodec):
             "fit_function_entry": entry,
             "from_target": from_target,
             "fit_function_name": None if entry is None else entry["name"],
-            "preview_mode": normalized["settings"]["preview_mode"],
             "y_options": y_options,
             "y_name": y_name,
             "x_rows": x_rows,
@@ -846,14 +783,6 @@ class LmfitCodec(FeatureCodec):
             "lowered_coefficients": lowered_coefficients["rows"],
             "weighting_options": [""] + list(eligible_names),
             "weighting_name": weighting_name,
-            "suppress_screen_updates": bool(
-                normalized["settings"].get("suppress_screen_updates")
-            ),
-            "execution_mode": (
-                "suppressed"
-                if normalized["settings"].get("suppress_screen_updates")
-                else "live"
-            ),
             "fit_result_name": fit_result_name,
             "fit_result_options": fit_result_options,
             "commands_preview": cls._command_preview(

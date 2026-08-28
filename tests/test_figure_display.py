@@ -1,10 +1,10 @@
 import unittest
 
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR
-from hyde.user_interface.shared.figure import FigureDisplayHelper
+from hyde.features.matplotlib_figure_records import supported_trace_records
+from hyde.features.matplotlib_ir import FigureIR
 
 
-class TestFigureDisplayHelper(unittest.TestCase):
+class TestFigureDisplayRecords(unittest.TestCase):
     def _figure_ir(self):
         return {
             "layout": {
@@ -38,6 +38,18 @@ class TestFigureDisplayHelper(unittest.TestCase):
                                 "kwargs": {},
                                 "y_source": {"kind": "name", "value": "counts"},
                             },
+                            {
+                                "id": "trace_label_fallback",
+                                "kind": "line",
+                                "kwargs": {"label": "Manual"},
+                                "y_source": {"kind": "literal", "value": [1, 2]},
+                            },
+                            {
+                                "id": "trace_id_fallback",
+                                "kind": "line",
+                                "kwargs": {},
+                                "y_source": {"kind": "literal", "value": [3, 4]},
+                            },
                         ],
                     }
                 ]
@@ -45,7 +57,7 @@ class TestFigureDisplayHelper(unittest.TestCase):
         }
 
     def test_supported_trace_records_preserve_raw_label_and_display_name(self):
-        records = FigureDisplayHelper().supported_trace_records(self._figure_ir())
+        records = supported_trace_records(self._figure_ir())
 
         self.assertEqual(
             [
@@ -87,6 +99,20 @@ class TestFigureDisplayHelper(unittest.TestCase):
                     "counts",
                     None,
                 ),
+                (
+                    "trace_label_fallback",
+                    "Manual",
+                    "Manual",
+                    None,
+                    None,
+                ),
+                (
+                    "trace_id_fallback",
+                    None,
+                    "trace_id_fallback",
+                    None,
+                    None,
+                ),
             ],
         )
 
@@ -103,6 +129,8 @@ class TestFigureDisplayHelper(unittest.TestCase):
                 ("trace_label_only", "Offset", "Offset: baseline"),
                 ("trace_x_only", None, "residual vs time"),
                 ("trace_y_only", None, "counts"),
+                ("trace_label_fallback", "Manual", "Manual"),
+                ("trace_id_fallback", None, "trace_id_fallback"),
             ],
         )
 

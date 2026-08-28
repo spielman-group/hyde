@@ -14,6 +14,11 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
 - project save/load with `manifest.toml`, `session.toml`, `session.py`, and
   `terminal/history.py`
 
+Those user-facing surfaces are implemented. The current IR refactor phase is the
+file-shape pass: feature-side package IR files, plugin-local widget workflow IR
+files, and removal of non-neutral feature authority from `shared/`.
+Behavior-level IR ownership cleanup remains later work.
+
 ## Implemented Contracts
 
 ### Runtime
@@ -22,8 +27,8 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   current plugin architecture.
 
 ### IR Contract
-- Hyde uses the `HydeIR` / `HydeIRDiff` contract, not the earlier prototype
-  codec/state architecture.
+- Hyde's intended app-wide contract is the `HydeIR` / `HydeIRDiff` model, not the
+  earlier prototype codec/state architecture.
 - `HydeIRDiff` is a `HydeIR` subclass.
 - Every widget base family owns one base-level IR slot named `widget_ir`.
 - `HydeInteractiveWidget.widget_ir` is the live current object IR.
@@ -31,13 +36,20 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   and may contain external IR snapshots used for preview or command generation.
 - `python_source()` lives on IR objects, and `features/..._features.py` files are
   package-pure lowerers only.
+- The repository now uses explicit IR module placement:
+  package-owned IR families live in `hyde/features/<package>_ir.py`,
+  widget-local workflow IRs live in plugin-local `<widget>_IR.py`, and
+  non-neutral feature support code no longer lives under
+  `hyde.user_interface.shared`.
+- The repository now has the intended module shape for package IR and widget
+  workflow IR. Later work will tighten behavior ownership inside those modules.
 
 ### Tables
 - `hyde.create_table(...)` opens or reopens a table by requested stable name.
 - `hyde.append_table(...)` appends objects to an existing open table.
 - `@hyde.table` is the recreation decorator.
-- `TableWidget.widget_ir` owns the live `TableIR`, and live edit/append/create/delete
-  mutations lower through the widget-owned `TableIR` / `TableIRDiff` path.
+- `TableWidget.widget_ir` owns the live `TableIR` for table-window creation,
+  recreation, layout capture, and in-table edit/create/delete mutation flows.
 - Open tables restore from `session.py`.
 - Session restore preserves stable table names and `window_state='minimized'`.
 
@@ -48,8 +60,16 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   export surface that defaults into the project-local `exports/` container and emits
   preview-backed live-kernel `savefig(...)` commands generated from figure IR
   through package-pure matplotlib lowerers.
-- Figure-working surfaces now share canonical trace `display_name` generation through
-  the composed `FigureDisplayHelper` path rather than widget-local fallback strings.
+- Figure-working surfaces now share canonical trace `display_name` generation
+  through feature-side matplotlib trace-record helpers rather than widget-local
+  fallback strings.
+- Matplotlib figure state authority now lives under `hyde/features`, with
+  figure-interactive support narrowed to plugin transport/window composition.
+  That move is not finished: `hyde/features/matplotlib_features.py` still carries
+  a second figure IR authority. See `issues/REFACTOR_STATUS.md`.
+- Figure dialogs now use an explicit `EditableFigureContext` adapter, with
+  `FigureDialogIR` kept workflow-only and `HydeFigureDialogWidget` owned by
+  plugin-local widget support.
 - Figure-window chrome now shows the current figure name plus canonical trace display
   names while preserving stable window identity separately for save/restore and
   subwindow binding.
@@ -77,11 +97,13 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   discovered after `procedures/__init__.py` reload.
 - `New Fit Function...` appends a minimal valid scaffold to `procedures/__init__.py`,
   reloads procedures, refreshes the catalog, and keeps the dialog open on success.
-- Curve Fit preview/commit uses one GUI-side coefficient model over kernel-owned fit
+- Curve Fit preview/commit uses one GUI-side workflow IR over kernel-owned fit
   results and attached figure state. Preview, `Do It`, live update, and
-  rollback/store command generation all flow through its IR object's
+  rollback/store command generation all flow through that IR object's
   `python_source()`, while attached-display patching stays on the shared
   figure-patch path.
+- The next behavior pass will tighten Curve Fit semantics inside the new
+  `lmfit_IR.py` / `curve_fit_IR.py` shape.
 
 ### Hidden Execution
 - GUI-owned hidden work dispatches through the shared kernel-runtime execution path
@@ -106,6 +128,11 @@ Hyde now has a working GUI + kernel architecture with these implemented surfaces
   and figures after successful `session.py` completion.
 
 ## Remaining Near-Term Gaps
+- collapse the duplicate figure IR authority: `FigureIRAuthority` in
+  `hyde/features/matplotlib_figure_state.py` is an 80% verbatim copy of
+  `FigureIRModel` in `hyde/features/matplotlib_features.py`, and the kernel and
+  GUI currently normalize figure IR through different copies
+- do the behavior-level IR pass now that the file-shape refactor has landed
 - define the final Python Terminal output policy for silent kernel-runtime execution
 - expand broader table interaction coverage
 - continue figure-edit surface growth from the existing first-class figure model

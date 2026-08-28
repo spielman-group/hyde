@@ -1,125 +1,86 @@
 # HydeDialogWidget Pattern
 
-Use this as the default target shape for Hyde dialog plugins.
+Default target shape for Hyde dialog plugins. Shared ownership, IR, and override
+rules live in `.agents/protocols/hyde/widget-family.md`; this file is the
+dialog-specific checklist.
 
-This reference is used in two modes:
-
-- implementation mode: build or normalize the dialog code
-- planning mode: help `to-issues` capture the intended standard shape before code
-  exists
-
-## Ownership Split
-
-`HydeDialogWidget` should own:
+## What The Base Owns
 
 - footer button wiring
 - backing preview string storage
-- default `Do It` enablement from whether the backing preview string is non-empty
-- default `Do It` dispatch
-- default `To Cmd Line`
-- default `To Clip`
+- `Do It` enablement from whether the backing string is non-empty
+- default `Do It` dispatch, `To Cmd Line`, and `To Clip`
 - file-backed help through `help_filename`
 
-The subclass should own:
-
-- loading the `.ui`
-- reading widget state
-- populating dynamic rows/items
-- validation messages
-- cancel/revert behavior
-- meaningful `Do It` policy that wraps the shared dispatch path
+The subclass owns loading the `.ui`, reading widget state, populating dynamic
+rows, validation messages, cancel/revert behavior, and any `Do It` policy that
+wraps the shared dispatch path.
 
 ## Preview Contract
 
-Default contract:
+The backing string comes from the dialog's `widget_ir`:
 
 ```python
-self.set_preview_string(command_source)
+self.widget_ir = self.build_widget_ir(selection)
+payload = "" if self.widget_ir is None else self.widget_ir.python_source(log=False)
+self.set_preview_string(payload)
 self.refresh_shell()
 ```
 
-If the dialog needs different displayed text:
+`HydeFileDialog.refresh_from_file_selection()` is the reference implementation:
+subclasses supply `build_preview_state(...)` and inherit generation, validation,
+and submission. Extend it through hook overrides and `super()`.
+
+When displayed text must differ from the executable payload:
 
 ```python
-self.set_preview_string(command_source, display_text=display_preview)
-self.refresh_shell()
+self.set_preview_string(payload, display_text=display_preview)
 ```
 
-Interpretation:
-
-- backing string: what executes, copies, and usually what the user sees
-- display text: optional alternate lower-pane text only when product behavior needs it
+Backing string is what executes and copies. Display text is an exception that the
+spec must justify.
 
 ## Good Override Reasons
 
-Keep a subclass override only when it adds real local policy.
-
-Examples:
-
-- `can_do_it()` depends on local validation state beyond whether a backing payload
-  exists
+- `can_do_it()` depends on local validation beyond payload presence
 - `do_it_dispatch_mode()` must be visible instead of hidden
-- `handle_do_it()` must perform validation, logging, rollback capture, or state
-  bookkeeping before or after shared dispatch
-- `can_send_to_cmd_line()` must intentionally disable visible command emission in one
-  preview mode
+- `handle_do_it()` must validate, log, capture rollback, or do state bookkeeping
+  around the shared dispatch
+- `can_send_to_cmd_line()` intentionally disables visible emission in one mode
 
 ## Bad Override Reasons
 
-Delete overrides that only:
-
-- return preview text already stored in the dialog
-- forward directly to the base dispatch path without extra policy
-- restate base help behavior
-- maintain a second preview string that only mirrors the lower text widget
-
-## Feature Ownership
-
-Use `hyde/features/..._features.py` for:
-
-- validation
-- normalization
-- preview/source lowering
-- package-specific command generation
-
-Two common cases:
-
-1. Plugin owns the domain package or surface.
-   Example: a fitting dialog that owns `lmfit` interaction.
-2. Plugin uses a package/domain owned elsewhere.
-   Example: a dialog that edits figures but should call figure-lowering helpers rather
-   than recreate them locally.
-
-In both cases, keep the dialog as a UI state holder and string factory, not the
-authority on backend semantics.
+- returning preview text the dialog already stores
+- forwarding to base dispatch without extra policy
+- restating base help behavior
+- maintaining a second preview string mirroring the lower text widget
+- assembling command Python instead of asking `widget_ir` for it
 
 ## New Plugin Checklist
 
-- plugin package name follows Hyde suffix taxonomy
+- package name ends in `_dialog`
 - static layout is in `.ui`
-- dialog subclass extends `HydeDialogWidget`
-- dialog updates `set_preview_string(...)` from one real refresh path
+- the dialog subclasses `HydeDialogWidget`, or the family base where one exists
+  (`HydeFileDialog` for target-selecting dialogs, `HydeFigureDialogWidget` for
+  figure work)
+- `widget_ir` is a real IR object, and the preview comes from its `python_source()`
 - footer actions use the base class wherever possible
-- launcher passes `services=` into the dialog
-- no second dispatch path after dialog acceptance
-- behavior tests prove execute/copy/send behavior
+- the launcher passes `services=` and does not add a second dispatch path
+- tests prove execute/copy/send behavior
 
-If this checklist cannot be satisfied, make the exception explicit in the spec, PRD,
-and issue file rather than burying it in implementation.
+## Normalization Checklist
 
-## Existing Plugin Normalization Checklist
-
-- remove trivial payload-getter wrappers and use `preview_string()` as the real
-  backing command interface
+- remove trivial payload getters; `preview_string()` is the backing contract
 - remove trivial `To Cmd Line` / `To Clip` implementations
-- collapse duplicate preview state into the base backing string
-- push command generation into the feature layer if duplicated in the dialog
-- verify `Do It`, `To Cmd Line`, and `To Clip` all use the same backing command
-  string unless the spec explicitly says otherwise
+- collapse duplicate preview state onto the base backing string
+- move locally assembled command text onto `widget_ir`
+- move package-local string lowering into `hyde/features/<package>_features.py`,
+  keeping validation and state normalization on the IR class
+- verify `Do It`, `To Cmd Line`, and `To Clip` share one backing string unless the
+  spec says otherwise
 
 ## Feature-Specific Policy
 
-Do not copy feature-specific dialog contracts into this reference. When a dialog has
-feature-specific ownership, preview, identity, or dispatch rules, read the active
-spec, PRD, issue file, and Hyde docs directly and apply this pattern around those
-sources.
+Do not copy feature-specific dialog contracts into this reference. When a dialog
+has feature-specific ownership, preview, identity, or dispatch rules, read the
+active spec and the Hyde docs and apply this pattern around them.

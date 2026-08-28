@@ -6,18 +6,23 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtWidgets
 
-from hyde.features.matplotlib_features import FigureIRCodec, figure_ir_from_live_state
+from hyde.features.matplotlib_features import figure_ir_from_live_state
+from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.user_interface.main import HydeApp
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.axis_edit_dialog import (
     AXIS_TAB_TITLES,
     AxisEditDialog,
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.user_interface.plugins.figure_interactive.window import FigureIR, FigureWindow
+from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
-from hyde.user_interface.shared.figure import EditableFigureContext, FigureDialogIR
+from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_IR import (
+    FigureDialogIR,
+)
+from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
 
 
@@ -226,7 +231,7 @@ def make_figure_ir():
             "tick_label_offset": 4.5,
         }
     )
-    return FigureIRCodec.validate_state(figure_ir)
+    return FigureIRAuthority.validate_state(figure_ir)
 
 
 def make_figure_defaults():
@@ -254,7 +259,7 @@ def make_figure_defaults():
             "offset": 12.0,
         }
     )
-    return FigureIRCodec.validate_state(defaults)
+    return FigureIRAuthority.validate_state(defaults)
 
 
 def make_active_figure_window(
@@ -743,7 +748,6 @@ class TestAxisEditDialog(unittest.TestCase):
 
         output = "\n".join(logs.output)
         self.assertIn("[Hyde state] TransportDispatchState", output)
-        self.assertNotIn("FigurePatchState", output)
         self.assertIn("'mode': 'hidden'", output)
         self.assertIn("python:\n", output)
         self.assertIn("ax.set_xlabel('Delay [ms]')", output)

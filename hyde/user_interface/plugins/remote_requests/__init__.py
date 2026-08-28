@@ -5,7 +5,7 @@ from labscript_utils.labconfig import LabConfig
 from labscript_utils.ls_zprocess import ZMQServer
 from zmq.error import ZMQError
 
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.shared.plugin import HydePlugin
 
 

@@ -13,13 +13,13 @@ except ModuleNotFoundError as exc:
 
 from qtutils.qt import QtGui, QtWidgets
 
+from hyde.features.hyde_ir import HydeAppIR
+from hyde.features.hyde_features import hyde_app_python_source
 from hyde.user_interface.plugins.file import Plugin
 from hyde.user_interface.plugins.file.dialogs import (
     HealProjectDialog,
-    HydeAppIR,
     LoadProjectDialog,
     NewProjectDialog,
-    ProjectSelectionDialogIR,
     SaveAsProjectDialog,
     SaveCopyProjectDialog,
 )
@@ -149,7 +149,49 @@ class TestFileDialogPlugin(unittest.TestCase):
             "hyde.load_project('/tmp/demo.hy')",
         )
 
-    def test_load_project_dialog_owns_dialog_ir_and_carries_app_snapshot(self):
+    def test_app_ir_python_source_matches_feature_lowerer_for_file_commands(self):
+        ir = HydeAppIR(current_project_dir="/tmp/current.hy")
+
+        self.assertEqual(
+            ir.with_new_project("/tmp/new.hy", load=False, overwrite=True).python_source(
+                log=False
+            ),
+            hyde_app_python_source(
+                command="new_project",
+                target_project_dir="/tmp/new.hy",
+                load=False,
+                overwrite=True,
+            ),
+        )
+        self.assertEqual(
+            ir.with_load_project("/tmp/load.hy").python_source(log=False),
+            hyde_app_python_source(
+                command="load_project",
+                target_project_dir="/tmp/load.hy",
+            ),
+        )
+        self.assertEqual(
+            ir.with_heal_project("/tmp/heal.hy").python_source(log=False),
+            hyde_app_python_source(
+                command="heal_project",
+                target_project_dir="/tmp/heal.hy",
+            ),
+        )
+        self.assertEqual(
+            ir.with_save_project(
+                target_project_dir="/tmp/copy.hy",
+                mode="copy",
+                overwrite=True,
+            ).python_source(log=False),
+            hyde_app_python_source(
+                command="save_project",
+                target_project_dir="/tmp/copy.hy",
+                save_mode="copy",
+                overwrite=True,
+            ),
+        )
+
+    def test_load_project_dialog_uses_hyde_app_ir_and_carries_app_snapshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "existing.hy")
             os.makedirs(project_dir)
@@ -164,10 +206,18 @@ class TestFileDialogPlugin(unittest.TestCase):
             self.qapp.processEvents()
 
             self.assertFalse(hasattr(dialog, "app_ir"))
-            self.assertIsInstance(dialog.widget_ir, ProjectSelectionDialogIR)
+            self.assertIsInstance(dialog.widget_ir, HydeAppIR)
             self.assertEqual(
-                dialog.widget_ir.current_project_dir(),
+                dialog.widget_ir.current_project_dir,
                 "/tmp/current.hy",
+            )
+            self.assertEqual(
+                dialog.widget_ir.command,
+                "load_project",
+            )
+            self.assertEqual(
+                dialog.widget_ir.target_project_dir,
+                project_dir,
             )
             self.assertEqual(
                 dialog.widget_ir.python_source(log=False),
@@ -242,27 +292,26 @@ class TestFileDialogPlugin(unittest.TestCase):
                 [(f"hyde.load_project({project_dir!r})", True)],
             )
 
-    def test_project_dialog_preview_generation_does_not_log_hyde_state_debug(self):
+    def test_project_dialog_preview_generation_updates_preview_without_dispatching(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "existing.hy")
             os.makedirs(project_dir)
+            dispatched = []
             services = {
                 "ui": QtWidgets.QWidget(),
-                "python_execution_service": ExecutionService([]),
+                "python_execution_service": ExecutionService(dispatched),
             }
 
             dialog = LoadProjectDialog(services)
-            with patch(
-                "hyde.user_interface.shared.core.log_hyde_state_debug"
-            ) as log_debug:
-                dialog.file_widget.set_selected_path(project_dir)
-                self.qapp.processEvents()
+            dialog.file_widget.set_selected_path(project_dir)
+            self.qapp.processEvents()
 
             self.assertEqual(
                 dialog.preview_string(),
                 f"hyde.load_project({project_dir!r})",
             )
-            log_debug.assert_not_called()
+            self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.preview_string())
+            self.assertEqual(dispatched, [])
 
     def test_save_as_same_target_previews_and_dispatches_plain_save(self):
         with tempfile.TemporaryDirectory() as tmpdir:

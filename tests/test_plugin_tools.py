@@ -30,7 +30,7 @@ from hyde.user_interface.shared.plugin import (
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.logging_tool import Plugin as LoggingPlugin
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
-from hyde.user_interface.plugins.file.dialogs import HydeAppIR
+from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.procedure_browser_tool import Plugin as ProcedureBrowserPlugin
 from hyde.user_interface.plugins.python_variables_tool import Plugin as PythonVariablesPlugin
 from hyde.user_interface.plugins.python_terminal_tool import Plugin as PythonTerminalPlugin
