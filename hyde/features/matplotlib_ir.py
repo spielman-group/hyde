@@ -9,6 +9,7 @@ from hyde.features.matplotlib_features import (
 )
 from hyde.features.hyde_features import (
     figure_decorator_source,
+    figure_graphics_copy_source,
     figure_lookup_prelude_lines,
     figure_refresh_source,
     publish_registry_source,
@@ -184,8 +185,18 @@ class FigureIR(HydeIR):
     size_inches: tuple[float, float] | None = None
 
     VALID_COMMANDS = frozenset(
-        {"create", "refresh", "publish_figure_macros", "close", "save_graphics"}
+        {
+            "create",
+            "refresh",
+            "publish_figure_macros",
+            "close",
+            "save_graphics",
+            "copy_graphics",
+        }
     )
+
+    # Passed through as `dpi` to defer resolution to the kernel's live figure.
+    FIGURE_DPI = "figure"
 
     def __post_init__(self):
         object.__setattr__(self, "figure_state", normalize_figure_state(self.figure_state))
@@ -207,7 +218,13 @@ class FigureIR(HydeIR):
         object.__setattr__(self, "creation_x_name", normalize_optional_text(self.creation_x_name))
         object.__setattr__(self, "output_path", normalize_optional_text(self.output_path))
         object.__setattr__(self, "output_format", str(self.output_format or "pdf"))
-        object.__setattr__(self, "dpi", int(self.dpi))
+        # 'figure' defers DPI resolution to the kernel's live figure; every
+        # other value is a concrete integer.
+        object.__setattr__(
+            self,
+            "dpi",
+            self.FIGURE_DPI if self.dpi == self.FIGURE_DPI else int(self.dpi),
+        )
         object.__setattr__(self, "transparent", bool(self.transparent))
         object.__setattr__(self, "size_inches", normalize_size_inches(self.size_inches))
 
@@ -254,8 +271,21 @@ class FigureIR(HydeIR):
                 raise ValueError("Figure save_graphics requires figure_name.")
             if not self.output_path:
                 raise ValueError("Figure save_graphics requires output_path.")
+            if self.dpi == self.FIGURE_DPI or not isinstance(self.dpi, int):
+                raise ValueError("Figure save_graphics requires a positive integer dpi.")
             if self.dpi <= 0:
                 raise ValueError("Figure save_graphics requires a positive dpi.")
+        if self.command == "copy_graphics":
+            if not self.figure_name:
+                raise ValueError("Figure copy_graphics requires figure_name.")
+            if self.output_path:
+                raise ValueError("Figure copy_graphics does not take an output_path.")
+            if self.dpi != self.FIGURE_DPI and not (
+                isinstance(self.dpi, int) and self.dpi > 0
+            ):
+                raise ValueError(
+                    "Figure copy_graphics requires dpi='figure' or a positive integer."
+                )
         return self
 
     def normalized_state(self):
@@ -356,6 +386,30 @@ class FigureIR(HydeIR):
             figure_number=int(figure_number),
             figure_name=None,
             use_bound_values=False,
+        )
+
+    def with_copy_graphics(self, *, figure_name=None, output_format="pdf"):
+        """Return an IR that copies the figure to the clipboard.
+
+        Copy carries no output path and defers DPI to the kernel, so it is a
+        separate command rather than a save with a null target.
+        """
+        resolved_figure_name = self.figure_name
+        if figure_name is not None:
+            resolved_figure_name = str(figure_name)
+        if resolved_figure_name in (None, ""):
+            resolved_figure_name = self.default_macro_name()
+        return dataclass_replace(
+            self,
+            command="copy_graphics",
+            figure_name=resolved_figure_name,
+            figure_number=None,
+            use_bound_values=False,
+            output_path=None,
+            output_format=output_format,
+            dpi=self.FIGURE_DPI,
+            transparent=False,
+            size_inches=None,
         )
 
     def with_save_graphics(
@@ -1026,6 +1080,12 @@ class FigureIR(HydeIR):
             )
         if self.command == "publish_figure_macros":
             return publish_registry_source("figure")
+        if self.command == "copy_graphics":
+            return figure_graphics_copy_source(
+                self.figure_name,
+                output_format=self.output_format,
+                dpi=self.dpi,
+            )
         if self.command == "save_graphics":
             return figure_lookup_source(
                 self.figure_name,

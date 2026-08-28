@@ -1005,6 +1005,57 @@ def refresh_figure(figure, *, use_bound_values=False):
     return None
 
 
+def copy_figure(figure, *, format="pdf", dpi="figure", transparent=False):
+    """Copy a live figure to the GUI clipboard.
+
+    Rendering happens here, in the kernel, because the kernel owns the figure.
+    The rendered bytes are handed to the GUI process, which owns the clipboard.
+    This function must never touch the clipboard itself; `hyde` is imported by
+    the kernel and may not depend on Qt.
+
+    Parameters
+    ----------
+    figure : matplotlib.figure.Figure or int
+        Live matplotlib figure or figure-manager number resolvable to a live
+        figure.
+    format : str, optional
+        A matplotlib output format. Defaults to ``"pdf"``.
+    dpi : int or str, optional
+        Resolution for raster output. Defaults to ``"figure"``, matplotlib's own
+        default, meaning the figure's own DPI is used.
+    transparent : bool, optional
+        Whether to render with a transparent background.
+
+    Returns
+    -------
+    bool
+        ``True`` when rendered bytes were handed to the GUI.
+    """
+    import base64
+    import io
+
+    from .execution.ipc import signal_copy_to_clipboard
+
+    resolved_figure = _resolve_matplotlib_figure(figure)
+    normalized_format = str(format or "pdf").strip().lower()
+    # PGF is LaTeX source, so it travels as text rather than as an image.
+    is_text = normalized_format == "pgf"
+
+    buffer = io.BytesIO()
+    resolved_figure.savefig(
+        buffer,
+        format=normalized_format,
+        dpi=dpi,
+        transparent=bool(transparent),
+    )
+    signal_copy_to_clipboard(
+        base64.b64encode(buffer.getvalue()).decode("ascii"),
+        output_format=normalized_format,
+        is_text=is_text,
+    )
+    return True
+
+
 def remove_traces(figure, *trace_ids):
     """Remove traces from a live first-class Hyde figure.
 

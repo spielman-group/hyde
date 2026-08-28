@@ -134,6 +134,43 @@ def runtime_graphics_export_formats(filetypes=None):
     return sorted(formats, key=sort_key)
 
 
+# Clipboard representation per matplotlib output format. A format absent from
+# this mapping has no clipboard representation at all: `raw` and `rgba` are raw
+# buffers with no MIME type, and `svgz` is gzipped SVG that no application
+# pastes, superseded by `svg`.
+GRAPHICS_CLIPBOARD_MIME_TYPES = {
+    "pdf": "application/pdf",
+    "png": "image/png",
+    "svg": "image/svg+xml",
+    "eps": "application/postscript",
+    "ps": "application/postscript",
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "tif": "image/tiff",
+    "tiff": "image/tiff",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "avif": "image/avif",
+    # LaTeX source, carried as text rather than as an image.
+    "pgf": "text/plain",
+}
+
+
+def clipboard_mime_type_for_format(output_format):
+    """Return the clipboard MIME type for a format, or None if it has none."""
+    normalized_format = str(output_format or "").strip().lower()
+    return GRAPHICS_CLIPBOARD_MIME_TYPES.get(normalized_format)
+
+
+def graphics_clipboard_formats(filetypes=None):
+    """Runtime export formats that have a clipboard representation."""
+    return tuple(
+        item
+        for item in runtime_graphics_export_formats(filetypes)
+        if clipboard_mime_type_for_format(item.key) is not None
+    )
+
+
 def graphics_output_transparency_supported(output_format):
     normalized_format = str(output_format or "").strip().lower()
     if not normalized_format:

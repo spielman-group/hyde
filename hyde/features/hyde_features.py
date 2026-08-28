@@ -175,6 +175,23 @@ def figure_refresh_source(figure_name, *, use_bound_values=False):
     )
 
 
+def figure_graphics_copy_source(figure_name, *, output_format="pdf", dpi="figure"):
+    """Emit Python that copies a live first-class figure to the clipboard.
+
+    The clipboard is GUI-owned and plain matplotlib cannot express it, so this
+    is a Hyde helper rather than a `savefig` call. `dpi` is normally the
+    `'figure'` sentinel, which defers resolution to the kernel's live figure
+    instead of mirroring the figure's DPI in the GUI.
+    """
+    return "\n".join(
+        figure_lookup_prelude_lines(figure_name)
+        + [
+            "hyde.copy_figure(fig, "
+            f"format={str(output_format)!r}, dpi={dpi!r})"
+        ]
+    )
+
+
 def remove_traces_source(figure_name, trace_ids):
     joined_ids = ", ".join(repr(str(trace_id)) for trace_id in tuple(trace_ids or ()))
     return "\n".join(

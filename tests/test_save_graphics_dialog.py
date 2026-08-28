@@ -2,6 +2,7 @@ import os
 import tempfile
 import types
 import unittest
+from dataclasses import replace as dataclass_replace
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -25,6 +26,11 @@ from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureCo
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.features.matplotlib_ir import FigureIR
+from hyde.features.matplotlib_features import (
+    clipboard_mime_type_for_format,
+    graphics_clipboard_formats,
+)
+from hyde.user_interface.plugins.save_graphics_dialog.clipboard import clipboard_mime_data
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.save_graphics_dialog import Plugin as SaveGraphicsPlugin
@@ -147,6 +153,192 @@ class RecordingEditableFigureContext(EditableFigureContext):
         return self._recorded_size_inches
 
 
+class TestFigureCopyCommand(unittest.TestCase):
+    """Copy lowers to a Hyde helper because the clipboard is GUI-owned.
+
+    Plain matplotlib cannot express "put this on the clipboard", so this is the
+    one place IR-CONTROL.md's carve-out for Hyde helpers in emitted Python
+    applies. DPI is passed as the 'figure' sentinel so the kernel resolves it
+    against the live figure rather than the GUI mirroring kernel state.
+    """
+
+    def test_copy_lowers_to_a_hyde_clipboard_call_on_the_looked_up_figure(self):
+        source = FigureIR(figure_name="Graph12").with_copy_graphics().python_source(log=False)
+
+        self.assertEqual(
+            source.splitlines(),
+            [
+                "fig = hyde.get_figure('Graph12')",
+                "hyde.copy_figure(fig, format='pdf', dpi='figure')",
+            ],
+        )
+
+    def test_copy_defaults_to_pdf_and_carries_the_requested_format(self):
+        for output_format in ("pdf", "png", "svg"):
+            with self.subTest(output_format=output_format):
+                source = (
+                    FigureIR(figure_name="Graph12")
+                    .with_copy_graphics(output_format=output_format)
+                    .python_source(log=False)
+                )
+                self.assertIn(f"format={output_format!r}", source)
+
+    def test_copy_always_resolves_a_figure_name_to_look_up(self):
+        # The emitted Python has to name a figure for hyde.get_figure, so an
+        # absent name falls back to the default the save path uses too.
+        source = FigureIR().with_copy_graphics().python_source(log=False)
+
+        self.assertRegex(source.splitlines()[0], r"^fig = hyde\.get_figure\('.+'\)$")
+
+    def test_copy_state_without_a_figure_name_fails_validation(self):
+        with self.assertRaises(ValueError):
+            dataclass_replace(
+                FigureIR(figure_name="Graph12").with_copy_graphics(), figure_name=None
+            ).validate()
+
+    def test_copy_carries_no_output_path(self):
+        # Copy has no export target; a state carrying one is a save state that
+        # took the wrong branch.
+        with self.assertRaises(ValueError):
+            dataclass_replace(
+                FigureIR(figure_name="Graph12").with_copy_graphics(),
+                output_path="/tmp/Graph12.pdf",
+            ).validate()
+
+    def test_save_still_rejects_the_figure_dpi_sentinel(self):
+        # The sentinel is valid only where the kernel is meant to resolve it.
+        with self.assertRaises(ValueError):
+            FigureIR(figure_name="Graph12").with_save_graphics(
+                "/tmp/Graph12.pdf", dpi="figure"
+            ).validate()
+
+    def test_copy_does_not_emit_savefig_or_touch_figure_size(self):
+        source = FigureIR(figure_name="Graph12").with_copy_graphics().python_source(log=False)
+
+        self.assertNotIn("savefig", source)
+        self.assertNotIn("set_size_inches", source)
+
+
+class TestFigureCopyEndToEnd(unittest.TestCase):
+    """The whole path: menu action -> emitted Python -> kernel render ->
+    bytes handed to the GUI -> clipboard."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def test_copy_action_emits_the_copy_command_for_the_active_figure(self):
+        executed = []
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {
+            "figure_context_service": types.SimpleNamespace(
+                active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
+            ),
+            "python_execution_service": types.SimpleNamespace(
+                execute_hidden=lambda code, silent=True: executed.append(code)
+            ),
+        }
+
+        self.assertTrue(plugin.copy_active_figure())
+        self.assertEqual(
+            executed,
+            [
+                "fig = hyde.get_figure('Graph12')\n"
+                "hyde.copy_figure(fig, format='pdf', dpi='figure')"
+            ],
+        )
+
+    def test_copy_action_does_nothing_without_an_active_figure(self):
+        executed = []
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {
+            "figure_context_service": types.SimpleNamespace(
+                active_editable_figure=lambda: None
+            ),
+            "python_execution_service": types.SimpleNamespace(
+                execute_hidden=lambda code, silent=True: executed.append(code)
+            ),
+        }
+
+        self.assertFalse(plugin.copy_active_figure())
+        self.assertEqual([], executed)
+
+    def test_rendered_bytes_from_the_kernel_reach_the_clipboard_as_pdf(self):
+        import base64
+
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {}
+        rendered = b"%PDF-1.4 fake pdf bytes"
+
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(rendered).decode("ascii"),
+                    "output_format": "pdf",
+                    "is_text": False,
+                },
+            }
+        )
+
+        mime_data = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertIn("application/pdf", mime_data.formats())
+        self.assertEqual(rendered, bytes(mime_data.data("application/pdf")))
+
+    def test_unrelated_kernel_messages_leave_the_clipboard_alone(self):
+        QtWidgets.QApplication.clipboard().setText("untouched")
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {}
+
+        plugin.on_kernel_message({"task": "SOMETHING_ELSE", "data": {}})
+
+        self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
+
+    def test_kernel_render_produces_pdf_bytes_without_disturbing_the_figure(self):
+        # hyde.copy_figure runs in the kernel against the live figure. Copying
+        # must not change the figure the user is looking at.
+        import base64
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import hyde
+
+        captured = []
+        figure = plt.figure(figsize=(5.0, 3.0))
+        figure.add_subplot(111).plot([0, 1], [1, 2])
+        original_size = tuple(figure.get_size_inches())
+        original_dpi = figure.dpi
+        try:
+            with patch(
+                "hyde.execution.ipc.signal_copy_to_clipboard",
+                side_effect=lambda payload, **kw: captured.append((payload, kw)),
+            ):
+                self.assertTrue(hyde.copy_figure(figure, format="pdf"))
+
+            self.assertEqual(1, len(captured))
+            payload, kwargs = captured[0]
+            self.assertEqual("pdf", kwargs["output_format"])
+            self.assertFalse(kwargs["is_text"])
+            self.assertTrue(base64.b64decode(payload).startswith(b"%PDF"))
+            self.assertEqual(original_size, tuple(figure.get_size_inches()))
+            self.assertEqual(original_dpi, figure.dpi)
+        finally:
+            plt.close(figure)
+
+    def test_clipboard_capable_formats_exclude_the_unpasteable_ones(self):
+        keys = [item.key for item in graphics_clipboard_formats()]
+
+        self.assertEqual(["pdf", "png"], keys[:2])
+        for excluded in ("raw", "rgba", "svgz"):
+            self.assertNotIn(excluded, keys)
+        for expected in ("pdf", "png", "svg", "pgf", "jpeg", "tiff"):
+            self.assertIn(expected, keys)
+
+    def test_a_format_with_no_clipboard_representation_yields_no_payload(self):
+        self.assertIsNone(clipboard_mime_data(b"junk", output_format="raw"))
+        self.assertIsNone(clipboard_mime_type_for_format("rgba"))
+
+
 class TestSaveGraphicsPlugin(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -175,11 +367,14 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
                 "Modify Data Appearance...",
                 "Modify Axis...",
                 "Save Graphics...",
+                "Copy",
             ],
         )
         self.assertEqual(len([action for action in actions if action.isSeparator()]), 1)
-        self.assertTrue(actions[-2].isSeparator())
-        self.assertEqual(actions[-1].text(), "Save Graphics...")
+        self.assertEqual(
+            [action.text() for action in actions[-2:]],
+            ["Save Graphics...", "Copy"],
+        )
 
     def test_figure_actions_are_disabled_without_an_active_figure(self):
         # These actions need a first-class figure. Before menu preconditions

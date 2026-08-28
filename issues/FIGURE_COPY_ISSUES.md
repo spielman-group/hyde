@@ -9,7 +9,7 @@ figure graphics-output path that `Save Graphics...` already owns.
 ## Progress Checklist
 
 - [x] Slice 1: Enable And Disable Menu Actions From Live Preconditions
-- [ ] Slice 2: Copy The Active Figure As PDF
+- [x] Slice 2: Copy The Active Figure As PDF
 - [ ] Slice 3: Add The Edit Menu With Copy And Its Shortcut
 - [ ] Slice 4: Offer Copy As Over The Clipboard-Capable Format Set
 - [ ] Slice 5: Copy PGF As Text
@@ -86,11 +86,17 @@ one turns out to be wrong, say so explicitly and record the change here.
    dialog plugins, and copy has no dialog. Accepted as a wart; the `file`
    plugin already sets that precedent.
 
-8. **IR shape.** A distinct `figure_graphics_copy` feature kind with its own
+8. **IR shape.** A distinct copy command with its own
    `FigureIR.with_copy_graphics(...)`, not an overload of the save path with a
    null output path. Copy has no output path and save requires one, so separate
-   kinds keep both validations honest and give the `'figure'` DPI sentinel a
+   commands keep both validations honest and give the `'figure'` DPI sentinel a
    home where it is the only valid value.
+
+   Refined while implementing: this is a `FigureIR` command, not a
+   `MatplotlibCodec` feature kind. Copy lowers to `hyde.copy_figure(...)`, which
+   is a Hyde string, so it emits from `hyde_features.py`. A `matplotlib_features`
+   model emitting Hyde strings would break the package-purity rule that
+   `IR-CONTROL.md` sets for those lowerers.
 
 9. **Dispatch.** Hidden, matching `Save Graphics`' `Do It`. Copy is the
    highest-frequency action in the application and echoing every keypress into
@@ -198,17 +204,17 @@ precondition through Slice 1 so it is disabled with no active figure.
 
 ### Acceptance criteria
 
-- [ ] `Copy` on an active figure results in a PDF on the clipboard that another
+- [x] `Copy` on an active figure results in a PDF on the clipboard that another
       application can paste.
-- [ ] The emitted Python resolves the figure by its stable Hyde name and passes
+- [x] The emitted Python resolves the figure by its stable Hyde name and passes
       `dpi='figure'`; it contains no GUI-side clipboard call.
-- [ ] The copy feature kind validates without an output path, and rejects a
+- [x] The copy feature kind validates without an output path, and rejects a
       state carrying one.
-- [ ] The save feature kind still requires a positive integer DPI and still
+- [x] The save feature kind still requires a positive integer DPI and still
       rejects the `'figure'` sentinel.
-- [ ] `hyde/__init__.py` gains no Qt import; the architecture guard passes.
-- [ ] `Copy` is disabled when no first-class figure is active.
-- [ ] Copying does not alter the live figure's size, DPI, or any other state.
+- [x] `hyde/__init__.py` gains no Qt import; the architecture guard passes.
+- [x] `Copy` is disabled when no first-class figure is active.
+- [x] Copying does not alter the live figure's size, DPI, or any other state.
 
 ### Blocked by
 

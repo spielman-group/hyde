@@ -29,6 +29,30 @@ def put_parent_message(message):
         tree.to_parent.put(message)
 
 
+def signal_copy_to_clipboard(payload_base64, *, output_format, is_text=False):
+    """
+    Signal the parent GUI process to place rendered figure bytes on the clipboard.
+
+    The clipboard belongs to the GUI process, so the kernel renders and hands
+    the result over rather than writing it itself.
+
+    This helper is intended to be called from a Hyde-managed kernel process,
+    which is a direct ProcessTree child of the GUI process.
+    """
+    try:
+        put_parent_message([
+            "COPY_TO_CLIPBOARD_REQUEST",
+            {
+                "payload_base64": str(payload_base64),
+                "output_format": str(output_format),
+                "is_text": bool(is_text),
+            },
+        ])
+    except Exception:
+        # Silently fail if running outside a Hyde-managed kernel.
+        pass
+
+
 def signal_open_table(
     names,
     name=None,
