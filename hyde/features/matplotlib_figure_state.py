@@ -81,7 +81,7 @@ TRACE_STYLE_ACTION_KEYS = (
 
 def default_trace_color(index):
     colors = rcParams["axes.prop_cycle"].by_key().get("color", ["#1f77b4"])
-    return str(colors[index % len(colors)])
+    return normalize_trace_style_color(colors[index % len(colors)], "#1f77b4")
 
 
 def normalize_trace_style_color(value, fallback):

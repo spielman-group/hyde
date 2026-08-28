@@ -4,9 +4,11 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from matplotlib import colors as mcolors
 from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_color import normalize_matplotlib_color_text
+from hyde.features.matplotlib_figure_state import default_trace_color
 from hyde.user_interface.plugins.figure_control_dialog.matplotlib_widgets import (
     MatplotlibColorDialog,
     MatplotlibColorLineEdit,
@@ -30,6 +32,15 @@ class TestMatplotlibColorHelpers(unittest.TestCase):
             normalize_matplotlib_color_text("(0.4, 0.9, 1.0, 0.5)"),
             "#66e6ff80",
         )
+
+    def test_default_trace_color_is_a_color_matplotlib_accepts(self):
+        # Hyde writes this value straight into generated matplotlib source such as
+        # ax.plot(..., color=...), so it must survive as a color literal even when
+        # rcParams carries the cycle as RGB tuples rather than hex strings.
+        for index in range(4):
+            color_text = default_trace_color(index)
+            with self.subTest(index=index):
+                self.assertTrue(mcolors.is_color_like(color_text), color_text)
 
     def test_line_edit_uses_preview_for_auto_and_reverts_invalid_input(self):
         widget = MatplotlibColorLineEdit(allow_empty=False, allow_auto=True)
