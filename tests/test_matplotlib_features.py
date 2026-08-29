@@ -111,7 +111,10 @@ class FakeShell:
 
 
 class TestGraphicsExportFormats(unittest.TestCase):
-    def test_matplotlib_codec_rejects_ambiguous_legacy_figure_feature(self):
+    def test_matplotlib_codec_rejects_the_ambiguous_figure_feature_name(self):
+        # Not migration scaffolding: unrecognised feature kinds fall through to
+        # figure_command, so a plausible-looking "figure" would silently lower
+        # as the wrong kind rather than being rejected.
         with self.assertRaisesRegex(ValueError, "Ambiguous matplotlib feature"):
             MatplotlibCodec.validate_state(
                 {
