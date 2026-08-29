@@ -18,13 +18,15 @@ from hyde.features.hyde_features import (
 from hyde.features.base import normalize_optional_text
 from hyde.user_interface.shared.core import HydeIR, HydeIRDiff
 from hyde.features.matplotlib_figure_records import supported_trace_records
+from hyde.features.matplotlib_figure_schema import (
+    supported_trace_style_state,
+    trace_style_defaults_by_subplot,
+)
 from hyde.features.matplotlib_figure_state import (
     FigureIRAuthority,
     figure_ir_apply_title,
     figure_ir_default_state,
     figure_ir_with_defaults,
-    supported_trace_style_state,
-    trace_style_defaults_by_subplot,
 )
 
 _DEFAULT_FIGURE_LABEL_RE = re.compile(r"^Figure\s+(\d+)$")

@@ -8,7 +8,9 @@ from matplotlib import colors as mcolors
 from qtutils.qt import QtWidgets
 
 from hyde.features.matplotlib_color import normalize_matplotlib_color_text
-from hyde.features.matplotlib_figure_state import default_trace_color
+from hyde.features.matplotlib_figure_schema import (
+    default_trace_color,
+)
 from hyde.user_interface.plugins.figure_control_dialog.matplotlib_widgets import (
     MatplotlibColorDialog,
     MatplotlibColorLineEdit,

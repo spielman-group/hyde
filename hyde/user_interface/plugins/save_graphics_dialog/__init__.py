@@ -89,7 +89,7 @@ class Plugin(HydePlugin):
 
     def copy_active_figure(self, checked=False, output_format="pdf"):
         del checked
-        figure_context = self._active_editable_figure()
+        figure_context = self.active_editable_figure()
         if figure_context is None:
             return False
         source = (
@@ -189,7 +189,7 @@ class Plugin(HydePlugin):
 
     def show_save_graphics_dialog(self, checked=False):
         del checked
-        figure_context = self._active_editable_figure()
+        figure_context = self.active_editable_figure()
         if figure_context is None:
             return False
         dialog = SaveGraphicsDialog(
@@ -199,11 +199,4 @@ class Plugin(HydePlugin):
         )
         return dialog.exec_() == QtWidgets.QDialog.Accepted
 
-    def has_active_editable_figure(self):
-        return self._active_editable_figure() is not None
 
-    def _active_editable_figure(self):
-        figure_context_service = self.services.get("figure_context_service")
-        if figure_context_service is None:
-            return None
-        return figure_context_service.active_editable_figure()

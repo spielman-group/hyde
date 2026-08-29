@@ -41,17 +41,10 @@ class Plugin(HydePlugin):
             lambda dialog: dialog.has_supported_axes(),
         )
 
-    def has_active_editable_figure(self):
-        return self._active_editable_figure() is not None
 
-    def _active_editable_figure(self):
-        figure_context_service = self.services.get("figure_context_service")
-        if figure_context_service is None:
-            return None
-        return figure_context_service.active_editable_figure()
 
     def _show_dialog(self, dialog_class, support_check):
-        figure_context = self._active_editable_figure()
+        figure_context = self.active_editable_figure()
         if figure_context is None:
             return False
         dialog = dialog_class(

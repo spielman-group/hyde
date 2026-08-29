@@ -29,10 +29,12 @@ from hyde.features.matplotlib_features import (
     apply_figure_state,
     figure_ir_append_trace,
 )
+from hyde.features.matplotlib_figure_schema import (
+    operand_from_runtime_value,
+)
 from hyde.features.matplotlib_figure_state import (
     figure_ir_apply_title,
     figure_ir_default_state,
-    operand_from_runtime_value,
 )
 from hyde.user_interface.shared.project import resolve_requested_name
 from hyde.execution.comms import FIGURE_COMM_TARGET

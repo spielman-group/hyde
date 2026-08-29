@@ -111,6 +111,20 @@ class HydePlugin(BasePlugin):
     def setup(self, data=None):
         del data
 
+    def active_editable_figure(self):
+        """The active first-class figure as an editable context, or None.
+
+        Figure-working plugins all need this to decide whether their actions
+        can run, so it is one accessor here rather than a copy per plugin.
+        """
+        figure_context_service = self.service("figure_context_service")
+        if figure_context_service is None:
+            return None
+        return figure_context_service.active_editable_figure()
+
+    def has_active_editable_figure(self):
+        return self.active_editable_figure() is not None
+
     def service(self, key, default=None):
         return self.services.get(key, default)
 

@@ -1,6 +1,6 @@
 from qtutils.qt import QtWidgets
 
-from hyde.features.matplotlib_figure_state import (
+from hyde.features.matplotlib_figure_schema import (
     SUPPORTED_TRACE_STYLE_DEFAULTS,
     default_trace_color,
 )

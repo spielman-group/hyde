@@ -10,12 +10,14 @@ from hyde.features.base import (
     sorted_eligible_names,
     valid_python_identifier,
 )
-from hyde.features.matplotlib_figure_state import (
+from hyde.features.matplotlib_figure_schema import (
+    TRACE_STYLE_ACTION_KEYS,
     _MIRROR_SIDE,
     _PRIMARY_SIDE,
-    FigureIRAuthority,
-    TRACE_STYLE_ACTION_KEYS,
     operand_to_python,
+)
+from hyde.features.matplotlib_figure_state import (
+    FigureIRAuthority,
 )
 
 

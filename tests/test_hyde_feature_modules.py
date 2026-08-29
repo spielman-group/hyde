@@ -98,6 +98,7 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
             FEATURES_DIR / "lmfit_ir.py",
             FEATURES_DIR / "matplotlib_color.py",
             FEATURES_DIR / "matplotlib_figure_state.py",
+            FEATURES_DIR / "matplotlib_figure_schema.py",
             FEATURES_DIR / "matplotlib_figure_records.py",
         }
         feature_files = set(FEATURES_DIR.glob("*.py"))

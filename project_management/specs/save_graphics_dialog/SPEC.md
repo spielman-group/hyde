@@ -282,10 +282,12 @@ what happened:
 ## Reuse Boundary
 
 The graphics-output option lowering for format, `DPI`, transparency, and temporary
-size override lives in the shared matplotlib feature layer, and clipboard copy is its
-second consumer.
+size override lives in the shared matplotlib feature layer. It normalizes the export
+dialog's options; the copy path does not use it, because copy takes fixed options and
+carries no size override.
 
-That reuse seam is limited to graphics-output options.
+What the two halves genuinely share is the format vocabulary: the clipboard-capable
+set and its MIME mapping sit beside that lowering, and copy consumes those.
 
 ## Out Of Scope
 
