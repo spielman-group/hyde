@@ -316,12 +316,12 @@ These capabilities are deferred until their underlying backend behavior is defin
 ## Screenshot Notes
 
 ### 03_data_tables.png
-![Data Tables](03_data_tables.png)
+![Data Tables](_source/03_data_tables.png)
 - What it shows: Hyde Python Variables beside a live table window.
 - Hyde interpretation: the table is a live, editable view into kernel-owned objects.
 
 ### 13_table_with_features.png
-![Table Features](13_table_with_features.png)
+![Table Features](_source/13_table_with_features.png)
 - What it shows: a table titled `Table0: delay2, fit_delay2` with a point column, two
   data columns, a current-cell value strip, a gear menu, and scrollbars.
 - Hyde interpretation: the table supports direct cell editing and kernel-synchronized

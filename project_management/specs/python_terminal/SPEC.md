@@ -58,7 +58,7 @@
 
 ## Reference Image
 
-![Python Terminal](22_python_terminal.png)
+![Python Terminal](_source/22_python_terminal.png)
 
 The image is a behavior reference for the embedded rich IPython console, not a literal
 widget-tree contract. The shipped Hyde structure is a `HydeToolWidget` container with

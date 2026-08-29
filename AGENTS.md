@@ -18,6 +18,12 @@ Review these before coding:
 
 Use `project_management/specs/` only for the feature you are touching.
 
+Each feature spec folder separates inputs from output:
+`<feature>/SPEC.md` is Hyde-authored and tracked; `<feature>/_source/`
+holds third-party input material (vendor screenshots, vendor
+documentation) and is gitignored. Never commit anything under `_source/`,
+and never copy vendor prose into `SPEC.md`.
+
 ## Core Rules
 1. **GUI is not scientific state.** Do not store authoritative arrays, figures, or
    analysis state in Qt.

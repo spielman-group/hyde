@@ -309,6 +309,6 @@ The following Igor concepts do not carry into Hyde as part of this specification
 - cross-project browsing of another `.hy` project
 
 ## 08_python_variables_context_menu.png
-![Python Variables Context Menu](08_python_variables_context_menu.png)
+![Python Variables Context Menu](_source/08_python_variables_context_menu.png)
 - What it shows: a selection-driven browser with a right-click action menu, an info area, and a preview-oriented workspace next to figure and table windows.
 - Hyde interpretation: a namespace browser for Python objects, with context actions translated into explicit Hyde/Python commands rather than Igor object operations.

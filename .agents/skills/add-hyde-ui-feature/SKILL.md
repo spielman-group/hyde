@@ -10,7 +10,11 @@ metadata:
 ## Overview
 Define a Hyde frontend feature spec from the artifacts in `project_management/specs/<feature>/`.
 
-Treat screenshots and drawings as evidence of visible UI behavior. Treat `SPEC.md` as the existing Hyde draft if present. Treat `IGOR.md` as a non-authoritative source of feature intent that may include concepts that do not fit Hyde.
+Input material lives in `project_management/specs/<feature>/_source/` and is gitignored; the `SPEC.md` you write sits alongside it and is tracked. Keep that boundary: read from `_source/`, write only to `SPEC.md`.
+
+Treat screenshots and drawings as evidence of visible UI behavior. Treat `SPEC.md` as the existing Hyde draft if present. Treat `_source/IGOR.md` as a non-authoritative source of feature intent that may include concepts that do not fit Hyde.
+
+`_source/` material is third-party copyrighted documentation. Describe the behavior it implies in your own words; never quote or paraphrase its prose into `SPEC.md`, and never reference its files from tracked documents.
 
 For repeatable Hyde-specific patterns, read [references/hyde-ui-spec-patterns.md](references/hyde-ui-spec-patterns.md) before drafting or revising the final spec.
 
@@ -33,14 +37,14 @@ Widget-shape mapping:
 
 ## Workflow
 1. Inspect the feature spec folder first.
-   Look for image assets, `SPEC.md`, and `IGOR.md`.
+   Look for `SPEC.md` alongside the folder's gitignored `_source/`, which holds the image assets and any `IGOR.md`.
 2. Infer the UI behavior shown by the screenshots before relying on prose.
    Note visible controls, panes, menus, selections, states, user actions, and relative layout.
 3. Sketch the visible layout in ASCII before drafting prose whenever the surface is more than a trivial single-column form.
    Capture top-to-bottom and left-to-right placement, grouped controls, major spans, and footer actions. If the UI uses tabs, stacked pages, or other mutually exclusive views, make a separate ASCII sketch for each one.
 4. Read `SPEC.md` if present.
    Preserve Hyde-specific decisions already made unless they conflict with project architecture or newer user direction.
-5. Read `IGOR.md` critically.
+5. Read `_source/IGOR.md` critically.
    Extract user intent and useful UX patterns, not literal Igor implementation details.
 6. Classify every meaningful visible control as one of:
    - `active`
@@ -59,14 +63,14 @@ Widget-shape mapping:
    - whether the surface is really a dialog, tool, or interactive widget
    - whether the lower pane shows the executable backing string directly or may show
      alternate status/help/preview text
-   - whether `Do It`, `To Cmd Line`, and `To Clip` all use the same backing string
+   - whether `OK`, `To IPython`, and `Copy` all use the same backing string
    - whether the dialog owns its domain package or calls a feature owner elsewhere
    - whether any architecture-sensitive ownership, naming, or identity seams need to
      be explicit for follow-on skills
    - which visible controls are intentionally inert in the initial deployment
 
 ## Interpretation Rules
-- Prioritize sources in this order: explicit user direction, Hyde architecture and AGENTS constraints, existing Hyde `SPEC.md`, screenshot evidence, then `IGOR.md`.
+- Prioritize sources in this order: explicit user direction, Hyde architecture and AGENTS constraints, existing Hyde `SPEC.md`, screenshot evidence, then `_source/IGOR.md`.
 - Do not copy Igor concepts directly when they do not map to Hyde.
   Translate them into Hyde-native or Python-native concepts and confirm the translation with the user when it materially affects the spec.
 - Common examples of Igor-specific concepts that need translation or rejection include data folders, waves, command-line insertion behavior, and other non-Python object models.
@@ -93,7 +97,7 @@ Widget-shape mapping:
 - If the feature spec folder does not exist, create it and add `SPEC.md`.
 - Use nearby Hyde spec folders for format and granularity when helpful.
   `project_management/specs/save_graphics_dialog/` is a clean dialog example;
-  `project_management/specs/table/` shows a spec paired with an `IGOR.md` source.
+  `project_management/specs/table/` shows a spec paired with a `_source/IGOR.md` input.
 - Keep `SPEC.md` free of implementation history, migrations, or discarded alternatives.
 - Separate initial deployment behavior from future work whenever the artifacts imply a larger eventual feature.
 - In `Window Layout`, include ASCII layout sketches whenever layout fidelity matters.
@@ -115,7 +119,7 @@ Widget-shape mapping:
   this open invites dialog-local string assembly.
 - When the feature is expected to be a `HydeDialogWidget`, state whether the lower
   preview pane shows the executable backing string directly or may display alternate
-  text while `Do It` / `To Cmd Line` / `To Clip` still use the backing string.
+  text while `OK` / `To IPython` / `Copy` still use the backing string.
 - When the feature depends on architecture-sensitive ownership, naming, or identity
   behavior, state that behavior explicitly in the spec and reference the governing
   Hyde docs so later skills do not have to rediscover it.

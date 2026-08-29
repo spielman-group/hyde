@@ -213,3 +213,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Third-party source material for feature specs: vendor screenshots and vendor
+# documentation used as input when writing a spec. Kept local, never
+# distributed with the repository. Hyde-authored SPEC.md files stay tracked.
+project_management/specs/*/_source/
