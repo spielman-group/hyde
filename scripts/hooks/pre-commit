@@ -1,0 +1,7 @@
+#!/bin/sh
+# Refuse a commit whose checked-in matplotlib format table no longer matches the
+# installed matplotlib. Hyde reads that table instead of querying matplotlib at
+# runtime, so a stale table silently offers formats that may not exist.
+#
+# Install with: scripts/hooks/install
+python scripts/regenerate_graphics_formats.py --check || exit 1

@@ -50,6 +50,19 @@ class SaveGraphicsDialog(HydeFileDialog):
             if selected_format is None
             else (selected_format.name_filter,)
         )
+        # HydeFileDialog.__init__ refreshes the preview before this subclass can
+        # build its output-options widgets, so the accessors below run against a
+        # half-built dialog exactly once. Declare those widgets so that state is
+        # visible rather than something each accessor has to probe for.
+        self.output_options_ready = False
+        self.format_list_widget = None
+        self.options_panel = None
+        self.dpi_spin_box = None
+        self.transparent_checkbox = None
+        self.same_size_radio = None
+        self.custom_size_radio = None
+        self.width_spin_box = None
+        self.height_spin_box = None
         super().__init__(parent=parent, services=services)
         self.setWindowTitle("Save Graphics")
         self.load_output_options_ui()
@@ -122,6 +135,7 @@ class SaveGraphicsDialog(HydeFileDialog):
         self.width_spin_box.valueChanged.connect(self.on_size_value_changed)
         self.height_spin_box.setValue(height)
         self.height_spin_box.valueChanged.connect(self.on_size_value_changed)
+        self.output_options_ready = True
         self.apply_same_size_display()
 
     def populate_format_list(self):
@@ -188,12 +202,12 @@ class SaveGraphicsDialog(HydeFileDialog):
         return tuple(float(value) for value in self._opening_figure_size_inches)
 
     def selected_dpi(self):
-        if hasattr(self, "dpi_spin_box"):
-            return int(self.dpi_spin_box.value())
-        return int(self.default_dpi)
+        if not self.output_options_ready:
+            return int(self.default_dpi)
+        return int(self.dpi_spin_box.value())
 
     def selected_transparent(self):
-        if not hasattr(self, "transparent_checkbox"):
+        if not self.output_options_ready:
             return bool(self.default_transparent)
         return bool(
             self.transparent_checkbox.isChecked()
@@ -201,7 +215,7 @@ class SaveGraphicsDialog(HydeFileDialog):
         )
 
     def selected_size_override_inches(self):
-        if not hasattr(self, "custom_size_radio") or not self.custom_size_radio.isChecked():
+        if not self.output_options_ready or not self.custom_size_radio.isChecked():
             return None
         return (
             float(self.width_spin_box.value()),
@@ -209,7 +223,7 @@ class SaveGraphicsDialog(HydeFileDialog):
         )
 
     def sync_transparent_control(self):
-        if not hasattr(self, "transparent_checkbox"):
+        if not self.output_options_ready:
             return
         selected_format = self.selected_export_format()
         supported = (
@@ -245,7 +259,7 @@ class SaveGraphicsDialog(HydeFileDialog):
         self.height_spin_box.setEnabled(True)
 
     def on_size_mode_changed(self, checked):
-        if not checked or not hasattr(self, "width_spin_box"):
+        if not checked or not self.output_options_ready:
             return
         if self.same_size_radio.isChecked():
             self.apply_same_size_display()

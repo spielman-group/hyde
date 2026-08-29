@@ -1,0 +1,10 @@
+#!/bin/sh
+# Install Hyde's git hooks into this clone.
+set -e
+root=$(git rev-parse --show-toplevel)
+for hook in "$root"/scripts/hooks/*; do
+    name=$(basename "$hook")
+    [ "$name" = "install" ] && continue
+    ln -sf "../../scripts/hooks/$name" "$root/.git/hooks/$name"
+    echo "installed $name"
+done

@@ -8,6 +8,7 @@ from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.shared.plugin import HydePlugin
 
 from .clipboard import clipboard_mime_data
+from .copy_request import FigureCopyRequest
 from .dialogs import SaveGraphicsDialog
 
 
@@ -26,10 +27,7 @@ class Plugin(HydePlugin):
 
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
-        self._copy_format = None
-        self._busy_cursor_shown = False
-        self._busy_timer = None
-        self._timeout_timer = None
+        self._copy_request = None
 
     def get_menu_contributions(self):
         return [
@@ -105,19 +103,7 @@ class Plugin(HydePlugin):
         return True
 
     def copy_in_flight(self):
-        return self._copy_format is not None
-
-    def show_busy_cursor(self):
-        if self._busy_cursor_shown:
-            return
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
-        self._busy_cursor_shown = True
-
-    def restore_cursor(self):
-        if not self._busy_cursor_shown:
-            return
-        QtWidgets.QApplication.restoreOverrideCursor()
-        self._busy_cursor_shown = False
+        return self._copy_request is not None
 
     def on_copy_timeout(self):
         # Mandatory rather than optional: an unrestored busy cursor makes the
@@ -137,27 +123,20 @@ class Plugin(HydePlugin):
 
     def _begin_copy(self, output_format):
         self._end_copy()
-        self._copy_format = str(output_format)
-        self._status_message(f"Copying figure as {self._copy_format.upper()}...")
-
-        self._busy_timer = QtCore.QTimer()
-        self._busy_timer.setSingleShot(True)
-        self._busy_timer.timeout.connect(self.show_busy_cursor)
-        self._busy_timer.start(self.busy_cursor_delay_ms)
-
-        self._timeout_timer = QtCore.QTimer()
-        self._timeout_timer.setSingleShot(True)
-        self._timeout_timer.timeout.connect(self.on_copy_timeout)
-        self._timeout_timer.start(self.copy_timeout_ms)
+        self._copy_request = FigureCopyRequest(
+            output_format,
+            busy_delay_ms=self.busy_cursor_delay_ms,
+            timeout_ms=self.copy_timeout_ms,
+            on_timeout=self.on_copy_timeout,
+        )
+        self._status_message(
+            f"Copying figure as {self._copy_request.output_format.upper()}..."
+        )
 
     def _end_copy(self):
-        for attr in ("_busy_timer", "_timeout_timer"):
-            timer = getattr(self, attr)
-            if timer is not None:
-                timer.stop()
-                setattr(self, attr, None)
-        self.restore_cursor()
-        self._copy_format = None
+        if self._copy_request is not None:
+            self._copy_request.settle()
+            self._copy_request = None
 
     def on_kernel_message(self, payload):
         # The kernel rendered the figure and handed the bytes over; the

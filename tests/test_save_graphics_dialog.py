@@ -676,7 +676,9 @@ class TestCopyFeedback(unittest.TestCase):
 
         plugin, _ = self._plugin_with_status()
         plugin.copy_active_figure(output_format="pdf")
-        plugin.show_busy_cursor()
+        # Take the slow path: the cursor a lingering copy would have put up.
+        plugin._copy_request.show_busy_cursor()
+        self.assertIsNotNone(QtWidgets.QApplication.overrideCursor())
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",

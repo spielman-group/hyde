@@ -81,7 +81,7 @@ Behavior-level IR ownership cleanup remains later work.
 - Axis, trace, and Curve Fit attached-display dialogs now mutate first-class figures
   through hidden matplotlib patch Python routed over Hyde's standard hidden-command
   execution/logging path, and Curve Fit attached live/preview uses the same
-  command-generation model as `Do It` / `To Cmd Line`.
+  command-generation model as `OK` / `To IPython`.
 - Hidden and visible GUI command dispatch now log the final dispatched command at the
   transport layer, so command visibility no longer depends on feature-local logging
   shims.
@@ -98,7 +98,7 @@ Behavior-level IR ownership cleanup remains later work.
 - `New Fit Function...` appends a minimal valid scaffold to `procedures/__init__.py`,
   reloads procedures, refreshes the catalog, and keeps the dialog open on success.
 - Curve Fit preview/commit uses one GUI-side workflow IR over kernel-owned fit
-  results and attached figure state. Preview, `Do It`, live update, and
+  results and attached figure state. Preview, `OK`, live update, and
   rollback/store command generation all flow through that IR object's
   `python_source()`, while attached-display patching stays on the shared
   figure-patch path.
@@ -117,7 +117,7 @@ Behavior-level IR ownership cleanup remains later work.
 - Visible command history saves to `terminal/history.py`.
 - Target-selecting project dialogs now use the shared `HydeFileDialog` /
   `HydeFileWidget` family, preview the real generated Hyde command, and route
-  `Do It`, `To Cmd Line`, and `To Clip` through that same preview payload.
+  `OK`, `To IPython`, and `Copy` through that same preview payload.
 - `File -> Save` remains a direct hidden `hyde.save_project(mode='save')` dispatch
   with no chooser dialog.
 - Same-target `Save As...` degenerates to plain `hyde.save_project(mode='save')`
@@ -128,6 +128,10 @@ Behavior-level IR ownership cleanup remains later work.
   and figures after successful `session.py` completion.
 
 ## Remaining Near-Term Gaps
+- correlate figure copy requests with their replies: two copies issued in quick
+  succession can settle against each other's replies, because the reply carries
+  no request token. Needs a token threaded through `hyde.copy_figure` and the
+  parent message, which changes a public runtime signature
 - raise Hyde's figure-creation DPI: figures inherit the matplotlib default, so
   raster clipboard copies and exports are correspondingly modest. The fix belongs
   at figure creation, not as a copy-specific or export-specific override

@@ -53,6 +53,38 @@
   code the traceback points at.
 - GUI code may hold only transient state needed to generate commands or render UI.
 
+## Generated Artifacts
+
+Some data Hyde needs is expensive or unsafe to obtain at runtime. Where that is
+true, it is generated into a checked-in module rather than queried, so it is
+reviewable in a diff and cannot surprise a running process.
+
+- `hyde/features/matplotlib_graphics_formats.py` holds matplotlib's export
+  formats. Asking matplotlib directly imports `matplotlib.pyplot` and resolves
+  an interactive backend as a side effect; the GUI process must do neither,
+  because it does not own figures and because once pyplot is imported
+  `configure_gui_matplotlib_backend()` becomes a no-op.
+
+Regenerate with:
+
+```
+python scripts/regenerate_graphics_formats.py
+```
+
+Run it when the matplotlib dependency changes. `--check` reports drift without
+writing.
+
+A generated artifact goes stale silently, so every such artifact needs a trigger
+that makes drift loud. This one has two, and both name the command to run:
+
+- `scripts/hooks/pre-commit` refuses a commit whose table does not match the
+  installed matplotlib. Install the hooks once per clone with
+  `scripts/hooks/install`.
+- a test in `tests/test_save_graphics_dialog.py` fails on the same condition, so
+  drift is caught even where the hook is not installed.
+
+Do not hand-edit a generated file, and do not add one without a trigger.
+
 ## Widget Hierarchy
 
 Use the widget base classes as the functionality path for plugins. Prefer inheriting
