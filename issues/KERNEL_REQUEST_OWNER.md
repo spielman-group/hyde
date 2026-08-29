@@ -1,6 +1,6 @@
 # Scope: one owner for GUI-initiated kernel requests
 
-Status: steps 1-4 landed. Step 5 next.
+Status: steps 1-4 landed. Step 5 partly landed; see below.
 
 ## The confusion is well founded
 
@@ -143,16 +143,22 @@ Each step leaves the suite green on its own.
    confirmation timeout. The figure window deliberately stays open until the
    kernel confirms, however long that takes: closing it first would make the
    GUI, not the kernel, the authority on whether the figure exists.
-5. Surface `status="error"` replies everywhere they are still dropped, which
-   retires the "hidden execution failures are invisible" debt recorded during
-   the figure copy work. Two known holes to close there:
+5. **Partly done.** The two named holes are closed:
 
-   - **Prefix commands before a table refresh.** `_queue_refresh` sends its
-     prefix mutations through `execute_hidden_command` and only the refresh
-     itself is correlated. Hyde's commands are silent, so a raised prefix does
-     *not* abort the refresh queued behind it -- the refresh runs and returns
-     data as though nothing failed.
-   - **The stray copy payload**, per the gap recorded above.
+   - **Table mutations** -- cell edits and column creation are correlated, and
+     a mutation that raises names its error in the status bar. The refresh
+     behind it still runs, because showing the unchanged data is what tells the
+     user the edit did not take.
+   - **The stray copy payload** -- `signal_copy_to_clipboard` now carries the
+     `msg_id` of the executing request, read from the kernel's parent header, so
+     bytes from an abandoned copy cannot satisfy a later one. No change to
+     `hyde.copy_figure`'s signature or to the emitted Python: the id is derived
+     where the payload is assembled, which is the same layer that carries the
+     table's request id. A payload with no id is still accepted -- absence means
+     the kernel could not tell us, not that the bytes are stale.
+
+   What remains is listed below, because the largest of it is not a mechanical
+   change.
 
 ## Decisions settled
 
@@ -242,6 +248,38 @@ request, not to the queued ones, so opting Hyde's requests out would mean
 changing what the terminal sends -- which is the user's own execution semantics,
 not Hyde's to redefine. It is another reason the real answer is a lane that is
 not behind the user's cell at all; see `CONCURRENT_KERNEL_ACCESS.md`.
+
+## Still dispatching without reading replies
+
+Every site below still uses `execute_hidden`, so a command that raises in the
+kernel is invisible to it. Ordered by consequence.
+
+**1. The curve-fit dialog's rollback never fires on a failed fit.**
+`curve_fit_dialog/dialogs.py` takes a snapshot, runs the fit, and rolls back on
+failure -- but its only failure signal is whether the command could be *sent*.
+A fit that raises in the kernel returns "sent", so the dialog reports success,
+keeps the snapshot, and never rolls back. This is a broken transaction, not
+merely a missing message.
+
+Fixing it is not a swap. The dialog's OK path is synchronous -- it returns
+`(ok, message)` -- and correlating means the accept-or-roll-back decision cannot
+be made until the reply arrives. That is a redesign of the dialog's OK flow and
+should be decided deliberately.
+
+**2. Every dialog's OK button accepts on "sent".** `HydeDialogWidget`'s
+`execute_ok_payload` closes the dialog once the command is dispatched, so a
+command that raises closes the dialog with no indication. Same asynchrony
+problem as 1, but shared by every dialog, so one fix covers many.
+
+**3. Assorted silent failures**, each local: project save and load
+(`file` plugin), session restore (`main`), figure and table plugin-level
+commands, `python_variables_tool`, `figure_control_dialog`.
+
+**Deliberately left alone:**
+
+- `remote_requests` dispatches from a server thread. `request` is main-thread
+  only by contract, and nothing there waits for an answer.
+- `request_regenerate_from_ir` in the figure window is a redraw nobody waits on.
 
 ## Risk
 

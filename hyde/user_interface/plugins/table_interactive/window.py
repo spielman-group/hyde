@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 
@@ -6,6 +7,9 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_ir import TableIR, TableIRDiff
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
+
+
+LOGGER = logging.getLogger("hyde")
 
 
 class TableViewModel(QtCore.QAbstractTableModel):
@@ -188,6 +192,7 @@ class TableWidget(HydeInteractiveWidget):
         self._closed = False
         self._restore_layout_requested = bool(geometry or column_widths)
         self._pending_created_columns = []
+        self._pending_column_requests = {}
         self._tracked_namespace_state = self.current_tracked_namespace_state()
 
         self.model = TableViewModel(self.widget_ir.names)
@@ -260,7 +265,11 @@ class TableWidget(HydeInteractiveWidget):
         self._refresh_requested = False
         refresh_command = self.widget_ir.with_push_table_data(request_id).python_source()
         for command in prefix:
-            if not self.execute_hidden_command(command):
+            # Correlated rather than dispatched: Hyde's commands are silent, so
+            # a mutation that raises does not abort the refresh queued behind
+            # it. Uncorrelated, the refresh would return unchanged data and the
+            # failed edit would look like it simply had no effect.
+            if self.request_command(command, self._on_table_command_finished) is None:
                 self._clear_refresh_in_flight()
                 return False
         self._refresh_request = self.request_command(
@@ -311,6 +320,44 @@ class TableWidget(HydeInteractiveWidget):
         if self._refresh_requested and not self._closed:
             self._refresh_requested = False
             self.refresh_data()
+
+    def _report_command_failure(self, kernel_request):
+        """A table command the user asked for did not run. Say so."""
+        if kernel_request.ran():
+            return False
+        LOGGER.warning(
+            "Table %s command failed: %s",
+            self.window_handle(),
+            kernel_request.error,
+        )
+        service = self.services.get("status_message_service")
+        if service is not None:
+            service.show_status_message(
+                f"Table command failed: {kernel_request.error}"
+                if kernel_request.error
+                else "Table command failed."
+            )
+        return True
+
+    @inmain_decorator()
+    def _on_table_command_finished(self, kernel_request):
+        if self._closed:
+            return
+        # The refresh behind this still runs. Showing the unchanged data is
+        # what tells the user the edit did not take.
+        self._report_command_failure(kernel_request)
+
+    @inmain_decorator()
+    def _on_create_column_finished(self, kernel_request):
+        pending_new_name = self._pending_column_requests.pop(
+            kernel_request.msg_id, None
+        )
+        if self._closed or not self._report_command_failure(kernel_request):
+            return
+        if pending_new_name in self._pending_created_columns:
+            # The column was never created, so stop waiting for a name that
+            # does not exist in the kernel.
+            self._pending_created_columns.remove(pending_new_name)
 
     def _clear_refresh_in_flight(self):
         self._refresh_payload_timer.stop()
@@ -718,8 +765,12 @@ class TableWidget(HydeInteractiveWidget):
             return False
 
         if pending_new_name is not None:
-            if not self.execute_hidden_command(command):
+            kernel_request = self.request_command(
+                command, self._on_create_column_finished
+            )
+            if kernel_request is None:
                 return False
+            self._pending_column_requests[kernel_request.msg_id] = pending_new_name
             self._pending_created_columns.append(pending_new_name)
             self._tracked_namespace_state = self.current_tracked_namespace_state()
         else:

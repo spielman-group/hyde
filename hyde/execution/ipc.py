@@ -29,6 +29,26 @@ def put_parent_message(message):
         tree.to_parent.put(message)
 
 
+def _executing_request_id():
+    """The `msg_id` of the kernel request currently executing, if any.
+
+    The parent-message channel carries no Jupyter header, so a payload sent
+    down it cannot be matched to the request that produced it unless it says
+    so itself. Returns an empty string outside a kernel, which the GUI reads
+    as "cannot tell" rather than as evidence against any request.
+    """
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell is None:
+            return ""
+        parent = shell.get_parent()
+        return str((parent or {}).get("header", {}).get("msg_id") or "")
+    except Exception:
+        return ""
+
+
 def signal_copy_to_clipboard(
     payload_base64,
     *,
@@ -53,6 +73,7 @@ def signal_copy_to_clipboard(
                 "output_format": str(output_format),
                 "is_text": bool(is_text),
                 "companion_png_base64": companion_png_base64,
+                "request_msg_id": _executing_request_id(),
             },
         ])
     except Exception:

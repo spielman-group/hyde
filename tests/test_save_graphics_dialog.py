@@ -196,17 +196,19 @@ class FakeKernelRequests:
         self._answer(KernelRequest.ABANDONED, "The kernel is no longer available.")
 
 
-def copy_payload(data=b"%PDF fake", output_format="pdf", is_text=False):
+def copy_payload(
+    data=b"%PDF fake", output_format="pdf", is_text=False, request_msg_id=None
+):
     import base64
 
-    return {
-        "task": "COPY_TO_CLIPBOARD_REQUEST",
-        "data": {
-            "payload_base64": base64.b64encode(data).decode("ascii"),
-            "output_format": output_format,
-            "is_text": is_text,
-        },
+    payload = {
+        "payload_base64": base64.b64encode(data).decode("ascii"),
+        "output_format": output_format,
+        "is_text": is_text,
     }
+    if request_msg_id is not None:
+        payload["request_msg_id"] = request_msg_id
+    return {"task": "COPY_TO_CLIPBOARD_REQUEST", "data": payload}
 
 
 def settle_copy(plugin, kernel, output_format="pdf"):
@@ -919,6 +921,36 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         kernel.render_ran()
         self.assertFalse(plugin.copy_in_flight())
         self.assertFalse(any("could not" in str(m).lower() for m in messages), messages)
+
+    def test_data_left_over_from_an_abandoned_copy_is_not_taken_for_a_new_one(self):
+        """The bytes name the request that produced them."""
+        plugin, kernel, messages = self._copy_in_flight()
+        stale = kernel.requests[-1][0].msg_id
+        kernel.render_ran()
+        plugin.on_copy_payload_timeout()
+        self.assertFalse(plugin.copy_in_flight())
+
+        QtWidgets.QApplication.clipboard().setText("untouched")
+        self.assertTrue(plugin.copy_active_figure(output_format="png"))
+        plugin.on_kernel_message(copy_payload(b"%PDF stale", request_msg_id=stale))
+
+        self.assertTrue(plugin.copy_in_flight())
+        self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
+
+        current = kernel.requests[-1][0].msg_id
+        plugin.on_kernel_message(
+            copy_payload(b"\x89PNG real", output_format="png", request_msg_id=current)
+        )
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(any("Copied" in str(m) for m in messages), messages)
+
+    def test_data_that_cannot_name_its_request_is_still_accepted(self):
+        """An absent name means the kernel could not tell us, not that it is stale."""
+        plugin, _, messages = self._copy_in_flight()
+        plugin.on_kernel_message(copy_payload())
+
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(any("Copied" in str(m) for m in messages), messages)
 
     def test_the_wait_cursor_is_released_while_the_copy_is_still_waiting(self):
         """A minute-long wait cursor reads as a hung application."""

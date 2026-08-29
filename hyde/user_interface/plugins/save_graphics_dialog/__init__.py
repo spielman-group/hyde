@@ -186,6 +186,8 @@ class Plugin(HydePlugin):
             # user has already been shown.
             return
         data = payload.get("data", {}) or {}
+        if not self._payload_answers_current_copy(data):
+            return
         try:
             rendered = base64.b64decode(data.get("payload_base64", ""))
             companion_png = base64.b64decode(data.get("companion_png_base64") or "")
@@ -211,6 +213,22 @@ class Plugin(HydePlugin):
         output_format = str(data.get("output_format", "") or "").upper()
         self._end_copy()
         self._status_message(f"Copied figure to the clipboard as {output_format}.")
+
+    def _payload_answers_current_copy(self, data):
+        """Reject bytes that belong to a copy this one already gave up on.
+
+        A copy that rendered but whose data was too slow fails, and its bytes
+        can still land afterwards. If the user has started another copy by then,
+        the stale bytes would satisfy it. The parent-message channel carries no
+        Jupyter header, so the payload names the request that produced it.
+        An empty name means the kernel could not tell us, which is not evidence
+        against this copy.
+        """
+        payload_msg_id = str(data.get("request_msg_id") or "")
+        if not payload_msg_id:
+            return True
+        kernel_request = self._copy_request.kernel_request
+        return kernel_request is None or kernel_request.msg_id == payload_msg_id
 
     def show_save_graphics_dialog(self, checked=False):
         del checked

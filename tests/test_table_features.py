@@ -1,6 +1,7 @@
 import gc
 import os
 import tempfile
+import types
 import unittest
 import weakref
 from unittest.mock import patch
@@ -739,6 +740,51 @@ class TestTableWidget(unittest.TestCase):
             widget.on_data_received({"a": [9]}, second_request_id)
 
             self.assertEqual(widget.model.data_cache["a"], [9])
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
+    def test_an_edit_that_raises_in_the_kernel_is_reported(self):
+        """Hyde's commands are silent, so a failed edit does not abort the
+        refresh behind it; without correlation it simply looked like no-op."""
+        queued = []
+        messages = []
+        namespace_service = FakeNamespaceViewService({"a": {"type": "ndarray"}})
+        execution = FakeExecutionService(queued)
+        widget = TableWidget(
+            "Table0",
+            ["a"],
+            services={
+                "python_execution_service": execution,
+                "namespace_view_service": namespace_service,
+                "status_message_service": types.SimpleNamespace(
+                    show_status_message=messages.append,
+                    clear_status_message=lambda: None,
+                ),
+            },
+        )
+        try:
+            widget.model.update_data({"a": [0]})
+            widget.ui.tableView.setCurrentIndex(widget.model.index(0, 1))
+            widget.ui.valueEdit.setReadOnly(False)
+            widget.ui.valueEdit.setText("9")
+            QtWidgets.QApplication.sendEvent(
+                widget.ui.valueEdit,
+                QtGui.QKeyEvent(
+                    QtCore.QEvent.KeyPress,
+                    QtCore.Qt.Key_Return,
+                    QtCore.Qt.NoModifier,
+                ),
+            )
+
+            # The mutation is the first of the two requests; the refresh follows.
+            mutation, on_finished = execution.requests[0]
+            mutation.settle(KernelRequest.RAISED, "TypeError: read-only array")
+            on_finished(mutation)
+
+            self.assertTrue(
+                any("read-only array" in str(m) for m in messages), messages
+            )
         finally:
             widget.shutdown_client()
             widget.close()
