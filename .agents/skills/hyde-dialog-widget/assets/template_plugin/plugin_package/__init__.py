@@ -30,4 +30,4 @@ class Plugin(HydePlugin):
             services=self.services,
             parent=self.service("ui"),
         )
-        return dialog.exec_() == QtWidgets.QDialog.Accepted
+        return dialog.exec() == QtWidgets.QDialog.Accepted
