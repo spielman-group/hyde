@@ -11,7 +11,7 @@ figure graphics-output path that `Save Graphics...` already owns.
 - [x] Slice 1: Enable And Disable Menu Actions From Live Preconditions
 - [x] Slice 2: Copy The Active Figure As PDF
 - [x] Slice 3: Add The Edit Menu With Copy And Its Shortcut
-- [ ] Slice 4: Offer Copy As Over The Clipboard-Capable Format Set
+- [x] Slice 4: Offer Copy As Over The Clipboard-Capable Format Set
 - [ ] Slice 5: Copy PGF As Text
 - [ ] Slice 6: Attach A PNG Companion Representation
 - [ ] Slice 7: Report Copy Progress And Failure
@@ -286,15 +286,24 @@ menu.
 
 ### Acceptance criteria
 
-- [ ] `Copy As` lists exactly the curated format set, ordered and labelled as in
+- [x] `Copy As` lists exactly the curated format set, ordered and labelled as in
       the Save Graphics dialog.
-- [ ] `raw`, `rgba` and `svgz` do not appear.
-- [ ] Each image-format entry places data on the clipboard under that format's
+- [x] `raw`, `rgba` and `svgz` do not appear.
+- [x] Each image-format entry places data on the clipboard under that format's
       MIME type, pasteable in an application that accepts it.
-- [ ] The submenu appears in all three surfaces, and its entries are disabled
-      when no figure is active.
-- [ ] Clipboard-capability and MIME mapping are queryable from the feature layer
+- [x] The submenu appears in the Edit menu, Figure menu, and figure right-click
+      menu, and its entries are disabled when no figure is active.
+- [x] Clipboard-capability and MIME mapping are queryable from the feature layer
       without importing Qt or any plugin module.
+
+### Note
+
+Contributing a submenu to a location that also holds plain actions was new
+ground, and it surfaced a latent lifetime bug elsewhere: figure and table
+workspaces connected `QMdiSubWindow.destroyed` to `functools.partial`
+callbacks, which Qt keeps and calls even after cyclic GC has cleared them.
+Fixed by connecting those signals to bound methods and passing the workspace
+handle through a Qt property. `STYLE.md` carries the general rule.
 
 ### Blocked by
 

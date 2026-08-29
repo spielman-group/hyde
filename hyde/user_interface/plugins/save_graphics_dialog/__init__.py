@@ -1,7 +1,12 @@
 import base64
+from functools import partial
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
+from hyde.features.matplotlib_features import (
+    GRAPHICS_CLIPBOARD_MIME_TYPES,
+    graphics_clipboard_formats,
+)
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.shared.plugin import HydePlugin
 
@@ -40,7 +45,42 @@ class Plugin(HydePlugin):
                 "enabled": self.has_active_editable_figure,
                 "shortcut": QtGui.QKeySequence.Copy,
             },
+            *self._copy_as_contributions(),
         ]
+
+    def _copy_as_contributions(self):
+        # One implementation, declared into both the shared `edit` location and
+        # the `figure` location. The figure context menu re-renders the whole
+        # `figure` location, so contributing there is what puts Copy As in the
+        # right-click menu.
+        # Menus are built during application start-up, and the runtime format
+        # query imports matplotlib.pyplot and resolves a backend as a side
+        # effect. The GUI process does not own figures, and once pyplot is
+        # imported configure_gui_matplotlib_backend() becomes a no-op. The
+        # static clipboard mapping yields identical keys, labels and suffix
+        # aliases without touching the runtime.
+        contributions = []
+        for index, item in enumerate(
+            graphics_clipboard_formats(GRAPHICS_CLIPBOARD_MIME_TYPES)
+        ):
+            for location in ("edit", "figure"):
+                contributions.append(
+                    {
+                        "location": location,
+                        "path": ("Copy As",),
+                        # Same group as Copy so the submenu sits beside it
+                        # rather than drifting elsewhere in the menu.
+                        "group": "clipboard" if location == "edit" else "figure_export",
+                        "group_order": 0 if location == "edit" else 100,
+                        "order": 30 + index,
+                        "name": item.display_label,
+                        "action": partial(
+                            self.copy_active_figure, output_format=item.key
+                        ),
+                        "enabled": self.has_active_editable_figure,
+                    }
+                )
+        return contributions
 
     def copy_active_figure(self, checked=False, output_format="pdf"):
         del checked

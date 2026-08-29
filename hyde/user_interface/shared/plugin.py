@@ -516,6 +516,39 @@ class HydeMenuContext(MenuContext):
             ),
         )
 
+    def _group_order_of(self, location, path, contribution):
+        group_orders = self._group_orders.get((location, self._normalized_path(path)), {})
+        return group_orders[contribution.get("group", None)]
+
+    def _submenu_sort_key(self, location, submenu_path):
+        """Where a submenu sits among its parent's entries.
+
+        A submenu carries no group or order of its own, so it takes the position
+        of its first entry. Without this a submenu lands wherever it happened to
+        be created, which for a location that also has plain actions means the
+        top of the menu regardless of intent.
+        """
+        best = None
+        for current_location, path in self._grouped_contributions:
+            if current_location != location:
+                continue
+            if path[: len(submenu_path)] != submenu_path:
+                continue
+            for plugin_name, contribution in self._sorted_contributions(location, path):
+                group_orders = self._group_orders.get(
+                    (location, self._normalized_path(path)), {}
+                )
+                candidate = (
+                    group_orders[contribution.get("group", None)],
+                    contribution.get("order", DEFAULT_PRIORITY),
+                    plugin_name,
+                    contribution["name"],
+                )
+                if best is None or candidate < best:
+                    best = candidate
+                break
+        return best if best is not None else (DEFAULT_PRIORITY, DEFAULT_PRIORITY, "", "")
+
     def _render_menu_tree(self, location, root_menu, register_actions):
         menus = {(location, ()): root_menu}
         paths = {
@@ -523,22 +556,64 @@ class HydeMenuContext(MenuContext):
             for current_location, path in self._grouped_contributions
             if current_location == location
         }
+        # Submenus of a parent, in the order they should appear among its
+        # entries, so a submenu can be created at the right moment below.
+        pending_submenus = {}
         for path in sorted(paths):
             parent_path = ()
             for submenu_name in path:
                 submenu_path = parent_path + (submenu_name,)
-                submenu_key = (location, submenu_path)
-                if submenu_key not in menus:
-                    submenu = menus[(location, parent_path)].addMenu(submenu_name)
-                    menus[submenu_key] = submenu
+                pending_submenus.setdefault(parent_path, {})[submenu_name] = (
+                    self._submenu_sort_key(location, submenu_path)
+                )
                 parent_path = submenu_path
 
+        def ensure_submenu(parent_path, submenu_name):
+            submenu_path = parent_path + (submenu_name,)
+            submenu_key = (location, submenu_path)
+            if submenu_key not in menus:
+                parent_menu = menus[(location, parent_path)]
+                menus[submenu_key] = parent_menu.addMenu(submenu_name)
+            return menus[submenu_key]
+
         for path in sorted(paths):
+            # Create this path's ancestors before rendering into it, in case no
+            # entry of the parent triggered their creation.
+            parent_path = ()
+            for submenu_name in path:
+                ensure_submenu(parent_path, submenu_name)
+                parent_path = parent_path + (submenu_name,)
             menu = menus[(location, path)]
             previous_group = None
-            for index, (plugin_name, contribution) in enumerate(
-                self._sorted_contributions(location, path)
-            ):
+            # Interleave this menu's own actions with its child submenus, so a
+            # submenu sits where its first entry says it belongs rather than
+            # wherever it happened to be created.
+            entries = [
+                (
+                    (
+                        self._group_order_of(location, path, contribution),
+                        contribution.get("order", DEFAULT_PRIORITY),
+                        plugin_name,
+                        contribution["name"],
+                    ),
+                    "action",
+                    (plugin_name, contribution),
+                )
+                for plugin_name, contribution in self._sorted_contributions(location, path)
+            ]
+            entries.extend(
+                (sort_key, "submenu", submenu_name)
+                for submenu_name, sort_key in pending_submenus.get(path, {}).items()
+            )
+            entries.sort(key=lambda entry: entry[0])
+
+            for index, (_sort_key, kind, payload) in enumerate(entries):
+                if kind == "submenu":
+                    ensure_submenu(path, payload)
+                    previous_group = None
+                    continue
+
+                plugin_name, contribution = payload
                 group = contribution.get("group", None)
                 if index and group != previous_group:
                     menu.addSeparator()

@@ -433,6 +433,107 @@ class TestEditMenuCopy(unittest.TestCase):
         self.assertEqual(from_edit, from_figure)
 
 
+class TestCopyAsSubmenu(unittest.TestCase):
+    """Copy As offers the clipboard-capable subset of what Save offers.
+
+    Curation is not preference here: `raw` and `rgba` are raw buffers with no
+    MIME type and `svgz` is gzipped SVG nothing pastes, so a menu entry for any
+    of them would be a broken action.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def setUp(self):
+        self.executed = []
+
+    def _host(self, figure_context):
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        manager.plugins = {
+            "figure": FigurePlugin({}),
+            "save_graphics_dialog": SaveGraphicsPlugin({}),
+        }
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+        for plugin in manager.plugins.values():
+            services = getattr(plugin, "services", None)
+            if isinstance(services, dict):
+                services["figure_context_service"] = types.SimpleNamespace(
+                    active_editable_figure=lambda: figure_context[0]
+                )
+                services["python_execution_service"] = types.SimpleNamespace(
+                    execute_hidden=lambda code, silent=True: self.executed.append(code)
+                )
+        return app
+
+    def _submenu_labels(self, menu):
+        for action in menu.actions():
+            submenu = action.menu()
+            if submenu is not None and submenu.title() == "Copy As":
+                return [entry.text() for entry in submenu.actions() if not entry.isSeparator()]
+        return None
+
+    def test_copy_as_lists_the_clipboard_capable_formats_in_save_dialog_order(self):
+        app = self._host([None])
+        expected = [item.display_label for item in graphics_clipboard_formats()]
+
+        self.assertEqual(expected, self._submenu_labels(app.ui.menuEdit))
+
+    def test_copy_as_omits_formats_with_no_clipboard_representation(self):
+        app = self._host([None])
+        labels = self._submenu_labels(app.ui.menuEdit)
+
+        for excluded in ("RAW", "RGBA", "SVGZ"):
+            self.assertNotIn(excluded, labels)
+        for expected in ("PDF", "PNG", "SVG", "PGF", "JPEG", "TIFF"):
+            self.assertIn(expected, labels)
+
+    def test_copy_as_appears_in_the_figure_context_menu(self):
+        app = self._host([None])
+        popup = app.menu_context.build_popup_menu("figure", parent=app.ui)
+
+        self.assertEqual(
+            [item.display_label for item in graphics_clipboard_formats()],
+            self._submenu_labels(popup),
+        )
+
+    def test_each_copy_as_entry_emits_its_own_format(self):
+        figure_context = [make_save_graphics_context(title="Graph12")]
+        app = self._host(figure_context)
+        app.menu_context.refresh_enabled_states()
+
+        for item in graphics_clipboard_formats():
+            with self.subTest(output_format=item.key):
+                self.executed.clear()
+                action = app.menu_context.lookup_action(
+                    "edit", item.display_label, path=("Copy As",)
+                )
+                self.assertIsNotNone(action, f"missing Copy As entry for {item.key}")
+                action.trigger()
+                self.assertEqual(
+                    [
+                        "fig = hyde.get_figure('Graph12')\n"
+                        f"hyde.copy_figure(fig, format={item.key!r}, dpi='figure')"
+                    ],
+                    self.executed,
+                )
+
+    def test_copy_as_entries_need_an_active_figure(self):
+        figure_context = [None]
+        app = self._host(figure_context)
+
+        app.menu_context.refresh_enabled_states()
+        action = app.menu_context.lookup_action("edit", "PNG", path=("Copy As",))
+        self.assertFalse(action.isEnabled())
+
+        figure_context[0] = make_save_graphics_context(title="Graph12")
+        app.menu_context.refresh_enabled_states()
+        self.assertTrue(action.isEnabled())
+
+
 class TestSaveGraphicsPlugin(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -462,12 +563,13 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
                 "Modify Axis...",
                 "Save Graphics...",
                 "Copy",
+                "Copy As",
             ],
         )
         self.assertEqual(len([action for action in actions if action.isSeparator()]), 1)
         self.assertEqual(
-            [action.text() for action in actions[-2:]],
-            ["Save Graphics...", "Copy"],
+            [action.text() for action in actions[-3:]],
+            ["Save Graphics...", "Copy", "Copy As"],
         )
 
     def test_figure_actions_are_disabled_without_an_active_figure(self):

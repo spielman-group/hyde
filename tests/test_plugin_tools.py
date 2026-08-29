@@ -1656,7 +1656,13 @@ class TestPluginTools(unittest.TestCase):
             )
         ]
         context.render()
-        main_window.addAction(context.lookup_action("edit", "Copy"))
+        action = context.lookup_action("edit", "Copy")
+        # Scope the shortcut to this window. Other tests in this process create
+        # hosts carrying their own Ctrl+C actions, and an application-scoped
+        # shortcut would make this test depend on execution order.
+        action.setShortcutContext(QtCore.Qt.WidgetShortcut)
+        main_window.addAction(action)
+        main_window.setFocus()
         try:
             context.refresh_enabled_states()
             QTest.keyClick(main_window, QtCore.Qt.Key_C, QtCore.Qt.ControlModifier)
