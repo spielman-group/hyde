@@ -32,7 +32,7 @@ from hyde.features.matplotlib_features import (
     figure_patch_source,
     graphics_output_options,
     graphics_output_transparency_supported,
-    runtime_graphics_export_formats,
+    graphics_export_formats,
 )
 from hyde.features.hyde_ir import HydeAppIR
 from hyde.project_tools import (
@@ -273,8 +273,8 @@ class TestGraphicsExportFormats(unittest.TestCase):
             source,
         )
 
-    def test_runtime_graphics_export_formats_orders_defaults_and_tracks_suffix_variants(self):
-        formats = runtime_graphics_export_formats(
+    def test_graphics_export_formats_orders_defaults_and_tracks_suffix_variants(self):
+        formats = graphics_export_formats(
             {
                 "svg": "Scalable Vector Graphics",
                 "png": "Portable Network Graphics",
@@ -579,9 +579,9 @@ class TestFigurePluginDispatch(unittest.TestCase):
             self.assertIsInstance(dialog.widget_ir, FigureIR)
             self.assertNotIn("initial_ir", vars(dialog))
             self.assertNotIn("current_ir", vars(dialog))
-            self.assertTrue(dialog.do_it_button.isEnabled())
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.to_clip_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
+            self.assertFalse(dialog.to_ipython_button.isEnabled())
+            self.assertTrue(dialog.copy_button.isEnabled())
 
             dialog.ui.titleEdit.setText("Delay Graph")
             self.qapp.processEvents()
@@ -598,7 +598,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_new_figure_dialog_do_it_dispatches_hidden_python_and_accepts(self):
+    def test_new_figure_dialog_ok_dispatches_hidden_python_and_accepts(self):
         execution = FakeExecutionService()
         terminal = FakeExecutionService()
         dialog = NewFigureDialog(
@@ -621,11 +621,11 @@ class TestFigurePluginDispatch(unittest.TestCase):
             self.qapp.processEvents()
 
             payload = dialog.preview_string()
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
-            dialog.to_cmd_line_button.click()
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
+            dialog.to_ipython_button.click()
             self.assertEqual(terminal.visible_calls, [payload])
 
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             self.assertEqual(execution.hidden_calls, [(payload, True)])
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
         finally:

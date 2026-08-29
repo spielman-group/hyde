@@ -1,5 +1,6 @@
 import os
 import tempfile
+import pathlib
 import types
 import unittest
 from dataclasses import replace as dataclass_replace
@@ -18,7 +19,7 @@ import hyde
 from qtutils.qt import QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import (
-    runtime_graphics_export_formats,
+    graphics_export_formats,
 )
 from hyde.user_interface.main import HydeApp
 from hyde.features.hyde_ir import HydeAppIR
@@ -29,7 +30,7 @@ from hyde.features.matplotlib_ir import FigureIR
 from hyde.features.matplotlib_features import (
     clipboard_mime_type_for_format,
     graphics_clipboard_formats,
-    runtime_graphics_export_formats,
+    graphics_export_formats,
 )
 from hyde.user_interface.plugins.save_graphics_dialog.clipboard import clipboard_mime_data
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
@@ -793,29 +794,44 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
         self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
 
 
-class TestCopyAndSaveFormatListsAgree(unittest.TestCase):
-    """The dialog derives formats from the matplotlib runtime; the copy menus
-    use Hyde's static clipboard mapping, so nothing keeps them in step by
-    construction. This turns a silent divergence into a failure."""
+class TestGeneratedGraphicsFormatTable(unittest.TestCase):
+    """Hyde ships a generated table of matplotlib's export formats rather than
+    querying matplotlib at runtime, because that query imports pyplot and
+    resolves an interactive backend, which the GUI process must not do.
 
-    def test_every_clipboard_format_is_one_the_runtime_can_export(self):
-        runtime = {item.key for item in runtime_graphics_export_formats()}
+    A generated artifact can go stale silently, so these are the trigger: they
+    fail when the checked-in table and the installed matplotlib disagree.
+    """
+
+    def test_the_generated_table_matches_the_installed_matplotlib(self):
+        from hyde.features.matplotlib_features import (
+            GRAPHICS_EXPORT_FILETYPES,
+            runtime_graphics_export_filetypes,
+        )
+
+        self.assertEqual(
+            dict(GRAPHICS_EXPORT_FILETYPES),
+            dict(runtime_graphics_export_filetypes()),
+            "matplotlib's export formats have changed. Run "
+            "scripts/regenerate_graphics_formats.py",
+        )
+
+    def test_copy_offers_only_formats_the_table_can_export(self):
+        exportable = {item.key for item in graphics_export_formats()}
         clipboard = {item.key for item in graphics_clipboard_formats()}
 
         self.assertTrue(
-            clipboard <= runtime,
-            f"copy offers formats the runtime cannot export: {sorted(clipboard - runtime)}",
+            clipboard <= exportable,
+            f"copy offers formats that cannot be exported: {sorted(clipboard - exportable)}",
         )
 
-    def test_the_static_mapping_matches_the_runtime_derived_list(self):
-        from hyde.features.matplotlib_features import GRAPHICS_CLIPBOARD_MIME_TYPES
-
-        runtime_derived = [item.key for item in graphics_clipboard_formats()]
-        static_derived = [
-            item.key for item in graphics_clipboard_formats(GRAPHICS_CLIPBOARD_MIME_TYPES)
-        ]
-
-        self.assertEqual(runtime_derived, static_derived)
+    def test_building_the_copy_menu_never_imports_pyplot(self):
+        # The whole reason the table is generated. A regression here would
+        # reintroduce a backend resolution in the GUI process at start-up.
+        source = pathlib.Path(
+            "hyde/user_interface/plugins/save_graphics_dialog/__init__.py"
+        ).read_text()
+        self.assertNotIn("runtime_graphics_export", source)
 
 
 class TestCopyAsSubmenu(unittest.TestCase):
@@ -1067,7 +1083,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             dialog.show()
             self.qapp.processEvents()
 
-            expected_formats = runtime_graphics_export_formats()
+            expected_formats = graphics_export_formats()
 
             self.assertEqual(
                 [

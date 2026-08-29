@@ -5,7 +5,7 @@ from qtutils.qt import QtCore, QtWidgets
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.features.matplotlib_features import (
     graphics_output_transparency_supported,
-    runtime_graphics_export_formats,
+    graphics_export_formats,
 )
 from hyde.user_interface.base_hyde_widgets import HydeFileDialog
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
@@ -36,7 +36,7 @@ class SaveGraphicsDialog(HydeFileDialog):
 
     def __init__(self, figure_context, services=None, parent=None):
         self.figure_context = require_editable_figure_context(figure_context)
-        self.export_formats = runtime_graphics_export_formats()
+        self.export_formats = graphics_export_formats()
         self.selected_format_key = (
             None if not self.export_formats else self.export_formats[0].key
         )

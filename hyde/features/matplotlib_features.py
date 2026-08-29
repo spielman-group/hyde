@@ -10,6 +10,7 @@ from hyde.features.base import (
     sorted_eligible_names,
     valid_python_identifier,
 )
+from hyde.features.matplotlib_graphics_formats import GRAPHICS_EXPORT_FILETYPES
 from hyde.features.matplotlib_figure_schema import (
     TRACE_STYLE_ACTION_KEYS,
     _MIRROR_SIDE,
@@ -71,6 +72,13 @@ def macro_ready_lines(lines):
 
 
 def runtime_graphics_export_filetypes():
+    """Ask the installed matplotlib what it can export.
+
+    This imports `matplotlib.pyplot` and resolves an interactive backend as a
+    side effect, so nothing on a GUI or start-up path may call it. It exists for
+    `scripts/regenerate_graphics_formats.py` and the test that detects a stale
+    generated table; everything else reads `GRAPHICS_EXPORT_FILETYPES`.
+    """
     import matplotlib.pyplot as plt
 
     backend_module = plt._get_backend_mod()
@@ -99,9 +107,14 @@ def graphics_export_name_filter(display_label, suffixes):
     return f"{display_label} Files ({patterns})"
 
 
-def runtime_graphics_export_formats(filetypes=None):
+def graphics_export_formats(filetypes=None):
+    """Export formats Hyde offers, ordered pdf, png, then alphabetically.
+
+    Reads the generated table by default rather than querying matplotlib, so
+    this is safe to call while building menus at start-up.
+    """
     resolved_filetypes = (
-        runtime_graphics_export_filetypes() if filetypes is None else dict(filetypes)
+        dict(GRAPHICS_EXPORT_FILETYPES) if filetypes is None else dict(filetypes)
     )
     formats = []
     for key in resolved_filetypes:
@@ -165,10 +178,10 @@ def clipboard_mime_type_for_format(output_format):
 
 
 def graphics_clipboard_formats(filetypes=None):
-    """Runtime export formats that have a clipboard representation."""
+    """Export formats that have a clipboard representation."""
     return tuple(
         item
-        for item in runtime_graphics_export_formats(filetypes)
+        for item in graphics_export_formats(filetypes)
         if clipboard_mime_type_for_format(item.key) is not None
     )
 

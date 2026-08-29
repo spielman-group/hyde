@@ -3,10 +3,7 @@ from functools import partial
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import (
-    GRAPHICS_CLIPBOARD_MIME_TYPES,
-    graphics_clipboard_formats,
-)
+from hyde.features.matplotlib_features import graphics_clipboard_formats
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.shared.plugin import HydePlugin
 
@@ -70,14 +67,9 @@ class Plugin(HydePlugin):
     def _copy_as_contributions(self):
         # Declared into both locations because the figure context menu
         # re-renders the whole `figure` location, and into the same group as
-        # Copy so the submenu sits beside it. Built from the static clipboard
-        # mapping rather than the runtime format query: menus are constructed
-        # during start-up, and that query imports matplotlib.pyplot and resolves
-        # a backend, which the GUI process must not do.
+        # Copy so the submenu sits beside it.
         contributions = []
-        for index, item in enumerate(
-            graphics_clipboard_formats(GRAPHICS_CLIPBOARD_MIME_TYPES)
-        ):
+        for index, item in enumerate(graphics_clipboard_formats()):
             for location, group, group_order in self.COPY_AS_LOCATIONS:
                 contributions.append(
                     {
