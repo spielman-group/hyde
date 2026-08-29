@@ -1,8 +1,7 @@
 # Curve Fitting Specification
 
 ## Feature Checklist
-- [x] Add a Hyde-native Curve Fitting dialog shaped by the screenshot family in
-  `project_management/specs/curve_fit/`.
+- [x] Add a Hyde-native Curve Fitting dialog.
 - [x] Implement the dialog as a modal figure-control-style surface following the
   interaction pattern used by `Modify Data Appearance` and `Modify Axis`.
 - [x] Keep the GUI authoritative only for transient dialog state and preview state.
@@ -91,8 +90,8 @@ The first implementation does not include:
 
 ## Window Layout
 
-The Curve Fitting dialog is a modal tabbed window that preserves the screenshot
-family's overall structure while using Hyde-native behavior behind those surfaces.
+The Curve Fitting dialog is a modal tabbed window using Hyde-native behavior behind
+its surfaces.
 
 It contains:
 

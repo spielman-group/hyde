@@ -8,21 +8,21 @@ trace. Users currently lack a GUI workflow for common styling tasks such as chan
 line style, marker shape, marker colors, opacity, or line width on a first-class Hyde
 figure.
 
-The missing workflow is not a tiny surface. The expected behavior is close to Igor's
-`Modify Trace Appearance` dialog: the user works in a modal dialog, chooses a trace
-from a list, edits a broad set of ordinary appearance properties, sees the figure
+The missing workflow is not a tiny surface. The expected behavior is: the user works
+in a modal dialog, chooses a trace from a list, edits a broad set of ordinary
+appearance properties, sees the figure
 update while working, and can still back out safely with `Cancel`.
 
 This feature therefore needs to be broader than a narrow "edit one style property"
 surface. It should cover most ordinary matplotlib `Line2D` appearance attributes that
 can be changed cleanly through Hyde's current command-driven figure-edit architecture, while
-explicitly excluding advanced Igor behaviors that Hyde does not yet model.
+explicitly excluding advanced behaviors that Hyde does not yet model.
 
 ## Solution
 
 Hyde adds a `Modify Data Appearance` dialog for first-class figure windows. The dialog
 is launched from the active `Figure` menu and operates on the active figure only. It
-uses an Igor-inspired two-pane modal layout:
+uses a two-pane modal layout:
 
 - a left pane that lists supported traces in the active figure
 - a right pane that presents grouped appearance controls for the selected trace
@@ -72,8 +72,8 @@ the figure runtime transport. The new plugin contributes actions through the nor
    figure-edit actions always have one clear target.
 4. As a Hyde user, I want to choose the trace from a list in the dialog, so that I can
    edit the correct trace even when several traces are present.
-5. As a Hyde user, I want the dialog layout to resemble Igor's trace editor, so that
-   the workflow feels familiar and efficient.
+5. As a Hyde user, I want the trace list and its property controls side by side, so
+   that I can restyle several traces without losing my place.
 6. As a Hyde user, I want line color controls, so that I can quickly restyle traces
    for clarity or presentation.
 7. As a Hyde user, I want line style controls, so that I can distinguish traces by
@@ -128,8 +128,8 @@ the figure runtime transport. The new plugin contributes actions through the nor
   control lane.
 - The new plugin contributes a `Modify Data Appearance` action through the normal
   `Figure` menu registration path.
-- The dialog is modal and uses a two-pane Igor-inspired layout with a trace list on
-  the left and grouped property controls on the right.
+- The dialog is modal and uses a two-pane layout with a trace list on the left and
+  grouped property controls on the right.
 - The first deployment supports one supported trace at a time.
 - The first deployment targets ordinary first-class line traces represented as
   supported matplotlib `Line2D` state in Hyde's figure-edit model.
@@ -144,8 +144,7 @@ the figure runtime transport. The new plugin contributes actions through the nor
 - Shared figure-dialog-family behavior for active-figure validation,
   `FigureDialogIR` snapshot seeding, command emission/logging, and refresh
   coordination lives on the shared dialog base rather than as dialog-local helpers.
-- The first version excludes behaviors that require unsupported semantics, even if they
-  appear in Igor's dialog or screenshot family.
+- The first version excludes behaviors that require unsupported semantics.
 
 ## Testing Decisions
 
@@ -186,10 +185,10 @@ the figure runtime transport. The new plugin contributes actions through the nor
 
 ## Further Notes
 
-- The dialog should preserve the broad composition and practical feel of Igor's
-  `Modify Trace Appearance` dialog without copying unsupported controls literally.
+- The dialog should stay broad and practical for everyday restyling work rather than
+  exposing a minimal subset of properties.
 - The first version should feel close to feature-complete for ordinary matplotlib line
-  appearance editing, even though advanced Igor-specific semantics remain excluded.
+  appearance editing, even though advanced semantics remain excluded.
 - This feature establishes the reusable dialog-family foundation for later figure
   control dialogs such as axis editing, append/remove trace workflows, text tools, and
   fitting surfaces.

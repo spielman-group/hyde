@@ -52,8 +52,7 @@ The dialog is a single modal-style window with:
 - a title field
 - command-generation / action buttons along the bottom
 
-The visible controls are intentionally Hyde-native, even when they echo the layout
-of the Igor dialog used as inspiration.
+The visible controls are intentionally Hyde-native.
 
 ## Visible Controls
 

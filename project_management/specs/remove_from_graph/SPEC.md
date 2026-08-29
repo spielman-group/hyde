@@ -5,8 +5,8 @@
 - [ ] Remove one or more supported plotted traces from the authoritative live kernel
   figure.
 - [ ] Support list filtering and multi-selection before confirmation.
-- [ ] Preserve the broad Igor-style shell with type selector, candidate list, lower
-  preview/status pane, and footer actions.
+- [ ] Provide a type selector, candidate list, lower preview/status pane, and footer
+  actions.
 - [ ] Support image-plot removal.
 - [ ] Support contour-plot removal.
 - [ ] Support richer cleanup policies after the final plotted item is removed.
@@ -81,7 +81,7 @@ The candidate list rows show:
 - the canonical Hyde trace display name
 - text only in the first pass
 
-The footer keeps the broad Igor-style composition, but Hyde does not treat the lower
+The footer keeps the shared dialog composition, but Hyde does not treat the lower
 pane as an executable command editor.
 
 ## Visible Controls

@@ -56,11 +56,9 @@
   path, so those hidden commands follow the same logging/debug channel as other
   hidden Hyde commands.
 
-## Reference Image
+## Console Structure
 
-![Python Terminal](_source/22_python_terminal.png)
-
-The image is a behavior reference for the embedded rich IPython console, not a literal
+The embedded rich IPython console is specified by behavior, not by a literal
 widget-tree contract. The shipped Hyde structure is a `HydeToolWidget` container with
 one mounted `RichJupyterWidget` child.
 

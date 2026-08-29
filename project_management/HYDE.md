@@ -4,7 +4,7 @@ Hyde is a standalone labscript-suite analysis application: an MDI desktop shell 
 authoritative Python kernel behind it.
 
 ## Product Goal
-Provide an Igor-Pro-like environment for tables, figures, procedures, and a Python
+Provide an integrated environment for tables, figures, procedures, and a Python
 terminal while keeping the GUI separate from scientific state.
 
 ## Version 1 Goals

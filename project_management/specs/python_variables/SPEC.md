@@ -60,7 +60,7 @@ The initial deployment does not include:
 ## Window Layout
 
 Python Variables lives as an MDI child window.
-Its layout follows the broad structure suggested by the screenshot while using Hyde-native semantics:
+Its layout is:
 
 - a left-hand sidebar containing display controls and action buttons
 - a main object list occupying most of the window
@@ -96,8 +96,6 @@ The visible controls are classified as follows:
 
 ## Left Sidebar Controls
 
-The left-hand sidebar follows the user-approved screenshot.
-
 The `Display` group contains:
 
 - `Arrays`
@@ -109,15 +107,14 @@ The `Display` group contains:
 - `Info`
   Toggle the visibility of the info pane.
 - `Plot`
-  Visible for layout continuity with the reference screenshot, but inert in the initial deployment.
+  Visible for layout continuity, but inert in the initial deployment.
 
-The sidebar also contains action buttons derived from the reference screenshot.
-In the initial deployment:
+The sidebar also contains action buttons. In the initial deployment:
 
 - `Delete` is active.
 - `New Data Folder`, `Save Copy`, `Browse Expt...`, and `Execute Cmd...` are excluded from the initial deployment.
 
-The screenshot-derived current-folder controls are excluded because Hyde does not implement Igor-style data folders.
+Current-folder controls are excluded because Hyde does not implement data folders.
 
 ## Object List
 
@@ -177,7 +174,7 @@ The only live mutable operation in the initial deployment is `Delete Object`.
 - Timing: confirmed before dispatch.
 - Invalid or unsupported selections: no deletion occurs if nothing valid is selected.
 
-The following operations are visible in the screenshot but are not part of the initial deployment:
+The following operations are deferred and are not part of the initial deployment:
 
 - `Display`
 - `Append to Graph`
@@ -200,7 +197,6 @@ In the initial deployment, the active actions are:
 - `Copy Python Expression`
   Copy the Python expression that identifies the selected object.
   For the initial deployment this is the top-level variable name.
-  This is the Hyde-native replacement for Igor's `Copy Full Path` action.
 - `Delete Object`
   Delete the selected object or objects from the live namespace after confirmation.
 - `Edit`
@@ -272,8 +268,8 @@ future user command.
 
 ## Cross-Project Browsing
 
-Igor's "Browse Expt" concept maps in Hyde to opening another `.hy` project.
-This is a project-level operation, not a data-folder import feature.
+Browsing another project means opening another `.hy` project. This is a
+project-level operation, not a data-folder import feature.
 
 The long-term direction is:
 
@@ -308,7 +304,9 @@ The following Igor concepts do not carry into Hyde as part of this specification
 - broader append-to-table actions once the table widget supports more object types
 - cross-project browsing of another `.hy` project
 
-## 08_python_variables_context_menu.png
-![Python Variables Context Menu](_source/08_python_variables_context_menu.png)
-- What it shows: a selection-driven browser with a right-click action menu, an info area, and a preview-oriented workspace next to figure and table windows.
-- Hyde interpretation: a namespace browser for Python objects, with context actions translated into explicit Hyde/Python commands rather than Igor object operations.
+## Window Composition
+
+Python Variables is a selection-driven browser with a right-click action menu, an info
+area, and a preview-oriented workspace sitting alongside figure and table windows. It
+browses Python objects in the kernel namespace, and its context actions are expressed
+as explicit Hyde/Python commands.

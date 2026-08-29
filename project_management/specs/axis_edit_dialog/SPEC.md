@@ -6,23 +6,20 @@ Hyde has first-class figure windows, figure-scoped menu infrastructure, and a
 command-driven figure-edit path, but it does not yet provide a broad axis-editing
 workflow for existing first-class figures.
 
-Users currently lack a GUI way to perform the ordinary graph-editing work that Igor's
-`Modify Axis` dialog supports: changing axis mode, limits, mirrored-side presentation,
+Users currently lack a GUI way to perform ordinary axis-editing work: changing axis mode, limits, mirrored-side presentation,
 tick generation, grids, zero lines, label text, label placement, and related axis-side
 presentation choices without dropping into handwritten matplotlib code.
 
 This missing workflow is not a narrow follow-on to the existing trace editor. The
-expected product is an Igor-style tabbed dialog with a broad surface area. The rule for
-this feature is:
+expected product is a broad tabbed dialog covering the axis-side presentation surface.
+The rule for this feature is:
 
-- if an Igor axis-dialog feature has a defensible matplotlib equivalent, Hyde should
-  expose it
-- only truly Igor-specific behavior without a clean matplotlib mapping should be
-  excluded
+- if an axis setting has a defensible matplotlib equivalent, Hyde should expose it
+- only behavior without a clean matplotlib mapping should be excluded
 
 The PRD therefore describes a broad `Modify Axis` dialog rather than a minimal first
 slice. Another agent should be able to implement the feature from this document
-directly, without reopening the screenshot folder or the Igor excerpt.
+directly, without consulting any external source material.
 
 ## Solution
 
@@ -32,8 +29,7 @@ Hyde adds a `Modify Axis` dialog for first-class figure windows inside the exist
 popup render from the shared figure-menu registry, not the same physical `QMenu`
 instance as the hidden menu-bar `Figure` menu.
 
-The dialog is modal, preserves the Igor-style tabbed shell, and includes all seven tabs
-shown in the reference family:
+The dialog is modal and uses a tabbed shell with all seven tabs:
 
 - `Axis`
 - `Auto/Man Ticks`
@@ -240,8 +236,8 @@ The lower pane is a read-only draft preview/status surface:
    contextual editing is fast.
 4. As a Hyde user, I want the right-click menu to match the registered `Figure` menu
    content, so that the UI stays consistent.
-5. As a Hyde user, I want the dialog to preserve the Igor-style tabbed interface, so
-   that the workflow feels familiar.
+5. As a Hyde user, I want a tabbed interface, so that related axis settings stay
+   grouped instead of crowding one page.
 6. As a Hyde user, I want all seven axis-dialog tabs present, so that Hyde does not
    collapse the feature into a smaller unrelated UI.
 7. As a Hyde user, I want to select `left`, `bottom`, `right`, or `top`, so that I can
@@ -348,7 +344,7 @@ The lower pane is a read-only draft preview/status surface:
 - The axis dialog contributes actions through the shared figure-menu registry and is
   reachable from both the hidden menu-bar `Figure` menu and a fresh right-click popup
   render from that same registry.
-- The dialog is modal and uses the Igor-style tab shell shown in the screenshot family.
+- The dialog is modal and uses the seven-tab shell described above.
 - The first implementation targets first-class Hyde figures only.
 - The first implementation stays within Hyde's current one-figure / one-subplot figure
   deployment, but still exposes `left`, `bottom`, `right`, and `top` as selectable
@@ -480,12 +476,12 @@ The lower pane is a read-only draft preview/status surface:
 ## Further Notes
 
 - This PRD intentionally replaces the earlier narrow axis spec. The product goal is the
-  broad Igor-style axis dialog, not a minimal title/label/range patch.
+  broad axis dialog, not a minimal title/label/range patch.
 - The feature should reuse the shared figure-control-dialog family aggressively so that
   active-window checks, preview/export behavior, `Live Update`, and cancel-revert
   semantics do not fork across sibling dialogs.
-- Another agent implementing this PRD should not need to inspect the axis screenshot
-  folder or the Igor excerpt to understand the intended behavior.
+- Another agent implementing this PRD should not need any external source material to
+  understand the intended behavior.
 - The core design bias remains the Hyde architecture bias:
   - GUI stays transient
   - kernel-owned figure IR stays authoritative
