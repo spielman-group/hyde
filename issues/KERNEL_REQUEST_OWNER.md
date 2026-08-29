@@ -25,12 +25,18 @@ own way of finding out.
 
 ## What that costs today
 
-Three features have independently hand-rolled the same request lifecycle, with
-four timeout constants and three sets of failure semantics:
+Four features have independently hand-rolled the same request lifecycle, with
+four timeout constants and four sets of failure semantics:
 
 - `figure_interactive/window.py` — `REFRESH_TIMEOUT_MS`, `CLOSE_TIMEOUT_MS`
 - `table_interactive/window.py` — `REFRESH_TIMEOUT_MS`
 - `save_graphics_dialog` — `copy_timeout_ms`, and a `FigureCopyRequest` object
+- `python_variables_tool` — `_execute_requests_in_flight`, a set keyed by
+  `(session, parent_header.msg_id)` from iopub `status` messages, with no timeout
+
+The last of those is the one that got closest. It already correlates replies to
+requests by `msg_id`; it just does it privately, on the iopub channel, for its
+own refresh trigger.
 
 Two defects follow directly from the gap, and both are live:
 
@@ -56,8 +62,8 @@ This is the finding that sets the scope.
   answers.
 - `_on_shell_message` **already performs exactly this correlation** — it matches
   `parent_header.msg_id` against `_ready_probe_msg_id` to detect kernel
-  readiness. It then returns early for every message once `self._ready` is set,
-  so nothing after startup is ever correlated.
+  readiness. Having done so once, it **disconnects itself from the shell
+  channel**, so no `execute_reply` after startup is ever seen at all.
 
 Hyde therefore does not need a new protocol, a request token in emitted Python,
 or a change to any public runtime signature. It needs to keep an identifier it
@@ -68,8 +74,8 @@ is already given and keep listening after startup.
 1. **Identity.** A GUI request gets a handle when issued, carrying the `msg_id`.
 2. **Completion.** The `execute_reply` for that `msg_id` resolves the request as
    ran or raised, with the kernel's error attached.
-3. **Timeout against kernel progress**, not wall-clock: a request queued behind a
-   long user cell is waiting, not failing.
+3. **No timeout before the reply.** A request queued behind a long user cell is
+   waiting, not failing, however long that takes.
 4. **Uniform failure reporting**, so a raised command says what raised rather
    than timing out generically.
 5. **Serialization policy**, enforceable in one place: refuse or queue a second
@@ -78,6 +84,19 @@ is already given and keep listening after startup.
 Payload-bearing replies stay on the parent-message channel. The owner correlates
 the *execution*; serialization is what lets a feature trust that the next payload
 is its own.
+
+**Two transports, no ordering between them.** The `execute_reply` for a copy
+travels the Jupyter shell channel while the rendered bytes travel the zprocess
+parent-message channel. The kernel sends the bytes first, but nothing guarantees
+they arrive first. A feature must therefore not read `execute_reply` as "stop
+listening":
+
+- reply `status="error"` — fail now, with the kernel's message
+- reply `status="ok"` — the render *happened*; the payload is in transit, so
+  wait for it
+
+That second wait is bounded work on a completed operation, which is what makes a
+short timeout legitimate there and not before.
 
 ## Not in scope
 
@@ -107,17 +126,40 @@ Each step leaves the suite green on its own.
 5. Surface `status="error"` replies, which retires the "hidden execution
    failures are invisible" debt recorded during the figure copy work.
 
-## Decisions needed before step 3
+## Decisions settled
 
-- **Serialization policy.** Refuse a second request while one is outstanding, or
-  queue it? Refusing is honest for millisecond operations and needs no queue.
-  Queueing is friendlier if a request can ever be slow. Copy is settled: refuse.
-- **Timeout semantics.** With correlation, a request that has not yet produced an
-  `execute_reply` is *pending*, not late. Does a pending-but-queued request time
-  out at all, and if so against what — kernel idle time, or a hard ceiling?
-- **Scope of `execute_visible`.** Visible commands go to the terminal, where the
-  user can see failures directly. Include them for uniformity, or leave them out
-  because the user is already the observer?
+- **Serialization policy.** Refuse a second GUI request while one is
+  outstanding. No queue.
+- **`execute_visible` is out of scope.** Every call site is fire-and-forget
+  dispatch to the terminal — "To Cmd Line", window macros, table append. None
+  waits, none has a timeout, none expects a payload. It also does not travel
+  `FrontendKernelService` at all: it goes through the qtconsole widget, which
+  owns its own path to the same client. It is the user typing, by proxy, so it
+  neither blocks a GUI request nor is blocked by one.
+
+## Decisions settled (continued)
+
+**A GUI request never times out before its `execute_reply`.** Refusal governs
+*Hyde's* queue, of which there is now at most one entry. It does not govern the
+*kernel's* queue, which Hyde does not control: the terminal and `execute_hidden`
+share one shell channel to a kernel that runs one cell at a time. Press copy
+during a 60-second fit and the request is the only one Hyde has outstanding, yet
+no `execute_reply` can arrive for 60 seconds. See "Timeouts measure wall-clock"
+above for what that produces today.
+
+So a pending request stays pending. The kernel always sends `execute_reply` —
+that is protocol, not best-effort — and interrupting the cell produces an error
+reply, so the request resolves either way. The only case a per-request timer
+would catch is a dead kernel, which Hyde already detects through
+`on_kernel_crashed`; that must settle every outstanding request at once rather
+than each waiting out its own timer.
+
+While waiting, the surface says so. The wait cursor reverts after a couple of
+seconds — it is cosmetic and does not block input, but a minute-long wait cursor
+reads as a hung application — and the status message carries the state instead.
+
+The one timeout that stays is the bounded wait for a payload *after* an
+`execute_reply` with `status="ok"`, per the two-transport note above.
 
 ## Risk
 
