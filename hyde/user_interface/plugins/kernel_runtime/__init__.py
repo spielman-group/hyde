@@ -20,11 +20,18 @@ LOGGER = logging.getLogger("hyde")
 
 
 def _reply_error_text(content):
+    status = str(content.get("status") or "").strip().lower()
+    if status == "aborted":
+        # The kernel aborts everything queued behind a non-silent request that
+        # raised, so a GUI request can be cancelled by the user's own failing
+        # cell without ever running. Say so, rather than reporting a bare
+        # protocol word.
+        return "the kernel aborted it after an earlier error"
     ename = str(content.get("ename") or "").strip()
     evalue = str(content.get("evalue") or "").strip()
     if ename and evalue:
         return f"{ename}: {evalue}"
-    return ename or evalue or str(content.get("status") or "").strip()
+    return ename or evalue or status
 
 
 class KernelRequest:

@@ -123,7 +123,11 @@ class TableViewModel(QtCore.QAbstractTableModel):
         )
 
 class TableWidget(HydeInteractiveWidget):
-    REFRESH_TIMEOUT_MS = 5000
+    # The kernel runs one request at a time, so a refresh issued while the
+    # user's own cell is running waits its turn -- and waiting is not failing.
+    # This bounds only the gap between the kernel saying the push ran and its
+    # data arriving on the parent-message channel.
+    REFRESH_PAYLOAD_TIMEOUT_MS = 2000
     ui_filename = os.path.join("plugins", "table_interactive", "table.ui")
 
     def __init__(
@@ -172,11 +176,12 @@ class TableWidget(HydeInteractiveWidget):
             column_widths=column_widths,
         )
         self._current_request_id = None
+        self._refresh_request = None
         self._refresh_in_flight = False
         self._refresh_requested = False
-        self._refresh_timeout_timer = QtCore.QTimer(self)
-        self._refresh_timeout_timer.setSingleShot(True)
-        self._refresh_timeout_timer.timeout.connect(self._on_refresh_timeout)
+        self._refresh_payload_timer = QtCore.QTimer(self)
+        self._refresh_payload_timer.setSingleShot(True)
+        self._refresh_payload_timer.timeout.connect(self._on_refresh_payload_timeout)
         self._selected_cell = None
         self._value_edit_dirty = False
         self._initial_size_applied = False
@@ -258,8 +263,10 @@ class TableWidget(HydeInteractiveWidget):
             if not self.execute_hidden_command(command):
                 self._clear_refresh_in_flight()
                 return False
-        if self.execute_hidden_command(refresh_command):
-            self._refresh_timeout_timer.start(self.REFRESH_TIMEOUT_MS)
+        self._refresh_request = self.request_command(
+            refresh_command, self._on_refresh_finished
+        )
+        if self._refresh_request is not None:
             return True
         self._clear_refresh_in_flight()
         return False
@@ -306,14 +313,28 @@ class TableWidget(HydeInteractiveWidget):
             self.refresh_data()
 
     def _clear_refresh_in_flight(self):
-        self._refresh_timeout_timer.stop()
+        self._refresh_payload_timer.stop()
         self._refresh_in_flight = False
         self._current_request_id = None
+        self._refresh_request = None
 
     @inmain_decorator()
-    def _on_refresh_timeout(self):
+    def _on_refresh_finished(self, kernel_request):
+        """The kernel answered the push command. Its data is separate."""
+        if self._closed or kernel_request is not self._refresh_request:
+            return
+        if kernel_request.ran():
+            self._refresh_payload_timer.start(self.REFRESH_PAYLOAD_TIMEOUT_MS)
+            return
+        self._abandon_refresh()
+
+    @inmain_decorator()
+    def _on_refresh_payload_timeout(self):
         if self._closed or not self._refresh_in_flight:
             return
+        self._abandon_refresh()
+
+    def _abandon_refresh(self):
         self._clear_refresh_in_flight()
         if self._refresh_requested and not self._closed:
             self._refresh_requested = False
@@ -718,7 +739,7 @@ class TableWidget(HydeInteractiveWidget):
         if self._closed:
             return
         self._closed = True
-        self._refresh_timeout_timer.stop()
+        self._refresh_payload_timer.stop()
         try:
             python_variables_service = self.services.get("namespace_view_service")
             if python_variables_service is not None:

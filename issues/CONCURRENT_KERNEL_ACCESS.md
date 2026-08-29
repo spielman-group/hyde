@@ -60,6 +60,20 @@ sharing one namespace rather than borrowing the control channel. That landed in
 `ipykernel` 7, which is **not** installed here — so it is the likely destination,
 unverified in this environment.
 
+## It is worse than waiting
+
+A queued GUI request is not merely delayed by the user's script. ipykernel calls
+`_abort_queues()` when a non-silent request raises, which aborts everything
+already queued behind it. Hyde's own commands are silent and never trigger this;
+the user's terminal cells are not.
+
+So a fit that fails takes the queued copy with it, and the copy's reply comes
+back `status="aborted"` having never run. Hyde cannot opt out: `stop_on_error`
+is read from the *failing* request, so the only way to change it is to change
+what the terminal sends, which is the user's own execution semantics.
+
+A request that is not in the shell queue is not in the queue being aborted.
+
 ## What Hyde would need beyond a transport
 
 - A distinct lane for GUI requests that are short and free of side effects, so

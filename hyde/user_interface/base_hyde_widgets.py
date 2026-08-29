@@ -777,6 +777,18 @@ class HydeInteractiveWidget(HydeToolWidget):
             return False
         return bool(python_execution_service.execute_hidden(code))
 
+    def request_command(self, code, on_finished):
+        """Dispatch `code` and correlate its reply.
+
+        Returns a `KernelRequest`, or None if there is no kernel to ask.
+        Unlike `execute_hidden_command`, which only says whether the command was
+        sent, this says what became of it.
+        """
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return None
+        return python_execution_service.request(code, on_finished=on_finished)
+
     def saveable_default_macro_name(self):
         raise NotImplementedError
 

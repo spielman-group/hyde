@@ -157,8 +157,12 @@ class FigureSnapshotState:
 
 
 class FigureWindow(HydeInteractiveWidget):
-    REFRESH_TIMEOUT_MS = 5000
-    CLOSE_TIMEOUT_MS = 5000
+    # Neither clock bounds the kernel. It runs one request at a time, so a
+    # refresh or a close issued while the user's own cell is running waits its
+    # turn, and waiting is not failing. These bound only the gap between the
+    # kernel saying the command ran and the figure traffic that follows it.
+    REFRESH_PAYLOAD_TIMEOUT_MS = 2000
+    CLOSE_PAYLOAD_TIMEOUT_MS = 2000
 
     def __init__(self, figure_number, services=None, parent=None):
         self.figure_number = int(figure_number)
@@ -176,15 +180,17 @@ class FigureWindow(HydeInteractiveWidget):
         self._pending_window_state = None
         self._refresh_in_flight = False
         self._refresh_requested = False
-        self._refresh_timeout_timer = QtCore.QTimer(self)
-        self._refresh_timeout_timer.setSingleShot(True)
-        self._refresh_timeout_timer.timeout.connect(self._on_refresh_timeout)
+        self._refresh_request = None
+        self._close_request = None
+        self._refresh_payload_timer = QtCore.QTimer(self)
+        self._refresh_payload_timer.setSingleShot(True)
+        self._refresh_payload_timer.timeout.connect(self._on_refresh_payload_timeout)
         self._resize_redraw_timer = QtCore.QTimer(self)
         self._resize_redraw_timer.setSingleShot(True)
         self._resize_redraw_timer.timeout.connect(self._on_resize_redraw_timeout)
-        self._close_timeout_timer = QtCore.QTimer(self)
-        self._close_timeout_timer.setSingleShot(True)
-        self._close_timeout_timer.timeout.connect(self._on_close_timeout)
+        self._close_payload_timer = QtCore.QTimer(self)
+        self._close_payload_timer.setSingleShot(True)
+        self._close_payload_timer.timeout.connect(self._on_close_payload_timeout)
         self.snapshot_state = FigureSnapshotState(
             default_macro_name=f"Figure{self.figure_number}"
         )
@@ -440,7 +446,9 @@ class FigureWindow(HydeInteractiveWidget):
     def request_regenerate_from_ir(self):
         if not self.has_figure_ir():
             return False
-        return self._execute_refresh_command(use_bound_values=True)
+        return self.execute_hidden_command(
+            self._refresh_command_source(use_bound_values=True)
+        )
 
     @inmain_decorator()
     def _on_resize_redraw_timeout(self):
@@ -467,14 +475,16 @@ class FigureWindow(HydeInteractiveWidget):
             return False
         self._refresh_in_flight = True
         self._refresh_requested = False
-        requested = self._execute_refresh_command(use_bound_values=False)
-        if requested:
-            self._refresh_timeout_timer.start(self.REFRESH_TIMEOUT_MS)
+        self._refresh_request = self.request_command(
+            self._refresh_command_source(use_bound_values=False),
+            self._on_refresh_finished,
+        )
+        if self._refresh_request is not None:
             return True
         self._clear_refresh_in_flight()
         return False
 
-    def _execute_refresh_command(self, *, use_bound_values):
+    def _refresh_command_source(self, *, use_bound_values):
         figure_name = (
             self.current_ir.default_macro_name()
             if self.current_ir is not None
@@ -485,21 +495,33 @@ class FigureWindow(HydeInteractiveWidget):
             if self.current_ir is None
             else self.current_ir
         )
-        return self.execute_hidden_command(
-            command_ir.with_refresh_figure(
-                figure_name,
-                use_bound_values=use_bound_values,
-            ).python_source(log=False)
-        )
+        return command_ir.with_refresh_figure(
+            figure_name,
+            use_bound_values=use_bound_values,
+        ).python_source(log=False)
 
     def _clear_refresh_in_flight(self):
-        self._refresh_timeout_timer.stop()
+        self._refresh_payload_timer.stop()
         self._refresh_in_flight = False
+        self._refresh_request = None
 
     @inmain_decorator()
-    def _on_refresh_timeout(self):
+    def _on_refresh_finished(self, kernel_request):
+        """The kernel answered the refresh command. The redraw is separate."""
+        if self._closed or kernel_request is not self._refresh_request:
+            return
+        if kernel_request.ran():
+            self._refresh_payload_timer.start(self.REFRESH_PAYLOAD_TIMEOUT_MS)
+            return
+        self._abandon_refresh()
+
+    @inmain_decorator()
+    def _on_refresh_payload_timeout(self):
         if self._closed or not self._refresh_in_flight:
             return
+        self._abandon_refresh()
+
+    def _abandon_refresh(self):
         self._clear_refresh_in_flight()
         if self._refresh_requested and not self._closed:
             self._refresh_requested = False
@@ -519,7 +541,7 @@ class FigureWindow(HydeInteractiveWidget):
             "Figure window %s received kernel close confirmation.",
             self.figure_number,
         )
-        self._close_timeout_timer.stop()
+        self._close_payload_timer.stop()
         self._kernel_close_in_progress = False
         self._closing_from_kernel = True
         if self._subwindow is not None:
@@ -607,9 +629,11 @@ class FigureWindow(HydeInteractiveWidget):
             return
         self._kernel_close_in_progress = True
         command_ir = FigureIR() if self.current_ir is None else self.current_ir
-        if not self.execute_hidden_command(
-            command_ir.with_close_figure(self.figure_number).python_source(log=False)
-        ):
+        self._close_request = self.request_command(
+            command_ir.with_close_figure(self.figure_number).python_source(log=False),
+            self._on_close_finished,
+        )
+        if self._close_request is None:
             self._kernel_close_in_progress = False
             LOGGER.warning(
                 "Figure window %s failed to queue kernel close command.",
@@ -621,23 +645,42 @@ class FigureWindow(HydeInteractiveWidget):
             "Figure window %s queued kernel close command and is awaiting confirmation.",
             self.figure_number,
         )
-        self._close_timeout_timer.start(self.CLOSE_TIMEOUT_MS)
+        # The window stays open until the kernel confirms, however long the
+        # kernel takes to get to the request. Closing it first would make the
+        # GUI, not the kernel, the authority on whether the figure exists.
         event.ignore()
 
     @inmain_decorator()
-    def _on_close_timeout(self):
+    def _on_close_finished(self, kernel_request):
+        if self._closed or kernel_request is not self._close_request:
+            return
+        if kernel_request.ran():
+            self._close_payload_timer.start(self.CLOSE_PAYLOAD_TIMEOUT_MS)
+            return
+        self._close_request = None
+        self._kernel_close_in_progress = False
+        LOGGER.warning(
+            "Figure window %s could not be closed in the kernel: %s",
+            self.figure_number,
+            kernel_request.error,
+        )
+
+    @inmain_decorator()
+    def _on_close_payload_timeout(self):
         if self._closed:
             return
         LOGGER.warning(
-            "Figure window %s close confirmation timed out; window remains open.",
+            "Figure window %s closed in the kernel but never confirmed; "
+            "window remains open.",
             self.figure_number,
         )
+        self._close_request = None
         self._kernel_close_in_progress = False
 
     def _disconnect_namespace_updates(self):
-        self._refresh_timeout_timer.stop()
+        self._refresh_payload_timer.stop()
         self._resize_redraw_timer.stop()
-        self._close_timeout_timer.stop()
+        self._close_payload_timer.stop()
         try:
             python_variables_service = self.services.get("namespace_view_service")
             if python_variables_service is not None:

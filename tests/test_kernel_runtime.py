@@ -333,6 +333,20 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertFalse(request.ran())
         self.assertEqual(request.error, "ValueError: no figure")
 
+    def test_kernel_request_says_so_when_the_users_own_error_aborted_it(self):
+        """A non-silent cell that raises aborts everything queued behind it."""
+        service, client = self._ready_service_with_client()
+        collector = FinishedCollector()
+
+        request = service.request("copy_me()", on_finished=collector.collect)
+        client.shell_channel.message_received.emit(
+            self._execute_reply(request.msg_id, {"status": "aborted"})
+        )
+
+        self.assertFalse(request.ran())
+        self.assertIn("aborted", request.error)
+        self.assertNotEqual("aborted", request.error)
+
     def test_kernel_request_ignores_a_reply_to_a_different_request(self):
         service, client = self._ready_service_with_client()
         collector = FinishedCollector()

@@ -1,6 +1,6 @@
 # Scope: one owner for GUI-initiated kernel requests
 
-Status: steps 1-3 landed. Step 4 next.
+Status: steps 1-4 landed. Step 5 next.
 
 ## The confusion is well founded
 
@@ -135,10 +135,24 @@ Each step leaves the suite green on its own.
    is gone; the only remaining clock bounds the transport gap after a
    successful render. The wait cursor now lowers itself after a short hold
    rather than staying up for as long as the kernel takes.
-4. Move table refresh, then figure refresh and close. Delete their timers and
-   timeout constants as each moves.
-5. Surface `status="error"` replies, which retires the "hidden execution
-   failures are invisible" debt recorded during the figure copy work.
+4. **Done.** Table refresh, figure refresh and figure close moved onto it.
+   `REFRESH_TIMEOUT_MS` and `CLOSE_TIMEOUT_MS` are gone; each is replaced by a
+   payload timeout that bounds only the gap after the kernel says the command
+   ran. A refresh or close queued behind the user's own cell now waits. A
+   failed close names the kernel's error instead of logging a generic
+   confirmation timeout. The figure window deliberately stays open until the
+   kernel confirms, however long that takes: closing it first would make the
+   GUI, not the kernel, the authority on whether the figure exists.
+5. Surface `status="error"` replies everywhere they are still dropped, which
+   retires the "hidden execution failures are invisible" debt recorded during
+   the figure copy work. Two known holes to close there:
+
+   - **Prefix commands before a table refresh.** `_queue_refresh` sends its
+     prefix mutations through `execute_hidden_command` and only the refresh
+     itself is correlated. Hyde's commands are silent, so a raised prefix does
+     *not* abort the refresh queued behind it -- the refresh runs and returns
+     data as though nothing failed.
+   - **The stray copy payload**, per the gap recorded above.
 
 ## Decisions settled
 
@@ -175,6 +189,22 @@ reads as a hung application — and the status message carries the state instead
 The one timeout that stays is the bounded wait for a payload *after* an
 `execute_reply` with `status="ok"`, per the two-transport note above.
 
+## Two correlations, not one
+
+Worth separating, because the answer differs:
+
+- **Execution correlation** -- which reply answers which command. Jupyter gives
+  this away for free in `parent_header.msg_id`, so no token in emitted Python is
+  needed, and that is what the owner provides.
+- **Payload correlation** -- which returned *data* answers which request, on the
+  parent-message channel that carries no Jupyter header at all. The owner does
+  not provide this.
+
+The table already solves the second one, and has all along: `_queue_refresh`
+mints a uuid, `with_push_table_data` puts it in the emitted command, and
+`on_data_received` drops any payload whose id does not match. Copy has no
+equivalent, which is the gap below.
+
 ## Known gap: a stray payload after a failed copy
 
 A copy that renders successfully but whose bytes never arrive fails after a
@@ -184,10 +214,34 @@ copy inside that window, the stale bytes satisfy the new one.
 
 The window is short and needs a copy started immediately after a failure, so
 this is a real but narrow exposure, and it is no worse than what the wall-clock
-timeout allowed before. Closing it means tagging the payload with the `msg_id`
-of the request that produced it. ipykernel exposes that to kernel-side code
-through the parent header of the executing request, so it does not require a
-change to `hyde.copy_figure`'s signature or to the emitted Python. Step 5.
+timeout allowed before. Two ways to close it, and the second is the precedent
+already in the tree:
+
+- tag the payload kernel-side with the `msg_id` of the executing request, which
+  ipykernel exposes through its parent header, needing no change to
+  `hyde.copy_figure`'s signature or to the emitted Python
+- mint a request id GUI-side and pass it through the command, exactly as table
+  refresh does
+
+Step 5.
+
+## A user's failing cell cancels queued GUI requests
+
+Discovered while moving copy. ipykernel aborts everything queued behind a
+request that raised -- `_abort_queues()`, gated on `not silent and stop_on_error`.
+Hyde's own commands are silent, so they never trigger it. The user's terminal
+cells are not.
+
+So a fit that raises does not merely delay a queued copy, it cancels it: the
+copy's reply comes back `status="aborted"` having never run. Reporting that is
+correct, and `_reply_error_text` phrases it rather than passing the protocol
+word through.
+
+It is not fixable from Hyde's side. `stop_on_error` belongs to the *failing*
+request, not to the queued ones, so opting Hyde's requests out would mean
+changing what the terminal sends -- which is the user's own execution semantics,
+not Hyde's to redefine. It is another reason the real answer is a lane that is
+not behind the user's cell at all; see `CONCURRENT_KERNEL_ACCESS.md`.
 
 ## Risk
 

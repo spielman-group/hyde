@@ -16,6 +16,7 @@ try:
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
+from hyde.user_interface.plugins.kernel_runtime import KernelRequest
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget, HydeToolWidget
 from hyde.user_interface.plugins.table_interactive import (
     Plugin,
@@ -361,10 +362,22 @@ class FakeExecutionService:
     def __init__(self, hidden_calls=None, visible_calls=None):
         self.hidden_calls = hidden_calls if hidden_calls is not None else []
         self.visible_calls = visible_calls if visible_calls is not None else []
+        self.requests = []
 
     def execute_hidden(self, code, silent=True):
         self.hidden_calls.append((code, silent))
         return True
+
+    def request(self, code, *, on_finished):
+        self.hidden_calls.append((code, True))
+        request = KernelRequest(f"msg-{len(self.requests) + 1}", code)
+        self.requests.append((request, on_finished))
+        return request
+
+    def answer_last(self, outcome=KernelRequest.RAN, error=""):
+        request, on_finished = self.requests[-1]
+        request.settle(outcome, error)
+        on_finished(request)
 
     def execute_visible(self, code):
         self.visible_calls.append(code)
@@ -920,12 +933,8 @@ class TestTableWidget(unittest.TestCase):
             widget.shutdown_client()
             widget.close()
 
-    def test_table_refresh_recovers_after_timed_out_request(self):
-        queued = []
-        namespace_service = FakeNamespaceViewService(
-            {"a": {"type": "ndarray", "view": "[1 2 3]"}}
-        )
-        widget = TableWidget(
+    def _refreshing_table(self, queued, namespace_service):
+        return TableWidget(
             "Table0",
             ["a"],
             services={
@@ -933,10 +942,41 @@ class TestTableWidget(unittest.TestCase):
                 "namespace_view_service": namespace_service,
             },
         )
+
+    def test_table_refresh_waits_while_the_kernel_is_busy(self):
+        """A refresh queued behind the user's own cell is waiting, not late."""
+        queued = []
+        namespace_service = FakeNamespaceViewService(
+            {"a": {"type": "ndarray", "view": "[1 2 3]"}}
+        )
+        widget = self._refreshing_table(queued, namespace_service)
+        execution = widget.services["python_execution_service"]
         try:
-            widget.REFRESH_TIMEOUT_MS = 0
+            widget.REFRESH_PAYLOAD_TIMEOUT_MS = 0
+            widget.refresh_data()
+            for _ in range(3):
+                self.qapp.processEvents()
+
+            # No reply yet: the push has not been answered, so nothing is retried.
+            namespace_service.emit({"a": {"type": "ndarray", "view": "[1 9 3]"}})
+            self.assertEqual(1, len(queued))
+            self.assertEqual(1, len(execution.requests))
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
+    def test_table_refresh_recovers_when_its_data_never_arrives(self):
+        queued = []
+        namespace_service = FakeNamespaceViewService(
+            {"a": {"type": "ndarray", "view": "[1 2 3]"}}
+        )
+        widget = self._refreshing_table(queued, namespace_service)
+        execution = widget.services["python_execution_service"]
+        try:
+            widget.REFRESH_PAYLOAD_TIMEOUT_MS = 0
             widget.refresh_data()
             queued_after_first_refresh = len(queued)
+            execution.answer_last()
             for _ in range(3):
                 self.qapp.processEvents()
 
@@ -944,6 +984,26 @@ class TestTableWidget(unittest.TestCase):
 
             self.assertGreater(len(queued), queued_after_first_refresh)
             self.assertIn("hyde.execution.ipc.push_table_data(['a'],", queued[-1][0])
+        finally:
+            widget.shutdown_client()
+            widget.close()
+
+    def test_table_refresh_recovers_at_once_when_the_push_command_fails(self):
+        """A raised push is answered; there is nothing to wait for."""
+        queued = []
+        namespace_service = FakeNamespaceViewService(
+            {"a": {"type": "ndarray", "view": "[1 2 3]"}}
+        )
+        widget = self._refreshing_table(queued, namespace_service)
+        execution = widget.services["python_execution_service"]
+        try:
+            widget.refresh_data()
+            queued_after_first_refresh = len(queued)
+            execution.answer_last(KernelRequest.RAISED, "NameError: a is not defined")
+
+            namespace_service.emit({"a": {"type": "ndarray", "view": "[1 9 3]"}})
+
+            self.assertGreater(len(queued), queued_after_first_refresh)
         finally:
             widget.shutdown_client()
             widget.close()

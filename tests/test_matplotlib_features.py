@@ -51,6 +51,7 @@ from hyde.user_interface.plugins.figure_interactive.dialogs import NewFigureDial
 from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.features.matplotlib_ir import FigureIR, FigureIRDiff
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
+from hyde.user_interface.plugins.kernel_runtime import KernelRequest
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 
@@ -82,11 +83,24 @@ class FakeExecutionService:
     def __init__(self, hidden_calls=None, visible_calls=None):
         self.hidden_calls = hidden_calls if hidden_calls is not None else []
         self.visible_calls = visible_calls if visible_calls is not None else []
+        self.requests = []
 
     def execute_hidden(self, code, silent=True):
         log_hyde_dispatch_debug("hidden", code)
         self.hidden_calls.append((code, silent))
         return True
+
+    def request(self, code, *, on_finished):
+        log_hyde_dispatch_debug("hidden", code)
+        self.hidden_calls.append((code, True))
+        request = KernelRequest(f"msg-{len(self.requests) + 1}", code)
+        self.requests.append((request, on_finished))
+        return request
+
+    def answer_last(self, outcome=KernelRequest.RAN, error=""):
+        request, on_finished = self.requests[-1]
+        request.settle(outcome, error)
+        on_finished(request)
 
     def execute_visible(self, code):
         self.visible_calls.append(code)
@@ -1657,8 +1671,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                     },
                 }
             )
-            widget.REFRESH_TIMEOUT_MS = 0
+            widget.REFRESH_PAYLOAD_TIMEOUT_MS = 0
             widget.refresh_figure()
+            execution.answer_last()
             for _ in range(3):
                 self.qapp.processEvents()
 
@@ -1848,13 +1863,15 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(queued, [])
         self.assertFalse(subwindow.isVisible())
 
-    def test_figure_window_close_timeout_clears_in_flight_close(self):
+    def test_figure_window_close_waits_while_the_kernel_is_busy(self):
+        """A close queued behind the user's own cell has not failed."""
         queued = []
         mdi_area = QtWidgets.QMdiArea()
+        execution = FakeExecutionService(queued)
         widget = FigureWindow(
             figure_number=1,
             services={
-                "python_execution_service": FakeExecutionService(queued),
+                "python_execution_service": execution,
                 "save_window_dialog_service": self._FakeSaveWindowDialogService(),
             },
         )
@@ -1864,8 +1881,61 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.show()
         self.qapp.processEvents()
 
-        widget.CLOSE_TIMEOUT_MS = 0
         subwindow.close()
+        for _ in range(3):
+            self.qapp.processEvents()
+
+        # No reply: the close is outstanding, so a second close sends nothing new.
+        subwindow.close()
+        self.qapp.processEvents()
+        self.assertEqual(1, len(queued))
+        widget.close_from_kernel()
+        self.qapp.processEvents()
+
+    def test_figure_window_close_reports_a_kernel_error(self):
+        mdi_area = QtWidgets.QMdiArea()
+        execution = FakeExecutionService([])
+        widget = FigureWindow(
+            figure_number=7,
+            services={
+                "python_execution_service": execution,
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            },
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
+
+        with self.assertLogs("hyde", level="WARNING") as logs:
+            subwindow.close()
+            self.qapp.processEvents()
+            execution.answer_last(KernelRequest.RAISED, "KeyError: 7")
+
+        self.assertTrue(any("KeyError: 7" in message for message in logs.output))
+        widget.force_close()
+
+    def test_figure_window_close_timeout_clears_in_flight_close(self):
+        queued = []
+        mdi_area = QtWidgets.QMdiArea()
+        execution = FakeExecutionService(queued)
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "python_execution_service": execution,
+                "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            },
+        )
+        subwindow = mdi_area.addSubWindow(widget)
+        subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        widget.bind_subwindow(subwindow)
+        subwindow.show()
+        self.qapp.processEvents()
+
+        widget.CLOSE_PAYLOAD_TIMEOUT_MS = 0
+        subwindow.close()
+        execution.answer_last()
         for _ in range(3):
             self.qapp.processEvents()
 
@@ -1876,12 +1946,13 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         widget.close_from_kernel()
         self.qapp.processEvents()
 
-    def test_figure_window_close_timeout_logs_warning(self):
+    def test_figure_window_close_that_is_never_confirmed_logs_warning(self):
         mdi_area = QtWidgets.QMdiArea()
+        execution = FakeExecutionService([])
         widget = FigureWindow(
             figure_number=7,
             services={
-                "python_execution_service": FakeExecutionService([]),
+                "python_execution_service": execution,
                 "save_window_dialog_service": self._FakeSaveWindowDialogService(),
             },
         )
@@ -1891,13 +1962,14 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.show()
         self.qapp.processEvents()
 
-        widget.CLOSE_TIMEOUT_MS = 0
+        widget.CLOSE_PAYLOAD_TIMEOUT_MS = 0
         with self.assertLogs("hyde", level="WARNING") as logs:
             subwindow.close()
+            execution.answer_last()
             for _ in range(3):
                 self.qapp.processEvents()
 
-        self.assertTrue(any("close confirmation timed out" in message for message in logs.output))
+        self.assertTrue(any("never confirmed" in message for message in logs.output))
         widget.force_close()
 
     def test_figure_window_uses_snapshot_size_for_initial_subwindow_geometry(self):
