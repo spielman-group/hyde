@@ -15,6 +15,25 @@ from .dialogs import SaveGraphicsDialog
 
 
 class Plugin(HydePlugin):
+    # Where the Copy As submenu is contributed, and the group it joins in each
+    # location so it sits beside that location's Copy entry.
+    COPY_AS_LOCATIONS = (
+        ("edit", "clipboard", 0),
+        ("figure", "figure_export", 100),
+    )
+
+    # Copy renders in the kernel and the bytes come back asynchronously, so a
+    # fast copy must show nothing while a slow one must not look like a hang.
+    busy_cursor_delay_ms = 200
+    copy_timeout_ms = 10000
+
+    def __init__(self, initial_settings):
+        super().__init__(initial_settings)
+        self._copy_format = None
+        self._busy_cursor_shown = False
+        self._busy_timer = None
+        self._timeout_timer = None
+
     def get_menu_contributions(self):
         return [
             {
@@ -49,29 +68,23 @@ class Plugin(HydePlugin):
         ]
 
     def _copy_as_contributions(self):
-        # One implementation, declared into both the shared `edit` location and
-        # the `figure` location. The figure context menu re-renders the whole
-        # `figure` location, so contributing there is what puts Copy As in the
-        # right-click menu.
-        # Menus are built during application start-up, and the runtime format
-        # query imports matplotlib.pyplot and resolves a backend as a side
-        # effect. The GUI process does not own figures, and once pyplot is
-        # imported configure_gui_matplotlib_backend() becomes a no-op. The
-        # static clipboard mapping yields identical keys, labels and suffix
-        # aliases without touching the runtime.
+        # Declared into both locations because the figure context menu
+        # re-renders the whole `figure` location, and into the same group as
+        # Copy so the submenu sits beside it. Built from the static clipboard
+        # mapping rather than the runtime format query: menus are constructed
+        # during start-up, and that query imports matplotlib.pyplot and resolves
+        # a backend, which the GUI process must not do.
         contributions = []
         for index, item in enumerate(
             graphics_clipboard_formats(GRAPHICS_CLIPBOARD_MIME_TYPES)
         ):
-            for location in ("edit", "figure"):
+            for location, group, group_order in self.COPY_AS_LOCATIONS:
                 contributions.append(
                     {
                         "location": location,
                         "path": ("Copy As",),
-                        # Same group as Copy so the submenu sits beside it
-                        # rather than drifting elsewhere in the menu.
-                        "group": "clipboard" if location == "edit" else "figure_export",
-                        "group_order": 0 if location == "edit" else 100,
+                        "group": group,
+                        "group_order": group_order,
                         "order": 30 + index,
                         "name": item.display_label,
                         "action": partial(
@@ -81,11 +94,6 @@ class Plugin(HydePlugin):
                     }
                 )
         return contributions
-
-    # Copy renders in the kernel and the bytes come back asynchronously, so a
-    # fast copy must show nothing while a slow one must not look like a hang.
-    busy_cursor_delay_ms = 200
-    copy_timeout_ms = 10000
 
     def copy_active_figure(self, checked=False, output_format="pdf"):
         del checked
@@ -105,16 +113,16 @@ class Plugin(HydePlugin):
         return True
 
     def copy_in_flight(self):
-        return getattr(self, "_copy_format", None) is not None
+        return self._copy_format is not None
 
     def show_busy_cursor(self):
-        if getattr(self, "_busy_cursor_shown", False):
+        if self._busy_cursor_shown:
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         self._busy_cursor_shown = True
 
     def restore_cursor(self):
-        if not getattr(self, "_busy_cursor_shown", False):
+        if not self._busy_cursor_shown:
             return
         QtWidgets.QApplication.restoreOverrideCursor()
         self._busy_cursor_shown = False
@@ -124,6 +132,9 @@ class Plugin(HydePlugin):
         # whole application look hung, which is worse than no feedback at all.
         if not self.copy_in_flight():
             return
+        self._fail_copy()
+
+    def _fail_copy(self):
         self._end_copy()
         self._status_message("Could not copy the figure to the clipboard.")
 
@@ -149,7 +160,7 @@ class Plugin(HydePlugin):
 
     def _end_copy(self):
         for attr in ("_busy_timer", "_timeout_timer"):
-            timer = getattr(self, attr, None)
+            timer = getattr(self, attr)
             if timer is not None:
                 timer.stop()
                 setattr(self, attr, None)
@@ -161,15 +172,20 @@ class Plugin(HydePlugin):
         # clipboard belongs to this process.
         if payload.get("task") != "COPY_TO_CLIPBOARD_REQUEST":
             return
+        if not self.copy_in_flight():
+            # A reply for a copy that already timed out, or that this plugin
+            # never asked for. Reporting success now would contradict the
+            # failure the user has already been shown.
+            return
         data = payload.get("data", {}) or {}
         try:
             rendered = base64.b64decode(data.get("payload_base64", ""))
             companion_png = base64.b64decode(data.get("companion_png_base64") or "")
         except Exception:
+            self._fail_copy()
             return
         if not rendered:
-            self._end_copy()
-            self._status_message("Could not copy the figure to the clipboard.")
+            self._fail_copy()
             return
         mime_data = clipboard_mime_data(
             rendered,
@@ -177,10 +193,11 @@ class Plugin(HydePlugin):
             is_text=bool(data.get("is_text")),
             companion_png=companion_png or None,
         )
-        if mime_data is None:
-            return
         clipboard = QtWidgets.QApplication.clipboard()
-        if clipboard is None:
+        if mime_data is None or clipboard is None:
+            # Nothing pasteable to hand over. Settle the request rather than
+            # leaving its timers armed and its cursor on the way.
+            self._fail_copy()
             return
         clipboard.setMimeData(mime_data)
         output_format = str(data.get("output_format", "") or "").upper()

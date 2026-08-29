@@ -29,6 +29,7 @@ from hyde.features.matplotlib_ir import FigureIR
 from hyde.features.matplotlib_features import (
     clipboard_mime_type_for_format,
     graphics_clipboard_formats,
+    runtime_graphics_export_formats,
 )
 from hyde.user_interface.plugins.save_graphics_dialog.clipboard import clipboard_mime_data
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
@@ -156,6 +157,24 @@ class RecordingEditableFigureContext(EditableFigureContext):
         return self._recorded_size_inches
 
 
+def make_copy_plugin(messages=None):
+    plugin = SaveGraphicsPlugin({})
+    plugin.services = {
+        "figure_context_service": types.SimpleNamespace(
+            active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
+        ),
+        "python_execution_service": types.SimpleNamespace(
+            execute_hidden=lambda code, silent=True: None
+        ),
+    }
+    if messages is not None:
+        plugin.services["status_message_service"] = types.SimpleNamespace(
+            show_status_message=messages.append,
+            clear_status_message=lambda: None,
+        )
+    return plugin
+
+
 class TestFigureCopyCommand(unittest.TestCase):
     """Copy lowers to a Hyde helper because the clipboard is GUI-owned.
 
@@ -263,8 +282,8 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
     def test_rendered_bytes_from_the_kernel_reach_the_clipboard_as_pdf(self):
         import base64
 
-        plugin = SaveGraphicsPlugin({})
-        plugin.services = {}
+        plugin = make_copy_plugin()
+        plugin.copy_active_figure(output_format="pdf")
         rendered = b"%PDF-1.4 fake pdf bytes"
 
         plugin.on_kernel_message(
@@ -447,8 +466,8 @@ class TestCopyPgfAsText(unittest.TestCase):
     def test_pgf_reaches_the_clipboard_as_latex_source(self):
         import base64
 
-        plugin = SaveGraphicsPlugin({})
-        plugin.services = {}
+        plugin = make_copy_plugin()
+        plugin.copy_active_figure(output_format="pgf")
         latex = b"\\begingroup%\n\\makeatletter%\n\\begin{pgfpicture}%"
 
         plugin.on_kernel_message(
@@ -575,8 +594,8 @@ class TestPngCompanionRepresentation(unittest.TestCase):
     def test_a_pdf_copy_is_pasteable_by_a_png_only_consumer(self):
         import base64
 
-        plugin = SaveGraphicsPlugin({})
-        plugin.services = {}
+        plugin = make_copy_plugin()
+        plugin.copy_active_figure(output_format="pdf")
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
@@ -698,6 +717,105 @@ class TestCopyFeedback(unittest.TestCase):
         self.assertTrue(plugin.copy_active_figure())
         plugin.on_copy_timeout()
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+
+
+class TestCopySettlesOnEveryPath(unittest.TestCase):
+    """A copy request must settle however it ends.
+
+    Every exit leaves the busy timer and the timeout timer armed until it does,
+    so an unsettled request shows a wait cursor for an operation that already
+    failed.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def test_a_reply_naming_an_unpasteable_format_settles_the_request(self):
+        import base64
+
+        messages = []
+        plugin = make_copy_plugin(messages)
+        plugin.copy_active_figure(output_format="pdf")
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(b"junk").decode("ascii"),
+                    "output_format": "raw",
+                    "is_text": False,
+                },
+            }
+        )
+
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+
+    def test_undecodable_payload_settles_the_request(self):
+        messages = []
+        plugin = make_copy_plugin(messages)
+        plugin.copy_active_figure(output_format="pdf")
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {"payload_base64": "!!not base64!!", "output_format": "pdf"},
+            }
+        )
+
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+
+    def test_a_reply_after_timeout_does_not_overwrite_the_failure(self):
+        import base64
+
+        messages = []
+        plugin = make_copy_plugin(messages)
+        QtWidgets.QApplication.clipboard().setText("untouched")
+        plugin.copy_active_figure(output_format="pdf")
+        plugin.on_copy_timeout()
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(b"%PDF late").decode("ascii"),
+                    "output_format": "pdf",
+                    "is_text": False,
+                },
+            }
+        )
+
+        self.assertFalse(any("Copied" in str(m) for m in messages), messages)
+        self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
+
+
+class TestCopyAndSaveFormatListsAgree(unittest.TestCase):
+    """The dialog derives formats from the matplotlib runtime; the copy menus
+    use Hyde's static clipboard mapping, so nothing keeps them in step by
+    construction. This turns a silent divergence into a failure."""
+
+    def test_every_clipboard_format_is_one_the_runtime_can_export(self):
+        runtime = {item.key for item in runtime_graphics_export_formats()}
+        clipboard = {item.key for item in graphics_clipboard_formats()}
+
+        self.assertTrue(
+            clipboard <= runtime,
+            f"copy offers formats the runtime cannot export: {sorted(clipboard - runtime)}",
+        )
+
+    def test_the_static_mapping_matches_the_runtime_derived_list(self):
+        from hyde.features.matplotlib_features import GRAPHICS_CLIPBOARD_MIME_TYPES
+
+        runtime_derived = [item.key for item in graphics_clipboard_formats()]
+        static_derived = [
+            item.key for item in graphics_clipboard_formats(GRAPHICS_CLIPBOARD_MIME_TYPES)
+        ]
+
+        self.assertEqual(runtime_derived, static_derived)
 
 
 class TestCopyAsSubmenu(unittest.TestCase):
@@ -1232,9 +1350,9 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             expected_payload = dialog.widget_ir.python_source(log=False)
             self.assertEqual(dialog.preview_string(), expected_payload)
 
-            dialog.to_clip_button.click()
-            dialog.to_cmd_line_button.click()
-            dialog.do_it_button.click()
+            dialog.copy_button.click()
+            dialog.to_ipython_button.click()
+            dialog.ok_button.click()
             self.qapp.processEvents()
 
             self.assertEqual(clipboard.text(), expected_payload)
@@ -1284,7 +1402,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
                 dialog.preview_string(),
             )
 
-    def test_do_it_exports_live_first_class_figure_to_default_pdf_target(self):
+    def test_ok_exports_live_first_class_figure_to_default_pdf_target(self):
         class EvaluatingExecutionService:
             def __init__(self):
                 self.hidden_calls = []
@@ -1321,7 +1439,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             dialog.show()
             self.qapp.processEvents()
 
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             self.qapp.processEvents()
 
             output_path = os.path.join(project_dir, "exports", "Figure9.pdf")
@@ -1331,7 +1449,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertEqual(len(execution_service.hidden_calls), 1)
             self.assertIn(repr(output_path), execution_service.hidden_calls[0][0])
 
-    def test_do_it_resolves_the_live_kernel_figure_at_export_time(self):
+    def test_ok_resolves_the_live_kernel_figure_at_export_time(self):
         class EvaluatingExecutionService:
             def __init__(self):
                 self.hidden_calls = []
@@ -1381,7 +1499,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
 
             live_figure.savefig = record_live_savefig
             try:
-                dialog.do_it_button.click()
+                dialog.ok_button.click()
                 self.qapp.processEvents()
             finally:
                 live_figure.savefig = original_savefig
