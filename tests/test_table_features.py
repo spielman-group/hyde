@@ -18,6 +18,7 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from hyde.user_interface.plugins.kernel_runtime import KernelRequest
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget, HydeToolWidget
 from hyde.user_interface.plugins.table_interactive import (
     Plugin,
@@ -359,26 +360,15 @@ class FakeNamespaceViewService:
             callback(dict(self._view))
 
 
-class FakeExecutionService:
+class FakeExecutionService(KernelRequestRecorder):
     def __init__(self, hidden_calls=None, visible_calls=None):
         self.hidden_calls = hidden_calls if hidden_calls is not None else []
         self.visible_calls = visible_calls if visible_calls is not None else []
-        self.requests = []
 
     def execute_hidden(self, code, silent=True):
         self.hidden_calls.append((code, silent))
         return True
 
-    def request(self, code, *, on_finished):
-        self.hidden_calls.append((code, True))
-        request = KernelRequest(f"msg-{len(self.requests) + 1}", code)
-        self.requests.append((request, on_finished))
-        return request
-
-    def answer_last(self, outcome=KernelRequest.RAN, error=""):
-        request, on_finished = self.requests[-1]
-        request.settle(outcome, error)
-        on_finished(request)
 
     def execute_visible(self, code):
         self.visible_calls.append(code)
@@ -778,7 +768,7 @@ class TestTableWidget(unittest.TestCase):
             )
 
             # The mutation is the first of the two requests; the refresh follows.
-            mutation, on_finished = execution.requests[0]
+            mutation, on_finished = execution.kernel_requests[0]
             mutation.settle(KernelRequest.RAISED, "TypeError: read-only array")
             on_finished(mutation)
 
@@ -1006,7 +996,7 @@ class TestTableWidget(unittest.TestCase):
             # No reply yet: the push has not been answered, so nothing is retried.
             namespace_service.emit({"a": {"type": "ndarray", "view": "[1 9 3]"}})
             self.assertEqual(1, len(queued))
-            self.assertEqual(1, len(execution.requests))
+            self.assertEqual(1, len(execution.kernel_requests))
         finally:
             widget.shutdown_client()
             widget.close()

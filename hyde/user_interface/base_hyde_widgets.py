@@ -20,6 +20,53 @@ def load_ui_for_owner(owner, ui_filename, *, module_name=None):
     return loader.load(ui_path, owner)
 
 
+class KernelCommands:
+    """Dispatching a command, and asking what became of it.
+
+    Mixed into both widget roots. A dialog and an interactive window reach the
+    kernel identically and had grown separate copies of the dispatch helper.
+    """
+
+    def execute_hidden_command(self, code):
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return False
+        return bool(python_execution_service.execute_hidden(code))
+
+    def request_command(self, code, on_finished):
+        """Dispatch `code` and correlate its reply.
+
+        Returns a `KernelRequest`, or None if there is no kernel to ask. Unlike
+        `execute_hidden_command`, which only says whether the command was sent,
+        this says what became of it.
+        """
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return None
+        return python_execution_service.request(code, on_finished=on_finished)
+
+    def report_failed_command(self, kernel_request):
+        """Say what the kernel said. Returns True if the command failed."""
+        if kernel_request.ran():
+            return False
+        service = self.services.get("status_message_service")
+        if service is not None:
+            service.show_status_message(
+                f"Command failed: {kernel_request.error}"
+                if kernel_request.error
+                else "Command failed in the kernel."
+            )
+        return True
+
+    def on_kernel_command_finished(self, kernel_request):
+        """Default reply handling: report a failure, ignore a success.
+
+        Surfaces that need more -- a dialog that has to undo something --
+        override this rather than growing a second dispatch path.
+        """
+        self.report_failed_command(kernel_request)
+
+
 class PersistentToolWindowFilter(QtCore.QObject):
     def __init__(self, widget):
         super().__init__(widget)
@@ -147,7 +194,7 @@ class HydeToolWidget(QtWidgets.QWidget):
             self._subwindow.removeEventFilter(self._persistent_close_filter)
 
 
-class HydeDialog(QtWidgets.QDialog):
+class HydeDialog(KernelCommands, QtWidgets.QDialog):
     def __init__(self, *args, services=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.services = dict(services or {})
@@ -156,12 +203,6 @@ class HydeDialog(QtWidgets.QDialog):
 
     def service(self, key, default=None):
         return self.services.get(key, default)
-
-    def execute_hidden_command(self, code):
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False
-        return bool(python_execution_service.execute_hidden(code))
 
     def load_ui(self, ui_filename, *, module_name=None):
         self.ui = load_ui_for_owner(self, ui_filename, module_name=module_name)
@@ -266,7 +307,11 @@ class HydeDialogWidget(HydeDialog):
             return False
         if self.ok_dispatch_mode() == "visible":
             return bool(python_execution_service.execute_visible(payload))
-        return bool(python_execution_service.execute_hidden(payload))
+        # The dialog closes on dispatch rather than waiting out the kernel, so
+        # a command that raises has to report itself after the fact.
+        return (
+            self.request_command(payload, self.on_kernel_command_finished) is not None
+        )
 
     def dispatch_ok_payload(
         self,
@@ -644,7 +689,7 @@ def tracked_namespace_signature(view, names):
     return tuple(tracked)
 
 
-class HydeInteractiveWidget(HydeToolWidget):
+class HydeInteractiveWidget(KernelCommands, HydeToolWidget):
     def __init__(
         self,
         *,
@@ -770,24 +815,6 @@ class HydeInteractiveWidget(HydeToolWidget):
             return False
         self._tracked_namespace_state = new_state
         return True
-
-    def execute_hidden_command(self, code):
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return False
-        return bool(python_execution_service.execute_hidden(code))
-
-    def request_command(self, code, on_finished):
-        """Dispatch `code` and correlate its reply.
-
-        Returns a `KernelRequest`, or None if there is no kernel to ask.
-        Unlike `execute_hidden_command`, which only says whether the command was
-        sent, this says what became of it.
-        """
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
-            return None
-        return python_execution_service.request(code, on_finished=on_finished)
 
     def saveable_default_macro_name(self):
         raise NotImplementedError

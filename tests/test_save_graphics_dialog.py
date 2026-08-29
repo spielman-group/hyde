@@ -36,6 +36,7 @@ from hyde.user_interface.plugins.save_graphics_dialog.clipboard import clipboard
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.kernel_runtime import KernelRequest
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde.user_interface.plugins.save_graphics_dialog import Plugin as SaveGraphicsPlugin
 from hyde.user_interface.plugins.save_graphics_dialog.dialogs import (
     SaveGraphicsDialog,
@@ -159,7 +160,7 @@ class RecordingEditableFigureContext(EditableFigureContext):
         return self._recorded_size_inches
 
 
-class FakeKernelRequests:
+class FakeKernelRequests(KernelRequestRecorder):
     """Stands in for `python_execution_service`, and answers on demand.
 
     Copy needs two arrivals that no channel orders against each other -- the
@@ -169,31 +170,21 @@ class FakeKernelRequests:
 
     def __init__(self):
         self.executed = []
-        self.requests = []
-
-    def request(self, code, *, on_finished):
-        self.executed.append(code)
-        request = KernelRequest(f"msg-{len(self.requests) + 1}", code)
-        self.requests.append((request, on_finished))
-        return request
 
     def execute_hidden(self, code, silent=True):
         self.executed.append(code)
         return True
 
-    def _answer(self, outcome, error=""):
-        request, on_finished = self.requests[-1]
-        request.settle(outcome, error)
-        on_finished(request)
-
     def render_ran(self):
-        self._answer(KernelRequest.RAN)
+        self.answer_last(KernelRequest.RAN)
 
     def render_raised(self, error="ValueError: no figure named Graph12"):
-        self._answer(KernelRequest.RAISED, error)
+        self.answer_last(KernelRequest.RAISED, error)
 
     def kernel_went_away(self):
-        self._answer(KernelRequest.ABANDONED, "The kernel is no longer available.")
+        self.answer_last(
+            KernelRequest.ABANDONED, "The kernel is no longer available."
+        )
 
 
 def copy_payload(
@@ -925,7 +916,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
     def test_data_left_over_from_an_abandoned_copy_is_not_taken_for_a_new_one(self):
         """The bytes name the request that produced them."""
         plugin, kernel, messages = self._copy_in_flight()
-        stale = kernel.requests[-1][0].msg_id
+        stale = kernel.kernel_requests[-1][0].msg_id
         kernel.render_ran()
         plugin.on_copy_payload_timeout()
         self.assertFalse(plugin.copy_in_flight())
@@ -937,7 +928,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         self.assertTrue(plugin.copy_in_flight())
         self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
 
-        current = kernel.requests[-1][0].msg_id
+        current = kernel.kernel_requests[-1][0].msg_id
         plugin.on_kernel_message(
             copy_payload(b"\x89PNG real", output_format="png", request_msg_id=current)
         )
@@ -1496,7 +1487,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertEqual(dialog.preview_string(), expected_state.python_source(log=False))
 
     def test_footer_actions_reuse_the_same_preview_backed_payload(self):
-        class ExecutionService:
+        class ExecutionService(KernelRequestRecorder):
             def __init__(self):
                 self.hidden_calls = []
                 self.visible_calls = []
@@ -1590,7 +1581,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             )
 
     def test_ok_exports_live_first_class_figure_to_default_pdf_target(self):
-        class EvaluatingExecutionService:
+        class EvaluatingExecutionService(KernelRequestRecorder):
             def __init__(self):
                 self.hidden_calls = []
 
@@ -1637,7 +1628,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertIn(repr(output_path), execution_service.hidden_calls[0][0])
 
     def test_ok_resolves_the_live_kernel_figure_at_export_time(self):
-        class EvaluatingExecutionService:
+        class EvaluatingExecutionService(KernelRequestRecorder):
             def __init__(self):
                 self.hidden_calls = []
 

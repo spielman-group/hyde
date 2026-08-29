@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qtutils.qt import QtCore, QtWidgets
 
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.user_interface.main import HydeApp
@@ -31,7 +32,7 @@ from hyde.user_interface.shared.plugin import HydePluginManager
 _DEFAULT_FIGURE_IR = object()
 
 
-class FakeExecutionService:
+class FakeExecutionService(KernelRequestRecorder):
     def __init__(self):
         self.hidden_calls = []
 

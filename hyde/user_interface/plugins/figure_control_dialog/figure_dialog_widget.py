@@ -169,12 +169,21 @@ class HydeFigureDialogWidget(HydeDialogWidget):
             return True
         if not self.execute_figure_patch(code, mode=mode):
             return False
-        if target_state is not None:
-            self.applied_figure_ir = target_state
-            self._reload_supported_trace_rows(target_state)
+        self.note_figure_patch_applied(target_state)
         if refresh_preview:
             self.refresh_figure_preview()
         return True
+
+    def note_figure_patch_applied(self, target_state):
+        """Record that the figure now matches `target_state`.
+
+        Separate from dispatch so a caller that sends the patch itself -- to
+        correlate the reply -- can still keep the mirror in step.
+        """
+        if target_state is None:
+            return
+        self.applied_figure_ir = target_state
+        self._reload_supported_trace_rows(target_state)
 
     def apply_figure_patch(self, target_ir, *, mode, refresh_preview=True):
         if self.applied_figure_ir is None or target_ir is None:

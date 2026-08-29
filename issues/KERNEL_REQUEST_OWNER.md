@@ -1,6 +1,6 @@
 # Scope: one owner for GUI-initiated kernel requests
 
-Status: steps 1-4 landed. Step 5 partly landed; see below.
+Status: all five steps landed. Remaining work is listed, not blocking.
 
 ## The confusion is well founded
 
@@ -249,31 +249,54 @@ changing what the terminal sends -- which is the user's own execution semantics,
 not Hyde's to redefine. It is another reason the real answer is a lane that is
 not behind the user's cell at all; see `CONCURRENT_KERNEL_ACCESS.md`.
 
+## Dialogs: report after the fact, and undo what needs undoing
+
+Decided with the user: dialogs keep closing on dispatch. Making OK wait for the
+kernel would leave a dialog open for as long as a user's cell runs, since there
+is no timeout before a reply, and it would change the feel of every dialog to
+fix one. So a dialog closes, and a command that raises reports itself
+afterwards.
+
+`HydeDialogWidget.execute_ok_payload` now dispatches through `request` and
+reports a raised reply. `KernelCommands` is the shared mixin behind that -- both
+widget roots had grown their own copy of the dispatch helper -- and its
+`on_kernel_command_finished` is the hook a surface overrides when reporting is
+not enough.
+
+**The curve-fit rollback is fixed.** It takes a snapshot, commits, and undoes
+the snapshot on failure -- but its only failure signal was whether the command
+could be *sent*. A fit that raised in the kernel returned "sent", so the dialog
+reported success, kept the snapshot, and never rolled back: the transaction was
+broken for the exact case the snapshot exists for. The commit is now correlated
+and the rollback fires on a raised reply. Its rollback command is built while
+the dialog is still up, because by the time a reply arrives the dialog has
+closed and its context is gone.
+
+Only the OK commit is correlated, through an explicit `undo_on_kernel_error`
+argument. The live-fit path shares `_run_commit_path` but reads the answer
+synchronously to drive the dialog's own state, and has nothing to undo;
+correlating it would silently drop that signal.
+
+## The test fakes were hiding this
+
+Worth recording, because it is why the defect survived a large suite. The
+curve-fit harness's fake execution service *executes the code* inside
+`execute_hidden` and returns False when it raises. Under that fake, "was it
+sent" and "did it run" are the same answer, so every failure test passed while
+the production path could not detect a kernel-side failure at all.
+
+A fake that conflates dispatch with execution cannot fail the test that would
+have caught this.
+
 ## Still dispatching without reading replies
 
-Every site below still uses `execute_hidden`, so a command that raises in the
-kernel is invisible to it. Ordered by consequence.
+Each of these would report a kernel-side failure to nobody. Each is local.
 
-**1. The curve-fit dialog's rollback never fires on a failed fit.**
-`curve_fit_dialog/dialogs.py` takes a snapshot, runs the fit, and rolls back on
-failure -- but its only failure signal is whether the command could be *sent*.
-A fit that raises in the kernel returns "sent", so the dialog reports success,
-keeps the snapshot, and never rolls back. This is a broken transaction, not
-merely a missing message.
-
-Fixing it is not a swap. The dialog's OK path is synchronous -- it returns
-`(ok, message)` -- and correlating means the accept-or-roll-back decision cannot
-be made until the reply arrives. That is a redesign of the dialog's OK flow and
-should be decided deliberately.
-
-**2. Every dialog's OK button accepts on "sent".** `HydeDialogWidget`'s
-`execute_ok_payload` closes the dialog once the command is dispatched, so a
-command that raises closes the dialog with no indication. Same asynchrony
-problem as 1, but shared by every dialog, so one fix covers many.
-
-**3. Assorted silent failures**, each local: project save and load
-(`file` plugin), session restore (`main`), figure and table plugin-level
-commands, `python_variables_tool`, `figure_control_dialog`.
+- project save and load (`file` plugin)
+- session restore (`main`)
+- figure and table plugin-level commands
+- `python_variables_tool`
+- `execute_figure_patch`, which the live/preview paths read synchronously
 
 **Deliberately left alone:**
 

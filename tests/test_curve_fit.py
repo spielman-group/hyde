@@ -19,6 +19,8 @@ except ModuleNotFoundError as exc:
 from qtutils.qt import QtWidgets
 
 import hyde
+from hyde.user_interface.plugins.kernel_runtime import KernelRequest
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde import project_tools
 from hyde.features.lmfit_features import CALCULATED_X_NAME
 from hyde.matplotlib_backend import (
@@ -117,7 +119,7 @@ def make_plugin_host(plugin_manager):
     return app
 
 
-class ProcedureExecutionHarness:
+class ProcedureExecutionHarness(KernelRequestRecorder):
     def __init__(self, plugin):
         self.plugin = plugin
         # execute_procedures_bootstrap deliberately chdirs into the project and
@@ -197,7 +199,7 @@ class ProcedureExecutionHarness:
         self.namespace[str(name)] = value
 
 
-class FakeExecutionService:
+class FakeExecutionService(KernelRequestRecorder):
     def __init__(self, harness):
         self.harness = harness
         self.calls = []
@@ -3006,6 +3008,70 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertIsNone(subplot["traces"][0]["x_source"])
             self.assertEqual(len(attached_figure.figure.axes), 1)
             self.assertEqual(len(attached_figure.figure.axes[0].lines), 1)
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_ok_rolls_back_when_the_commit_raises_in_the_kernel(self):
+        """The snapshot exists for a fit that runs and fails.
+
+        Dispatching only says a command was sent, so before the reply was read
+        the rollback fired for a command that could not be sent and never for
+        the case it was written for.
+        """
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            dialog.show_fit_checkbox.setChecked(True)
+            QtWidgets.QApplication.processEvents()
+            execution = harness.execution_service
+
+            dialog.ok_button.click()
+            QtWidgets.QApplication.processEvents()
+            self.assertTrue(execution.kernel_requests)
+            execution.calls.clear()
+
+            execution.answer_last(KernelRequest.RAISED, "ValueError: fit diverged")
+            QtWidgets.QApplication.processEvents()
+
+            restored = [
+                call["code"]
+                for call in execution.calls
+                if dialog._live_restore_store_name in call["code"]
+            ]
+            self.assertTrue(restored, execution.calls)
+        finally:
+            dialog.close()
+            harness.close()
+            attached_figure.close()
+
+    def test_curve_fit_ok_does_not_roll_back_when_the_commit_runs(self):
+        attached_figure = AttachedFigureHarness(
+            np.array([0.0, 1.0, 2.0, 3.0]),
+            np.array([1.0, 3.0, 5.0, 7.0]),
+        )
+        _, _, harness, dialog = create_configured_line_fit_dialog(
+            figure_window=attached_figure.figure_window
+        )
+        try:
+            dialog.show_fit_checkbox.setChecked(True)
+            QtWidgets.QApplication.processEvents()
+            execution = harness.execution_service
+
+            dialog.ok_button.click()
+            QtWidgets.QApplication.processEvents()
+            execution.calls.clear()
+
+            execution.answer_last()
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual([], execution.calls)
         finally:
             dialog.close()
             harness.close()

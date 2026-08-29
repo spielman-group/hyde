@@ -71,6 +71,9 @@ class CurveFitDialog(HydeFigureDialogWidget):
         self._catalog_status_text = ""
         self._live_result_target_name = None
         self._live_restore_store_name = f"_hyde_lmfit_live_restore_{id(self)}"
+        # Held between dispatching a commit and learning whether it ran, so a
+        # commit that raises in the kernel can be undone.
+        self._pending_rollback_command = ""
         self._live_missing_sentinel_name = f"_hyde_lmfit_missing_{id(self)}"
         self._preview_target_name = f"_hyde_lmfit_preview_{id(self)}"
         self.setModal(True)
@@ -162,6 +165,7 @@ class CurveFitDialog(HydeFigureDialogWidget):
         success, message = self._run_commit_path(
             success_target_name=self._current_model.get("fit_result_name"),
             display_root_name=self._current_model.get("fit_result_name"),
+            undo_on_kernel_error=True,
         )
         if not success:
             self._update_status_label(message)
@@ -484,6 +488,57 @@ class CurveFitDialog(HydeFigureDialogWidget):
             command_parts.append(str(patch_code).strip())
         return "\n".join(command_parts), target_state
 
+    def _dispatch_commit(self, code, undo_on_kernel_error):
+        """Send a commit, correlating it only when something will act on the reply.
+
+        The live path reads this answer synchronously to drive the dialog's own
+        state, and has nothing to undo. The OK path has closed by the time a
+        reply arrives, so the reply is the only thing that can fire its
+        rollback.
+        """
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is None:
+            return False
+        if not undo_on_kernel_error:
+            return bool(python_execution_service.execute_hidden(code))
+        return (
+            self.request_command(code, self.on_kernel_command_finished) is not None
+        )
+
+    def _rollback_command_source(self, target_name):
+        self.widget_ir.set_context(self._context())
+        self.widget_ir.set_restore_target_command(
+            target_name,
+            restore_store_name=self._live_restore_store_name,
+            missing_sentinel_name=self._live_missing_sentinel_name,
+        )
+        return self.widget_ir.python_source(log=False)
+
+    def _roll_back_now(self, python_execution_service):
+        """Undo the snapshot for a commit that never reached the kernel."""
+        rollback_command = self._pending_rollback_command
+        self._pending_rollback_command = ""
+        if rollback_command and python_execution_service is not None:
+            python_execution_service.execute_hidden(rollback_command)
+
+    def on_kernel_command_finished(self, kernel_request):
+        """A commit answered. Undo the snapshot if it raised.
+
+        Dispatching told us only that the command was sent, so before this the
+        rollback fired for a command that could not be sent and never for one
+        that ran and raised -- which is the case the snapshot exists for.
+        """
+        rollback_command = self._pending_rollback_command
+        self._pending_rollback_command = ""
+        if not self.report_failed_command(kernel_request):
+            return
+        if not rollback_command:
+            return
+        python_execution_service = self.services.get("python_execution_service")
+        if python_execution_service is not None:
+            python_execution_service.execute_hidden(rollback_command)
+        self._live_result_target_name = None
+
     def _execute_attached_display_command(self, code, *, mode, target_state):
         return self.apply_figure_patch_command(
             code,
@@ -533,6 +588,7 @@ class CurveFitDialog(HydeFigureDialogWidget):
         *,
         success_target_name=None,
         display_root_name=None,
+        undo_on_kernel_error=False,
     ):
         python_execution_service = self.services.get("python_execution_service")
         if python_execution_service is None:
@@ -560,6 +616,11 @@ class CurveFitDialog(HydeFigureDialogWidget):
                 snapshot_command
             ):
                 return False, self._execution_failure_message(python_execution_service)
+            # Built now, while the dialog is still up and its context is live.
+            # By the time a reply says the commit raised, the dialog has closed.
+            self._pending_rollback_command = self._rollback_command_source(
+                success_target_name
+            )
         patch_code = ""
         if display_root_name is not None and self.figure_context is not None:
             patch_code, target_effective_state = self._attached_display_command_source(
@@ -571,23 +632,15 @@ class CurveFitDialog(HydeFigureDialogWidget):
             if part
         )
         if patch_code:
-            if not self._execute_attached_display_command(
-                combined_command,
-                mode="ok",
-                target_state=target_effective_state,
-            ):
-                if needs_rollback_snapshot:
-                    self.widget_ir.set_context(self._context())
-                    self.widget_ir.set_restore_target_command(
-                        success_target_name,
-                        restore_store_name=self._live_restore_store_name,
-                        missing_sentinel_name=self._live_missing_sentinel_name,
-                    )
-                    rollback_command = self.widget_ir.python_source(log=False)
-                    if rollback_command:
-                        python_execution_service.execute_hidden(rollback_command)
-                return False, self._execution_failure_message(python_execution_service)
-        elif str(command or "").strip() and not python_execution_service.execute_hidden(command):
+            dispatched = self._dispatch_commit(combined_command, undo_on_kernel_error)
+            if dispatched:
+                self.note_figure_patch_applied(target_effective_state)
+        elif str(command or "").strip():
+            dispatched = self._dispatch_commit(command, undo_on_kernel_error)
+        else:
+            dispatched = True
+        if not dispatched:
+            self._roll_back_now(python_execution_service)
             return False, self._execution_failure_message(python_execution_service)
         if success_target_name is not None:
             self._live_result_target_name = success_target_name

@@ -13,6 +13,7 @@ except ModuleNotFoundError as exc:
 
 from qtutils.qt import QtGui, QtWidgets
 
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde.features.hyde_ir import HydeAppIR
 from hyde.features.hyde_features import hyde_app_python_source
 from hyde.user_interface.plugins.file import Plugin
@@ -25,7 +26,7 @@ from hyde.user_interface.plugins.file.dialogs import (
 )
 
 
-class ExecutionService:
+class ExecutionService(KernelRequestRecorder):
     def __init__(self, dispatched):
         self._dispatched = dispatched
 

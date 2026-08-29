@@ -24,6 +24,7 @@ import tomllib
 
 import hyde
 import hyde.project_tools
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.main.project_state import (
@@ -134,7 +135,7 @@ class DummyPythonTerminalService:
         self.restored_entries = list(entries)
 
 
-class DummyExecutionService:
+class DummyExecutionService(KernelRequestRecorder):
     def __init__(self, events):
         self.events = events
 
@@ -143,7 +144,7 @@ class DummyExecutionService:
         return True
 
 
-class DummyWindowExecutionService:
+class DummyWindowExecutionService(KernelRequestRecorder):
     def __init__(self):
         self.hidden_calls = []
 

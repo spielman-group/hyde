@@ -52,6 +52,7 @@ from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.features.matplotlib_ir import FigureIR, FigureIRDiff
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.kernel_runtime import KernelRequest
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 
@@ -79,28 +80,16 @@ class FakeNamespaceViewService:
             callback(dict(self._view))
 
 
-class FakeExecutionService:
+class FakeExecutionService(KernelRequestRecorder):
     def __init__(self, hidden_calls=None, visible_calls=None):
         self.hidden_calls = hidden_calls if hidden_calls is not None else []
         self.visible_calls = visible_calls if visible_calls is not None else []
-        self.requests = []
 
     def execute_hidden(self, code, silent=True):
         log_hyde_dispatch_debug("hidden", code)
         self.hidden_calls.append((code, silent))
         return True
 
-    def request(self, code, *, on_finished):
-        log_hyde_dispatch_debug("hidden", code)
-        self.hidden_calls.append((code, True))
-        request = KernelRequest(f"msg-{len(self.requests) + 1}", code)
-        self.requests.append((request, on_finished))
-        return request
-
-    def answer_last(self, outcome=KernelRequest.RAN, error=""):
-        request, on_finished = self.requests[-1]
-        request.settle(outcome, error)
-        on_finished(request)
 
     def execute_visible(self, code):
         self.visible_calls.append(code)

@@ -14,6 +14,7 @@ import hyde
 
 from qtutils.qt import QtWidgets
 
+from tests.kernel_fakes import KernelRequestRecorder
 from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.matplotlib_backend import figure_snapshot_payload
@@ -38,7 +39,7 @@ from hyde.user_interface.shared.plugin import HydePluginManager
 _DEFAULT_FIGURE_IR = object()
 
 
-class FakeExecutionService:
+class FakeExecutionService(KernelRequestRecorder):
     def __init__(self):
         self.hidden_calls = []
 
