@@ -15,7 +15,7 @@ figure graphics-output path that `Save Graphics...` already owns.
 - [x] Slice 5: Copy PGF As Text
 - [x] Slice 6: Attach A PNG Companion Representation
 - [x] Slice 7: Report Copy Progress And Failure
-- [ ] Slice 8: Resync The Save Graphics Spec And Architecture Docs
+- [x] Slice 8: Resync The Save Graphics Spec And Architecture Docs
 - [ ] Slice 9: Test Cleanup Pass
 
 ## Agreed Design Decisions
@@ -463,18 +463,18 @@ of `dpi='figure'` as remaining work rather than leaving it implicit.
 
 ### Acceptance criteria
 
-- [ ] The Save Graphics spec describes copy in the present tense, including
+- [x] The Save Graphics spec describes copy in the present tense, including
       every agreed decision that a reader would otherwise have to infer.
-- [ ] Each format exclusion carries its technical reason.
-- [ ] The spec states that `Save Graphics` derives its format list from the
+- [x] Each format exclusion carries its technical reason.
+- [x] The spec states that `Save Graphics` derives its format list from the
       matplotlib runtime while `Copy As` uses Hyde's static clipboard mapping,
       why they differ, and what that costs.
-- [ ] The asynchronous clipboard and its accepted race are documented, not
+- [x] The asynchronous clipboard and its accepted race are documented, not
       omitted.
-- [ ] `IR-CONTROL.md` records the `figure_graphics_copy` feature kind and the
+- [x] `IR-CONTROL.md` records the `figure_graphics_copy` feature kind and the
       `'figure'` DPI sentinel.
-- [ ] `STATUS.md` lists the figure-DPI raster-size follow-up.
-- [ ] No historical narrative in the spec; progress notes stay in progress docs.
+- [x] `STATUS.md` lists the figure-DPI raster-size follow-up.
+- [x] No historical narrative in the spec; progress notes stay in progress docs.
 
 ### Blocked by
 

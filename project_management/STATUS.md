@@ -128,6 +128,9 @@ Behavior-level IR ownership cleanup remains later work.
   and figures after successful `session.py` completion.
 
 ## Remaining Near-Term Gaps
+- raise Hyde's figure-creation DPI: figures inherit the matplotlib default, so
+  raster clipboard copies and exports are correspondingly modest. The fix belongs
+  at figure creation, not as a copy-specific or export-specific override
 - do the behavior-level IR pass now that the file-shape refactor has landed
 - define the final Python Terminal output policy for silent kernel-runtime execution
 - expand broader table interaction coverage

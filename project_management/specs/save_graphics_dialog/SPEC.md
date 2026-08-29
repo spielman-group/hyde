@@ -5,6 +5,11 @@
 `Save Graphics...` is Hyde's figure-scoped export dialog for writing the active
 first-class figure to a graphics file.
 
+`Copy` and `Copy As` are the clipboard half of the same feature. They place a
+rendering of the active first-class figure on the system clipboard without a
+dialog. Both halves share one format vocabulary, one output-option contract, and
+one reuse boundary, which is why they are specified together.
+
 The dialog owns only transient export configuration. The authoritative export source is
 always the live kernel matplotlib `Figure` resolved from the opening figure identity.
 The dialog does not export cached GUI pixels, does not patch figure IR, and does not
@@ -147,14 +152,140 @@ The generated command:
 
 `Do It` dispatches that command through Hyde's hidden execution path.
 
+## Clipboard Copy
+
+### Entry Points
+
+- `Copy` appears in the `Edit` menu carrying the platform copy shortcut, in the
+  `Figure` menu, and in the figure window context menu.
+- `Copy As` is a submenu in the same three surfaces, listing one entry per
+  clipboard-capable format.
+- The `Figure` menu and the figure context menu render the same location, so a
+  single contribution reaches both.
+- `Edit` is a shell-owned menu location. Each widget family contributes its own
+  copy actions into it, so later table and terminal copy need no central
+  dispatcher.
+- Every copy action requires an active first-class figure and is disabled
+  without one. A disabled action's shortcut is inert, so the keyboard is gated by
+  the same precondition as the menu.
+
+### Format Behavior
+
+`Copy` copies PDF. `Copy As` offers the clipboard-capable subset of the export
+formats, in the same order and with the same labels the dialog uses:
+
+- offered as images: `pdf`, `png`, `avif`, `eps`, `gif`, `jpeg`, `jpg`, `ps`,
+  `svg`, `tif`, `tiff`, `webp`
+- offered as text: `pgf`
+- not offered: `raw` and `rgba`, which are raw buffers with no clipboard MIME
+  type, and `svgz`, which is gzipped SVG that no application pastes and which
+  `svg` supersedes
+
+Whether a format has a clipboard representation, and which MIME type it carries,
+is data about the format rather than dialog policy, so that mapping lives in the
+feature layer beside the other graphics-output helpers.
+
+The dialog derives its format list from the matplotlib runtime; the copy menus
+use Hyde's static clipboard mapping. They differ because menus are built during
+application start-up and the runtime query imports `matplotlib.pyplot` and
+resolves an interactive backend as a side effect, which the GUI process must not
+do. The two lists agree on keys, labels, and suffix aliases today. The cost of
+the divergence is that if a matplotlib build ever dropped one of these formats,
+the copy menu would still offer it and the copy would fail at render time rather
+than the entry being absent.
+
+### Clipboard Payload
+
+- An image-format copy places the rendering under that format's MIME type and
+  additionally attaches an `image/png` representation. A clipboard payload can
+  carry several representations of one content, so the paste succeeds in
+  applications that reject the requested type while applications preferring
+  vector still receive it. Without the companion, a PDF copy appears to do
+  nothing in a great many applications.
+- `png` carries no companion, which would only duplicate itself.
+- `pgf` is placed as text, because it is LaTeX source and what someone copying it
+  intends to paste is the source. It deliberately carries no image
+  representation: an image companion would mean pasting into a word processor
+  silently yields a picture instead of the source.
+
+### Output Options
+
+Copy has no dialog, so it takes fixed options rather than exposing controls:
+
+- format comes from the invoked menu entry
+- `DPI` is passed as matplotlib's `'figure'` sentinel, so the kernel resolves it
+  against the live figure instead of the GUI mirroring kernel state
+- transparency is off
+- there is no size override; the figure's current size is used
+
+Because Hyde figures inherit the matplotlib default figure DPI, raster copies are
+correspondingly modest. Raising that is a figure-creation concern, not a
+copy-specific override.
+
+### Command Generation
+
+Copy lowers through the figure IR family, like every other command-emitting Hyde
+surface. `FigureIR.with_copy_graphics()` produces a copy command that resolves the
+figure by its stable Hyde name and calls a Hyde runtime helper:
+
+```
+fig = hyde.get_figure('Graph12')
+hyde.copy_figure(fig, format='pdf', dpi='figure')
+```
+
+Copy is a distinct command from save rather than a save with a null target: copy
+carries no output path and save requires one, so separate commands keep both
+validations honest and give the `'figure'` DPI sentinel a home where it is the
+only valid value.
+
+The emitted call is a Hyde helper rather than plain matplotlib because the
+clipboard is GUI-owned and matplotlib cannot express it. `IR-CONTROL.md` permits a
+Hyde helper in emitted Python exactly when it is the necessary contract for a
+Hyde-owned operation.
+
+`Do It` dispatches the command through Hyde's hidden execution path, matching the
+dialog. Copy is the highest-frequency action in the application, so it is not
+echoed to the terminal.
+
+### Synchronization
+
+Rendering happens in the kernel, which owns the figure; the rendered bytes are
+handed to the GUI, which owns the clipboard. `hyde/__init__.py` must not import
+Qt, so the runtime helper renders and hands off and never touches the clipboard
+itself.
+
+Copy is therefore asynchronous: the clipboard is not populated when the menu
+action returns. This is the accepted cost of keeping the kernel authoritative
+over rendering. The round trip is fast in practice, but the semantics differ from
+a synchronous clipboard operation.
+
+Copying does not alter the live figure's size, DPI, or any other state.
+
+### Feedback
+
+Copy's entire effect is invisible until the user pastes elsewhere, so it reports
+what happened:
+
+- the status bar names the format that reached the clipboard on success
+- a render that produces nothing reports failure rather than confirming success
+- a busy cursor appears only if the copy has not completed within a short delay,
+  so a fast copy does not flicker the cursor
+- a copy that never completes times out, restores the cursor, and reports
+  failure. This guard is mandatory: an unrestored busy cursor makes the whole
+  application look hung, which is worse than no feedback at all
+
+### Controls
+
+- `Copy`, `Copy As`, and every format entry: `active`
+- there is no copy dialog, preview pane, or footer; these are menu actions only
+
 ## Reuse Boundary
 
 The graphics-output option lowering for format, `DPI`, transparency, and temporary
-size override lives in the shared matplotlib feature layer so it can be reused by a
-future figure-copy workflow.
+size override lives in the shared matplotlib feature layer, and clipboard copy is its
+second consumer.
 
-That reuse seam is limited to graphics-output options. This feature does not implement
-clipboard export, `Copy...`, or any other copy surface.
+That reuse seam is limited to graphics-output options.
 
 ## Out Of Scope
 
@@ -164,6 +295,5 @@ The initial deployment does not include:
 - multi-figure export from one dialog
 - figure recreation macro export
 - figure IR edits as part of export
-- clipboard/copy export
 - monochrome/color-mode export controls
 - format curation beyond runtime-derived ordering and clear transparency disablement

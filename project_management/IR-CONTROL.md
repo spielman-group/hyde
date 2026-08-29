@@ -208,6 +208,13 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - Figure axis, trace, and Curve Fit attached-display dialogs now emit matplotlib
   patch Python from imported figure IR rather than using a separate semantic
   figure-action transport.
+- Figure clipboard copy is a distinct `FigureIR` copy command rather than a save
+  with a null target, so both validations stay honest. It carries `dpi='figure'`,
+  matplotlib's own sentinel, which lets the kernel resolve DPI against the live
+  figure instead of the GUI mirroring kernel state.
+- That copy command lowers to a `hyde.copy_figure(...)` call rather than plain
+  matplotlib. The clipboard is GUI-owned and matplotlib cannot express it, which
+  is precisely the case the Hyde-helper allowance above is for.
 - Emitted strings that could plausibly be reused outside Hyde should prefer standard
   matplotlib/Python. Hyde public helpers are acceptable in emitted update strings only
   when they are the necessary or clearer contract for a Hyde-owned operation, not as a
