@@ -341,7 +341,7 @@ class TestAxisEditDialogPlugin(unittest.TestCase):
             launched["dialog"] = dialog
             return QtWidgets.QDialog.Accepted
 
-        with patch.object(AxisEditDialog, "exec_", new=record_exec):
+        with patch.object(AxisEditDialog, "exec", new=record_exec):
             manager.services["lookup_menu_action"]("figure", "Modify Axis...").trigger()
 
         self.assertIsInstance(launched["dialog"], AxisEditDialog)
@@ -377,7 +377,7 @@ class TestAxisEditDialogPlugin(unittest.TestCase):
             {"active_editable_figure": lambda _self: EditableFigureContext(figure)},
         )()
 
-        with patch.object(AxisEditDialog, "exec_", return_value=QtWidgets.QDialog.Accepted):
+        with patch.object(AxisEditDialog, "exec", return_value=QtWidgets.QDialog.Accepted):
             self.assertTrue(plugin.show_axis_edit_dialog())
 
 

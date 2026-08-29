@@ -234,7 +234,7 @@ class TestRemoveFromGraphPlugin(unittest.TestCase):
             launched["dialog"] = dialog
             return QtWidgets.QDialog.Accepted
 
-        with patch.object(RemoveFromGraphDialog, "exec_", new=record_exec):
+        with patch.object(RemoveFromGraphDialog, "exec", new=record_exec):
             manager.services["lookup_menu_action"](
                 "figure", "Remove from Graph..."
             ).trigger()

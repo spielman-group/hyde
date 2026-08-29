@@ -55,4 +55,4 @@ class Plugin(HydePlugin):
         if not support_check(dialog):
             dialog.deleteLater()
             return False
-        return dialog.exec_() == QtWidgets.QDialog.Accepted
+        return dialog.exec() == QtWidgets.QDialog.Accepted

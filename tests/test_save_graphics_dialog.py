@@ -1038,7 +1038,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             return QtWidgets.QDialog.Accepted
 
         with patch(
-            "hyde.user_interface.plugins.save_graphics_dialog.dialogs.SaveGraphicsDialog.exec_",
+            "hyde.user_interface.plugins.save_graphics_dialog.dialogs.SaveGraphicsDialog.exec",
             new=record_exec,
         ):
             action = manager.services["lookup_menu_action"]("figure", "Save Graphics...")

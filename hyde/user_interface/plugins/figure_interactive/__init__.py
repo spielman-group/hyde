@@ -109,7 +109,7 @@ class FigureFeatureService:
             services=self.plugin.services,
             parent=parent,
         )
-        if not dialog.exec_():
+        if not dialog.exec():
             return False
         return True
 

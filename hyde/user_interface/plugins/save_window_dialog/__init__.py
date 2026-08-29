@@ -64,7 +64,7 @@ class SaveWindowDialogService:
         )
         while True:
             dialog = SaveWindowDialog(saveable=saveable, parent=parent)
-            if dialog.exec_() != QtWidgets.QDialog.Accepted:
+            if dialog.exec() != QtWidgets.QDialog.Accepted:
                 return False
             if dialog.choice == SaveWindowDialog.NO_SAVE:
                 return True

@@ -71,4 +71,4 @@ if __name__ == '__main__':
     # splash.hide() and hyde_instance.ui.show() are handled by HydeApp once the
     # direct kernel child is ready.
     
-    sys.exit(qapplication.exec_())
+    sys.exit(qapplication.exec())

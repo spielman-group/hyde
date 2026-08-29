@@ -246,7 +246,7 @@ class TestSaveWindowDialog(unittest.TestCase):
                     self.parent = parent
                     self.saveable = saveable
 
-                def exec_(self):
+                def exec(self):
                     return QtWidgets.QDialog.Accepted
 
                 def macro_name(self):
@@ -290,7 +290,7 @@ class TestSaveWindowDialog(unittest.TestCase):
                 self.parent = parent
                 self.saveable = saveable
 
-            def exec_(self):
+            def exec(self):
                 return QtWidgets.QDialog.Accepted
 
         widget = FakeInteractiveWidget()
@@ -319,7 +319,7 @@ class TestSaveWindowDialog(unittest.TestCase):
                 self.parent = parent
                 self.saveable = saveable
 
-            def exec_(self):
+            def exec(self):
                 return QtWidgets.QDialog.Rejected
 
         widget = FakeInteractiveWidget()
@@ -594,7 +594,7 @@ class TestTableFeatureService(unittest.TestCase):
                 del objects_metadata, preselection, parent
                 captured["services"] = services
 
-            def exec_(self):
+            def exec(self):
                 return True
 
         with patch(

@@ -399,7 +399,7 @@ class MatplotlibColorLineEdit(QtWidgets.QLineEdit):
             allow_empty=self._allow_empty,
             allow_auto=self._allow_auto,
         )
-        if dialog.exec_() != QtWidgets.QDialog.Accepted:
+        if dialog.exec() != QtWidgets.QDialog.Accepted:
             return
         self.set_committed_text(dialog.selected_color_text())
         self.editingFinished.emit()

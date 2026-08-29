@@ -93,15 +93,15 @@ class Plugin(HydePlugin):
 
     def new_project(self, checked=False):
         del checked
-        NewProjectDialog(self.services).exec_()
+        NewProjectDialog(self.services).exec()
 
     def load_project(self, checked=False):
         del checked
-        LoadProjectDialog(self.services).exec_()
+        LoadProjectDialog(self.services).exec()
 
     def heal_project(self, checked=False):
         del checked
-        HealProjectDialog(self.services).exec_()
+        HealProjectDialog(self.services).exec()
 
     def save_project(self, checked=False):
         del checked
@@ -118,11 +118,11 @@ class Plugin(HydePlugin):
 
     def save_project_as(self, checked=False):
         del checked
-        SaveAsProjectDialog(self.services).exec_()
+        SaveAsProjectDialog(self.services).exec()
 
     def save_project_copy(self, checked=False):
         del checked
-        SaveCopyProjectDialog(self.services).exec_()
+        SaveCopyProjectDialog(self.services).exec()
 
     def quit_application(self, checked=False):
         del checked

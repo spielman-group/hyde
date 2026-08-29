@@ -527,7 +527,7 @@ class TestFigurePluginDispatch(unittest.TestCase):
                 del objects_metadata, preselection, parent
                 captured["services"] = services
 
-            def exec_(self):
+            def exec(self):
                 return True
 
         with patch(

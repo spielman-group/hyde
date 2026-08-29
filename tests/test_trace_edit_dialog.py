@@ -242,7 +242,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
             launched["dialog"] = dialog
             return QtWidgets.QDialog.Accepted
 
-        with patch.object(TraceAppearanceDialog, "exec_", new=record_exec):
+        with patch.object(TraceAppearanceDialog, "exec", new=record_exec):
             manager.services["lookup_menu_action"](
                 "figure", "Modify Data Appearance..."
             ).trigger()
@@ -270,7 +270,7 @@ class TestTraceAppearancePlugin(unittest.TestCase):
 
         with patch.object(
             TraceAppearanceDialog,
-            "exec_",
+            "exec",
             side_effect=AssertionError("Dialog should not execute without supported traces."),
         ):
             self.assertFalse(

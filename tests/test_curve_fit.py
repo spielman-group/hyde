@@ -265,7 +265,7 @@ def trigger_curve_fit_action_and_capture_dialog(manager):
         QtWidgets.QApplication.processEvents()
         return QtWidgets.QDialog.Accepted
 
-    with patch.object(CurveFitDialog, "exec_", new=record_exec):
+    with patch.object(CurveFitDialog, "exec", new=record_exec):
         action = manager.services["lookup_menu_action"]("analysis", "Curve Fit...")
         assert action is not None
         action.trigger()

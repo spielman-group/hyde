@@ -113,7 +113,7 @@ class TestMatplotlibColorHelpers(unittest.TestCase):
             with patch.object(MatplotlibColorDialog, "__init__", new=wrapped_init):
                 with patch.object(
                     MatplotlibColorDialog,
-                    "exec_",
+                    "exec",
                     new=record_exec,
                 ):
                     swatch.click()
