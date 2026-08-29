@@ -305,6 +305,20 @@ callbacks, which Qt keeps and calls even after cyclic GC has cleared them.
 Fixed by connecting those signals to bound methods and passing the workspace
 handle through a Qt property. `STYLE.md` carries the general rule.
 
+The `Copy As` menu is built from Hyde's static clipboard format mapping rather
+than from the live matplotlib runtime. Menus are constructed during application
+start-up, and the runtime query imports `matplotlib.pyplot` and resolves an
+interactive backend as a side effect; the GUI process does not own figures, and
+once pyplot is imported `configure_gui_matplotlib_backend()` becomes a no-op.
+The static mapping yields identical keys, labels and suffix aliases, because
+MIME values group `jpg`/`jpeg`, `tif`/`tiff` and `eps`/`ps` exactly as the
+runtime descriptions do.
+
+The trade-off is deliberate and belongs in the spec: `Save Graphics` remains
+runtime-derived, while `Copy As` is a fixed Hyde-curated list. If a matplotlib
+build ever drops one of these formats, the copy menu would still offer it and
+the copy would fail at render time rather than the entry being absent.
+
 ### Blocked by
 
 - Slice 3: Add The Edit Menu With Copy And Its Shortcut
@@ -452,6 +466,9 @@ of `dpi='figure'` as remaining work rather than leaving it implicit.
 - [ ] The Save Graphics spec describes copy in the present tense, including
       every agreed decision that a reader would otherwise have to infer.
 - [ ] Each format exclusion carries its technical reason.
+- [ ] The spec states that `Save Graphics` derives its format list from the
+      matplotlib runtime while `Copy As` uses Hyde's static clipboard mapping,
+      why they differ, and what that costs.
 - [ ] The asynchronous clipboard and its accepted race are documented, not
       omitted.
 - [ ] `IR-CONTROL.md` records the `figure_graphics_copy` feature kind and the
