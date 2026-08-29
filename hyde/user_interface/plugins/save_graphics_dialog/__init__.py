@@ -106,6 +106,7 @@ class Plugin(HydePlugin):
         data = payload.get("data", {}) or {}
         try:
             rendered = base64.b64decode(data.get("payload_base64", ""))
+            companion_png = base64.b64decode(data.get("companion_png_base64") or "")
         except Exception:
             return
         if not rendered:
@@ -114,6 +115,7 @@ class Plugin(HydePlugin):
             rendered,
             output_format=data.get("output_format", "pdf"),
             is_text=bool(data.get("is_text")),
+            companion_png=companion_png or None,
         )
         if mime_data is None:
             return

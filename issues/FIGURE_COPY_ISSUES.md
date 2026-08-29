@@ -12,8 +12,8 @@ figure graphics-output path that `Save Graphics...` already owns.
 - [x] Slice 2: Copy The Active Figure As PDF
 - [x] Slice 3: Add The Edit Menu With Copy And Its Shortcut
 - [x] Slice 4: Offer Copy As Over The Clipboard-Capable Format Set
-- [ ] Slice 5: Copy PGF As Text
-- [ ] Slice 6: Attach A PNG Companion Representation
+- [x] Slice 5: Copy PGF As Text
+- [x] Slice 6: Attach A PNG Companion Representation
 - [ ] Slice 7: Report Copy Progress And Failure
 - [ ] Slice 8: Resync The Save Graphics Spec And Architecture Docs
 - [ ] Slice 9: Test Cleanup Pass
@@ -343,10 +343,10 @@ format excluded from the companion representation added in Slice 6.
 
 ### Acceptance criteria
 
-- [ ] `Copy As > PGF` yields text that pastes into a text editor as LaTeX
+- [x] `Copy As > PGF` yields text that pastes into a text editor as LaTeX
       source.
-- [ ] The PGF clipboard payload carries no image representation.
-- [ ] Image formats are unaffected.
+- [x] The PGF clipboard payload carries no image representation.
+- [x] Image formats are unaffected.
 
 ### Blocked by
 
@@ -378,11 +378,11 @@ asked for.
 
 ### Acceptance criteria
 
-- [ ] An image-format copy carries both the requested format and a PNG
+- [x] An image-format copy carries both the requested format and a PNG
       representation.
-- [ ] An application that accepts only PNG can paste the result of a PDF copy.
-- [ ] An application that prefers the primary format still receives it.
-- [ ] A PGF copy carries text only.
+- [x] An application that accepts only PNG can paste the result of a PDF copy.
+- [x] An application that prefers the primary format still receives it.
+- [x] A PGF copy carries text only.
 
 ### Blocked by
 

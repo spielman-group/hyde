@@ -433,6 +433,171 @@ class TestEditMenuCopy(unittest.TestCase):
         self.assertEqual(from_edit, from_figure)
 
 
+class TestCopyPgfAsText(unittest.TestCase):
+    """PGF is LaTeX source, so it goes on the clipboard as text.
+
+    It is the one offered format with no image reading, which is also why it is
+    excluded from the PNG companion representation: attaching an image to a
+    text copy would mean pasting into a word processor silently yields a
+    picture instead of the source that was asked for.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def test_pgf_reaches_the_clipboard_as_latex_source(self):
+        import base64
+
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {}
+        latex = b"\\begingroup%\n\\makeatletter%\n\\begin{pgfpicture}%"
+
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(latex).decode("ascii"),
+                    "output_format": "pgf",
+                    "is_text": True,
+                },
+            }
+        )
+
+        mime_data = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertTrue(mime_data.hasText())
+        self.assertIn("pgfpicture", mime_data.text())
+
+    def test_pgf_payload_carries_no_image_representation(self):
+        payload = clipboard_mime_data(b"\\begin{pgfpicture}", output_format="pgf", is_text=True)
+
+        self.assertTrue(payload.hasText())
+        for image_type in ("image/png", "application/pdf", "image/svg+xml"):
+            self.assertNotIn(image_type, payload.formats())
+
+    def test_the_kernel_marks_pgf_as_text_and_other_formats_as_not(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import hyde
+
+        figure = plt.figure(figsize=(3.0, 2.0))
+        figure.add_subplot(111).plot([0, 1], [1, 2])
+        try:
+            for output_format, expected_text in (("pgf", True), ("png", False), ("pdf", False)):
+                with self.subTest(output_format=output_format):
+                    captured = []
+                    with patch(
+                        "hyde.execution.ipc.signal_copy_to_clipboard",
+                        side_effect=lambda payload, **kw: captured.append(kw),
+                    ):
+                        hyde.copy_figure(figure, format=output_format)
+                    self.assertEqual(expected_text, captured[0]["is_text"])
+        finally:
+            plt.close(figure)
+
+
+class TestPngCompanionRepresentation(unittest.TestCase):
+    """A clipboard payload can carry several representations of one content.
+
+    Without a PNG alongside the requested format, a PDF copy appears to do
+    nothing in the many applications that do not accept PDF from the clipboard.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def test_an_image_copy_carries_both_its_own_format_and_png(self):
+        payload = clipboard_mime_data(
+            b"%PDF-1.4 fake",
+            output_format="pdf",
+            companion_png=b"\x89PNG\r\n\x1a\n fake",
+        )
+
+        self.assertIn("application/pdf", payload.formats())
+        self.assertIn("image/png", payload.formats())
+        self.assertEqual(b"%PDF-1.4 fake", bytes(payload.data("application/pdf")))
+        self.assertEqual(b"\x89PNG\r\n\x1a\n fake", bytes(payload.data("image/png")))
+
+    def test_a_png_copy_does_not_duplicate_itself(self):
+        payload = clipboard_mime_data(
+            b"\x89PNG fake", output_format="png", companion_png=b"\x89PNG fake"
+        )
+
+        self.assertEqual(["image/png"], [f for f in payload.formats() if f.startswith("image/")])
+
+    def test_pgf_is_excluded_from_the_companion(self):
+        # Attaching an image to a text copy would mean pasting into a word
+        # processor silently yields a picture instead of the LaTeX source.
+        payload = clipboard_mime_data(
+            b"\\begin{pgfpicture}",
+            output_format="pgf",
+            is_text=True,
+            companion_png=b"\x89PNG fake",
+        )
+
+        self.assertTrue(payload.hasText())
+        self.assertNotIn("image/png", payload.formats())
+
+    def test_the_kernel_renders_a_companion_png_for_image_formats_only(self):
+        import base64
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import hyde
+
+        figure = plt.figure(figsize=(3.0, 2.0))
+        figure.add_subplot(111).plot([0, 1], [1, 2])
+        try:
+            for output_format, expect_companion in (
+                ("pdf", True),
+                ("svg", True),
+                ("png", False),
+                ("pgf", False),
+            ):
+                with self.subTest(output_format=output_format):
+                    captured = []
+                    with patch(
+                        "hyde.execution.ipc.signal_copy_to_clipboard",
+                        side_effect=lambda payload, **kw: captured.append(kw),
+                    ):
+                        hyde.copy_figure(figure, format=output_format)
+                    companion = captured[0].get("companion_png_base64")
+                    if expect_companion:
+                        self.assertTrue(companion, f"{output_format} should carry a PNG")
+                        self.assertTrue(base64.b64decode(companion).startswith(b"\x89PNG"))
+                    else:
+                        self.assertFalse(companion, f"{output_format} should carry no PNG")
+        finally:
+            plt.close(figure)
+
+    def test_a_pdf_copy_is_pasteable_by_a_png_only_consumer(self):
+        import base64
+
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {}
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(b"%PDF-1.4 fake").decode("ascii"),
+                    "output_format": "pdf",
+                    "is_text": False,
+                    "companion_png_base64": base64.b64encode(b"\x89PNG fake").decode("ascii"),
+                },
+            }
+        )
+
+        mime_data = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertIn("image/png", mime_data.formats())
+        self.assertIn("application/pdf", mime_data.formats())
+
+
 class TestCopyAsSubmenu(unittest.TestCase):
     """Copy As offers the clipboard-capable subset of what Save offers.
 

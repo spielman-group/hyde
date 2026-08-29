@@ -11,8 +11,12 @@ from qtutils.qt import QtCore
 from hyde.features.matplotlib_features import clipboard_mime_type_for_format
 
 
-def clipboard_mime_data(rendered, *, output_format, is_text=False):
+def clipboard_mime_data(rendered, *, output_format, is_text=False, companion_png=None):
     """Return a `QMimeData` carrying `rendered` under its format's MIME type.
+
+    `companion_png`, when given, is attached as an additional `image/png`
+    representation so a paste still succeeds in applications that reject the
+    requested format.
 
     Returns `None` when the format has no clipboard representation, so a caller
     never places an unpasteable payload on the clipboard.
@@ -31,4 +35,6 @@ def clipboard_mime_data(rendered, *, output_format, is_text=False):
         return mime_data
 
     mime_data.setData(mime_type, QtCore.QByteArray(rendered))
+    if companion_png and mime_type != "image/png":
+        mime_data.setData("image/png", QtCore.QByteArray(companion_png))
     return mime_data

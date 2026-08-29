@@ -1041,17 +1041,32 @@ def copy_figure(figure, *, format="pdf", dpi="figure", transparent=False):
     # PGF is LaTeX source, so it travels as text rather than as an image.
     is_text = normalized_format == "pgf"
 
-    buffer = io.BytesIO()
-    resolved_figure.savefig(
-        buffer,
-        format=normalized_format,
-        dpi=dpi,
-        transparent=bool(transparent),
-    )
+    def render(output_format):
+        buffer = io.BytesIO()
+        resolved_figure.savefig(
+            buffer,
+            format=output_format,
+            dpi=dpi,
+            transparent=bool(transparent),
+        )
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    rendered = render(normalized_format)
+
+    # A clipboard payload can carry several representations of one content.
+    # Attaching a PNG lets a paste succeed in applications that reject the
+    # requested format, while ones preferring vector still receive it. PGF is
+    # excluded: it copies as text, and an image companion would mean pasting
+    # into a word processor silently yields a picture instead of the source.
+    companion_png_base64 = None
+    if not is_text and normalized_format != "png":
+        companion_png_base64 = render("png")
+
     signal_copy_to_clipboard(
-        base64.b64encode(buffer.getvalue()).decode("ascii"),
+        rendered,
         output_format=normalized_format,
         is_text=is_text,
+        companion_png_base64=companion_png_base64,
     )
     return True
 

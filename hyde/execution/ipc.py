@@ -29,7 +29,13 @@ def put_parent_message(message):
         tree.to_parent.put(message)
 
 
-def signal_copy_to_clipboard(payload_base64, *, output_format, is_text=False):
+def signal_copy_to_clipboard(
+    payload_base64,
+    *,
+    output_format,
+    is_text=False,
+    companion_png_base64=None,
+):
     """
     Signal the parent GUI process to place rendered figure bytes on the clipboard.
 
@@ -46,6 +52,7 @@ def signal_copy_to_clipboard(payload_base64, *, output_format, is_text=False):
                 "payload_base64": str(payload_base64),
                 "output_format": str(output_format),
                 "is_text": bool(is_text),
+                "companion_png_base64": companion_png_base64,
             },
         ])
     except Exception:
