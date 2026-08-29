@@ -193,7 +193,7 @@ Its command responsibilities are:
   explicit matplotlib Python source
 - routine figure-edit dialogs lower imported figure state plus current dialog draft
   into minimal matplotlib patch Python
-- `Do It`, live update, `Cancel` rollback, and `To Cmd Line` all use that same
+- `OK`, live update, `Cancel` rollback, and `To IPython` all use that same
   command-generation model for the dialog-owned region
 - explicit refresh/regenerate lowers to Hyde's ordinary hidden command path instead of
   using a private routine figure-action transport

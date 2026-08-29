@@ -27,7 +27,7 @@ Target-selecting project dialogs such as `New Project`, `Load Project`,
 `HydeDialogWidget` surfaces built on the shared `HydeFileDialog` /
 `HydeFileWidget` family in `hyde.user_interface.base_hyde_widgets`. They show the
 actual generated Hyde Python in the lower preview pane and use that same backing
-command string for `Do It`, `To Cmd Line`, and `To Clip`.
+command string for `OK`, `To IPython`, and `Copy`.
 `File -> Save` remains a direct hidden `hyde.save_project(mode='save')` dispatch
 with no chooser dialog.
 

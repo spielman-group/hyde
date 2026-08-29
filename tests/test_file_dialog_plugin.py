@@ -123,7 +123,7 @@ class TestFileDialogPlugin(unittest.TestCase):
             )
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(operations, ["Creating Hyde project..."])
             self.assertEqual(
@@ -258,7 +258,7 @@ class TestFileDialogPlugin(unittest.TestCase):
                     dialog = dialog_class(services)
                     dialog.file_widget.set_selected_path(project_dir)
                     self.qapp.processEvents()
-                    dialog.do_it_button.click()
+                    dialog.ok_button.click()
 
                     self.assertEqual(dialog.preview_string(), expected_payload)
                     self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
@@ -283,7 +283,7 @@ class TestFileDialogPlugin(unittest.TestCase):
             dialog = LoadProjectDialog(services)
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(confirmations, [])
             self.assertEqual(operations, ["Loading Hyde project..."])
@@ -331,7 +331,7 @@ class TestFileDialogPlugin(unittest.TestCase):
             dialog = SaveAsProjectDialog(services)
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(dialog.preview_string(), "hyde.save_project(mode='save')")
             self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.preview_string())
@@ -357,7 +357,7 @@ class TestFileDialogPlugin(unittest.TestCase):
             dialog = SaveAsProjectDialog(services)
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(confirmations, [])
             self.assertEqual(dialog.preview_string(), "hyde.save_project(mode='save')")
@@ -382,7 +382,7 @@ class TestFileDialogPlugin(unittest.TestCase):
 
             self.assertEqual(dialog.preview_string(), "")
             self.assertIn("requires a different .hy directory", dialog.lower_text_edit.toPlainText())
-            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
 
     def test_project_dialog_footer_actions_reuse_preview_payload(self):
         clipboard = QtWidgets.QApplication.clipboard()
@@ -399,8 +399,8 @@ class TestFileDialogPlugin(unittest.TestCase):
             dialog = LoadProjectDialog(services)
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
-            dialog.to_clip_button.click()
-            dialog.to_cmd_line_button.click()
+            dialog.copy_button.click()
+            dialog.to_ipython_button.click()
 
             expected_payload = f"hyde.load_project({project_dir!r})"
             self.assertEqual(dialog.preview_string(), expected_payload)

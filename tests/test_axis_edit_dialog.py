@@ -463,7 +463,7 @@ class TestAxisEditDialog(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_preview_and_send_to_cmd_line_use_same_canonical_patch_block(self):
+    def test_preview_and_send_to_ipython_use_same_canonical_patch_block(self):
         execution = FakeExecutionService()
         terminal = FakeVisibleTerminalService()
         mdi_area = QtWidgets.QMdiArea()
@@ -495,9 +495,9 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertIn("ax.set_xlabel('Delay [s]')", preview)
             self.assertNotIn("fig._hyde_ir", preview)
             self.assertNotIn("_figure_defaults_snapshot", preview)
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
 
-            dialog.to_cmd_line_button.click()
+            dialog.to_ipython_button.click()
 
             self.assertEqual(terminal.visible_calls[-1], preview)
             self.assertEqual(execution.hidden_calls, [])
@@ -531,16 +531,16 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertIn("ax.spines['bottom'].set_visible(True)", preview)
             self.assertNotIn("ax.set_xlabel('Delay [ms]')", preview)
 
-            dialog.to_cmd_line_button.click()
+            dialog.to_ipython_button.click()
             self.assertEqual(terminal.visible_calls[-1], preview)
 
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
         finally:
             dialog.close()
 
         self.assertEqual(execution.hidden_calls[-1][0], preview)
 
-    def test_live_applied_axis_state_keeps_last_patch_preview_and_do_it_only_closes(self):
+    def test_live_applied_axis_state_keeps_last_patch_preview_and_ok_only_closes(self):
         execution = FakeExecutionService()
         terminal = FakeVisibleTerminalService()
         mdi_area = QtWidgets.QMdiArea()
@@ -560,13 +560,13 @@ class TestAxisEditDialog(unittest.TestCase):
 
             preview = dialog.lower_text_edit.toPlainText()
             self.assertIn("ax.set_xlabel('Delay [ms]')", preview)
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
 
-            dialog.to_cmd_line_button.click()
+            dialog.to_ipython_button.click()
             self.assertEqual(terminal.visible_calls[-1], preview)
 
             hidden_count = len(execution.hidden_calls)
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             self.assertEqual(len(execution.hidden_calls), hidden_count)
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
         finally:
@@ -663,7 +663,7 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.ui.zero_line_style_combo.setCurrentIndex(
                 dialog.ui.zero_line_style_combo.findData("--")
             )
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
         finally:
             dialog.close()
 
@@ -676,7 +676,7 @@ class TestAxisEditDialog(unittest.TestCase):
         self.assertIn("ax.grid(True, axis='x', which='both', linestyle=':'", command)
         self.assertIn("ax.axvline(0, linestyle='--'", command)
 
-    def test_live_update_off_batches_until_do_it(self):
+    def test_live_update_off_batches_until_ok(self):
         execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
@@ -696,7 +696,7 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertEqual(execution.hidden_calls, [])
 
             expected = dialog.lower_text_edit.toPlainText()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
         finally:
             dialog.close()
 
@@ -745,7 +745,7 @@ class TestAxisEditDialog(unittest.TestCase):
             dialog.ui.axis_label_edit.setText("Delay [ms]")
             dialog.ui.axis_label_edit.editingFinished.emit()
             with self.assertLogs("hyde", level="DEBUG") as logs:
-                dialog.do_it_button.click()
+                dialog.ok_button.click()
         finally:
             dialog.close()
 

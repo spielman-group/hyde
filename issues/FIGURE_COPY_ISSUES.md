@@ -98,7 +98,7 @@ one turns out to be wrong, say so explicitly and record the change here.
    model emitting Hyde strings would break the package-purity rule that
    `IR-CONTROL.md` sets for those lowerers.
 
-9. **Dispatch.** Hidden, matching `Save Graphics`' `Do It`. Copy is the
+9. **Dispatch.** Hidden, matching `Save Graphics`' `OK`. Copy is the
    highest-frequency action in the application and echoing every keypress into
    the terminal would make it unusable.
 

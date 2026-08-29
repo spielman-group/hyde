@@ -41,5 +41,5 @@ class NewTableDialog(HydeDialogWidget):
         self.set_preview_string(payload)
         self.refresh_shell()
 
-    def do_it_dispatch_mode(self):
+    def ok_dispatch_mode(self):
         return "visible"

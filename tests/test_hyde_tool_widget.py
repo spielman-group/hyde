@@ -46,7 +46,7 @@ class DemoDialog(HydeDialog):
 
 class HookedDialogWidget(HydeDialogWidget):
     def __init__(self, *args, **kwargs):
-        self.do_it_calls = 0
+        self.ok_calls = 0
         self.payload = "print('dialog payload')"
         self.preview_text = "Equation preview"
         super().__init__(*args, **kwargs)
@@ -54,8 +54,8 @@ class HookedDialogWidget(HydeDialogWidget):
         self.set_preview_string(self.payload, display_text=self.preview_text)
         self.refresh_shell()
 
-    def handle_do_it(self):
-        self.do_it_calls += 1
+    def handle_ok(self):
+        self.ok_calls += 1
 
 
 class DispatchingDialogWidget(HydeDialogWidget):
@@ -69,7 +69,7 @@ class DispatchingDialogWidget(HydeDialogWidget):
 
 
 class VisibleDispatchDialogWidget(DispatchingDialogWidget):
-    def do_it_dispatch_mode(self):
+    def ok_dispatch_mode(self):
         return "visible"
 
 
@@ -339,14 +339,14 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertTrue(content.isVisibleTo(dialog))
         self.assertLess(content.geometry().top(), dialog.lower_text_edit.geometry().top())
         self.assertTrue(dialog.lower_text_edit.isReadOnly())
-        self.assertEqual(dialog.do_it_button.text(), "Do It")
-        self.assertEqual(dialog.to_cmd_line_button.text(), "To Cmd Line")
-        self.assertEqual(dialog.to_clip_button.text(), "To Clip")
+        self.assertEqual(dialog.ok_button.text(), "OK")
+        self.assertEqual(dialog.to_ipython_button.text(), "To IPython")
+        self.assertEqual(dialog.copy_button.text(), "Copy")
         self.assertEqual(dialog.help_button.text(), "Help")
         self.assertEqual(dialog.cancel_button.text(), "Cancel")
-        self.assertFalse(dialog.do_it_button.isEnabled())
-        self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-        self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
+        self.assertFalse(dialog.ok_button.isEnabled())
+        self.assertFalse(dialog.to_ipython_button.isEnabled())
+        self.assertTrue(dialog.to_ipython_button.isVisibleTo(dialog))
         self.assertFalse(dialog.help_button.isEnabled())
         self.assertTrue(dialog.help_button.isVisibleTo(dialog))
         self.assertGreater(dialog.shell_ui.left_button_layout.count(), 0)
@@ -400,20 +400,20 @@ class TestHydeToolWidget(unittest.TestCase):
 
         dialog.show()
         self.qapp.processEvents()
-        dialog.do_it_button.click()
-        dialog.to_clip_button.click()
-        dialog.to_cmd_line_button.click()
+        dialog.ok_button.click()
+        dialog.copy_button.click()
+        dialog.to_ipython_button.click()
 
         self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.preview_text)
         self.assertEqual(dialog.preview_string(), dialog.payload)
         self.assertEqual(clipboard.text(), dialog.payload)
         self.assertEqual(terminal_service.executed, [dialog.payload])
-        self.assertEqual(dialog.do_it_calls, 1)
-        self.assertTrue(dialog.to_cmd_line_button.isEnabled())
-        self.assertTrue(dialog.to_clip_button.isEnabled())
+        self.assertEqual(dialog.ok_calls, 1)
+        self.assertTrue(dialog.to_ipython_button.isEnabled())
+        self.assertTrue(dialog.copy_button.isEnabled())
         self.assertFalse(dialog.help_button.isEnabled())
 
-    def test_dialog_base_return_triggers_default_do_it_action(self):
+    def test_dialog_base_return_triggers_default_ok_action(self):
         dialog = HookedDialogWidget()
 
         dialog.show()
@@ -429,7 +429,7 @@ class TestHydeToolWidget(unittest.TestCase):
         )
         self.qapp.processEvents()
 
-        self.assertEqual(dialog.do_it_calls, 1)
+        self.assertEqual(dialog.ok_calls, 1)
 
     def test_tool_dialog_shell_can_show_message_without_enabling_footer_payload_actions(self):
         terminal_service = RecordingVisibleTerminalService()
@@ -440,10 +440,10 @@ class TestHydeToolWidget(unittest.TestCase):
 
         self.assertEqual(dialog.preview_string(), "")
         self.assertEqual(dialog.lower_text_edit.toPlainText(), "Validation failed")
-        self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-        self.assertFalse(dialog.to_clip_button.isEnabled())
+        self.assertFalse(dialog.to_ipython_button.isEnabled())
+        self.assertFalse(dialog.copy_button.isEnabled())
 
-    def test_dialog_base_do_it_dispatches_hidden_canonical_payload_and_accepts(self):
+    def test_dialog_base_ok_dispatches_hidden_canonical_payload_and_accepts(self):
         execution_service = RecordingExecutionService()
         dialog = DispatchingDialogWidget(
             services={"python_execution_service": execution_service}
@@ -451,7 +451,7 @@ class TestHydeToolWidget(unittest.TestCase):
 
         dialog.show()
         self.qapp.processEvents()
-        dialog.do_it_button.click()
+        dialog.ok_button.click()
 
         self.assertEqual(dialog.lower_text_edit.toPlainText(), dialog.preview_text)
         self.assertEqual(
@@ -460,7 +460,7 @@ class TestHydeToolWidget(unittest.TestCase):
         )
         self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
 
-    def test_dialog_base_do_it_can_dispatch_visible_payload(self):
+    def test_dialog_base_ok_can_dispatch_visible_payload(self):
         execution_service = RecordingExecutionService()
         dialog = VisibleDispatchDialogWidget(
             services={"python_execution_service": execution_service}
@@ -468,7 +468,7 @@ class TestHydeToolWidget(unittest.TestCase):
 
         dialog.show()
         self.qapp.processEvents()
-        dialog.do_it_button.click()
+        dialog.ok_button.click()
 
         self.assertEqual(execution_service.visible_calls, [dialog.payload])
         self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
@@ -614,7 +614,7 @@ class TestHydeToolWidget(unittest.TestCase):
             self.assertFalse(dialog.isVisible())
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Rejected)
 
-    def test_return_in_embedded_file_widget_triggers_outer_dialog_do_it(self):
+    def test_return_in_embedded_file_widget_triggers_outer_dialog_ok(self):
         execution_service = RecordingExecutionService()
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = os.path.join(tmpdir, "demo.hy")
@@ -657,7 +657,7 @@ class TestHydeToolWidget(unittest.TestCase):
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
             selected_path = dialog.refresh_from_file_selection()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             expected_payload = f"emit({os.path.abspath(project_dir)!r})"
             self.assertEqual(selected_path, os.path.abspath(project_dir))
@@ -685,7 +685,7 @@ class TestHydeToolWidget(unittest.TestCase):
             dialog.show()
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             expected_payload = f"emit({os.path.abspath(project_dir)!r})"
             self.assertTrue(dialog.file_widget.isVisibleTo(dialog))
@@ -714,15 +714,15 @@ class TestHydeToolWidget(unittest.TestCase):
 
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
-            dialog.to_clip_button.click()
-            dialog.to_cmd_line_button.click()
+            dialog.copy_button.click()
+            dialog.to_ipython_button.click()
 
             expected_payload = f"emit({os.path.abspath(project_dir)!r})"
             self.assertEqual(dialog.preview_string(), expected_payload)
             self.assertEqual(dialog.lower_text_edit.toPlainText(), expected_payload)
-            self.assertTrue(dialog.do_it_button.isEnabled())
-            self.assertTrue(dialog.to_clip_button.isEnabled())
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
+            self.assertTrue(dialog.copy_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
             self.assertEqual(clipboard.text(), expected_payload)
             self.assertEqual(terminal_service.executed, [expected_payload])
 
@@ -743,7 +743,7 @@ class TestHydeToolWidget(unittest.TestCase):
                 "question",
                 return_value=QtWidgets.QMessageBox.No,
             ) as question:
-                dialog.do_it_button.click()
+                dialog.ok_button.click()
 
             question.assert_called_once()
             self.assertEqual(execution_service.hidden_calls, [])
@@ -761,7 +761,7 @@ class TestHydeToolWidget(unittest.TestCase):
                 "question",
                 return_value=QtWidgets.QMessageBox.Yes,
             ) as question:
-                dialog.do_it_button.click()
+                dialog.ok_button.click()
 
             question.assert_called_once()
             self.assertEqual(
@@ -783,9 +783,9 @@ class TestHydeToolWidget(unittest.TestCase):
 
             self.assertEqual(dialog.preview_string(), "")
             self.assertIn("does not exist", dialog.lower_text_edit.toPlainText())
-            self.assertFalse(dialog.do_it_button.isEnabled())
-            self.assertFalse(dialog.to_clip_button.isEnabled())
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
+            self.assertFalse(dialog.copy_button.isEnabled())
+            self.assertFalse(dialog.to_ipython_button.isEnabled())
 
     def test_file_dialog_can_optionally_create_directory_for_suggested_target(self):
         with tempfile.TemporaryDirectory() as tmpdir:

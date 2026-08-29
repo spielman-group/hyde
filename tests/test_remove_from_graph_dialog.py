@@ -283,9 +283,9 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
                 dialog.lower_text_edit.toPlainText(),
                 "No supported traces available to remove.",
             )
-            self.assertFalse(dialog.do_it_button.isEnabled())
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-            self.assertFalse(dialog.to_clip_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
+            self.assertFalse(dialog.to_ipython_button.isEnabled())
+            self.assertFalse(dialog.copy_button.isEnabled())
         finally:
             dialog.close()
 
@@ -317,7 +317,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
                 dialog.lower_text_edit.toPlainText(),
                 "Select one or more traces to remove.",
             )
-            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
 
             dialog.ui.trace_list.item(0).setSelected(True)
             dialog.ui.trace_list.item(1).setSelected(True)
@@ -331,14 +331,14 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             self.assertNotIn("_figure_defaults_snapshot", preview)
             self.assertNotIn("ax.legend()", preview)
             self.assertNotIn("ax.get_legend()", preview)
-            self.assertTrue(dialog.do_it_button.isEnabled())
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.to_clip_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
+            self.assertTrue(dialog.copy_button.isEnabled())
 
-            dialog.to_cmd_line_button.click()
+            dialog.to_ipython_button.click()
             self.assertEqual(terminal.visible_calls, [preview])
 
-            dialog.to_clip_button.click()
+            dialog.copy_button.click()
             self.assertEqual(
                 QtWidgets.QApplication.clipboard().text(),
                 preview,
@@ -346,7 +346,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_do_it_removes_selected_traces_from_live_first_class_figure(self):
+    def test_ok_removes_selected_traces_from_live_first_class_figure(self):
         live_figure, snapshot = make_live_first_class_figure()
         execution = EvaluatingExecutionService()
         terminal = FakeVisibleTerminalService()
@@ -381,7 +381,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             self.qapp.processEvents()
 
             expected_command = dialog.preview_string()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
             self.assertEqual(execution.hidden_calls[-1][0], expected_command)
@@ -447,7 +447,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
 
             self.assertEqual(dialog.preview_string(), expected_command)
 
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(execution.hidden_calls, [(expected_command, True)])
         finally:
@@ -484,7 +484,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
         try:
             dialog.ui.trace_list.item(0).setSelected(True)
             self.qapp.processEvents()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             figure_window.update_payload(
                 {
@@ -515,7 +515,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             dialog.close()
             live_figure.canvas.manager.destroy()
 
-    def test_do_it_refreshes_existing_live_legend(self):
+    def test_ok_refreshes_existing_live_legend(self):
         live_figure, snapshot = make_live_first_class_figure()
         live_figure.axes[0].legend()
         execution = EvaluatingExecutionService()
@@ -549,7 +549,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             dialog.ui.trace_list.item(0).setSelected(True)
             self.qapp.processEvents()
 
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
             self.assertIsNotNone(live_figure.axes[0].get_legend())
@@ -656,9 +656,9 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
                 "Invalid regex:",
                 dialog.lower_text_edit.toPlainText(),
             )
-            self.assertTrue(dialog.do_it_button.isEnabled())
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.to_clip_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
+            self.assertTrue(dialog.copy_button.isEnabled())
         finally:
             dialog.close()
 

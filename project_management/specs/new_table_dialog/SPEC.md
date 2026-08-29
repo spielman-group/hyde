@@ -67,9 +67,9 @@ The visible controls are classified as follows:
 - `From Top Graph`: `inert-but-visible`
 - `Title` field: `active`
 - `Style` selector: `inert-but-visible`
-- `Do It`: `active`
-- `To Cmd Line`: `inert-but-visible`
-- `To Clip`: `inert-but-visible`
+- `OK`: `active`
+- `To IPython`: `inert-but-visible`
+- `Copy`: `inert-but-visible`
 - `Help`: `active`
 - `Cancel`: `active`
 
@@ -91,7 +91,7 @@ selects the inputs and generates the table-creation command.
 ## Command Generation
 
 The dialog follows Hyde's string-factory rule.
-When the user clicks `Do It`, the GUI generates an explicit
+When the user clicks `OK`, the GUI generates an explicit
 `hyde.create_table(...)` string through `TableIR.python_source()` and sends it
 to the kernel.
 

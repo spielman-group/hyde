@@ -147,16 +147,16 @@ class CurveFitDialog(HydeFigureDialogWidget):
             self._populate_fit_function_combo()
         self._refresh_from_state()
 
-    def can_do_it(self):
+    def can_ok(self):
         model = self._current_model or {}
         return bool(model.get("valid")) and not bool(self._live_error_message)
 
-    def can_send_to_cmd_line(self):
+    def can_send_to_ipython(self):
         if self._preview_mode != "Commands":
             return False
         return self.service("visible_terminal_service") is not None
 
-    def handle_do_it(self):
+    def handle_ok(self):
         if self._current_model is None or not self._current_model.get("valid"):
             return
         success, message = self._run_commit_path(
@@ -573,7 +573,7 @@ class CurveFitDialog(HydeFigureDialogWidget):
         if patch_code:
             if not self._execute_attached_display_command(
                 combined_command,
-                mode="do_it",
+                mode="ok",
                 target_state=target_effective_state,
             ):
                 if needs_rollback_snapshot:

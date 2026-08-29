@@ -51,23 +51,23 @@
      <item>
       <layout class="QHBoxLayout" name="left_button_layout">
        <item>
-        <widget class="QPushButton" name="do_it_button">
+        <widget class="QPushButton" name="ok_button">
          <property name="text">
-          <string>Do It</string>
+          <string>OK</string>
          </property>
         </widget>
        </item>
        <item>
-        <widget class="QPushButton" name="to_cmd_line_button">
+        <widget class="QPushButton" name="to_ipython_button">
          <property name="text">
-          <string>To Cmd Line</string>
+          <string>To IPython</string>
          </property>
         </widget>
        </item>
        <item>
-        <widget class="QPushButton" name="to_clip_button">
+        <widget class="QPushButton" name="copy_button">
          <property name="text">
-          <string>To Clip</string>
+          <string>Copy</string>
          </property>
         </widget>
        </item>

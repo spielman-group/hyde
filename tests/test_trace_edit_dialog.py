@@ -434,7 +434,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             remove_dialog.close()
             trace_dialog.close()
 
-    def test_live_applied_trace_state_keeps_last_patch_preview_and_do_it_only_closes(self):
+    def test_live_applied_trace_state_keeps_last_patch_preview_and_ok_only_closes(self):
         execution = FakeExecutionService()
         terminal = FakeVisibleTerminalService()
         mdi_area = QtWidgets.QMdiArea()
@@ -463,13 +463,13 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             self.assertIn("line.set_color('#abcdef')", preview)
             self.assertNotIn("fig._hyde_ir", preview)
             self.assertNotIn("_figure_defaults_snapshot", preview)
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
 
-            dialog.to_cmd_line_button.click()
+            dialog.to_ipython_button.click()
             self.assertEqual(terminal.visible_calls[-1], preview)
 
             hidden_count = len(execution.hidden_calls)
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             self.assertEqual(len(execution.hidden_calls), hidden_count)
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
         finally:
@@ -589,7 +589,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
         self.assertIn("line = ax.lines[0]", command)
         self.assertIn("line.set_linestyle('None')", command)
 
-    def test_live_update_off_batches_until_do_it(self):
+    def test_live_update_off_batches_until_ok(self):
         execution = FakeExecutionService()
         mdi_area = QtWidgets.QMdiArea()
         figure = make_active_figure_window(
@@ -613,7 +613,7 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             self.assertEqual(execution.hidden_calls, [])
 
             expected = dialog.lower_text_edit.toPlainText()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
         finally:
             dialog.close()
 

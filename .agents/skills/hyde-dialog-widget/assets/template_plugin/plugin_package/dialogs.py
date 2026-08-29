@@ -37,9 +37,9 @@ class ExampleDialog(HydeDialogWidget):
         self.set_preview_string(command_source)
         self.refresh_shell()
 
-    def can_do_it(self):
+    def can_ok(self):
         return bool(self._preview_string)
 
-    def handle_do_it(self):
+    def handle_ok(self):
         # Keep local validation/bookkeeping here only when needed.
-        self.dispatch_do_it_payload()
+        self.dispatch_ok_payload()

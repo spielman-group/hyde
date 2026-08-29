@@ -34,9 +34,9 @@ The initial deployment includes:
 - selecting one or more supported traces
 - previewing the pending removal as Hyde-generated read-only matplotlib patch source or
   validation text
-- confirming removal through `Do It`
-- emitting the same removal patch through `To Cmd Line`
-- copying the current preview/status text through `To Clip`
+- confirming removal through `OK`
+- emitting the same removal patch through `To IPython`
+- copying the current preview/status text through `Copy`
 
 The initial deployment does not include:
 
@@ -72,7 +72,7 @@ ASCII layout sketch:
 | | Remove 1 trace: fracneg1_9                                         | |
 | +--------------------------------------------------------------------+ |
 |                                                                        |
-| [Do It] [To Cmd Line] [To Clip] [Help]                      [Cancel]   |
+| [OK] [To IPython] [Copy] [Help]                      [Cancel]   |
 +------------------------------------------------------------------------+
 ```
 
@@ -91,9 +91,9 @@ pane as an executable command editor.
 - trace-name filter field: `active`
 - lower preview/status pane: `active`
   - read-only only
-- `Do It`: `active`
-- `To Cmd Line`: `active`
-- `To Clip`: `active`
+- `OK`: `active`
+- `To IPython`: `active`
+- `Copy`: `active`
 - `Help`: `inert-but-visible`
 - `Cancel`: `active`
 
@@ -124,7 +124,7 @@ Initial live operations are:
 - selecting one or more supported traces
   - immediate GUI-only selection update
   - updates the lower preview/status pane immediately
-- confirming removal with `Do It`
+- confirming removal with `OK`
   - targets the selected supported `TraceIR` nodes in the active subplot
   - removes those traces from the live figure and kernel-owned figure IR
   - is confirmed, not live-on-selection
@@ -135,7 +135,7 @@ their live matplotlib line artists are removed from the rendered figure.
 
 Invalid or unsupported states behave as follows:
 
-- if no supported trace is selected, `Do It` is disabled and the lower pane explains
+- if no supported trace is selected, `OK` is disabled and the lower pane explains
   that no removable target is selected
 - if the figure has no supported removable traces, the candidate list is empty and the
   lower pane states that no supported traces are available to remove
@@ -148,13 +148,13 @@ If Hyde implements this dialog, routine figure removal should follow the same
 command-driven model as the shipped axis, trace, and Curve Fit attached-display
 surfaces.
 
-On `Do It`, the GUI should resolve the selected stable trace IDs from the active
+On `OK`, the GUI should resolve the selected stable trace IDs from the active
 figure context, build a `FigureIRDiff` between the opening and current `FigureIR`
 states, and emit one bounded command block through that shared figure-family lowering
 path. Because stable trace identity is Hyde-owned rather than ordinary matplotlib
 state, the canonical emitted command for this dialog uses Hyde's public
 `hyde.remove_traces(...)` helper instead of exposing `_hyde_trace_id` lookup code
-directly. `To Cmd Line` emits that same canonical block visibly.
+directly. `To IPython` emits that same canonical block visibly.
 
 The lower pane shows Hyde-native preview/status text only:
 
@@ -164,7 +164,7 @@ The lower pane shows Hyde-native preview/status text only:
 - it is never a command log
 - it is never executed directly
 
-`To Clip` copies the current preview/status text only. `To Cmd Line` emits the same
+`Copy` copies the current preview/status text only. `To IPython` emits the same
 canonical removal block shown in the lower pane.
 
 ## Synchronization

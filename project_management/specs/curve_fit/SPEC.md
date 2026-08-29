@@ -18,7 +18,7 @@
   object while rendering in-dialog attached previews from the current coefficient
   guesses.
 - [x] Support live reruns when screen updates are enabled.
-- [x] Support one-shot execution on `Do It` when screen updates are suppressed.
+- [x] Support one-shot execution on `OK` when screen updates are suppressed.
 
 ## Purpose
 
@@ -37,7 +37,7 @@ The dialog owns only transient configuration state long enough to:
 The dialog does not become the authoritative owner of scientific results. The
 authoritative fit output is an `lmfit` result object stored in the kernel namespace.
 While the dialog is open, attached fit and residual previews render from the current
-coefficient guesses. After successful `Do It` / accept, any surviving attached display
+coefficient guesses. After successful `OK` / accept, any surviving attached display
 is re-rooted to that authoritative result object rather than becoming a separate
 top-level scientific output channel.
 
@@ -65,13 +65,13 @@ The first implementation includes:
 - a fit-result target control whose default name is based on the selected Y object,
   typically `<y_name>_fit_result`
 - graph-display controls for fit-curve and residual rendering, with guessed previews
-  while the dialog is open and result-rooted displays after successful `Do It` /
+  while the dialog is open and result-rooted displays after successful `OK` /
   accept
 - explicit Python preview
-- `To Clip`
-- `To Cmd Line`
+- `Copy`
+- `To IPython`
 - live hidden reruns when screen updates are enabled
-- one-shot hidden execution on `Do It` when screen updates are suppressed
+- one-shot hidden execution on `OK` when screen updates are suppressed
 - revert-on-cancel behavior for any real kernel-side targets and graph displays the
   dialog session changed
 
@@ -103,14 +103,14 @@ It contains:
 - a preview mode switch for `Commands` and `Equation`
 - a large preview pane
 - a one-line status/error strip
-- footer buttons for `Do It`, `To Cmd Line`, `To Clip`, and `Cancel`
+- footer buttons for `OK`, `To IPython`, `Copy`, and `Cancel`
 
 The first implementation follows the existing figure-control-dialog family behavior:
 
 - live changes rerun immediately when screen updates are enabled
 - `Cancel` restores the opening state for any target the dialog changed
-- `Do It` accepts the current state rather than triggering an extra rerun in live mode
-- `To Cmd Line` is enabled only in `Commands` preview mode because `Equation` preview
+- `OK` accepts the current state rather than triggering an extra rerun in live mode
+- `To IPython` is enabled only in `Commands` preview mode because `Equation` preview
   is not the executable commit payload
 
 ## Fit Function Discovery
@@ -212,7 +212,7 @@ When enabled:
 
 - no intermediate fit reruns occur while the user changes controls
 - attached guessed-function previews may still update as the user edits the dialog
-- the real outputs are updated only once, on `Do It`
+- the real outputs are updated only once, on `OK`
 
 When disabled:
 
@@ -236,7 +236,7 @@ Parameter rules:
 
 - required free parameters start blank unless explicit defaults are supplied by the fit
   function metadata
-- `Do It` is invalid until every required free parameter has a usable value
+- `OK` is invalid until every required free parameter has a usable value
 - a non-empty `expr` makes that parameter expression-owned
 - expression-owned parameters remain visible, but ordinary manual controls become
   subordinate to the expression
@@ -267,7 +267,7 @@ Graph-display behaviors:
 
 - while the dialog is open, attached `Show Fit` and `Show Residuals` previews render
   from the current coefficient guesses rather than from an already-computed fit result
-- on successful `Do It` / accept, any surviving attached fit or residual display is
+- on successful `OK` / accept, any surviving attached fit or residual display is
   re-rooted to the authoritative fit result object
 - neither is treated as a separate top-level scientific output
 
@@ -295,16 +295,16 @@ Execution rules:
 
 - when screen updates are enabled, relevant changes rerun immediately through a hidden
   execution path
-- `Do It` in live mode accepts the current state and does not trigger an extra rerun
+- `OK` in live mode accepts the current state and does not trigger an extra rerun
 - when screen updates are suppressed, intermediate fit reruns do not occur, but
   guessed attached previews may still update
-- `Do It` in suppressed mode performs the one hidden fit/update execution
+- `OK` in suppressed mode performs the one hidden fit/update execution
 
-`To Clip` copies the backing command preview string. In `Equation` mode the lower
-preview pane may show equation text instead, but `To Clip` still copies the command
+`Copy` copies the backing command preview string. In `Equation` mode the lower
+preview pane may show equation text instead, but `Copy` still copies the command
 block the dialog would execute.
 
-`To Cmd Line` emits the same canonical command block the dialog would execute through
+`To IPython` emits the same canonical command block the dialog would execute through
 Hyde's hidden-command path.
 
 ## Real Targets, Live Ownership, And Revert Behavior
@@ -329,7 +329,7 @@ When a live rerun fails:
 - the last successful live outputs remain in place
 - the dialog stays open
 - the status area shows the error
-- `Do It` remains disabled until the configuration becomes valid again
+- `OK` remains disabled until the configuration becomes valid again
 
 ## Synchronization
 

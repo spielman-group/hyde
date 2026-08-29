@@ -479,8 +479,8 @@ class TestNewTableDialog(unittest.TestCase):
                 dialog.lower_text_edit.toPlainText(),
                 "hyde.create_table(alpha)",
             )
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.to_clip_button.isEnabled())
+            self.assertFalse(dialog.to_ipython_button.isEnabled())
+            self.assertTrue(dialog.copy_button.isEnabled())
 
             dialog.ui.titleEdit.setText("My Table")
             self.qapp.processEvents()
@@ -515,7 +515,7 @@ class TestNewTableDialog(unittest.TestCase):
         finally:
             dialog.close()
 
-    def test_new_table_dialog_disables_do_it_until_preview_exists(self):
+    def test_new_table_dialog_disables_ok_until_preview_exists(self):
         dialog = NewTableDialog(
             {
                 "alpha": {
@@ -531,17 +531,17 @@ class TestNewTableDialog(unittest.TestCase):
             self.qapp.processEvents()
 
             self.assertEqual(dialog.preview_string(), "")
-            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
 
             dialog.ui.objectList.item(0).setSelected(True)
             self.qapp.processEvents()
 
             self.assertTrue(dialog.preview_string())
-            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
         finally:
             dialog.close()
 
-    def test_new_table_dialog_do_it_uses_visible_dispatch_and_accepts(self):
+    def test_new_table_dialog_ok_uses_visible_dispatch_and_accepts(self):
         execution = FakeExecutionService()
         terminal = FakeExecutionService()
         dialog = NewTableDialog(
@@ -564,11 +564,11 @@ class TestNewTableDialog(unittest.TestCase):
             self.qapp.processEvents()
 
             payload = dialog.preview_string()
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
-            dialog.to_cmd_line_button.click()
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
+            dialog.to_ipython_button.click()
             self.assertEqual(terminal.visible_calls, [payload])
 
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             self.assertEqual(execution.visible_calls, [payload])
             self.assertEqual(execution.hidden_calls, [])
             self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)

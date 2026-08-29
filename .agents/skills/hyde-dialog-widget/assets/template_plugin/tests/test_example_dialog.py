@@ -44,9 +44,9 @@ class TestExampleDialog(unittest.TestCase):
             )
             dialog.refresh_shell()
 
-            dialog.to_clip_button.click()
-            dialog.to_cmd_line_button.click()
-            dialog.do_it_button.click()
+            dialog.copy_button.click()
+            dialog.to_ipython_button.click()
+            dialog.ok_button.click()
 
             self.assertEqual(dialog.lower_text_edit.toPlainText(), "User-facing preview")
             self.assertEqual(terminal.visible_calls, ["print('command source')"])

@@ -28,9 +28,9 @@ participate in figure-dialog patch workflows.
 
 The dialog is a standard `HydeFileDialog` using the shared `HydeDialogWidget` footer:
 
-- `Do It`
-- `To Cmd Line`
-- `To Clip`
+- `OK`
+- `To IPython`
+- `Copy`
 - `Help`
 - `Cancel`
 
@@ -39,7 +39,7 @@ The lower pane follows the normal Hyde preview/status contract:
 - when the dialog resolves to a concrete output path, the pane shows the executable
   Python backing string
 - when the dialog is incomplete or invalid, the pane shows validation/status text
-- `Do It`, `To Cmd Line`, and `To Clip` all use the same backing string when that
+- `OK`, `To IPython`, and `Copy` all use the same backing string when that
   string exists
 - `Help` is visible but inert in the initial deployment
 
@@ -79,7 +79,7 @@ The `Size` section contains:
   needed for filesystem safety.
 - The dialog defaults to the suggested project-local export path but does not restrict
   the user to saving inside `exports/`.
-- Overwrite is handled through Hyde's normal confirmation flow on `Do It`.
+- Overwrite is handled through Hyde's normal confirmation flow on `OK`.
 - There is no `Force Overwrite` checkbox.
 - The dialog does not remember prior selections between openings in the initial
   deployment.
@@ -126,7 +126,7 @@ The `Size` section contains:
 - When switching to `Custom`, width and height initialize from that current figure
   size.
 - Under `Custom`, width and height become the active export override values.
-- The width/height display always shows the values that would be used if `Do It` were
+- The width/height display always shows the values that would be used if `OK` were
   pressed immediately.
 - Switching back to `Same` discards the prior custom draft and returns the display to
   the current figure size.
@@ -140,7 +140,7 @@ The dialog follows Hyde's string-factory rule:
 - the figure family's `FigureIR` path owns export request normalization and lowering
 - `hyde/features/matplotlib_features.py` owns the export-command lowering
 - execution runs against the live kernel figure looked up by stable Hyde figure name
-- `Do It` may dispatch the already generated preview string without regenerating it
+- `OK` may dispatch the already generated preview string without regenerating it
 
 The generated command:
 
@@ -150,7 +150,7 @@ The generated command:
 - applies a temporary size override only when `Custom` is active
 - restores the original figure size after a temporary custom-size export
 
-`Do It` dispatches that command through Hyde's hidden execution path.
+`OK` dispatches that command through Hyde's hidden execution path.
 
 ## Clipboard Copy
 
@@ -243,7 +243,7 @@ clipboard is GUI-owned and matplotlib cannot express it. `IR-CONTROL.md` permits
 Hyde helper in emitted Python exactly when it is the necessary contract for a
 Hyde-owned operation.
 
-`Do It` dispatches the command through Hyde's hidden execution path, matching the
+`OK` dispatches the command through Hyde's hidden execution path, matching the
 dialog. Copy is the highest-frequency action in the application, so it is not
 echoed to the terminal.
 

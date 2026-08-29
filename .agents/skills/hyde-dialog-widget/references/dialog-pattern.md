@@ -8,12 +8,12 @@ dialog-specific checklist.
 
 - footer button wiring
 - backing preview string storage
-- `Do It` enablement from whether the backing string is non-empty
-- default `Do It` dispatch, `To Cmd Line`, and `To Clip`
+- `OK` enablement from whether the backing string is non-empty
+- default `OK` dispatch, `To IPython`, and `Copy`
 - file-backed help through `help_filename`
 
 The subclass owns loading the `.ui`, reading widget state, populating dynamic
-rows, validation messages, cancel/revert behavior, and any `Do It` policy that
+rows, validation messages, cancel/revert behavior, and any `OK` policy that
 wraps the shared dispatch path.
 
 ## Preview Contract
@@ -42,11 +42,11 @@ spec must justify.
 
 ## Good Override Reasons
 
-- `can_do_it()` depends on local validation beyond payload presence
-- `do_it_dispatch_mode()` must be visible instead of hidden
-- `handle_do_it()` must validate, log, capture rollback, or do state bookkeeping
+- `can_ok()` depends on local validation beyond payload presence
+- `ok_dispatch_mode()` must be visible instead of hidden
+- `handle_ok()` must validate, log, capture rollback, or do state bookkeeping
   around the shared dispatch
-- `can_send_to_cmd_line()` intentionally disables visible emission in one mode
+- `can_send_to_ipython()` intentionally disables visible emission in one mode
 
 ## Bad Override Reasons
 
@@ -71,12 +71,12 @@ spec must justify.
 ## Normalization Checklist
 
 - remove trivial payload getters; `preview_string()` is the backing contract
-- remove trivial `To Cmd Line` / `To Clip` implementations
+- remove trivial `To IPython` / `Copy` implementations
 - collapse duplicate preview state onto the base backing string
 - move locally assembled command text onto `widget_ir`
 - move package-local string lowering into `hyde/features/<package>_features.py`,
   keeping validation and state normalization on the IR class
-- verify `Do It`, `To Cmd Line`, and `To Clip` share one backing string unless the
+- verify `OK`, `To IPython`, and `Copy` share one backing string unless the
   spec says otherwise
 
 ## Feature-Specific Policy

@@ -100,11 +100,11 @@ class ProjectSelectionDialog(HydeFileDialog):
             )
         raise ValueError(f"Unsupported app_command: {self.app_command!r}.")
 
-    def execute_do_it_payload(self, payload):
+    def execute_ok_payload(self, payload):
         begin_project_operation = self.services.get("begin_project_operation")
         if self.operation_label and callable(begin_project_operation):
             begin_project_operation(self.operation_label)
-        return super().execute_do_it_payload(payload)
+        return super().execute_ok_payload(payload)
 
     def needs_overwrite_confirmation(self, selected_path):
         if not self.confirm_overwrite:

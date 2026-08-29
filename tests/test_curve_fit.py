@@ -722,11 +722,11 @@ class TestCurveFitPlugin(unittest.TestCase):
                 dialog.ui.status_title_label.text(),
                 "Status",
             )
-            self.assertEqual(dialog.do_it_button.text(), "Do It")
-            self.assertEqual(dialog.to_cmd_line_button.text(), "To Cmd Line")
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
-            self.assertEqual(dialog.to_clip_button.text(), "To Clip")
+            self.assertEqual(dialog.ok_button.text(), "OK")
+            self.assertEqual(dialog.to_ipython_button.text(), "To IPython")
+            self.assertFalse(dialog.to_ipython_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isVisibleTo(dialog))
+            self.assertEqual(dialog.copy_button.text(), "Copy")
             self.assertEqual(dialog.cancel_button.text(), "Cancel")
             show_output_options_tab(dialog)
             self.assertTrue(dialog.show_fit_checkbox.isVisible())
@@ -1015,7 +1015,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                     "1.0",
                 )
 
-                dialog.do_it_button.click()
+                dialog.ok_button.click()
                 QtWidgets.QApplication.processEvents()
 
                 self.assertEqual(dialog.result(), QtWidgets.QDialog.Accepted)
@@ -1424,7 +1424,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_to_clip_copies_canonical_lower_text(self):
+    def test_curve_fit_copy_copies_canonical_lower_text(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
@@ -1480,7 +1480,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                     dialog.lower_text_edit.toPlainText(),
                 )
 
-                dialog.to_clip_button.click()
+                dialog.copy_button.click()
                 self.assertEqual(clipboard.text(), dialog.preview_string())
                 self.assertNotEqual(
                     clipboard.text(),
@@ -1491,7 +1491,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_dialog_requires_usable_free_parameter_values_for_do_it(self):
+    def test_curve_fit_dialog_requires_usable_free_parameter_values_for_ok(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
         manager.plugins = {"curve_fit_dialog": CurveFitPlugin({})}
         app = make_plugin_host(manager)
@@ -1532,7 +1532,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 QtWidgets.QApplication.processEvents()
 
                 self.assertEqual(dialog.coefficients_table.rowCount(), 2)
-                self.assertFalse(dialog.do_it_button.isEnabled())
+                self.assertFalse(dialog.ok_button.isEnabled())
                 self.assertIn("slope", dialog.status_label.text())
                 self.assertIn("initial value", dialog.status_label.text())
             finally:
@@ -1602,7 +1602,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 self.assertFalse(slope_widgets["lower"].isEnabled())
                 self.assertFalse(slope_widgets["upper"].isEnabled())
                 self.assertTrue(slope_widgets["expr"].isEnabled())
-                self.assertTrue(dialog.do_it_button.isEnabled())
+                self.assertTrue(dialog.ok_button.isEnabled())
                 self.assertEqual(dialog.status_label.text(), "")
             finally:
                 dialog.close()
@@ -1654,7 +1654,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                     "2 * offset",
                 )
 
-                self.assertFalse(dialog.do_it_button.isEnabled())
+                self.assertFalse(dialog.ok_button.isEnabled())
                 self.assertIn("offset", dialog.status_label.text())
                 self.assertNotIn(".fit(", dialog.lower_text_edit.toPlainText())
             finally:
@@ -1670,7 +1670,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.fit_result_target_combo.setEditText("bad-name")
             QtWidgets.QApplication.processEvents()
 
-            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
             self.assertIn(
                 "valid Python identifier",
                 dialog.status_label.text(),
@@ -1678,7 +1678,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertNotIn("bad-name =", dialog.lower_text_edit.toPlainText())
             self.assertNotIn(".fit(", dialog.lower_text_edit.toPlainText())
 
-            dialog.to_clip_button.click()
+            dialog.copy_button.click()
             clipboard = QtWidgets.QApplication.clipboard()
             self.assertEqual(clipboard.text(), dialog.lower_text_edit.toPlainText())
             self.assertNotIn("bad-name =", clipboard.text())
@@ -1694,7 +1694,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.fit_result_target_combo.setEditText("custom_fit_result")
             QtWidgets.QApplication.processEvents()
 
-            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
             self.assertEqual(dialog.status_label.text(), "")
             self.assertIn(
                 "custom_fit_result = custom_fit_model.fit(",
@@ -1713,14 +1713,14 @@ class TestCurveFitPlugin(unittest.TestCase):
         try:
             clipboard = QtWidgets.QApplication.clipboard()
 
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.to_cmd_line_button.isVisibleTo(dialog))
+            self.assertFalse(dialog.to_ipython_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isVisibleTo(dialog))
             self.assertIn(
                 "signal_fit_result = signal_fit_model.fit(",
                 dialog.lower_text_edit.toPlainText(),
             )
 
-            dialog.to_clip_button.click()
+            dialog.copy_button.click()
 
             self.assertEqual(
                 clipboard.text(),
@@ -1734,18 +1734,18 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.close()
             harness.close()
 
-    def test_curve_fit_equation_preview_keeps_to_cmd_line_disabled_but_do_it_available(self):
+    def test_curve_fit_equation_preview_keeps_to_ipython_disabled_but_ok_available(self):
         _, _, harness, dialog = create_configured_line_fit_dialog()
         try:
             clipboard = QtWidgets.QApplication.clipboard()
             dialog.preview_mode_combo.setCurrentText("Equation")
             QtWidgets.QApplication.processEvents()
 
-            self.assertFalse(dialog.to_cmd_line_button.isEnabled())
-            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.to_ipython_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
             self.assertIn("def line_fit(", dialog.lower_text_edit.toPlainText())
 
-            dialog.to_clip_button.click()
+            dialog.copy_button.click()
             self.assertEqual(clipboard.text(), dialog.preview_string())
             self.assertIn("signal_fit_result = signal_fit_model.fit(", clipboard.text())
             self.assertNotEqual(clipboard.text(), dialog.lower_text_edit.toPlainText())
@@ -2034,7 +2034,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_dialog_suppressed_do_it_runs_one_hidden_fit_and_creates_result_object(
+    def test_curve_fit_dialog_suppressed_ok_runs_one_hidden_fit_and_creates_result_object(
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
@@ -2093,7 +2093,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 preview_command = dialog.lower_text_edit.toPlainText()
                 self.assertNotIn("signal_fit_result", harness.namespace)
 
-                dialog.do_it_button.click()
+                dialog.ok_button.click()
                 QtWidgets.QApplication.processEvents()
 
                 self.assertEqual(len(harness.execution_service.calls), 1)
@@ -2111,7 +2111,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_dialog_suppressed_do_it_recreates_existing_result_target_once(
+    def test_curve_fit_dialog_suppressed_ok_recreates_existing_result_target_once(
         self,
     ):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
@@ -2174,7 +2174,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 harness.execution_service.calls.clear()
                 self.assertIs(harness.namespace["signal_fit_result"], previous_result)
 
-                dialog.do_it_button.click()
+                dialog.ok_button.click()
                 QtWidgets.QApplication.processEvents()
 
                 self.assertEqual(len(harness.execution_service.calls), 1)
@@ -2188,7 +2188,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         finally:
             harness.close()
 
-    def test_curve_fit_dialog_live_mode_reruns_immediately_and_do_it_does_not_rerun(
+    def test_curve_fit_dialog_live_mode_reruns_immediately_and_ok_does_not_rerun(
         self,
     ):
         _, _, harness, dialog = create_configured_line_fit_dialog()
@@ -2210,7 +2210,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(len(harness.execution_service.calls), 2)
             self.assertIsNot(harness.namespace["signal_fit_result"], first_result)
 
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             QtWidgets.QApplication.processEvents()
 
             self.assertEqual(len(harness.execution_service.calls), 2)
@@ -2367,7 +2367,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             harness.close()
             attached_figure.close()
 
-    def test_curve_fit_dialog_attached_preview_and_send_to_cmd_line_use_same_patch_block(
+    def test_curve_fit_dialog_attached_preview_and_send_to_ipython_use_same_patch_block(
         self,
     ):
         attached_figure = AttachedFigureHarness(
@@ -2389,10 +2389,10 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertIn("fig = hyde.get_figure('CurveFitAttachedFigure')", preview)
             self.assertIn("ax = fig.axes[0]", preview)
             self.assertIn("ax.plot(", preview)
-            self.assertTrue(dialog.to_cmd_line_button.isEnabled())
+            self.assertTrue(dialog.to_ipython_button.isEnabled())
 
             hidden_call_count = len(harness.execution_service.calls)
-            dialog.to_cmd_line_button.click()
+            dialog.to_ipython_button.click()
 
             self.assertEqual(harness.execution_service.visible_calls[-1], preview)
             self.assertEqual(len(harness.execution_service.calls), hidden_call_count)
@@ -2606,7 +2606,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertNotIn("signal_fit_result", harness.namespace)
 
             harness.execution_service.calls.clear()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             QtWidgets.QApplication.processEvents()
 
             self.assertTrue(harness.execution_service.calls)
@@ -3025,7 +3025,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
             dialog.show_fit_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
-            dialog.do_it_button.click()
+            dialog.ok_button.click()
             QtWidgets.QApplication.processEvents()
 
             reopening_dialog = create_curve_fit_dialog(
@@ -3173,7 +3173,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.close()
             harness.close()
 
-    def test_curve_fit_dialog_live_failure_retains_last_successful_result_and_blocks_do_it_until_valid_again(
+    def test_curve_fit_dialog_live_failure_retains_last_successful_result_and_blocks_ok_until_valid_again(
         self,
     ):
         _, _, harness, dialog = create_configured_line_fit_dialog(include_weights=True)
@@ -3189,7 +3189,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             self.assertEqual(len(harness.execution_service.calls), 1)
             self.assertIs(harness.namespace["signal_fit_result"], successful_result)
             self.assertEqual(dialog.result(), 0)
-            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
             self.assertIn("Curve Fit execution failed:", dialog.status_label.text())
             self.assertIn(
                 harness.execution_service.last_error_message.strip(),
@@ -3201,7 +3201,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             self.assertEqual(len(harness.execution_service.calls), 1)
-            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
             self.assertEqual(dialog.status_label.text(), "")
         finally:
             dialog.close()
@@ -3253,7 +3253,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 harness.namespace["alternate_fit_result"],
                 original_alternate_result,
             )
-            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
             self.assertIn("Curve Fit execution failed:", dialog.status_label.text())
             self.assertIn(
                 harness.execution_service.last_error_message.strip(),
@@ -3273,14 +3273,14 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.weighting_combo.setCurrentText("weights")
             QtWidgets.QApplication.processEvents()
 
-            self.assertFalse(dialog.do_it_button.isEnabled())
+            self.assertFalse(dialog.ok_button.isEnabled())
             self.assertIn("Curve Fit execution failed:", dialog.status_label.text())
 
             dialog.suppress_screen_updates_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
 
             self.assertEqual(dialog.execution_mode(), "suppressed")
-            self.assertTrue(dialog.do_it_button.isEnabled())
+            self.assertTrue(dialog.ok_button.isEnabled())
             self.assertEqual(dialog.status_label.text(), "")
         finally:
             dialog.close()

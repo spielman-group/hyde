@@ -185,12 +185,12 @@ class HydeDialogWidget(HydeDialog):
         self._preview_string = ""
         self._preview_display_text = None
         self.lower_text_edit.setReadOnly(True)
-        self.do_it_button.setDefault(True)
-        self.do_it_button.setAutoDefault(True)
+        self.ok_button.setDefault(True)
+        self.ok_button.setAutoDefault(True)
         self.cancel_button.setAutoDefault(False)
-        self.do_it_button.clicked.connect(self.handle_do_it)
-        self.to_cmd_line_button.clicked.connect(self.send_to_cmd_line)
-        self.to_clip_button.clicked.connect(self.copy_to_clip)
+        self.ok_button.clicked.connect(self.handle_ok)
+        self.to_ipython_button.clicked.connect(self.send_to_ipython)
+        self.copy_button.clicked.connect(self.copy_to_clipboard)
         self.help_button.clicked.connect(self.handle_help)
         self.cancel_button.clicked.connect(self.reject)
         self.refresh_shell()
@@ -248,27 +248,27 @@ class HydeDialogWidget(HydeDialog):
         self.set_preview_string("", display_text=message)
         return self.preview_display_text()
 
-    def can_do_it(self):
+    def can_ok(self):
         return bool(self.preview_string())
 
-    def can_send_to_cmd_line(self):
+    def can_send_to_ipython(self):
         return self.service("visible_terminal_service") is not None
 
     def can_show_help(self):
         return self.resolved_help_path() is not None
 
-    def do_it_dispatch_mode(self):
+    def ok_dispatch_mode(self):
         return "hidden"
 
-    def execute_do_it_payload(self, payload):
+    def execute_ok_payload(self, payload):
         python_execution_service = self.service("python_execution_service")
         if python_execution_service is None:
             return False
-        if self.do_it_dispatch_mode() == "visible":
+        if self.ok_dispatch_mode() == "visible":
             return bool(python_execution_service.execute_visible(payload))
         return bool(python_execution_service.execute_hidden(payload))
 
-    def dispatch_do_it_payload(
+    def dispatch_ok_payload(
         self,
         payload=None,
         *,
@@ -278,7 +278,7 @@ class HydeDialogWidget(HydeDialog):
         resolved_payload = self.preview_string() if payload is None else payload
         if not str(resolved_payload or "").strip():
             return False
-        dispatch = self.execute_do_it_payload if executor is None else executor
+        dispatch = self.execute_ok_payload if executor is None else executor
         if not dispatch(resolved_payload):
             return False
         if accept_on_success:
@@ -294,8 +294,8 @@ class HydeDialogWidget(HydeDialog):
             return None
         return help_path
 
-    def handle_do_it(self):
-        self.dispatch_do_it_payload()
+    def handle_ok(self):
+        self.dispatch_ok_payload()
 
     def handle_help(self):
         help_path = self.resolved_help_path()
@@ -303,7 +303,7 @@ class HydeDialogWidget(HydeDialog):
             return False
         return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(help_path)))
 
-    def copy_to_clip(self):
+    def copy_to_clipboard(self):
         payload = self.preview_string()
         if not payload:
             return
@@ -312,7 +312,7 @@ class HydeDialogWidget(HydeDialog):
             return
         clipboard.setText(payload)
 
-    def send_to_cmd_line(self):
+    def send_to_ipython(self):
         payload = self.preview_string()
         if not payload:
             return
@@ -324,9 +324,9 @@ class HydeDialogWidget(HydeDialog):
     def refresh_shell(self):
         payload = self.preview_string()
         self.lower_text_edit.setPlainText(self.preview_display_text())
-        self.do_it_button.setEnabled(self.can_do_it())
-        self.to_cmd_line_button.setEnabled(bool(payload) and self.can_send_to_cmd_line())
-        self.to_clip_button.setEnabled(bool(payload))
+        self.ok_button.setEnabled(self.can_ok())
+        self.to_ipython_button.setEnabled(bool(payload) and self.can_send_to_ipython())
+        self.copy_button.setEnabled(bool(payload))
         self.help_button.setEnabled(self.can_show_help())
 
 
@@ -411,8 +411,8 @@ class HydeFileWidget(QtWidgets.QFileDialog):
     def accept(self):
         self.emit_selection_changed()
         parent = self.outer_dialog(HydeDialogWidget)
-        if parent is not None and parent.do_it_button.isEnabled():
-            parent.do_it_button.click()
+        if parent is not None and parent.ok_button.isEnabled():
+            parent.ok_button.click()
 
     def outer_dialog(self, dialog_type):
         parent = self.parentWidget()
@@ -597,7 +597,7 @@ class HydeFileDialog(HydeDialogWidget):
         )
         return response == QtWidgets.QMessageBox.Yes
 
-    def handle_do_it(self):
+    def handle_ok(self):
         selected_path = self.selected_path()
         validation_message = self.validation_message(selected_path)
         if validation_message is not None:
@@ -606,7 +606,7 @@ class HydeFileDialog(HydeDialogWidget):
             selected_path
         ):
             return False
-        return self.dispatch_do_it_payload()
+        return self.dispatch_ok_payload()
 
 
 def active_interactive_window(services, interactive_type=None):

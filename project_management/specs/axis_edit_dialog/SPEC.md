@@ -48,7 +48,7 @@ The dialog also includes:
 - an `Axis` selector with `left`, `bottom`, `right`, and `top`
 - a `Live Update` checkbox
 - a large lower preview/status pane
-- footer buttons `Do It`, `To Cmd Line`, `To Clip`, `Help`, and `Cancel`
+- footer buttons `OK`, `To IPython`, `Copy`, `Help`, and `Cancel`
 
 The dialog operates on the active first-class figure only. In the current Hyde figure
 deployment, that means one live kernel-owned figure and one subplot. The selected
@@ -212,11 +212,11 @@ Per-end manual/auto is supported as a Hyde-owned resolved-range policy:
 - `Live Update` on: valid committed changes execute immediately through Hyde's hidden
   Python command path
 - `Live Update` off: the dialog keeps transient draft state only; nothing is sent
-  until `Do It`
+  until `OK`
 - switching `Live Update` from off to on applies the current valid draft immediately
-- `Do It`: executes the current valid patch block and closes
-- `To Cmd Line`: emits the same canonical patch block visibly to the terminal
-- `To Clip`: copies the current valid preview source to the clipboard
+- `OK`: executes the current valid patch block and closes
+- `To IPython`: emits the same canonical patch block visibly to the terminal
+- `Copy`: copies the current valid preview source to the clipboard
 - `Help`: disabled or hidden unless Hyde has a real local help target
 - `Cancel`: if live edits were sent during the session, executes a rollback patch that
   restores the opening snapshot for the dialog-owned region; otherwise closes without
@@ -317,13 +317,13 @@ The lower pane is a read-only draft preview/status surface:
     work.
 42. As a Hyde user, I want `Live Update` off when needed, so that I can prepare a set
     of changes before sending them.
-43. As a Hyde user, I want `Do It` to apply the current valid draft and close, so that
+43. As a Hyde user, I want `OK` to apply the current valid draft and close, so that
     non-live editing still has an explicit commit path.
 44. As a Hyde user, I want `Cancel` to restore the exact opening axis state when live
     updates were sent, so that experimentation is safe.
 45. As a Hyde user, I want the lower pane to preview the current draft source, so that
     I can see what the saved figure recreation will become.
-46. As a Hyde user, I want `To Clip`, so that I can copy the current preview source
+46. As a Hyde user, I want `Copy`, so that I can copy the current preview source
     without executing it.
 47. As a Hyde developer, I want all routine edits to go through the same
     command-driven Python path, so that Hyde keeps one authoritative figure-edit
@@ -392,7 +392,7 @@ The lower pane is a read-only draft preview/status surface:
   - invalid or partial edits stay local and do not execute
 - `Live Update` off:
   - dialog widgets update only local draft state
-  - `Do It` validates and executes the accumulated patch once
+  - `OK` validates and executes the accumulated patch once
 - Switching `Live Update` from off to on applies the current valid draft immediately.
 - `Cancel` executes a rollback patch only if edits were already applied during the
   session.
@@ -413,8 +413,8 @@ The lower pane is a read-only draft preview/status surface:
   one locator-policy family rather than embedding formatting logic directly in widgets.
 - Quick-set controls resolve Python-backed data already visible to Hyde rather than
   Igor waves or Igor scaling metadata.
-- `To Clip` copies preview source only; it never applies edits by itself.
-- `To Cmd Line` emits the same canonical patch block used by hidden execution; it does
+- `Copy` copies preview source only; it never applies edits by itself.
+- `To IPython` emits the same canonical patch block used by hidden execution; it does
   not invent a second lowering path.
 - `Help` remains disabled or hidden unless Hyde gains a real user-facing local help
   target for this dialog.
@@ -434,8 +434,8 @@ The lower pane is a read-only draft preview/status surface:
   - incomplete or invalid edits do not execute
   - turning `Live Update` on applies the current valid draft
 - Tests should verify non-live behavior:
-  - draft-only edits remain local until `Do It`
-  - `Do It` executes the same canonical patch block previewed by the dialog and closes
+  - draft-only edits remain local until `OK`
+  - `OK` executes the same canonical patch block previewed by the dialog and closes
 - Tests should verify `Cancel` behavior:
   - restores the exact opening snapshot when live edits were sent
   - leaves the live figure untouched when nothing was applied
@@ -448,7 +448,7 @@ The lower pane is a read-only draft preview/status surface:
   survive redraw/regeneration from figure IR.
 - Tests should verify that save/restore lowers the expanded axis semantics back to
   ordinary matplotlib recreation source deterministically.
-- Tests should verify that `To Cmd Line` emits the same canonical patch block as
+- Tests should verify that `To IPython` emits the same canonical patch block as
   hidden execution.
 - Tests should verify that quick-set controls resolve Python-backed data sources rather
   than Igor-specific objects.

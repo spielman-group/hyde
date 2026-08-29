@@ -102,7 +102,7 @@ the figure runtime transport. The new plugin contributes actions through the nor
     styling changes immediately.
 19. As a Hyde user, I want `Cancel` to restore the trace exactly to its opening state,
     so that I can experiment without risk.
-20. As a Hyde user, I want `Do It` to keep the current edited state and close, so that
+20. As a Hyde user, I want `OK` to keep the current edited state and close, so that
     I can confirm the live changes I have made.
 21. As a Hyde user, I want unsupported advanced trace behaviors to stay out of the
     first version, so that the dialog remains coherent and reliable.
@@ -135,8 +135,8 @@ the figure runtime transport. The new plugin contributes actions through the nor
   supported matplotlib `Line2D` state in Hyde's figure-edit model.
 - The supported appearance surface is intentionally broad for ordinary line styling and
   includes line, marker, visibility, mode, opacity, and draw-style controls.
-- Live edits execute the same canonical matplotlib patch block family used by `Do It`
-  and `To Cmd Line`.
+- Live edits execute the same canonical matplotlib patch block family used by `OK`
+  and `To IPython`.
 - The GUI stores only transient dialog state, including the opening appearance snapshot
   needed for `Cancel` revert behavior.
 - `Cancel` is implemented by executing a rollback patch for the opening trace
@@ -157,9 +157,9 @@ the figure runtime transport. The new plugin contributes actions through the nor
   current appearance.
 - Tests should verify that supported control changes execute hidden live-update patch
   blocks through the ordinary figure-edit command path.
-- Tests should verify that `Do It` preserves the current edited live state.
+- Tests should verify that `OK` preserves the current edited live state.
 - Tests should verify that `Cancel` restores the exact opening appearance snapshot.
-- Tests should verify that `To Cmd Line` emits the same canonical patch block used by
+- Tests should verify that `To IPython` emits the same canonical patch block used by
   hidden execution.
 - Tests should verify that unsupported trace targets do not trigger GUI-side fallback
   behavior.

@@ -233,9 +233,9 @@ class HydeFigureDialogWidget(HydeDialogWidget):
         checkbox = getattr(getattr(self, "ui", None), "live_update_checkbox", None)
         return bool(checkbox is not None and checkbox.isChecked())
 
-    def commit_current_figure_patch(self, *, mode="do_it"):
+    def commit_current_figure_patch(self, *, mode="ok"):
         target_ir = self.current_figure_ir
-        if self.dispatch_do_it_payload(
+        if self.dispatch_ok_payload(
             executor=lambda code: self.execute_figure_patch(code, mode=mode),
             accept_on_success=False,
         ):
@@ -246,7 +246,7 @@ class HydeFigureDialogWidget(HydeDialogWidget):
             return True
         return False
 
-    def handle_do_it(self):
+    def handle_ok(self):
         if self.live_update_is_enabled():
             self.accept()
             return

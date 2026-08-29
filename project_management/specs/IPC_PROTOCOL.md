@@ -326,7 +326,7 @@ This is the user's visible interactive console session.
 - Hyde should not inject kernel-runtime-controlled background execution through this session
 - the Python Terminal is for visible user interaction, not for replaying `procedures/__init__.py`
 - routine figure GUI edits are not dispatched through the visible terminal session
-- `To Cmd Line` may emit the same canonical figure-edit block visibly, but hidden GUI
+- `To IPython` may emit the same canonical figure-edit block visibly, but hidden GUI
   figure edits execute through Lane 2B rather than through the user's interactive
   prompt
 

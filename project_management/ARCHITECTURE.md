@@ -77,8 +77,8 @@ to build commands or previews. Those snapshots do not move runtime authority
 out of the owning feature.
 
 Across Hyde, GUI-generated command Python comes from `HydeIR.python_source()`.
-Preview surfaces display that same generated string, and `Do It`, `To Cmd Line`,
-or `To Clip` may dispatch the cached preview payload without regenerating it.
+Preview surfaces display that same generated string, and `OK`, `To IPython`,
+or `Copy` may dispatch the cached preview payload without regenerating it.
 
 ## IR File Layout
 
@@ -234,7 +234,7 @@ when a project is loaded.
   allowed in emitted update strings only when no standard matplotlib equivalent exists
   or when the Hyde helper is the clearer contract for a Hyde-owned operation, such as
   `hyde.refresh_figure(...)` or `hyde.remove_traces(...)`. Curve Fit attached live
-  update, preview, `Do It`, and `To Cmd Line` now share one attached-display
+  update, preview, `OK`, and `To IPython` now share one attached-display
   command-generation model.
 - `Save Graphics...` is a preview-backed figure export surface. The dialog owns
   only transient file/output UI state; figure export command generation belongs
