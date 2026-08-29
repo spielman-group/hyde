@@ -323,20 +323,13 @@ class TableWidget(HydeInteractiveWidget):
 
     def _report_command_failure(self, kernel_request):
         """A table command the user asked for did not run. Say so."""
-        if kernel_request.ran():
+        if not self.report_failed_command(kernel_request):
             return False
         LOGGER.warning(
             "Table %s command failed: %s",
             self.window_handle(),
             kernel_request.error,
         )
-        service = self.services.get("status_message_service")
-        if service is not None:
-            service.show_status_message(
-                f"Table command failed: {kernel_request.error}"
-                if kernel_request.error
-                else "Table command failed."
-            )
         return True
 
     @inmain_decorator()

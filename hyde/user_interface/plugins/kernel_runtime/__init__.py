@@ -75,14 +75,13 @@ class KernelRequest:
 class FrontendKernelService(QtCore.QObject):
     """The GUI's one client onto the kernel's shell channel.
 
-    Requests carry identity: `execute` hands back the `msg_id` the kernel will
-    quote in `parent_header` when it answers, and `execute_reply` re-emits every
-    answer against that id. A caller can therefore tell its own reply from
-    anyone else's, and learn whether its command ran or raised.
+    Requests carry identity: `request` hands back a handle bearing the `msg_id`
+    the kernel quotes in `parent_header` when it answers, so a caller can tell
+    its own reply from anyone else's and learn whether its command ran or
+    raised.
     """
 
     ready = QtCore.Signal()
-    execute_reply = QtCore.Signal(str, dict)
 
     def __init__(self, connection_file, parent=None):
         super().__init__(parent)
@@ -235,9 +234,7 @@ class FrontendKernelService(QtCore.QObject):
             return
         if msg_type != "execute_reply" or not parent_msg_id:
             return
-        content = dict(message.get("content") or {})
-        self._settle_request(str(parent_msg_id), content)
-        self.execute_reply.emit(str(parent_msg_id), content)
+        self._settle_request(str(parent_msg_id), dict(message.get("content") or {}))
 
     def _accept_readiness_reply(self, parent_msg_id):
         if self._ready_probe_msg_id and parent_msg_id not in (None, self._ready_probe_msg_id):
@@ -518,6 +515,15 @@ class Plugin(HydePlugin):
 
     def request_frontend(self, code, on_finished):
         if self.frontend_kernel_service is None or not self.frontend_kernel_service.is_ready():
+            return None
+        executor = self._main_thread_executor
+        if executor is not None and QtCore.QThread.currentThread() is not executor.thread():
+            # execute_hidden marshals; a correlated request cannot, because the
+            # msg_id has to come back to the caller now. Refusing beats sending
+            # from the wrong thread and corrupting the client's sockets.
+            LOGGER.warning(
+                "A correlated kernel request was issued off the GUI thread and refused."
+            )
             return None
         code = str(code)
         log_hyde_dispatch_debug("hidden", code)

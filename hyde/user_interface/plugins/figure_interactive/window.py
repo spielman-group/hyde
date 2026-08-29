@@ -652,7 +652,7 @@ class FigureWindow(HydeInteractiveWidget):
 
     @inmain_decorator()
     def _on_close_finished(self, kernel_request):
-        if self._closed or kernel_request is not self._close_request:
+        if self.is_close_complete() or kernel_request is not self._close_request:
             return
         if kernel_request.ran():
             self._close_payload_timer.start(self.CLOSE_PAYLOAD_TIMEOUT_MS)

@@ -488,7 +488,7 @@ class CurveFitDialog(HydeFigureDialogWidget):
             command_parts.append(str(patch_code).strip())
         return "\n".join(command_parts), target_state
 
-    def _dispatch_commit(self, code, undo_on_kernel_error):
+    def _dispatch_commit(self, code, *, undo_on_kernel_error):
         """Send a commit, correlating it only when something will act on the reply.
 
         The live path reads this answer synchronously to drive the dialog's own
@@ -632,11 +632,15 @@ class CurveFitDialog(HydeFigureDialogWidget):
             if part
         )
         if patch_code:
-            dispatched = self._dispatch_commit(combined_command, undo_on_kernel_error)
+            dispatched = self._dispatch_commit(
+                combined_command, undo_on_kernel_error=undo_on_kernel_error
+            )
             if dispatched:
                 self.note_figure_patch_applied(target_effective_state)
         elif str(command or "").strip():
-            dispatched = self._dispatch_commit(command, undo_on_kernel_error)
+            dispatched = self._dispatch_commit(
+                command, undo_on_kernel_error=undo_on_kernel_error
+            )
         else:
             dispatched = True
         if not dispatched:

@@ -62,6 +62,21 @@ class FinishedCollector:
         self.finished.append(request)
 
 
+class FakeShellChannel:
+    def __init__(self):
+        self.message_received = FakeSignal()
+
+
+class FinishedCollector:
+    """Bound-method callback receiver; see STYLE.md on Qt receiver lifetimes."""
+
+    def __init__(self):
+        self.finished = []
+
+    def collect(self, request):
+        self.finished.append(request)
+
+
 class ReplyCollector:
     """Bound-method signal receiver; see STYLE.md on Qt receiver lifetimes."""
 
@@ -192,43 +207,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 self.assertTrue(service.is_ready())
                 self.assertEqual(ready_events, ["ready"])
 
-    def test_frontend_kernel_service_reports_which_request_a_reply_answers(self):
-        """A caller can tell its own execute_reply from anyone else's."""
-        service = FrontendKernelService("/tmp/kernel.json")
-        client = FakeKernelClient()
-        service._kernel_client = client
-        service._ready = True
-        client.shell_channel.message_received.connect(service._on_shell_message)
-
-        collector = ReplyCollector()
-        service.execute_reply.connect(collector.collect)
-
-        mine = service.execute("copy_me()")
-        self.assertEqual(mine, "execute-1")
-
-        client.shell_channel.message_received.emit(
-            {
-                "header": {"msg_type": "execute_reply"},
-                "parent_header": {"msg_id": "someone-else"},
-                "content": {"status": "ok"},
-            }
-        )
-        client.shell_channel.message_received.emit(
-            {
-                "header": {"msg_type": "execute_reply"},
-                "parent_header": {"msg_id": mine},
-                "content": {"status": "error", "ename": "ValueError"},
-            }
-        )
-
-        self.assertEqual(
-            collector.replies,
-            [
-                ("someone-else", {"status": "ok"}),
-                ("execute-1", {"status": "error", "ename": "ValueError"}),
-            ],
-        )
-
     def test_frontend_kernel_service_reports_no_request_when_kernel_is_absent(self):
         service = FrontendKernelService("/tmp/kernel.json")
         self.assertIsNone(service.execute("value = 1"))
@@ -272,17 +250,19 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 )
                 self.assertTrue(service.is_ready())
 
-                collector = ReplyCollector()
-                service.execute_reply.connect(collector.collect)
+                collector = FinishedCollector()
+                request = service.request(
+                    "after_ready()", on_finished=collector.collect
+                )
                 channel.message_received.emit(
                     {
                         "header": {"msg_type": "execute_reply"},
-                        "parent_header": {"msg_id": "after-ready"},
+                        "parent_header": {"msg_id": request.msg_id},
                         "content": {"status": "ok"},
                     }
                 )
 
-                self.assertEqual(collector.msg_ids(), ["after-ready"])
+                self.assertEqual(collector.finished, [request])
 
     def _ready_service_with_client(self):
         service = FrontendKernelService("/tmp/kernel.json")
@@ -305,6 +285,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
         collector = FinishedCollector()
 
         request = service.request("copy_me()", on_finished=collector.collect)
+        self.assertEqual("execute-1", request.msg_id)
         self.assertTrue(request.is_pending())
         self.assertEqual(collector.finished, [])
 
@@ -390,11 +371,35 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIsNone(service.request("copy_me()", on_finished=collector.collect))
         self.assertEqual(collector.finished, [])
 
+    def test_a_correlated_request_from_the_wrong_thread_is_refused(self):
+        """execute_hidden marshals; a request cannot, so it must refuse."""
+        service, client = self._ready_service_with_client()
+        plugin = type("Plugin", (), {})()
+        plugin.services = {}
+        plugin.frontend_kernel_service = service
+        plugin._main_thread_executor = type(
+            "Executor", (), {"thread": lambda self: object()}
+        )()
+        plugin.request_frontend = KernelRuntimePlugin.request_frontend.__get__(
+            plugin, type(plugin)
+        )
+        collector = FinishedCollector()
+
+        self.assertIsNone(
+            PythonExecutionService(plugin).request(
+                "copy_me()", on_finished=collector.collect
+            )
+        )
+        self.assertEqual([], client.calls)
+
     def test_python_execution_service_dispatches_and_logs_a_correlated_request(self):
         service, client = self._ready_service_with_client()
         plugin = type("Plugin", (), {})()
         plugin.services = {}
         plugin.frontend_kernel_service = service
+        plugin._main_thread_executor = type(
+            "Executor", (), {"thread": lambda self: QtCore.QThread.currentThread()}
+        )()
         plugin.request_frontend = KernelRuntimePlugin.request_frontend.__get__(
             plugin, type(plugin)
         )
