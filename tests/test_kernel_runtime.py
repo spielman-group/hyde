@@ -52,12 +52,29 @@ class FakeShellChannel:
         self.message_received = FakeSignal()
 
 
+class ReplyCollector:
+    """Bound-method signal receiver; see STYLE.md on Qt receiver lifetimes."""
+
+    def __init__(self):
+        self.replies = []
+
+    def collect(self, msg_id, content):
+        self.replies.append((msg_id, content))
+
+    def msg_ids(self):
+        return [msg_id for msg_id, _ in self.replies]
+
+
 class FakeKernelClient:
     def __init__(self):
         self.calls = []
+        self.shell_channel = FakeShellChannel()
+        self.execute_calls = 0
 
     def execute(self, code, silent=True):
         self.calls.append((code, silent))
+        self.execute_calls += 1
+        return f"execute-{self.execute_calls}"
 
     def shutdown(self, restart=False):
         self.calls.append(("shutdown", restart))
@@ -161,6 +178,98 @@ class TestRuntimeArchitecture(unittest.TestCase):
 
                 self.assertTrue(service.is_ready())
                 self.assertEqual(ready_events, ["ready"])
+
+    def test_frontend_kernel_service_reports_which_request_a_reply_answers(self):
+        """A caller can tell its own execute_reply from anyone else's."""
+        service = FrontendKernelService("/tmp/kernel.json")
+        client = FakeKernelClient()
+        service._kernel_client = client
+        service._ready = True
+        client.shell_channel.message_received.connect(service._on_shell_message)
+
+        collector = ReplyCollector()
+        service.execute_reply.connect(collector.collect)
+
+        mine = service.execute("copy_me()")
+        self.assertEqual(mine, "execute-1")
+
+        client.shell_channel.message_received.emit(
+            {
+                "header": {"msg_type": "execute_reply"},
+                "parent_header": {"msg_id": "someone-else"},
+                "content": {"status": "ok"},
+            }
+        )
+        client.shell_channel.message_received.emit(
+            {
+                "header": {"msg_type": "execute_reply"},
+                "parent_header": {"msg_id": mine},
+                "content": {"status": "error", "ename": "ValueError"},
+            }
+        )
+
+        self.assertEqual(
+            collector.replies,
+            [
+                ("someone-else", {"status": "ok"}),
+                ("execute-1", {"status": "error", "ename": "ValueError"}),
+            ],
+        )
+
+    def test_frontend_kernel_service_reports_no_request_when_kernel_is_absent(self):
+        service = FrontendKernelService("/tmp/kernel.json")
+        self.assertIsNone(service.execute("value = 1"))
+
+        service._kernel_client = FakeKernelClient()
+        self.assertIsNone(service.execute("value = 1"))
+
+    def test_frontend_kernel_service_keeps_listening_for_replies_once_ready(self):
+        """Readiness must not deafen the shell channel."""
+
+        class FakeQtKernelClient(FakeKernelClient):
+            def __init__(self, connection_file):
+                super().__init__()
+                self.connection_file = connection_file
+
+            def load_connection_file(self):
+                return None
+
+            def start_channels(self):
+                return None
+
+            def kernel_info(self):
+                return "probe-1"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            connection_file = os.path.join(tmpdir, "kernel.json")
+            with open(connection_file, "w", encoding="utf-8"):
+                pass
+            with patch(
+                "hyde.user_interface.plugins.kernel_runtime.QtKernelClient",
+                FakeQtKernelClient,
+            ):
+                service = FrontendKernelService(connection_file)
+                service._try_connect()
+                channel = service.kernel_client().shell_channel
+                channel.message_received.emit(
+                    {
+                        "header": {"msg_type": "kernel_info_reply"},
+                        "parent_header": {"msg_id": "probe-1"},
+                    }
+                )
+                self.assertTrue(service.is_ready())
+
+                collector = ReplyCollector()
+                service.execute_reply.connect(collector.collect)
+                channel.message_received.emit(
+                    {
+                        "header": {"msg_type": "execute_reply"},
+                        "parent_header": {"msg_id": "after-ready"},
+                        "content": {"status": "ok"},
+                    }
+                )
+
+                self.assertEqual(collector.msg_ids(), ["after-ready"])
 
     def test_frontend_kernel_service_requests_real_kernel_shutdown(self):
         service = FrontendKernelService("/tmp/kernel.json")

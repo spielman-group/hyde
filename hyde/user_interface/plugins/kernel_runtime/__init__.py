@@ -20,7 +20,16 @@ LOGGER = logging.getLogger("hyde")
 
 
 class FrontendKernelService(QtCore.QObject):
+    """The GUI's one client onto the kernel's shell channel.
+
+    Requests carry identity: `execute` hands back the `msg_id` the kernel will
+    quote in `parent_header` when it answers, and `execute_reply` re-emits every
+    answer against that id. A caller can therefore tell its own reply from
+    anyone else's, and learn whether its command ran or raised.
+    """
+
     ready = QtCore.Signal()
+    execute_reply = QtCore.Signal(str, dict)
 
     def __init__(self, connection_file, parent=None):
         super().__init__(parent)
@@ -66,10 +75,15 @@ class FrontendKernelService(QtCore.QObject):
         return self._kernel_client
 
     def execute(self, code, silent=True):
+        """Send `code` and return the request's `msg_id`, or None if not sent.
+
+        Callers that only need "was it sent" keep working unchanged: a sent
+        request yields a non-empty id, an unsent one yields None.
+        """
         if self._kernel_client is None or not self._ready:
-            return False
-        self._kernel_client.execute(code, silent=bool(silent))
-        return True
+            return None
+        msg_id = self._kernel_client.execute(code, silent=bool(silent))
+        return None if msg_id is None else str(msg_id)
 
     def shutdown_kernel(self):
         if self._kernel_client is None:
@@ -109,25 +123,30 @@ class FrontendKernelService(QtCore.QObject):
         self._ready_probe_at = now
 
     def _on_shell_message(self, message):
-        if self._ready or self._kernel_client is None:
+        if self._kernel_client is None:
             return
         msg_type = (
             message.get("msg_type")
             or message.get("header", {}).get("msg_type")
         )
-        if msg_type != "kernel_info_reply":
-            return
         parent_msg_id = message.get("parent_header", {}).get("msg_id")
+        if not self._ready:
+            # Readiness is the only thing worth reading before the kernel says
+            # hello; the channel stays connected afterwards to carry replies.
+            if msg_type == "kernel_info_reply":
+                self._accept_readiness_reply(parent_msg_id)
+            return
+        if msg_type != "execute_reply" or not parent_msg_id:
+            return
+        self.execute_reply.emit(str(parent_msg_id), dict(message.get("content") or {}))
+
+    def _accept_readiness_reply(self, parent_msg_id):
         if self._ready_probe_msg_id and parent_msg_id not in (None, self._ready_probe_msg_id):
             return
         self._ready = True
         self._ready_probe_msg_id = None
         self._ready_probe_at = None
         self._poll_timer.stop()
-        try:
-            self._kernel_client.shell_channel.message_received.disconnect(self._on_shell_message)
-        except Exception:
-            pass
         self.ready.emit()
 
 
@@ -383,7 +402,9 @@ class Plugin(HydePlugin):
         current_thread = QtCore.QThread.currentThread()
         executor_thread = self._main_thread_executor.thread()
         if current_thread is executor_thread:
-            return self.frontend_kernel_service.execute(code, silent=bool(silent))
+            # Dispatch answers "was it sent"; the request id belongs to callers
+            # that go to FrontendKernelService for a correlated request.
+            return bool(self.frontend_kernel_service.execute(code, silent=bool(silent)))
         self._main_thread_executor.execute_requested.emit(code, bool(silent))
         return True
 
