@@ -40,6 +40,12 @@
   event drain invokes a cleared callable and segfaults the interpreter rather than
   raising. Pass per-connection data through a Qt property on the sender and read it
   back in the slot.
+- The rule bites when the sender can outlive the captured owner, and it is acute for
+  signals Qt emits during or after destruction: `destroyed`, `subWindowActivated`,
+  `aboutToQuit`, and anything queued or cross-thread. A lambda capturing `self` and
+  connected to a widget that `self` itself owns is not at risk, because the two die
+  together; rewriting those is churn. Ask whether the sender can still emit after the
+  captured object is gone.
 - Beware that such a crash surfaces far from its cause. It is GC-threshold sensitive,
   so it presents as an intermittent segfault in whichever unrelated code next pumps
   the event loop, and unrelated edits appear to cause or cure it by shifting

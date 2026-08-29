@@ -343,8 +343,12 @@ class HydeApp:
         # Opening a menu refreshes its own items, but a keyboard shortcut never
         # opens one. Refresh on activation so a shortcut is gated by the window
         # the user is actually looking at.
+        #
+        # A bound method rather than a lambda: subWindowActivated fires while a
+        # subwindow is closing, and PyQt keeps a lambda alive and calls it even
+        # after the object it captured has been collected. See STYLE.md.
         self.ui.mdiArea.subWindowActivated.connect(
-            lambda _subwindow: self.menu_context.refresh_enabled_states()
+            self.menu_context.refresh_enabled_states
         )
         self.hide_menu("figure")
         self.hide_menu("table")
