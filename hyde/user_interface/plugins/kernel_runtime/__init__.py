@@ -19,6 +19,52 @@ qt_slot = getattr(QtCore, "Slot", QtCore.pyqtSlot)
 LOGGER = logging.getLogger("hyde")
 
 
+def _reply_error_text(content):
+    ename = str(content.get("ename") or "").strip()
+    evalue = str(content.get("evalue") or "").strip()
+    if ename and evalue:
+        return f"{ename}: {evalue}"
+    return ename or evalue or str(content.get("status") or "").strip()
+
+
+class KernelRequest:
+    """One GUI-initiated kernel request, from sent to settled.
+
+    Identity is the kernel's `msg_id`, which it quotes in `parent_header` when
+    it answers. A pending request is one the kernel has not answered yet, which
+    is not the same as a late one: the kernel runs a single request at a time,
+    so a request issued while the user's own cell is running waits its turn.
+    There is no timeout, and waiting is not failing.
+
+    Only `FrontendKernelService` settles a request. Callers read it.
+    """
+
+    PENDING = None
+    RAN = "ran"
+    RAISED = "raised"
+    ABANDONED = "abandoned"
+
+    def __init__(self, msg_id, code):
+        self.msg_id = str(msg_id)
+        self.code = str(code)
+        self.outcome = self.PENDING
+        self.error = ""
+
+    def is_pending(self):
+        return self.outcome is self.PENDING
+
+    def ran(self):
+        return self.outcome == self.RAN
+
+    def settle(self, outcome, error=""):
+        """Owner-only. Returns False if the request was already settled."""
+        if not self.is_pending():
+            return False
+        self.outcome = outcome
+        self.error = str(error)
+        return True
+
+
 class FrontendKernelService(QtCore.QObject):
     """The GUI's one client onto the kernel's shell channel.
 
@@ -42,6 +88,7 @@ class FrontendKernelService(QtCore.QObject):
         self._connecting = False
         self._ready_probe_msg_id = None
         self._ready_probe_at = None
+        self._pending_requests = {}
 
     def start(self):
         if self._kernel_client is not None or self._poll_timer.isActive():
@@ -57,6 +104,7 @@ class FrontendKernelService(QtCore.QObject):
         self._ready = False
         self._ready_probe_msg_id = None
         self._ready_probe_at = None
+        self._abandon_pending_requests("The kernel is no longer available.")
         if client is None:
             return
         try:
@@ -84,6 +132,48 @@ class FrontendKernelService(QtCore.QObject):
             return None
         msg_id = self._kernel_client.execute(code, silent=bool(silent))
         return None if msg_id is None else str(msg_id)
+
+    def request(self, code, *, on_finished):
+        """Send `code` and correlate its reply. Main thread only.
+
+        Returns a `KernelRequest`, or None if there is no kernel to ask.
+        `on_finished(request)` is called exactly once: when the kernel answers,
+        or when the kernel goes away with the request still outstanding. It is
+        never called for a timeout, because there is none.
+        """
+        msg_id = self.execute(code, silent=True)
+        if msg_id is None:
+            return None
+        # Safe against a reply racing this line: shell-channel messages are
+        # delivered on the Qt event loop, which cannot run until this returns.
+        request = KernelRequest(msg_id, code)
+        self._pending_requests[msg_id] = (request, on_finished)
+        return request
+
+    def pending_requests(self):
+        return tuple(request for request, _ in self._pending_requests.values())
+
+    def _settle_request(self, msg_id, content):
+        entry = self._pending_requests.pop(msg_id, None)
+        if entry is None:
+            return
+        request, on_finished = entry
+        # Anything that is not "ok" -- an error, an abort from the user
+        # interrupting -- means the command did not run to completion.
+        if str(content.get("status") or "").lower() == "ok":
+            request.settle(KernelRequest.RAN)
+        else:
+            request.settle(KernelRequest.RAISED, _reply_error_text(content))
+        on_finished(request)
+
+    def _abandon_pending_requests(self, reason):
+        # A dead kernel settles every outstanding request at once. Nothing is
+        # left waiting for a reply that can no longer arrive.
+        entries = list(self._pending_requests.values())
+        self._pending_requests.clear()
+        for request, on_finished in entries:
+            request.settle(KernelRequest.ABANDONED, reason)
+            on_finished(request)
 
     def shutdown_kernel(self):
         if self._kernel_client is None:
@@ -138,7 +228,9 @@ class FrontendKernelService(QtCore.QObject):
             return
         if msg_type != "execute_reply" or not parent_msg_id:
             return
-        self.execute_reply.emit(str(parent_msg_id), dict(message.get("content") or {}))
+        content = dict(message.get("content") or {})
+        self._settle_request(str(parent_msg_id), content)
+        self.execute_reply.emit(str(parent_msg_id), content)
 
     def _accept_readiness_reply(self, parent_msg_id):
         if self._ready_probe_msg_id and parent_msg_id not in (None, self._ready_probe_msg_id):
@@ -262,6 +354,15 @@ class PythonExecutionService:
 
     def execute_hidden(self, code, silent=True):
         return self.plugin.execute_frontend(code, silent=silent)
+
+    def request(self, code, *, on_finished):
+        """Dispatch `code` and correlate its reply. Main thread only.
+
+        The third verb on this surface. `execute_hidden` and `execute_visible`
+        answer "was it sent"; `request` answers "what happened", by handing back
+        a `KernelRequest` that settles when the kernel replies.
+        """
+        return self.plugin.request_frontend(code, on_finished)
 
     def execute_visible(self, code):
         visible_terminal_service = self.plugin.services.get("visible_terminal_service")
@@ -407,6 +508,13 @@ class Plugin(HydePlugin):
             return bool(self.frontend_kernel_service.execute(code, silent=bool(silent)))
         self._main_thread_executor.execute_requested.emit(code, bool(silent))
         return True
+
+    def request_frontend(self, code, on_finished):
+        if self.frontend_kernel_service is None or not self.frontend_kernel_service.is_ready():
+            return None
+        code = str(code)
+        log_hyde_dispatch_debug("hidden", code)
+        return self.frontend_kernel_service.request(code, on_finished=on_finished)
 
     def kill_kernel(self, checked=False):
         del checked

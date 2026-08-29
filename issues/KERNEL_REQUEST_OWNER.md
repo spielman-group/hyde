@@ -1,6 +1,6 @@
 # Scope: one owner for GUI-initiated kernel requests
 
-Status: scope definition. Nothing here is implemented.
+Status: steps 1 and 2 landed. Step 3 next.
 
 ## The confusion is well founded
 
@@ -119,10 +119,15 @@ short timeout legitimate there and not before.
 
 Each step leaves the suite green on its own.
 
-1. Keep the `msg_id` from `execute`, and stop `_on_shell_message` returning early
-   once ready. No behavior change; the data is simply no longer discarded.
-2. Add the request handle and completion, with no policy attached. Nothing uses
-   it yet.
+1. **Done.** Keep the `msg_id` from `execute`, and stop `_on_shell_message`
+   disconnecting once ready. No behavior change; the data is simply no longer
+   discarded.
+2. **Done.** `KernelRequest` plus request tracking in `FrontendKernelService`,
+   reached through a third verb on `python_execution_service`: `request`.
+   `execute_hidden` and `execute_visible` answer "was it sent"; `request`
+   answers "what happened". Outcomes are ran / raised / abandoned, and `stop()`
+   abandons everything outstanding at once. No policy attached; nothing uses it
+   yet.
 3. Move copy onto it. Copy is the smallest consumer and already has an isolated
    `FigureCopyRequest` to fold in. This is also where serialization lands.
 4. Move table refresh, then figure refresh and close. Delete their timers and

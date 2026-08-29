@@ -52,6 +52,16 @@ class FakeShellChannel:
         self.message_received = FakeSignal()
 
 
+class FinishedCollector:
+    """Bound-method callback receiver; see STYLE.md on Qt receiver lifetimes."""
+
+    def __init__(self):
+        self.finished = []
+
+    def collect(self, request):
+        self.finished.append(request)
+
+
 class ReplyCollector:
     """Bound-method signal receiver; see STYLE.md on Qt receiver lifetimes."""
 
@@ -78,6 +88,9 @@ class FakeKernelClient:
 
     def shutdown(self, restart=False):
         self.calls.append(("shutdown", restart))
+
+    def stop_channels(self):
+        self.calls.append(("stop_channels",))
 
 
 class FakeCommManager:
@@ -270,6 +283,124 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 )
 
                 self.assertEqual(collector.msg_ids(), ["after-ready"])
+
+    def _ready_service_with_client(self):
+        service = FrontendKernelService("/tmp/kernel.json")
+        client = FakeKernelClient()
+        service._kernel_client = client
+        service._ready = True
+        client.shell_channel.message_received.connect(service._on_shell_message)
+        return service, client
+
+    @staticmethod
+    def _execute_reply(msg_id, content):
+        return {
+            "header": {"msg_type": "execute_reply"},
+            "parent_header": {"msg_id": msg_id},
+            "content": content,
+        }
+
+    def test_kernel_request_finishes_as_ran_when_the_command_succeeds(self):
+        service, client = self._ready_service_with_client()
+        collector = FinishedCollector()
+
+        request = service.request("copy_me()", on_finished=collector.collect)
+        self.assertTrue(request.is_pending())
+        self.assertEqual(collector.finished, [])
+
+        client.shell_channel.message_received.emit(
+            self._execute_reply(request.msg_id, {"status": "ok"})
+        )
+
+        self.assertEqual(collector.finished, [request])
+        self.assertFalse(request.is_pending())
+        self.assertTrue(request.ran())
+        self.assertEqual(request.error, "")
+
+    def test_kernel_request_carries_the_kernel_error_when_the_command_raises(self):
+        service, client = self._ready_service_with_client()
+        collector = FinishedCollector()
+
+        request = service.request("boom()", on_finished=collector.collect)
+        client.shell_channel.message_received.emit(
+            self._execute_reply(
+                request.msg_id,
+                {"status": "error", "ename": "ValueError", "evalue": "no figure"},
+            )
+        )
+
+        self.assertEqual(collector.finished, [request])
+        self.assertFalse(request.ran())
+        self.assertEqual(request.error, "ValueError: no figure")
+
+    def test_kernel_request_ignores_a_reply_to_a_different_request(self):
+        service, client = self._ready_service_with_client()
+        collector = FinishedCollector()
+
+        request = service.request("mine()", on_finished=collector.collect)
+        client.shell_channel.message_received.emit(
+            self._execute_reply("someone-else", {"status": "ok"})
+        )
+
+        self.assertTrue(request.is_pending())
+        self.assertEqual(collector.finished, [])
+
+    def test_kernel_request_stays_pending_while_the_kernel_is_busy(self):
+        """A request queued behind the user's own cell is waiting, not late."""
+        service, _ = self._ready_service_with_client()
+        collector = FinishedCollector()
+
+        request = service.request("slow()", on_finished=collector.collect)
+
+        self.assertTrue(request.is_pending())
+        self.assertEqual(collector.finished, [])
+        self.assertEqual(service.pending_requests(), (request,))
+
+    def test_kernel_request_is_abandoned_when_the_kernel_goes_away(self):
+        service, _ = self._ready_service_with_client()
+        collector = FinishedCollector()
+
+        request = service.request("copy_me()", on_finished=collector.collect)
+        service.stop()
+
+        self.assertEqual(collector.finished, [request])
+        self.assertFalse(request.is_pending())
+        self.assertFalse(request.ran())
+        self.assertTrue(request.error)
+        self.assertEqual(service.pending_requests(), ())
+
+    def test_kernel_request_is_refused_when_there_is_no_kernel(self):
+        service = FrontendKernelService("/tmp/kernel.json")
+        collector = FinishedCollector()
+
+        self.assertIsNone(service.request("copy_me()", on_finished=collector.collect))
+        self.assertEqual(collector.finished, [])
+
+    def test_python_execution_service_dispatches_and_logs_a_correlated_request(self):
+        service, client = self._ready_service_with_client()
+        plugin = type("Plugin", (), {})()
+        plugin.services = {}
+        plugin.frontend_kernel_service = service
+        plugin.request_frontend = KernelRuntimePlugin.request_frontend.__get__(
+            plugin, type(plugin)
+        )
+        execution_service = PythonExecutionService(plugin)
+        collector = FinishedCollector()
+
+        with self.assertLogs("hyde", level="DEBUG") as logs:
+            request = execution_service.request(
+                "copy_me()", on_finished=collector.collect
+            )
+
+        self.assertEqual(client.calls, [("copy_me()", True)])
+        output = "\n".join(logs.output)
+        self.assertIn("'mode': 'hidden'", output)
+        self.assertIn("python:\ncopy_me()", output)
+
+        client.shell_channel.message_received.emit(
+            self._execute_reply(request.msg_id, {"status": "ok"})
+        )
+        self.assertEqual(collector.finished, [request])
 
     def test_frontend_kernel_service_requests_real_kernel_shutdown(self):
         service = FrontendKernelService("/tmp/kernel.json")
