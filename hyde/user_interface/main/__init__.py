@@ -72,6 +72,24 @@ def connect_logger_to_output_sink(logger_name, sink):
     return handler
 
 
+class StatusMessageService:
+    """Status-bar access for plugins.
+
+    The shell already drives the status bar for project operations; this is the
+    same surface, exposed so a plugin can report an outcome the user would
+    otherwise have no way of seeing.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    def show_status_message(self, label):
+        self.app.show_status_message(label)
+
+    def clear_status_message(self):
+        self.app.clear_status_message()
+
+
 class VisibleCommandNotificationService:
     def __init__(self, app):
         self._app = app
@@ -198,6 +216,7 @@ class HydeApp:
             "visible_command_notification_service": (
                 VisibleCommandNotificationService(self)
             ),
+            "status_message_service": StatusMessageService(self),
             "get_current_project_dir": self.get_current_project_dir,
             "get_current_app_ir": self.get_current_app_ir,
             "get_shutting_down": self.get_shutting_down,
@@ -409,6 +428,12 @@ class HydeApp:
             return True
         with os.scandir(project_dir) as entries:
             return any(entries)
+
+    def show_status_message(self, label):
+        self.ui.statusbar.showMessage(str(label))
+
+    def clear_status_message(self):
+        self.ui.statusbar.clearMessage()
 
     def begin_project_operation(self, label):
         self.set_project_status_message(label)

@@ -82,6 +82,11 @@ class Plugin(HydePlugin):
                 )
         return contributions
 
+    # Copy renders in the kernel and the bytes come back asynchronously, so a
+    # fast copy must show nothing while a slow one must not look like a hang.
+    busy_cursor_delay_ms = 200
+    copy_timeout_ms = 10000
+
     def copy_active_figure(self, checked=False, output_format="pdf"):
         del checked
         figure_context = self._active_editable_figure()
@@ -95,8 +100,61 @@ class Plugin(HydePlugin):
         python_execution_service = self.services.get("python_execution_service")
         if python_execution_service is None:
             return False
+        self._begin_copy(output_format)
         python_execution_service.execute_hidden(source)
         return True
+
+    def copy_in_flight(self):
+        return getattr(self, "_copy_format", None) is not None
+
+    def show_busy_cursor(self):
+        if getattr(self, "_busy_cursor_shown", False):
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        self._busy_cursor_shown = True
+
+    def restore_cursor(self):
+        if not getattr(self, "_busy_cursor_shown", False):
+            return
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self._busy_cursor_shown = False
+
+    def on_copy_timeout(self):
+        # Mandatory rather than optional: an unrestored busy cursor makes the
+        # whole application look hung, which is worse than no feedback at all.
+        if not self.copy_in_flight():
+            return
+        self._end_copy()
+        self._status_message("Could not copy the figure to the clipboard.")
+
+    def _status_message(self, text):
+        service = self.services.get("status_message_service")
+        if service is not None:
+            service.show_status_message(text)
+
+    def _begin_copy(self, output_format):
+        self._end_copy()
+        self._copy_format = str(output_format)
+        self._status_message(f"Copying figure as {self._copy_format.upper()}...")
+
+        self._busy_timer = QtCore.QTimer()
+        self._busy_timer.setSingleShot(True)
+        self._busy_timer.timeout.connect(self.show_busy_cursor)
+        self._busy_timer.start(self.busy_cursor_delay_ms)
+
+        self._timeout_timer = QtCore.QTimer()
+        self._timeout_timer.setSingleShot(True)
+        self._timeout_timer.timeout.connect(self.on_copy_timeout)
+        self._timeout_timer.start(self.copy_timeout_ms)
+
+    def _end_copy(self):
+        for attr in ("_busy_timer", "_timeout_timer"):
+            timer = getattr(self, attr, None)
+            if timer is not None:
+                timer.stop()
+                setattr(self, attr, None)
+        self.restore_cursor()
+        self._copy_format = None
 
     def on_kernel_message(self, payload):
         # The kernel rendered the figure and handed the bytes over; the
@@ -110,6 +168,8 @@ class Plugin(HydePlugin):
         except Exception:
             return
         if not rendered:
+            self._end_copy()
+            self._status_message("Could not copy the figure to the clipboard.")
             return
         mime_data = clipboard_mime_data(
             rendered,
@@ -123,6 +183,9 @@ class Plugin(HydePlugin):
         if clipboard is None:
             return
         clipboard.setMimeData(mime_data)
+        output_format = str(data.get("output_format", "") or "").upper()
+        self._end_copy()
+        self._status_message(f"Copied figure to the clipboard as {output_format}.")
 
     def show_save_graphics_dialog(self, checked=False):
         del checked

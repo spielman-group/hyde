@@ -80,6 +80,8 @@ def make_plugin_host(plugin_manager):
         name,
         data,
     )
+    app.show_status_message = lambda label: label
+    app.clear_status_message = lambda: None
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)

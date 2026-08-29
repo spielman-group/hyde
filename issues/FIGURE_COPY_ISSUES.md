@@ -14,7 +14,7 @@ figure graphics-output path that `Save Graphics...` already owns.
 - [x] Slice 4: Offer Copy As Over The Clipboard-Capable Format Set
 - [x] Slice 5: Copy PGF As Text
 - [x] Slice 6: Attach A PNG Companion Representation
-- [ ] Slice 7: Report Copy Progress And Failure
+- [x] Slice 7: Report Copy Progress And Failure
 - [ ] Slice 8: Resync The Save Graphics Spec And Architecture Docs
 - [ ] Slice 9: Test Cleanup Pass
 
@@ -419,15 +419,15 @@ existing debt and is not in scope here.
 
 ### Acceptance criteria
 
-- [ ] A completed copy confirms in the status bar which format reached the
+- [x] A completed copy confirms in the status bar which format reached the
       clipboard.
-- [ ] A copy that has not completed within a short delay shows a busy cursor; a
+- [x] A copy that has not completed within a short delay shows a busy cursor; a
       fast copy shows none.
-- [ ] A copy that never completes restores the cursor and reports failure in the
+- [x] A copy that never completes restores the cursor and reports failure in the
       status bar.
-- [ ] A failed render reports failure rather than silently confirming success.
-- [ ] The cursor is never left in a busy state on any path.
-- [ ] The status-message surface is available to plugins rather than private to
+- [x] A failed render reports failure rather than silently confirming success.
+- [x] The cursor is never left in a busy state on any path.
+- [x] The status-message surface is available to plugins rather than private to
       the shell.
 
 ### Blocked by

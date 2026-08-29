@@ -69,6 +69,8 @@ def make_plugin_host(plugin_manager):
     app.plugin_manager = plugin_manager
     app.configure_persistent_subwindow = lambda subwindow: None
     app.emit_plugin_event = lambda name, data=None: (name, data)
+    app.show_status_message = lambda label: label
+    app.clear_status_message = lambda: None
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)

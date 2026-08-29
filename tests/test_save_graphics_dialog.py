@@ -59,6 +59,8 @@ def make_plugin_host(plugin_manager):
     app.plugin_manager = plugin_manager
     app.configure_persistent_subwindow = lambda subwindow: None
     app.emit_plugin_event = lambda name, data=None: (name, data)
+    app.show_status_message = lambda label: label
+    app.clear_status_message = lambda: None
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
@@ -596,6 +598,131 @@ class TestPngCompanionRepresentation(unittest.TestCase):
         mime_data = QtWidgets.QApplication.clipboard().mimeData()
         self.assertIn("image/png", mime_data.formats())
         self.assertIn("application/pdf", mime_data.formats())
+
+
+class TestCopyFeedback(unittest.TestCase):
+    """Copy is asynchronous and its whole effect is invisible until you paste
+    somewhere else, so it has to say what happened."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def _plugin_with_status(self):
+        messages = []
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {
+            "figure_context_service": types.SimpleNamespace(
+                active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
+            ),
+            "python_execution_service": types.SimpleNamespace(
+                execute_hidden=lambda code, silent=True: None
+            ),
+            "status_message_service": types.SimpleNamespace(
+                show_status_message=lambda text: messages.append(text),
+                clear_status_message=lambda: messages.append(None),
+            ),
+        }
+        return plugin, messages
+
+    def test_a_completed_copy_confirms_which_format_reached_the_clipboard(self):
+        import base64
+
+        plugin, messages = self._plugin_with_status()
+        plugin.copy_active_figure(output_format="png")
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(b"\x89PNG fake").decode("ascii"),
+                    "output_format": "png",
+                    "is_text": False,
+                },
+            }
+        )
+
+        self.assertTrue(any("PNG" in str(m) for m in messages), messages)
+        self.assertTrue(any("clipboard" in str(m).lower() for m in messages), messages)
+
+    def test_a_copy_that_never_completes_reports_failure_and_restores_the_cursor(self):
+        plugin, messages = self._plugin_with_status()
+        plugin.copy_active_figure(output_format="pdf")
+
+        self.assertTrue(plugin.copy_in_flight())
+        plugin.on_copy_timeout()
+
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+
+    def test_the_cursor_is_never_left_busy_after_a_completed_copy(self):
+        import base64
+
+        plugin, _ = self._plugin_with_status()
+        plugin.copy_active_figure(output_format="pdf")
+        plugin.show_busy_cursor()
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(b"%PDF fake").decode("ascii"),
+                    "output_format": "pdf",
+                    "is_text": False,
+                },
+            }
+        )
+
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+        self.assertFalse(plugin.copy_in_flight())
+
+    def test_a_fast_copy_shows_no_busy_cursor(self):
+        import base64
+
+        plugin, _ = self._plugin_with_status()
+        plugin.copy_active_figure(output_format="pdf")
+        # Completion before the delay elapses, so the cursor was never shown.
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {
+                    "payload_base64": base64.b64encode(b"%PDF fake").decode("ascii"),
+                    "output_format": "pdf",
+                    "is_text": False,
+                },
+            }
+        )
+
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+
+    def test_a_failed_render_does_not_confirm_success(self):
+        plugin, messages = self._plugin_with_status()
+        plugin.copy_active_figure(output_format="pdf")
+        plugin.on_kernel_message(
+            {
+                "task": "COPY_TO_CLIPBOARD_REQUEST",
+                "data": {"payload_base64": "", "output_format": "pdf", "is_text": False},
+            }
+        )
+
+        self.assertFalse(any("Copied" in str(m) for m in messages), messages)
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+
+    def test_copy_works_without_a_status_service(self):
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {
+            "figure_context_service": types.SimpleNamespace(
+                active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
+            ),
+            "python_execution_service": types.SimpleNamespace(
+                execute_hidden=lambda code, silent=True: None
+            ),
+        }
+
+        self.assertTrue(plugin.copy_active_figure())
+        plugin.on_copy_timeout()
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
 
 
 class TestCopyAsSubmenu(unittest.TestCase):
