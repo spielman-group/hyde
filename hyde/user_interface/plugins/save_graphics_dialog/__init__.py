@@ -22,8 +22,13 @@ class Plugin(HydePlugin):
 
     # Copy renders in the kernel and the bytes come back asynchronously, so a
     # fast copy must show nothing while a slow one must not look like a hang.
+    # Neither clock bounds the kernel: a copy queued behind the user's own cell
+    # waits as long as that takes.
     busy_cursor_delay_ms = 200
-    copy_timeout_ms = 10000
+    busy_cursor_hold_ms = 2000
+    # Once the render has run its bytes are already in transit on the other
+    # channel, so this gap is transport, not work.
+    payload_timeout_ms = 2000
 
     def __init__(self, initial_settings):
         super().__init__(initial_settings)
@@ -87,6 +92,12 @@ class Plugin(HydePlugin):
 
     def copy_active_figure(self, checked=False, output_format="pdf"):
         del checked
+        if self.copy_in_flight():
+            # One at a time. The rendered bytes arrive on a channel that does
+            # not say which copy they answer, so a second copy in flight would
+            # make "the next payload is mine" untrue for both.
+            self._status_message("A figure copy is already in progress.")
+            return False
         figure_context = self.active_editable_figure()
         if figure_context is None:
             return False
@@ -99,22 +110,48 @@ class Plugin(HydePlugin):
         if python_execution_service is None:
             return False
         self._begin_copy(output_format)
-        python_execution_service.execute_hidden(source)
+        kernel_request = python_execution_service.request(
+            source, on_finished=self.on_copy_render_finished
+        )
+        if kernel_request is None:
+            self._fail_copy("Could not reach the kernel to copy the figure.")
+            return False
+        self._copy_request.kernel_request = kernel_request
         return True
 
     def copy_in_flight(self):
         return self._copy_request is not None
 
-    def on_copy_timeout(self):
+    def on_copy_render_finished(self, kernel_request):
+        """The kernel answered the render command. The bytes are separate."""
+        if not self.copy_in_flight():
+            # The bytes beat the reply and the copy is already done.
+            return
+        if self._copy_request.kernel_request is not kernel_request:
+            return
+        if kernel_request.ran():
+            self._copy_request.await_payload(self.payload_timeout_ms)
+            return
+        # Until the GUI read replies, a command that raised in the kernel was
+        # invisible here and the copy could only time out anonymously.
+        self._fail_copy(
+            f"Could not copy the figure: {kernel_request.error}"
+            if kernel_request.error
+            else None
+        )
+
+    def on_copy_payload_timeout(self):
         # Mandatory rather than optional: an unrestored busy cursor makes the
         # whole application look hung, which is worse than no feedback at all.
         if not self.copy_in_flight():
             return
-        self._fail_copy()
+        self._fail_copy(
+            "Could not copy the figure: it rendered, but its data never arrived."
+        )
 
-    def _fail_copy(self):
+    def _fail_copy(self, message=None):
         self._end_copy()
-        self._status_message("Could not copy the figure to the clipboard.")
+        self._status_message(message or "Could not copy the figure to the clipboard.")
 
     def _status_message(self, text):
         service = self.services.get("status_message_service")
@@ -126,8 +163,8 @@ class Plugin(HydePlugin):
         self._copy_request = FigureCopyRequest(
             output_format,
             busy_delay_ms=self.busy_cursor_delay_ms,
-            timeout_ms=self.copy_timeout_ms,
-            on_timeout=self.on_copy_timeout,
+            busy_hold_ms=self.busy_cursor_hold_ms,
+            on_payload_timeout=self.on_copy_payload_timeout,
         )
         self._status_message(
             f"Copying figure as {self._copy_request.output_format.upper()}..."
@@ -144,9 +181,9 @@ class Plugin(HydePlugin):
         if payload.get("task") != "COPY_TO_CLIPBOARD_REQUEST":
             return
         if not self.copy_in_flight():
-            # A reply for a copy that already timed out, or that this plugin
-            # never asked for. Reporting success now would contradict the
-            # failure the user has already been shown.
+            # Bytes for a copy that already failed, or that this plugin never
+            # asked for. Reporting success now would contradict the failure the
+            # user has already been shown.
             return
         data = payload.get("data", {}) or {}
         try:

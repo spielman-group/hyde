@@ -35,6 +35,7 @@ from hyde.features.matplotlib_features import (
 from hyde.user_interface.plugins.save_graphics_dialog.clipboard import clipboard_mime_data
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
+from hyde.user_interface.plugins.kernel_runtime import KernelRequest
 from hyde.user_interface.plugins.save_graphics_dialog import Plugin as SaveGraphicsPlugin
 from hyde.user_interface.plugins.save_graphics_dialog.dialogs import (
     SaveGraphicsDialog,
@@ -158,15 +159,73 @@ class RecordingEditableFigureContext(EditableFigureContext):
         return self._recorded_size_inches
 
 
+class FakeKernelRequests:
+    """Stands in for `python_execution_service`, and answers on demand.
+
+    Copy needs two arrivals that no channel orders against each other -- the
+    kernel's reply, and the rendered bytes -- so tests need to drive them
+    separately and in either order.
+    """
+
+    def __init__(self):
+        self.executed = []
+        self.requests = []
+
+    def request(self, code, *, on_finished):
+        self.executed.append(code)
+        request = KernelRequest(f"msg-{len(self.requests) + 1}", code)
+        self.requests.append((request, on_finished))
+        return request
+
+    def execute_hidden(self, code, silent=True):
+        self.executed.append(code)
+        return True
+
+    def _answer(self, outcome, error=""):
+        request, on_finished = self.requests[-1]
+        request.settle(outcome, error)
+        on_finished(request)
+
+    def render_ran(self):
+        self._answer(KernelRequest.RAN)
+
+    def render_raised(self, error="ValueError: no figure named Graph12"):
+        self._answer(KernelRequest.RAISED, error)
+
+    def kernel_went_away(self):
+        self._answer(KernelRequest.ABANDONED, "The kernel is no longer available.")
+
+
+def copy_payload(data=b"%PDF fake", output_format="pdf", is_text=False):
+    import base64
+
+    return {
+        "task": "COPY_TO_CLIPBOARD_REQUEST",
+        "data": {
+            "payload_base64": base64.b64encode(data).decode("ascii"),
+            "output_format": output_format,
+            "is_text": is_text,
+        },
+    }
+
+
+def settle_copy(plugin, kernel, output_format="pdf"):
+    """Complete the copy in flight the way a real one completes.
+
+    Copy refuses a second request while one is outstanding, so a test that
+    triggers several in a row has to let each finish first.
+    """
+    kernel.render_ran()
+    plugin.on_kernel_message(copy_payload(output_format=output_format))
+
+
 def make_copy_plugin(messages=None):
     plugin = SaveGraphicsPlugin({})
     plugin.services = {
         "figure_context_service": types.SimpleNamespace(
             active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
         ),
-        "python_execution_service": types.SimpleNamespace(
-            execute_hidden=lambda code, silent=True: None
-        ),
+        "python_execution_service": FakeKernelRequests(),
     }
     if messages is not None:
         plugin.services["status_message_service"] = types.SimpleNamespace(
@@ -245,20 +304,18 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         cls.qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
     def test_copy_action_emits_the_copy_command_for_the_active_figure(self):
-        executed = []
+        kernel = FakeKernelRequests()
         plugin = SaveGraphicsPlugin({})
         plugin.services = {
             "figure_context_service": types.SimpleNamespace(
                 active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
             ),
-            "python_execution_service": types.SimpleNamespace(
-                execute_hidden=lambda code, silent=True: executed.append(code)
-            ),
+            "python_execution_service": kernel,
         }
 
         self.assertTrue(plugin.copy_active_figure())
         self.assertEqual(
-            executed,
+            kernel.executed,
             [
                 "fig = hyde.get_figure('Graph12')\n"
                 "hyde.copy_figure(fig, format='pdf', dpi='figure')"
@@ -266,19 +323,17 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         )
 
     def test_copy_action_does_nothing_without_an_active_figure(self):
-        executed = []
+        kernel = FakeKernelRequests()
         plugin = SaveGraphicsPlugin({})
         plugin.services = {
             "figure_context_service": types.SimpleNamespace(
                 active_editable_figure=lambda: None
             ),
-            "python_execution_service": types.SimpleNamespace(
-                execute_hidden=lambda code, silent=True: executed.append(code)
-            ),
+            "python_execution_service": kernel,
         }
 
         self.assertFalse(plugin.copy_active_figure())
-        self.assertEqual([], executed)
+        self.assertEqual([], kernel.executed)
 
     def test_rendered_bytes_from_the_kernel_reach_the_clipboard_as_pdf(self):
         import base64
@@ -371,9 +426,10 @@ class TestEditMenuCopy(unittest.TestCase):
 
     def _host_with_figure(self, figure_context):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        self.save_graphics = SaveGraphicsPlugin({})
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "save_graphics_dialog": SaveGraphicsPlugin({}),
+            "save_graphics_dialog": self.save_graphics,
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
@@ -383,13 +439,11 @@ class TestEditMenuCopy(unittest.TestCase):
                 services["figure_context_service"] = types.SimpleNamespace(
                     active_editable_figure=lambda: figure_context[0]
                 )
-                services["python_execution_service"] = types.SimpleNamespace(
-                    execute_hidden=lambda code, silent=True: self.executed.append(code)
-                )
+                services["python_execution_service"] = self.kernel
         return app
 
     def setUp(self):
-        self.executed = []
+        self.kernel = FakeKernelRequests()
 
     def test_edit_menu_exists_and_carries_copy_with_the_platform_shortcut(self):
         figure_context = [None]
@@ -433,11 +487,12 @@ class TestEditMenuCopy(unittest.TestCase):
         app.menu_context.refresh_enabled_states()
 
         app.menu_context.lookup_action("edit", "Copy").trigger()
-        from_edit = list(self.executed)
+        from_edit = list(self.kernel.executed)
+        settle_copy(self.save_graphics, self.kernel)
 
-        self.executed.clear()
+        self.kernel.executed.clear()
         app.menu_context.lookup_action("figure", "Copy").trigger()
-        from_figure = list(self.executed)
+        from_figure = list(self.kernel.executed)
 
         self.assertEqual(
             [
@@ -631,9 +686,7 @@ class TestCopyFeedback(unittest.TestCase):
             "figure_context_service": types.SimpleNamespace(
                 active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
             ),
-            "python_execution_service": types.SimpleNamespace(
-                execute_hidden=lambda code, silent=True: None
-            ),
+            "python_execution_service": FakeKernelRequests(),
             "status_message_service": types.SimpleNamespace(
                 show_status_message=lambda text: messages.append(text),
                 clear_status_message=lambda: messages.append(None),
@@ -660,12 +713,22 @@ class TestCopyFeedback(unittest.TestCase):
         self.assertTrue(any("PNG" in str(m) for m in messages), messages)
         self.assertTrue(any("clipboard" in str(m).lower() for m in messages), messages)
 
-    def test_a_copy_that_never_completes_reports_failure_and_restores_the_cursor(self):
+    def test_a_copy_waits_for_a_busy_kernel_rather_than_reporting_failure(self):
+        """The user's own long cell holds the kernel; the copy is queued, not late."""
         plugin, messages = self._plugin_with_status()
         plugin.copy_active_figure(output_format="pdf")
 
         self.assertTrue(plugin.copy_in_flight())
-        plugin.on_copy_timeout()
+        self.assertFalse(any("could not" in str(m).lower() for m in messages), messages)
+
+    def test_a_rendered_copy_whose_data_never_arrives_reports_failure(self):
+        plugin, messages = self._plugin_with_status()
+        kernel = plugin.services["python_execution_service"]
+        plugin.copy_active_figure(output_format="pdf")
+        kernel.render_ran()
+
+        self.assertTrue(plugin.copy_in_flight())
+        plugin.on_copy_payload_timeout()
 
         self.assertFalse(plugin.copy_in_flight())
         self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
@@ -707,18 +770,18 @@ class TestCopyFeedback(unittest.TestCase):
         self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
 
     def test_copy_works_without_a_status_service(self):
+        kernel = FakeKernelRequests()
         plugin = SaveGraphicsPlugin({})
         plugin.services = {
             "figure_context_service": types.SimpleNamespace(
                 active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
             ),
-            "python_execution_service": types.SimpleNamespace(
-                execute_hidden=lambda code, silent=True: None
-            ),
+            "python_execution_service": kernel,
         }
 
         self.assertTrue(plugin.copy_active_figure())
-        plugin.on_copy_timeout()
+        kernel.render_raised()
+        self.assertFalse(plugin.copy_in_flight())
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
 
 
@@ -771,29 +834,102 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
         self.assertFalse(plugin.copy_in_flight())
         self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
 
-    def test_a_reply_after_timeout_does_not_overwrite_the_failure(self):
-        import base64
-
+    def test_data_arriving_after_a_failure_does_not_overwrite_it(self):
         messages = []
         plugin = make_copy_plugin(messages)
+        kernel = plugin.services["python_execution_service"]
         QtWidgets.QApplication.clipboard().setText("untouched")
         plugin.copy_active_figure(output_format="pdf")
-        plugin.on_copy_timeout()
+        kernel.render_ran()
+        plugin.on_copy_payload_timeout()
         self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
 
-        plugin.on_kernel_message(
-            {
-                "task": "COPY_TO_CLIPBOARD_REQUEST",
-                "data": {
-                    "payload_base64": base64.b64encode(b"%PDF late").decode("ascii"),
-                    "output_format": "pdf",
-                    "is_text": False,
-                },
-            }
-        )
+        plugin.on_kernel_message(copy_payload(b"%PDF late"))
 
         self.assertFalse(any("Copied" in str(m) for m in messages), messages)
         self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
+
+
+class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
+    """A copy is answered twice, by routes nothing orders against each other.
+
+    The kernel's execute_reply says the render ran; the rendered bytes come
+    back on the parent-message channel. Either can arrive first, and only one
+    of them carries a reason when things go wrong.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def _copy_in_flight(self, output_format="pdf"):
+        messages = []
+        plugin = make_copy_plugin(messages)
+        kernel = plugin.services["python_execution_service"]
+        self.assertTrue(plugin.copy_active_figure(output_format=output_format))
+        return plugin, kernel, messages
+
+    def test_a_second_copy_is_refused_while_one_is_in_flight(self):
+        plugin, kernel, messages = self._copy_in_flight()
+
+        self.assertFalse(plugin.copy_active_figure(output_format="png"))
+        self.assertEqual(1, len(kernel.executed))
+        self.assertTrue(
+            any("already in progress" in str(m).lower() for m in messages), messages
+        )
+
+    def test_a_copy_can_be_started_again_once_the_last_one_settled(self):
+        plugin, kernel, _ = self._copy_in_flight()
+        plugin.on_kernel_message(copy_payload())
+
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(plugin.copy_active_figure(output_format="png"))
+        self.assertEqual(2, len(kernel.executed))
+
+    def test_a_render_that_raises_reports_what_the_kernel_said(self):
+        """Hidden execution failures used to be invisible; the reply carries them."""
+        plugin, kernel, messages = self._copy_in_flight()
+        kernel.render_raised("ValueError: no figure named Graph12")
+
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(
+            any("no figure named Graph12" in str(m) for m in messages), messages
+        )
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+
+    def test_a_copy_fails_when_the_kernel_goes_away(self):
+        plugin, kernel, messages = self._copy_in_flight()
+        kernel.kernel_went_away()
+
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+
+    def test_data_arriving_before_the_reply_still_reaches_the_clipboard(self):
+        plugin, kernel, messages = self._copy_in_flight()
+        QtWidgets.QApplication.clipboard().setText("untouched")
+
+        plugin.on_kernel_message(copy_payload(b"%PDF early"))
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(any("Copied" in str(m) for m in messages), messages)
+
+        # The reply lands afterwards against a copy that is already settled.
+        kernel.render_ran()
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertFalse(any("could not" in str(m).lower() for m in messages), messages)
+
+    def test_the_wait_cursor_is_released_while_the_copy_is_still_waiting(self):
+        """A minute-long wait cursor reads as a hung application."""
+        plugin, _, _ = self._copy_in_flight()
+        plugin._copy_request.show_busy_cursor()
+        self.assertIsNotNone(QtWidgets.QApplication.overrideCursor())
+
+        plugin._copy_request.release_busy_cursor()
+
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+        self.assertTrue(plugin.copy_in_flight())
 
 
 class TestGeneratedGraphicsFormatTable(unittest.TestCase):
@@ -851,13 +987,14 @@ class TestCopyAsSubmenu(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def setUp(self):
-        self.executed = []
+        self.kernel = FakeKernelRequests()
 
     def _host(self, figure_context):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        self.save_graphics = SaveGraphicsPlugin({})
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "save_graphics_dialog": SaveGraphicsPlugin({}),
+            "save_graphics_dialog": self.save_graphics,
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)
@@ -867,9 +1004,7 @@ class TestCopyAsSubmenu(unittest.TestCase):
                 services["figure_context_service"] = types.SimpleNamespace(
                     active_editable_figure=lambda: figure_context[0]
                 )
-                services["python_execution_service"] = types.SimpleNamespace(
-                    execute_hidden=lambda code, silent=True: self.executed.append(code)
-                )
+                services["python_execution_service"] = self.kernel
         return app
 
     def _submenu_labels(self, menu):
@@ -910,7 +1045,7 @@ class TestCopyAsSubmenu(unittest.TestCase):
 
         for item in graphics_clipboard_formats():
             with self.subTest(output_format=item.key):
-                self.executed.clear()
+                self.kernel.executed.clear()
                 action = app.menu_context.lookup_action(
                     "edit", item.display_label, path=("Copy As",)
                 )
@@ -921,8 +1056,9 @@ class TestCopyAsSubmenu(unittest.TestCase):
                         "fig = hyde.get_figure('Graph12')\n"
                         f"hyde.copy_figure(fig, format={item.key!r}, dpi='figure')"
                     ],
-                    self.executed,
+                    self.kernel.executed,
                 )
+                settle_copy(self.save_graphics, self.kernel, item.key)
 
     def test_copy_as_entries_need_an_active_figure(self):
         figure_context = [None]
@@ -1023,9 +1159,10 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
 
     def test_save_graphics_action_opens_dialog_for_active_figure(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        self.save_graphics = SaveGraphicsPlugin({})
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "save_graphics_dialog": SaveGraphicsPlugin({}),
+            "save_graphics_dialog": self.save_graphics,
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)

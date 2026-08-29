@@ -1,6 +1,6 @@
 # Scope: one owner for GUI-initiated kernel requests
 
-Status: steps 1 and 2 landed. Step 3 next.
+Status: steps 1-3 landed. Step 4 next.
 
 ## The confusion is well founded
 
@@ -128,8 +128,13 @@ Each step leaves the suite green on its own.
    answers "what happened". Outcomes are ran / raised / abandoned, and `stop()`
    abandons everything outstanding at once. No policy attached; nothing uses it
    yet.
-3. Move copy onto it. Copy is the smallest consumer and already has an isolated
-   `FigureCopyRequest` to fold in. This is also where serialization lands.
+3. **Done.** Copy moved onto it. `FigureCopyRequest` now holds the copy open
+   until it has what it needs from either channel, refuses a second copy while
+   one is outstanding, reports what the kernel said when a render raises, and
+   fails the copy when the kernel goes away. Its wall-clock `copy_timeout_ms`
+   is gone; the only remaining clock bounds the transport gap after a
+   successful render. The wait cursor now lowers itself after a short hold
+   rather than staying up for as long as the kernel takes.
 4. Move table refresh, then figure refresh and close. Delete their timers and
    timeout constants as each moves.
 5. Surface `status="error"` replies, which retires the "hidden execution
@@ -169,6 +174,20 @@ reads as a hung application — and the status message carries the state instead
 
 The one timeout that stays is the bounded wait for a payload *after* an
 `execute_reply` with `status="ok"`, per the two-transport note above.
+
+## Known gap: a stray payload after a failed copy
+
+A copy that renders successfully but whose bytes never arrive fails after a
+bounded wait. Those bytes can still land afterwards. While no copy is
+outstanding they are dropped, which is correct -- but if the user starts another
+copy inside that window, the stale bytes satisfy the new one.
+
+The window is short and needs a copy started immediately after a failure, so
+this is a real but narrow exposure, and it is no worse than what the wall-clock
+timeout allowed before. Closing it means tagging the payload with the `msg_id`
+of the request that produced it. ipykernel exposes that to kernel-side code
+through the parent header of the executing request, so it does not require a
+change to `hyde.copy_figure`'s signature or to the emitted Python. Step 5.
 
 ## Risk
 
