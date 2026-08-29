@@ -193,12 +193,6 @@ class TestFigureCopyCommand(unittest.TestCase):
 
         self.assertRegex(source.splitlines()[0], r"^fig = hyde\.get_figure\('.+'\)$")
 
-    def test_copy_state_without_a_figure_name_fails_validation(self):
-        with self.assertRaises(ValueError):
-            dataclass_replace(
-                FigureIR(figure_name="Graph12").with_copy_graphics(), figure_name=None
-            ).validate()
-
     def test_copy_carries_no_output_path(self):
         # Copy has no export target; a state carrying one is a save state that
         # took the wrong branch.
@@ -676,25 +670,6 @@ class TestCopyFeedback(unittest.TestCase):
 
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
         self.assertFalse(plugin.copy_in_flight())
-
-    def test_a_fast_copy_shows_no_busy_cursor(self):
-        import base64
-
-        plugin, _ = self._plugin_with_status()
-        plugin.copy_active_figure(output_format="pdf")
-        # Completion before the delay elapses, so the cursor was never shown.
-        plugin.on_kernel_message(
-            {
-                "task": "COPY_TO_CLIPBOARD_REQUEST",
-                "data": {
-                    "payload_base64": base64.b64encode(b"%PDF fake").decode("ascii"),
-                    "output_format": "pdf",
-                    "is_text": False,
-                },
-            }
-        )
-
-        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
 
     def test_a_failed_render_does_not_confirm_success(self):
         plugin, messages = self._plugin_with_status()

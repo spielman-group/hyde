@@ -16,7 +16,7 @@ figure graphics-output path that `Save Graphics...` already owns.
 - [x] Slice 6: Attach A PNG Companion Representation
 - [x] Slice 7: Report Copy Progress And Failure
 - [x] Slice 8: Resync The Save Graphics Spec And Architecture Docs
-- [ ] Slice 9: Test Cleanup Pass
+- [x] Slice 9: Test Cleanup Pass
 
 ## Agreed Design Decisions
 
@@ -512,12 +512,12 @@ The durable safety net this should leave behind:
 
 ### Acceptance criteria
 
-- [ ] Every remaining test has a public behaviour or architecture-contract
+- [x] Every remaining test has a public behaviour or architecture-contract
       reason to exist.
-- [ ] Tests asserting private wiring, call order, or stale fixture shape are
+- [x] Tests asserting private wiring, call order, or stale fixture shape are
       removed or rewritten.
-- [ ] No production fallback was added to keep an old test passing.
-- [ ] The whole suite passes in a single process.
+- [x] No production fallback was added to keep an old test passing.
+- [x] The whole suite passes in a single process.
 
 ### Blocked by
 

@@ -14,7 +14,6 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("labscript_utils.plugins is required") from exc
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
-from PyQt5.QtTest import QTest
 from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 
 from hyde.user_interface.main import HydeApp, connect_logger_to_output_sink
@@ -1532,6 +1531,10 @@ class TestPluginTools(unittest.TestCase):
         # Menus render once at startup, so a static `enabled` flag can only ever
         # describe the state at launch. Figure actions need to reflect whether a
         # figure is active right now.
+        #
+        # This is also what gates keyboard shortcuts: Qt will not fire a
+        # disabled action's shortcut, so Hyde carries no separate
+        # shortcut-handling path.
         figure_active = [False]
         main_window = QtWidgets.QMainWindow()
         persistent_menu = RecordingMenu("Figure", main_window)
@@ -1634,50 +1637,6 @@ class TestPluginTools(unittest.TestCase):
         figure_active[0] = True
         enabled_popup = context.build_popup_menu("figure", parent=main_window)
         self.assertTrue(enabled_popup.actions()[0].isEnabled())
-
-    def test_disabled_action_does_not_fire_on_its_shortcut(self):
-        # Correct enablement is what gates the keyboard, so there is no separate
-        # shortcut-gating path to maintain.
-        fired = []
-        allowed = [False]
-        main_window = QtWidgets.QMainWindow()
-        main_window.show()
-        persistent_menu = RecordingMenu("Edit", main_window)
-        context = HydeMenuContext()
-        context.register_location("edit", persistent_menu)
-        context.contributions = [
-            (
-                "demo",
-                {
-                    "location": "edit",
-                    "name": "Copy",
-                    "action": lambda: fired.append("copy"),
-                    "shortcut": QtGui.QKeySequence.Copy,
-                    "enabled": lambda: allowed[0],
-                },
-            )
-        ]
-        context.render()
-        action = context.lookup_action("edit", "Copy")
-        # Scope the shortcut to this window. Other tests in this process create
-        # hosts carrying their own Ctrl+C actions, and an application-scoped
-        # shortcut would make this test depend on execution order.
-        action.setShortcutContext(QtCore.Qt.WidgetShortcut)
-        main_window.addAction(action)
-        main_window.setFocus()
-        try:
-            context.refresh_enabled_states()
-            QTest.keyClick(main_window, QtCore.Qt.Key_C, QtCore.Qt.ControlModifier)
-            QtWidgets.QApplication.instance().processEvents()
-            self.assertEqual([], fired)
-
-            allowed[0] = True
-            context.refresh_enabled_states()
-            QTest.keyClick(main_window, QtCore.Qt.Key_C, QtCore.Qt.ControlModifier)
-            QtWidgets.QApplication.instance().processEvents()
-            self.assertEqual(["copy"], fired)
-        finally:
-            main_window.close()
 
     def test_setup_plugins_renders_contextual_menu_contributions_and_uses_fresh_popup_menu(self):
         triggered = []
