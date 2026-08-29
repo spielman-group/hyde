@@ -108,6 +108,10 @@ short timeout legitimate there and not before.
   in order. Ordering was never missing; correlation was.
 - **The user's own terminal cells.** The owner must not queue GUI requests behind
   a policy that makes the GUI appear frozen, nor block the user.
+- **Making the GUI usable while a script runs.** The owner makes the wait honest;
+  it does not remove it. That is a real defect with its own mechanism and its own
+  hazards, recorded in `CONCURRENT_KERNEL_ACCESS.md`. The owner is a prerequisite
+  for it, so nothing here should be read as a fix for it.
 - **`hyde.copy_figure` and the other public runtime helpers.** Their signatures
   and emitted Python do not change.
 
