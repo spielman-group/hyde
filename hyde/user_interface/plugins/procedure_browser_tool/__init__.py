@@ -2,11 +2,7 @@ import os
 from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtWidgets import QWidget
 from qtutils.qt.QtGui import QDesktopServices
-try:
-    # Qt6 moved QFileSystemModel from QtWidgets to QtGui
-    from qtutils.qt.QtGui import QFileSystemModel
-except ImportError:
-    from qtutils.qt.QtWidgets import QFileSystemModel
+from qtutils.qt.QtGui import QFileSystemModel
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget, load_ui_for_owner
 from hyde.user_interface.shared.plugin import HydeToolWindowPlugin
 
