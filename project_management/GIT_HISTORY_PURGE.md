@@ -3,7 +3,34 @@
 Runbook for permanently removing Igor Pro source material from
 `spielman-group/hyde`, including all past commits.
 
-**Status: PLAN ONLY. No history has been rewritten.**
+**Status: EXECUTED 2026-08-29. History has been rewritten and force-pushed.**
+
+The rewrite is done. What remains is the GitHub-side garbage collection in
+step 6 — until GitHub confirms it, the old objects are still reachable by
+direct SHA URL, and the purge is not complete.
+
+## Execution record
+
+| Check | Result |
+| --- | --- |
+| Paths purged | 58 (23 `specifications/`, 8 `IGOR.md`, 27 screenshots) |
+| Commits preserved | 191 / 191 |
+| Refs preserved | 7 / 7 |
+| `SPEC.md` files preserved | 17 |
+| Content mismatches on surviving files | 0 |
+| Remote size | 21M -> 2.3M |
+
+Verified against a fresh clone of the remote, not local state. All local
+branches were reset to the rewritten refs, the stale
+`.claude/worktrees/brave-chaplygin-99255e` worktree was removed after
+confirming it held no unique content, and the local object store was expired
+and repacked (23M -> 2.0M).
+
+Pre-rewrite backup: `~/hyde-backup-prerewrite.git` (191 commits). Keep it until
+GitHub confirms garbage collection, then it may be deleted.
+
+Anyone holding a clone made before 2026-08-29 must delete it and re-clone. A
+single push from such a clone restores the purged blobs.
 
 ## Motivation
 
