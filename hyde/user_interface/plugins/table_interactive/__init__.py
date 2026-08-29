@@ -1,5 +1,3 @@
-from functools import partial
-
 from qtutils.qt import QtCore
 from hyde.user_interface.base_hyde_widgets import active_interactive_window
 from hyde.user_interface.shared.plugin import (
@@ -68,7 +66,11 @@ class TableWorkspaceService:
         subwindow.setWindowTitle(table.formatted_window_title())
         subwindow.show()
         apply_saveable_window_state(subwindow, window_state)
-        subwindow.destroyed.connect(partial(self._on_subwindow_destroyed, stable_name))
+        # Keep the workspace as the signal receiver rather than hiding it in a
+        # partial. PyQt weakly tracks bound-method receivers, so deferred Qt
+        # destruction cannot call a Python callable whose owner was collected.
+        subwindow.setProperty("hyde_workspace_handle", stable_name)
+        subwindow.destroyed.connect(self._on_subwindow_destroyed)
         return table
 
     def append_to_table(self, names, name):
@@ -129,9 +131,12 @@ class TableWorkspaceService:
         if self.active_table_handle == handle:
             self.active_table_handle = None
 
-    def _on_subwindow_destroyed(self, handle, *args):
-        del args
-        self._remove_table(handle)
+    def _on_subwindow_destroyed(self, subwindow=None):
+        if subwindow is None:
+            return
+        handle = subwindow.property("hyde_workspace_handle")
+        if handle is not None:
+            self._remove_table(str(handle))
 
 
 class TableFeatureService:

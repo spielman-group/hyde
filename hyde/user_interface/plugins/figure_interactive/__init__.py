@@ -1,5 +1,4 @@
 import logging
-from functools import partial
 
 from qtutils import inmain_decorator
 from qtutils.qt import QtCore
@@ -49,9 +48,11 @@ class FigureWorkspaceService:
             subwindow.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
             figure.bind_subwindow(subwindow, stable_name=stable_name)
             self.figures[figure_number] = figure
-            subwindow.destroyed.connect(
-                partial(self._on_subwindow_destroyed, figure_number)
-            )
+            # Keep the workspace as the signal receiver rather than hiding it
+            # in a partial. PyQt weakly tracks bound-method receivers, so
+            # deferred Qt destruction cannot call a GC-cleared callable.
+            subwindow.setProperty("hyde_workspace_handle", figure_number)
+            subwindow.destroyed.connect(self._on_subwindow_destroyed)
             subwindow.show()
         else:
             subwindow = figure.parentWidget()
@@ -87,9 +88,12 @@ class FigureWorkspaceService:
             return
         figures.pop(int(figure_number), None)
 
-    def _on_subwindow_destroyed(self, figure_number, *args):
-        del args
-        self._remove_figure(figure_number)
+    def _on_subwindow_destroyed(self, subwindow=None):
+        if subwindow is None:
+            return
+        figure_number = subwindow.property("hyde_workspace_handle")
+        if figure_number is not None:
+            self._remove_figure(int(figure_number))
 
 
 class FigureFeatureService:

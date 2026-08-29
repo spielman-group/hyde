@@ -1,7 +1,9 @@
-import unittest
-import types
-from unittest.mock import patch
+import gc
 import sys
+import types
+import unittest
+import weakref
+from unittest.mock import patch
 
 try:
     import matplotlib
@@ -2038,6 +2040,38 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(figure.snapshot_state.figure_ir()["settings"]["title"], "FigureA")
         workspace.clear()
         mdi_area.close()
+
+    def test_deferred_subwindow_delete_does_not_retain_cleared_workspace(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = type("FakePlugin", (), {})()
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": FakeNamespaceViewService(),
+            "python_execution_service": FakeExecutionService(),
+            "save_window_dialog_service": self._FakeSaveWindowDialogService(),
+            "get_shutting_down": lambda: False,
+        }
+        workspace = FigureWorkspaceService(plugin)
+        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        workspace.open_or_update_figure(
+            {
+                "figure_number": 1,
+                "snapshot": {
+                    "is_first_class": True,
+                    "default_macro_name": "FigureA",
+                    "figure_ir": figure_ir,
+                },
+            }
+        )
+
+        workspace.clear()
+        workspace_ref = weakref.ref(workspace)
+        del workspace
+        gc.collect()
+
+        self.assertIsNone(workspace_ref())
+        QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+        self.qapp.processEvents()
 
     def test_workspace_requires_save_window_dialog_service_for_first_class_windows(self):
         mdi_area = QtWidgets.QMdiArea()

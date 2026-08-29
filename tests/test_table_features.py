@@ -1,6 +1,8 @@
+import gc
 import os
 import tempfile
 import unittest
+import weakref
 from unittest.mock import patch
 
 import numpy as np
@@ -1226,6 +1228,20 @@ class TestTableWorkspaceService(unittest.TestCase):
         self.assertTrue(table._closed)
         self.assertIsNone(workspace.lookup_table("Table0"))
         self.assertEqual(mdi_area.subWindowList(), [])
+
+    def test_deferred_subwindow_delete_does_not_retain_cleared_workspace(self):
+        mdi_area = QtWidgets.QMdiArea()
+        plugin = FakeTablePlugin(mdi_area, save_result=True)
+        workspace = TableWorkspaceService(plugin)
+        workspace.open_table(["a"])
+
+        workspace.clear()
+        workspace_ref = weakref.ref(workspace)
+        del workspace
+        gc.collect()
+
+        self.assertIsNone(workspace_ref())
+        self._drain_events()
 
     def test_new_tables_keep_unique_handles_when_requested_names_conflict(self):
         mdi_area = QtWidgets.QMdiArea()

@@ -32,6 +32,19 @@
 
 ## UI Boundary
 - If non-UI callbacks touch Qt widgets, route them onto the main thread.
+- Connect Qt signals to bound methods, not to `functools.partial` or closures that
+  capture the receiver. PyQt tracks a bound-method receiver weakly and disconnects
+  when its owner disappears; a partial or closure is an ordinary Python object that
+  Qt keeps and calls regardless. If cyclic GC clears that callable while Qt still
+  holds a pending emission - `destroyed`, `deleteLater`, anything queued - the next
+  event drain invokes a cleared callable and segfaults the interpreter rather than
+  raising. Pass per-connection data through a Qt property on the sender and read it
+  back in the slot.
+- Beware that such a crash surfaces far from its cause. It is GC-threshold sensitive,
+  so it presents as an intermittent segfault in whichever unrelated code next pumps
+  the event loop, and unrelated edits appear to cause or cure it by shifting
+  allocation. Suspect object lifetimes and signal receivers before suspecting the
+  code the traceback points at.
 - GUI code may hold only transient state needed to generate commands or render UI.
 
 ## Widget Hierarchy
