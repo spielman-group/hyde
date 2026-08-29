@@ -376,7 +376,7 @@ class PythonVariables(HydeToolWidget):
         )
         append_action.setEnabled(bool(table_names) and has_active_table)
 
-        chosen = menu.exec_(self.ui.treeView.viewport().mapToGlobal(position))
+        chosen = menu.exec(self.ui.treeView.viewport().mapToGlobal(position))
         if chosen == copy_action:
             self._copy_selected_expression()
         elif chosen == delete_action:

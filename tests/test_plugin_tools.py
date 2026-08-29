@@ -44,7 +44,7 @@ class RecordingMenu(QtWidgets.QMenu):
         super().__init__(title, parent)
         self.popup_calls = []
 
-    def exec_(self, pos, *args, **kwargs):
+    def exec(self, pos, *args, **kwargs):
         self.popup_calls.append(QtCore.QPoint(pos))
         return None
 

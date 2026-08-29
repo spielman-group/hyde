@@ -314,7 +314,7 @@ class HydeApp:
         )
         if menu is None:
             return None
-        return menu.exec_(global_pos)
+        return menu.exec(global_pos)
 
     def setup_plugins(self):
         self.menu_context = HydeMenuContext(logger=logging.getLogger("hyde"))
