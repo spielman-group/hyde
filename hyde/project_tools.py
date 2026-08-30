@@ -107,6 +107,11 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
 
     import hyde
     hyde.gui_mode(True)
+    # Guaranteed here rather than inherited from procedures/__init__.py, which
+    # is the user's file to edit. Session files and generated macros refer to
+    # `hyde` unqualified, and they should not stop working because someone
+    # tidied an import out of their own procedures.
+    __main__.__dict__["hyde"] = hyde
     configure_gui_matplotlib_backend()
     import hyde.recreation_registry
     hyde.recreation_registry.clear()

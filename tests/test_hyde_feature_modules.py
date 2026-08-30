@@ -265,7 +265,7 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
                 command="session_restore",
                 session_source="value = 1",
             ),
-            "import hyde\nvalue = 1\n",
+            "value = 1\n",
         )
 
     def test_session_restore_source_runs_a_session_file_as_written(self):
@@ -273,7 +273,9 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
 
         It used to be indented to fit inside a `try:` block, which broke a
         `__future__` import, rewrote the contents of multi-line strings, and
-        failed to compile at all when the file held only comments.
+        failed to compile at all when the file held only comments. Nothing is
+        added to it now either, so a traceback names the line the user would
+        find in the file.
         """
         from hyde.features.hyde_features import hyde_app_python_source
 
@@ -293,6 +295,21 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
                     "<session_restore>",
                     "exec",
                 )
+
+    def test_session_restore_source_reports_the_users_own_line_numbers(self):
+        from hyde.features.hyde_features import hyde_app_python_source
+
+        source = hyde_app_python_source(
+            command="session_restore",
+            session_source="value = 1\nraise ValueError('here')\n",
+        )
+        try:
+            exec(compile(source, "<session_restore>", "exec"), {})
+        except ValueError:
+            import sys
+
+            line = sys.exc_info()[2].tb_next.tb_lineno
+        self.assertEqual(2, line, "reported line does not match session.py")
 
     def test_session_restore_source_preserves_multiline_string_contents(self):
         from hyde.features.hyde_features import hyde_app_python_source

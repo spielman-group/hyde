@@ -77,41 +77,16 @@ def session_source_has_statements(session_source):
 def session_restore_source(session_source):
     """Lower a project's session.py for execution in the kernel.
 
-    The source runs as written. Whether it ran is carried by the kernel's reply
-    to the request that ran it, so there is no try/except wrapper reporting the
-    same thing a second time -- and none of the hazards that came with
-    indenting a whole module to fit inside one: a `__future__` import stops
-    being first in the file, the contents of multi-line strings get rewritten,
-    a body of only comments does not compile, and every line number in a
-    traceback moves.
+    The source runs exactly as written, so a traceback names the line the user
+    would find in the file. Whether it ran is carried by the kernel's reply to
+    the request that ran it, so nothing is wrapped around it to report the same
+    thing again -- and nothing is prepended to it either, which would displace
+    a `__future__` import and shift every reported line number.
 
-    `import hyde` is added because session.py refers to `hyde`, and the
-    bootstrap binds it inside procedures rather than in the kernel's namespace.
-    It goes after any `__future__` imports, which the language requires to come
-    first, and shifts reported line numbers by one.
+    `hyde` is in the kernel namespace already; the bootstrap puts it there.
     """
     source = str(session_source)
-    if not source.endswith("\n"):
-        source += "\n"
-    future_imports, body = _split_leading_future_imports(source)
-    return f"{future_imports}import hyde\n{body}"
-
-
-def _split_leading_future_imports(source):
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return "", source
-    last_future_line = 0
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
-            last_future_line = node.end_lineno
-        else:
-            break
-    if not last_future_line:
-        return "", source
-    lines = source.splitlines(keepends=True)
-    return "".join(lines[:last_future_line]), "".join(lines[last_future_line:])
+    return source if source.endswith("\n") else f"{source}\n"
 
 
 def normalize_namespace_names(namespace_names):
