@@ -213,6 +213,12 @@ def settle_copy(plugin, kernel, output_format="pdf"):
     plugin.on_kernel_message(copy_payload(output_format=output_format))
 
 
+_ONE_PIXEL_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM"
+    "IQAAAABJRU5ErkJggg=="
+)
+
+
 def make_copy_plugin(messages=None):
     plugin = SaveGraphicsPlugin({})
     plugin.services = {
@@ -641,6 +647,42 @@ class TestPngCompanionRepresentation(unittest.TestCase):
                         self.assertFalse(companion, f"{output_format} should carry no PNG")
         finally:
             plt.close(figure)
+
+    def test_a_copy_carries_an_image_the_platform_can_republish(self):
+        """MIME types reach other Qt applications; everything else reads the
+        platform's own pasteboard.
+
+        Bytes under an unrecognised MIME type land there as a private flavour
+        that nothing can paste, so a copy that only set bytes put nothing
+        usable on the clipboard at all.
+        """
+        import base64
+
+        png = base64.b64decode(_ONE_PIXEL_PNG_BASE64)
+        for output_format, rendered, companion in (
+            ("pdf", b"%PDF-1.4 fake", png),
+            ("svg", b"<svg/>", png),
+            ("png", png, None),
+        ):
+            with self.subTest(output_format=output_format):
+                mime = clipboard_mime_data(
+                    rendered,
+                    output_format=output_format,
+                    is_text=False,
+                    companion_png=companion,
+                )
+                self.assertTrue(
+                    mime.hasImage(),
+                    f"a {output_format} copy cannot be pasted outside Qt",
+                )
+
+    def test_a_pgf_copy_carries_no_image_the_platform_could_paste(self):
+        mime = clipboard_mime_data(
+            b"\\begin{pgfpicture}", output_format="pgf", is_text=True
+        )
+
+        self.assertFalse(mime.hasImage())
+        self.assertTrue(mime.hasText())
 
     def test_a_pdf_copy_is_pasteable_by_a_png_only_consumer(self):
         import base64

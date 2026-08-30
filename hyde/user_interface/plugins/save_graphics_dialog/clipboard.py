@@ -6,7 +6,7 @@ half: it turns rendered bytes into a `QMimeData` the GUI can hand to the
 clipboard.
 """
 
-from qtutils.qt import QtCore
+from qtutils.qt import QtCore, QtGui
 
 from hyde.features.matplotlib_features import clipboard_mime_type_for_format
 
@@ -35,6 +35,17 @@ def clipboard_mime_data(rendered, *, output_format, is_text=False, companion_png
         return mime_data
 
     mime_data.setData(mime_type, QtCore.QByteArray(rendered))
-    if companion_png and mime_type != "image/png":
-        mime_data.setData("image/png", QtCore.QByteArray(companion_png))
+    raster = rendered if mime_type == "image/png" else companion_png
+    if raster:
+        if mime_type != "image/png":
+            mime_data.setData("image/png", QtCore.QByteArray(raster))
+        # The MIME types above reach other Qt applications. Everything else on
+        # this platform reads the native pasteboard, where Qt publishes an
+        # unrecognised MIME type under a private flavour nothing can paste --
+        # so an image set only as bytes puts nothing usable on the clipboard.
+        # An image set as an image is republished as the platform's own image
+        # flavours, which is what makes a paste work anywhere.
+        image = QtGui.QImage.fromData(QtCore.QByteArray(raster), "PNG")
+        if not image.isNull():
+            mime_data.setImageData(image)
     return mime_data
