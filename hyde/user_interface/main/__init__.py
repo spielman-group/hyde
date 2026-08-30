@@ -5,6 +5,7 @@ from qtutils.qt import QtWidgets, QtCore
 from qtutils.outputbox import BLUE, GREEN, ORANGE, RED, WHITE
 from labscript_utils.filewatcher import FileWatcher
 
+from hyde.features.hyde_features import session_source_has_statements
 from hyde.features.hyde_ir import HydeAppIR
 from hyde.paths import (
     HYDE_DIR,
@@ -734,7 +735,12 @@ class HydeApp:
         if session:
             restore_main_window(self, session)
         self.emit_plugin_event("project_loaded", {"session": session})
-        if str(session_source or "").strip():
+        # Whether there is anything to restore is a dispatch decision, so it
+        # is decided here rather than by asking the kernel to run a command
+        # that reports back that it had nothing to do. A project with an
+        # untouched session.py must not be recorded as a failed restore just
+        # because the kernel is not up yet.
+        if session_source_has_statements(session_source):
             python_execution_service = self.plugin_service("python_execution_service")
             if python_execution_service is not None:
                 restore_ir = self.current_app_ir.with_session_restore_source(

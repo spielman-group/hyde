@@ -61,7 +61,7 @@ def callable_invocation_source(callable_name, callable_args=()):
     return f"{callable_name}({args})"
 
 
-def _session_source_has_statements(session_source):
+def session_source_has_statements(session_source):
     try:
         return bool(ast.parse(str(session_source)).body)
     except SyntaxError:
@@ -72,7 +72,7 @@ def _session_source_has_statements(session_source):
 
 
 def session_restore_source(session_source):
-    if not _session_source_has_statements(session_source):
+    if not session_source_has_statements(session_source):
         # Comments are not a block body, so wrapping a file that holds only
         # comments -- which is what a new project ships -- in `try:` emits
         # Python that does not compile. There is nothing to run, and the GUI
