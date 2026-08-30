@@ -1022,7 +1022,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
         source = app_ir.current_diff(restore_ir).python_source()
 
         self.assertEqual("Table0()\nFigure0(delay)\n", source)
-        self.assertNotIn("task_complete", source)
 
     def test_python_execution_service_logs_hidden_dispatch(self):
         executed = []

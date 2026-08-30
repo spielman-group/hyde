@@ -104,39 +104,6 @@ def make_plugin_host(plugin_manager):
     return app
 
 
-def live_tool_window_session_keys():
-    """Every session key a tool-window plugin currently claims.
-
-    Discovered rather than listed, so a plugin added or renamed later is
-    checked without anyone remembering to update this.
-    """
-    import importlib
-
-    from hyde.paths import HYDE_DIR
-    from hyde.user_interface.shared.plugin import HydeToolWindowPlugin
-
-    plugins_dir = os.path.join(HYDE_DIR, "user_interface", "plugins")
-    keys = set()
-    for name in sorted(os.listdir(plugins_dir)):
-        if not os.path.isfile(os.path.join(plugins_dir, name, "__init__.py")):
-            continue
-        try:
-            module = importlib.import_module(
-                f"hyde.user_interface.plugins.{name}"
-            )
-        except Exception:
-            continue
-        plugin = getattr(module, "Plugin", None)
-        if not isinstance(plugin, type) or not issubclass(
-            plugin, HydeToolWindowPlugin
-        ):
-            continue
-        session_key = getattr(plugin, "session_key", None)
-        if session_key:
-            keys.add(str(session_key))
-    return keys
-
-
 class TestPluginTools(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -380,18 +347,21 @@ class TestPluginTools(unittest.TestCase):
         finally:
             subwindow.deleteLater()
 
-    def test_the_shipped_project_template_session_restores_without_warnings(self):
-        """The template encodes which tool windows a new project opens with.
+    def test_a_new_project_opens_the_terminal_and_variables_windows(self):
+        """What the shipped template is for.
 
-        It is the one session.toml nobody edits, so it drifts silently when the
-        session schema or a plugin's session key changes.
+        Its keys come from the plugins, not from the template, so this fails
+        whether the template drifts or a plugin's session key changes -- the
+        drift that made a new project quietly open with nothing.
         """
         import tomllib
 
         from hyde.paths import HYDE_DIR
-        from hyde.user_interface.shared.plugin import (
-            _TOOL_WINDOW_STATES,
-            coerce_geometry,
+        from hyde.user_interface.plugins.python_terminal_tool import (
+            Plugin as TerminalPlugin,
+        )
+        from hyde.user_interface.plugins.python_variables_tool import (
+            Plugin as VariablesPlugin,
         )
 
         template = os.path.join(
@@ -400,31 +370,24 @@ class TestPluginTools(unittest.TestCase):
         with open(template, "rb") as handle:
             session = tomllib.load(handle)
 
-        tool_windows = session.get("tool_windows", {})
-        self.assertTrue(tool_windows, "template records no tool windows")
-        for key, info in tool_windows.items():
-            with self.subTest(tool_window=key):
-                self.assertIn(info.get("window_state"), _TOOL_WINDOW_STATES)
-                self.assertIsNotNone(coerce_geometry(info.get("geometry")))
+        for plugin_class in (TerminalPlugin, VariablesPlugin):
+            session_key = plugin_class.session_key
+            with self.subTest(tool_window=session_key):
+                _, plugin, subwindow = self.make_tool_window_plugin(
+                    mdi_key=session_key
+                )
+                subwindow.hide()
+                self.qapp.processEvents()
 
-        # Values alone are not enough: the drift that caused this was a key
-        # rename, which leaves every value perfectly valid and simply matches
-        # nothing.
-        live_keys = live_tool_window_session_keys()
-        self.assertTrue(live_keys, "found no tool-window plugins to check against")
-        self.assertEqual(
-            set(),
-            set(tool_windows) - live_keys,
-            "template names tool windows no plugin claims",
-        )
-        for key in session:
-            if key in ("format_version", "main_window", "tool_windows"):
-                continue
-            with self.subTest(section=key):
-                self.assertIn(
-                    key,
-                    live_keys,
-                    "template carries settings under a session key no plugin claims",
+                with self.assertNoLogs("hyde", level="WARNING"):
+                    plugin.restore_tool_window(
+                        session, session_key, mdi_key=session_key
+                    )
+                self.qapp.processEvents()
+
+                self.assertFalse(
+                    subwindow.isHidden(),
+                    f"a new project does not open {session_key}",
                 )
 
     def test_shared_tool_window_plugin_restores_generic_state_before_widget_state(self):
