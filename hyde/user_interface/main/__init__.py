@@ -679,6 +679,13 @@ class HydeApp:
         self._clear_session_restore_state()
 
     @inmain_decorator()
+    def _on_session_restore_command_finished(self, kernel_request):
+        if kernel_request.ran():
+            # The session file ran; task_complete carries the real answer.
+            return
+        self._complete_session_restore(False)
+
+    @inmain_decorator()
     def on_task_complete(self, data):
         data = dict(data or {})
         if data.get("name") != "session_restore":
@@ -719,9 +726,14 @@ class HydeApp:
                 restore_ir = self.current_app_ir.with_session_restore_source(
                     session_source
                 )
-                if python_execution_service.execute_hidden(
-                    self.current_app_ir.current_diff(restore_ir).python_source()
-                ):
+                # Correlated, because a session file that does not compile
+                # never reaches its own except branch and so never reports
+                # task_complete. Without the reply the GUI waits forever and
+                # never presents the windows it restored.
+                if python_execution_service.request(
+                    self.current_app_ir.current_diff(restore_ir).python_source(),
+                    on_finished=self._on_session_restore_command_finished,
+                ) is not None:
                     return
             self._complete_session_restore(False)
         else:

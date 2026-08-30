@@ -275,6 +275,43 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
             '    hyde.task_complete("session_restore", True)\n',
         )
 
+    def test_session_restore_source_is_valid_python_for_every_session_file(self):
+        """A session file with no statements is a normal file, not an error.
+
+        Comments are not a block body, so wrapping a comments-only file in
+        `try:` produces Python that does not compile -- which is what a new
+        project's template session.py contains.
+        """
+        from hyde.features.hyde_features import hyde_app_python_source
+
+        for description, session_source in (
+            ("comments only", "# written when the project is saved\n"),
+            ("blank", "\n\n"),
+            ("real source", "value = 1\n"),
+            ("trailing blank lines", "value = 1\n\n\n"),
+        ):
+            with self.subTest(session_source=description):
+                compile(
+                    hyde_app_python_source(
+                        command="session_restore",
+                        session_source=session_source,
+                    ),
+                    "<session_restore>",
+                    "exec",
+                )
+
+    def test_session_restore_with_nothing_to_run_still_reports_completion(self):
+        """The GUI defers presenting restored windows until this arrives."""
+        from hyde.features.hyde_features import hyde_app_python_source
+
+        source = hyde_app_python_source(
+            command="session_restore",
+            session_source="# nothing here\n",
+        )
+
+        self.assertIn('hyde.task_complete("session_restore", True)', source)
+        self.assertNotIn("try:", source)
+
     def test_numeric_series_eligibility_contract(self):
         eligible = {
             "delay": {"python_type": "ndarray", "numpy_type": "Array", "numpy_kind": "f", "ndim": 1},

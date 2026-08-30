@@ -1,3 +1,4 @@
+import ast
 import copy
 import keyword
 import textwrap
@@ -60,7 +61,24 @@ def callable_invocation_source(callable_name, callable_args=()):
     return f"{callable_name}({args})"
 
 
+def _session_source_has_statements(session_source):
+    try:
+        return bool(ast.parse(str(session_source)).body)
+    except SyntaxError:
+        # A malformed session file is still worth sending. The kernel's own
+        # error tells the user which line is wrong; restoring nothing silently
+        # does not.
+        return True
+
+
 def session_restore_source(session_source):
+    if not _session_source_has_statements(session_source):
+        # Comments are not a block body, so wrapping a file that holds only
+        # comments -- which is what a new project ships -- in `try:` emits
+        # Python that does not compile. There is nothing to run, and the GUI
+        # defers presenting restored windows until it hears that restoring
+        # finished.
+        return "import hyde\n" 'hyde.task_complete("session_restore", True)\n'
     indented_source = textwrap.indent(f"{session_source}\n", "    ")
     return (
         "import hyde\n"

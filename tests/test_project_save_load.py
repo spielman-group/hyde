@@ -377,6 +377,12 @@ class TestProjectStateHelpers(unittest.TestCase):
                     success,
                 )
             )
+            restored_app._on_session_restore_command_finished = (
+                lambda kernel_request: HydeApp._on_session_restore_command_finished(
+                    restored_app,
+                    kernel_request,
+                )
+            )
             restored_app.plugin_manager = PluginManagerStub({"session": RestoringPlugin()})
             restored_app.plugin_service = lambda key: (
                 DummyPythonTerminalService()
@@ -498,6 +504,12 @@ class TestProjectStateHelpers(unittest.TestCase):
                     success,
                 )
             )
+            restored_app._on_session_restore_command_finished = (
+                lambda kernel_request: HydeApp._on_session_restore_command_finished(
+                    restored_app,
+                    kernel_request,
+                )
+            )
             tool_plugin = SessionRestoreToolWindowPlugin(
                 restored_app,
                 mdi_area,
@@ -613,6 +625,12 @@ class TestProjectStateHelpers(unittest.TestCase):
                 lambda success: HydeApp._complete_session_restore(
                     restored_app,
                     success,
+                )
+            )
+            restored_app._on_session_restore_command_finished = (
+                lambda kernel_request: HydeApp._on_session_restore_command_finished(
+                    restored_app,
+                    kernel_request,
                 )
             )
             tool_plugin = SessionRestoreToolWindowPlugin(
@@ -834,6 +852,12 @@ class TestProjectStateHelpers(unittest.TestCase):
                 lambda success: HydeApp._complete_session_restore(
                     restored_app,
                     success,
+                )
+            )
+            restored_app._on_session_restore_command_finished = (
+                lambda kernel_request: HydeApp._on_session_restore_command_finished(
+                    restored_app,
+                    kernel_request,
                 )
             )
             tool_plugin = SessionRestoreToolWindowPlugin(
