@@ -900,6 +900,26 @@ def hide_subwindow_with_warning(subwindow, session_key, detail):
     LOGGER.warning("%s: %s.", session_key, detail)
 
 
+def outdated_tool_window_session_keys(session):
+    """Tool-window entries written before `window_state` replaced `visible`.
+
+    That schema change shipped without a migration, so such a project still
+    parses and still loads -- it simply restores none of its tool windows. The
+    entry is the evidence: every window Hyde saves now records `window_state`,
+    so one without it predates the change.
+
+    Reported rather than migrated because the two are not equivalent: `visible`
+    said nothing about minimized, maximized, or geometry validity, so guessing
+    a `window_state` from it would invent state the user never saved.
+    """
+    tool_windows = session.get("tool_windows", {}) or {}
+    return sorted(
+        str(key)
+        for key, info in tool_windows.items()
+        if isinstance(info, dict) and "window_state" not in info
+    )
+
+
 def normalize_subwindow_restore_info(subwindow, info, *, session_key):
     if not isinstance(info, dict) or not info:
         # Nothing was saved for this window: a new project, or a tool added

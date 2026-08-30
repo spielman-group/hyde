@@ -26,6 +26,7 @@ from hyde.user_interface.shared.plugin import (
     HydePluginManager,
     blank_window_icon,
     finalize_subwindow_state,
+    outdated_tool_window_session_keys,
 )
 
 class PersistentSubwindowFilter(QtCore.QObject):
@@ -719,6 +720,17 @@ class HydeApp:
         session, session_error = try_read_session(self.current_project_dir)
         if session_error:
             warnings.append(f"session.toml: {session_error}")
+        outdated = outdated_tool_window_session_keys(session or {})
+        if outdated:
+            # Once per project load, rather than once per window, and only
+            # here: a project that loads but silently restores no windows
+            # otherwise looks like it simply had none saved.
+            warnings.append(
+                "session.toml: window layout for "
+                + ", ".join(outdated)
+                + " was saved by an older Hyde and cannot be restored. "
+                "Saving this project will record the current layout."
+            )
         session_source, session_source_error = try_read_session_source(
             self.current_project_dir
         )
