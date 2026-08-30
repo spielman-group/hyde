@@ -83,6 +83,7 @@ def make_plugin_host(plugin_manager):
         data,
     )
     app.show_status_message = lambda label: label
+    app.show_transient_status_message = lambda label, timeout_ms: label
     app.clear_status_message = lambda: None
     app.process_tree = object()
     app.show_plugin_window = lambda key: key

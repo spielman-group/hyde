@@ -96,7 +96,7 @@ class Plugin(HydePlugin):
             # One at a time. The rendered bytes arrive on a channel that does
             # not say which copy they answer, so a second copy in flight would
             # make "the next payload is mine" untrue for both.
-            self._status_message("A figure copy is already in progress.")
+            self._outcome_message("A figure copy is already in progress.")
             return False
         figure_context = self.active_editable_figure()
         if figure_context is None:
@@ -151,12 +151,20 @@ class Plugin(HydePlugin):
 
     def _fail_copy(self, message=None):
         self._end_copy()
-        self._status_message(message or "Could not copy the figure to the clipboard.")
+        self._outcome_message(
+            message or "Could not copy the figure to the clipboard."
+        )
 
     def _status_message(self, text):
+        """A copy still in flight; it stays until the outcome replaces it."""
         service = self.services.get("status_message_service")
         if service is not None:
             service.show_status_message(text)
+
+    def _outcome_message(self, text):
+        service = self.services.get("status_message_service")
+        if service is not None:
+            service.show_transient_message(text)
 
     def _begin_copy(self, output_format):
         self._end_copy()
@@ -212,7 +220,7 @@ class Plugin(HydePlugin):
         clipboard.setMimeData(mime_data)
         output_format = str(data.get("output_format", "") or "").upper()
         self._end_copy()
-        self._status_message(f"Copied figure to the clipboard as {output_format}.")
+        self._outcome_message(f"Copied figure to the clipboard as {output_format}.")
 
     def _payload_answers_current_copy(self, data):
         """Reject bytes that belong to a copy this one already gave up on.

@@ -68,6 +68,7 @@ def make_plugin_host(plugin_manager):
     app.configure_persistent_subwindow = lambda subwindow: None
     app.emit_plugin_event = lambda name, data=None: (name, data)
     app.show_status_message = lambda label: label
+    app.show_transient_status_message = lambda label, timeout_ms: label
     app.clear_status_message = lambda: None
     app.process_tree = object()
     app.show_plugin_window = lambda key: key

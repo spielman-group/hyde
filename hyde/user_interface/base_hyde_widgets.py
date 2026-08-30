@@ -51,7 +51,7 @@ class KernelCommands:
             return False
         service = self.services.get("status_message_service")
         if service is not None:
-            service.show_status_message(
+            service.show_transient_message(
                 f"Command failed: {kernel_request.error}"
                 if kernel_request.error
                 else "Command failed in the kernel."

@@ -83,8 +83,19 @@ class StatusMessageService:
     def __init__(self, app):
         self.app = app
 
+    TRANSIENT_MS = 10000
+
     def show_status_message(self, label):
+        """Show until something replaces it, for work still in progress."""
         self.app.show_status_message(label)
+
+    def show_transient_message(self, label):
+        """Show an outcome, which should not outlive the user's interest.
+
+        A finished operation's message has no reason to sit in the status bar
+        until some unrelated action happens to replace it.
+        """
+        self.app.show_transient_status_message(label, self.TRANSIENT_MS)
 
     def clear_status_message(self):
         self.app.clear_status_message()
@@ -435,6 +446,9 @@ class HydeApp:
 
     def show_status_message(self, label):
         self.ui.statusbar.showMessage(str(label))
+
+    def show_transient_status_message(self, label, timeout_ms):
+        self.ui.statusbar.showMessage(str(label), int(timeout_ms))
 
     def clear_status_message(self):
         self.ui.statusbar.clearMessage()

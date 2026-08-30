@@ -749,6 +749,7 @@ class TestTableWidget(unittest.TestCase):
                 "namespace_view_service": namespace_service,
                 "status_message_service": types.SimpleNamespace(
                     show_status_message=messages.append,
+                    show_transient_message=messages.append,
                     clear_status_message=lambda: None,
                 ),
             },

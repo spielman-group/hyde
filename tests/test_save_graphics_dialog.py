@@ -64,6 +64,7 @@ def make_plugin_host(plugin_manager):
     app.configure_persistent_subwindow = lambda subwindow: None
     app.emit_plugin_event = lambda name, data=None: (name, data)
     app.show_status_message = lambda label: label
+    app.show_transient_status_message = lambda label, timeout_ms: label
     app.clear_status_message = lambda: None
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
@@ -223,6 +224,7 @@ def make_copy_plugin(messages=None):
     if messages is not None:
         plugin.services["status_message_service"] = types.SimpleNamespace(
             show_status_message=messages.append,
+            show_transient_message=messages.append,
             clear_status_message=lambda: None,
         )
     return plugin
@@ -682,6 +684,7 @@ class TestCopyFeedback(unittest.TestCase):
             "python_execution_service": FakeKernelRequests(),
             "status_message_service": types.SimpleNamespace(
                 show_status_message=lambda text: messages.append(text),
+                show_transient_message=lambda text: messages.append(text),
                 clear_status_message=lambda: messages.append(None),
             ),
         }
@@ -863,6 +866,33 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         kernel = plugin.services["python_execution_service"]
         self.assertTrue(plugin.copy_active_figure(output_format=output_format))
         return plugin, kernel, messages
+
+    def test_a_copy_in_progress_holds_the_status_bar_but_its_outcome_does_not(self):
+        """A finished operation should not sit in the status bar indefinitely.
+
+        The copy in flight is the only thing still telling the user anything --
+        the wait cursor has already lowered itself -- so that message stays.
+        """
+        shown = []
+        plugin = SaveGraphicsPlugin({})
+        plugin.services = {
+            "figure_context_service": types.SimpleNamespace(
+                active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
+            ),
+            "python_execution_service": FakeKernelRequests(),
+            "status_message_service": types.SimpleNamespace(
+                show_status_message=lambda text: shown.append(("holds", text)),
+                show_transient_message=lambda text: shown.append(("fades", text)),
+                clear_status_message=lambda: None,
+            ),
+        }
+
+        plugin.copy_active_figure(output_format="pdf")
+        self.assertEqual([("holds", "Copying figure as PDF...")], shown)
+
+        plugin.on_kernel_message(copy_payload())
+        self.assertEqual("fades", shown[-1][0])
+        self.assertIn("Copied figure", shown[-1][1])
 
     def test_a_second_copy_is_refused_while_one_is_in_flight(self):
         plugin, kernel, messages = self._copy_in_flight()
