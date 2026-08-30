@@ -238,6 +238,13 @@ def _install_first_class_figure_dirty_tracking(figure):
             previous_callback(artist, stale)
         if stale:
             _mark_first_class_figure_dirty(figure)
+            # A recreation macro re-run against a figure that still exists gets
+            # the existing figure back from `plt.figure(label)`, so no
+            # FigureHyde is constructed and nothing registers itself. Drawing
+            # on it is what identifies the figure the macro is building.
+            session = _current_build_session()
+            if session is not None:
+                session.register_figure(figure)
 
     figure._hyde_dirty_tracking_installed = True
     figure.stale_callback = _on_stale

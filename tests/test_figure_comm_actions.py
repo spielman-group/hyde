@@ -75,6 +75,34 @@ class TestFigureCommActions(unittest.TestCase):
             3.25,
         )
 
+    def test_a_recreation_macro_can_be_run_again(self):
+        """Re-running is what a recreation macro is for.
+
+        `plt.figure(label)` hands back the figure that already exists rather
+        than constructing one, so nothing registers itself with the build
+        session and the macro used to fail every time after the first.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            ax = fig.add_subplot(111)
+            ax.plot(x, y, label="y")
+            return fig
+
+        first = Graph0([0, 1, 2], [1, 4, 9])
+        again = Graph0([0, 1, 2], [2, 5, 10])
+
+        self.assertIs(again, first)
+        self.assertEqual("Graph0", again.get_label())
+        self.assertTrue(again._hyde_is_first_class)
+        self.assertEqual(
+            [2, 5, 10],
+            list(again.axes[0].lines[0].get_ydata()),
+        )
+
     def test_apply_figure_action_rejects_routine_semantic_edit_actions(self):
         plt = self._configure_pyplot()
 
