@@ -903,9 +903,11 @@ def hide_subwindow_with_warning(subwindow, session_key, detail):
 def normalize_subwindow_restore_info(subwindow, info, *, session_key):
     if not isinstance(info, dict) or not info:
         # Nothing was saved for this window: a new project, or a tool added
-        # since the session was written. Tool windows are created hidden and
-        # shown by whatever the session recorded, so this is the ordinary case
-        # and the window already has the presentation it should have.
+        # since the session was written. A tool window shows only what a
+        # session recorded, so it is hidden -- switching to a project that does
+        # not mention it must not leave it showing from the last one. Ordinary,
+        # and nothing to report.
+        subwindow.hide()
         return None
 
     window_state = info.get("window_state")

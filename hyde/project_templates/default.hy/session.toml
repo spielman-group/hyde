@@ -8,7 +8,7 @@ geometry = [0, 520, 1200, 320]
 window_state = "visible"
 geometry = [780, 0, 420, 300]
 
-[python_variables]
+[python_variables_tool]
 arrays = true
 variables = true
 strings = true

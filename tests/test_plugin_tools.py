@@ -104,6 +104,39 @@ def make_plugin_host(plugin_manager):
     return app
 
 
+def live_tool_window_session_keys():
+    """Every session key a tool-window plugin currently claims.
+
+    Discovered rather than listed, so a plugin added or renamed later is
+    checked without anyone remembering to update this.
+    """
+    import importlib
+
+    from hyde.paths import HYDE_DIR
+    from hyde.user_interface.shared.plugin import HydeToolWindowPlugin
+
+    plugins_dir = os.path.join(HYDE_DIR, "user_interface", "plugins")
+    keys = set()
+    for name in sorted(os.listdir(plugins_dir)):
+        if not os.path.isfile(os.path.join(plugins_dir, name, "__init__.py")):
+            continue
+        try:
+            module = importlib.import_module(
+                f"hyde.user_interface.plugins.{name}"
+            )
+        except Exception:
+            continue
+        plugin = getattr(module, "Plugin", None)
+        if not isinstance(plugin, type) or not issubclass(
+            plugin, HydeToolWindowPlugin
+        ):
+            continue
+        session_key = getattr(plugin, "session_key", None)
+        if session_key:
+            keys.add(str(session_key))
+    return keys
+
+
 class TestPluginTools(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -298,12 +331,13 @@ class TestPluginTools(unittest.TestCase):
         self.assertEqual(self.subwindow_geometry(subwindow), [11, 22, 333, 444])
 
 
-    def test_a_tool_window_with_nothing_saved_is_not_reported_as_invalid(self):
+    def test_a_tool_window_with_nothing_saved_is_hidden_without_complaint(self):
         """A new project, or a tool added since the session was written.
 
-        Tool windows are created hidden and shown by whatever the session
-        recorded, so having nothing recorded is the ordinary case and not
-        something to warn about.
+        A tool window shows only what a session recorded, so one with nothing
+        recorded is hidden -- including when switching to a project that does
+        not mention it, where it may currently be visible from the last one.
+        That is ordinary, and not something to warn about.
         """
         from hyde.user_interface.shared.plugin import (
             normalize_subwindow_restore_info,
@@ -313,12 +347,14 @@ class TestPluginTools(unittest.TestCase):
         try:
             for description, info in (("absent", {}), ("not a mapping", None)):
                 with self.subTest(info=description):
+                    subwindow.show()
                     with self.assertNoLogs("hyde", level="WARNING"):
                         self.assertIsNone(
                             normalize_subwindow_restore_info(
                                 subwindow, info, session_key="python_terminal_tool"
                             )
                         )
+                    self.assertTrue(subwindow.isHidden())
         finally:
             subwindow.deleteLater()
 
@@ -370,6 +406,26 @@ class TestPluginTools(unittest.TestCase):
             with self.subTest(tool_window=key):
                 self.assertIn(info.get("window_state"), _TOOL_WINDOW_STATES)
                 self.assertIsNotNone(coerce_geometry(info.get("geometry")))
+
+        # Values alone are not enough: the drift that caused this was a key
+        # rename, which leaves every value perfectly valid and simply matches
+        # nothing.
+        live_keys = live_tool_window_session_keys()
+        self.assertTrue(live_keys, "found no tool-window plugins to check against")
+        self.assertEqual(
+            set(),
+            set(tool_windows) - live_keys,
+            "template names tool windows no plugin claims",
+        )
+        for key in session:
+            if key in ("format_version", "main_window", "tool_windows"):
+                continue
+            with self.subTest(section=key):
+                self.assertIn(
+                    key,
+                    live_keys,
+                    "template carries settings under a session key no plugin claims",
+                )
 
     def test_shared_tool_window_plugin_restores_generic_state_before_widget_state(self):
         class DemoToolWidget(HydeToolWidget):
