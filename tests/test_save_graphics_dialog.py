@@ -894,6 +894,40 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         self.assertEqual("fades", shown[-1][0])
         self.assertIn("Copied figure", shown[-1][1])
 
+    def test_rendered_bytes_reach_the_clipboard_through_kernel_dispatch(self):
+        """The plugin has to be wired to kernel messages, not merely able to
+        handle one.
+
+        Calling on_kernel_message directly proves nothing about whether
+        anything ever calls it.
+        """
+        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+        save_graphics = SaveGraphicsPlugin({})
+        manager.plugins = {"save_graphics_dialog": save_graphics}
+        app = make_plugin_host(manager)
+        HydeApp.setup_plugins(app)
+        app.emit_plugin_event = lambda name, data=None: HydeApp.emit_plugin_event(
+            app, name, data
+        )
+        kernel = FakeKernelRequests()
+        save_graphics.services["figure_context_service"] = types.SimpleNamespace(
+            active_editable_figure=lambda: make_save_graphics_context(title="Graph12")
+        )
+        save_graphics.services["python_execution_service"] = kernel
+
+        QtWidgets.QApplication.clipboard().setText("untouched")
+        self.assertTrue(save_graphics.copy_active_figure(output_format="pdf"))
+        kernel.render_ran()
+
+        app.emit_plugin_event(
+            "kernel_message",
+            copy_payload(b"%PDF real", request_msg_id=kernel.kernel_requests[-1][0].msg_id),
+        )
+
+        self.assertFalse(save_graphics.copy_in_flight())
+        mime = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertTrue(mime.hasFormat("application/pdf"))
+
     def test_a_second_copy_is_refused_while_one_is_in_flight(self):
         plugin, kernel, messages = self._copy_in_flight()
 

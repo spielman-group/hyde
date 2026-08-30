@@ -183,6 +183,12 @@ class Plugin(HydePlugin):
             self._copy_request.settle()
             self._copy_request = None
 
+    def get_event_handlers(self):
+        # Without this the rendered bytes are dispatched to every plugin that
+        # asked for kernel messages, and this one never asked, so every copy
+        # waited out its payload timeout.
+        return {"kernel_message": self.on_kernel_message}
+
     def on_kernel_message(self, payload):
         # The kernel rendered the figure and handed the bytes over; the
         # clipboard belongs to this process.
