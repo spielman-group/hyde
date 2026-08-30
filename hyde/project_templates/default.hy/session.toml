@@ -1,11 +1,11 @@
 format_version = 1
 
-[tool_windows.python_terminal]
-visible = true
+[tool_windows.python_terminal_tool]
+window_state = "visible"
 geometry = [0, 520, 1200, 320]
 
-[tool_windows.python_variables]
-visible = true
+[tool_windows.python_variables_tool]
+window_state = "visible"
 geometry = [780, 0, 420, 300]
 
 [python_variables]

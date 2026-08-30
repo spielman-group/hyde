@@ -296,6 +296,80 @@ class TestPluginTools(unittest.TestCase):
         self.assertTrue(subwindow.isVisible())
         self.assertEqual(self.subwindow_geometry(subwindow), [11, 22, 333, 444])
 
+
+    def test_a_tool_window_with_nothing_saved_is_not_reported_as_invalid(self):
+        """A new project, or a tool added since the session was written.
+
+        Tool windows are created hidden and shown by whatever the session
+        recorded, so having nothing recorded is the ordinary case and not
+        something to warn about.
+        """
+        from hyde.user_interface.shared.plugin import (
+            normalize_subwindow_restore_info,
+        )
+
+        subwindow = QtWidgets.QMdiSubWindow()
+        try:
+            for description, info in (("absent", {}), ("not a mapping", None)):
+                with self.subTest(info=description):
+                    with self.assertNoLogs("hyde", level="WARNING"):
+                        self.assertIsNone(
+                            normalize_subwindow_restore_info(
+                                subwindow, info, session_key="python_terminal_tool"
+                            )
+                        )
+        finally:
+            subwindow.deleteLater()
+
+    def test_a_tool_window_with_unusable_saved_state_is_still_reported(self):
+        from hyde.user_interface.shared.plugin import (
+            normalize_subwindow_restore_info,
+        )
+
+        subwindow = QtWidgets.QMdiSubWindow()
+        try:
+            for description, info in (
+                ("bad window_state", {"window_state": "wat", "geometry": [0, 0, 1, 1]}),
+                ("missing window_state", {"geometry": [0, 0, 1, 1]}),
+                ("bad geometry", {"window_state": "visible", "geometry": [0, 0]}),
+            ):
+                with self.subTest(info=description):
+                    with self.assertLogs("hyde", level="WARNING"):
+                        self.assertIsNone(
+                            normalize_subwindow_restore_info(
+                                subwindow, info, session_key="python_terminal_tool"
+                            )
+                        )
+        finally:
+            subwindow.deleteLater()
+
+    def test_the_shipped_project_template_session_restores_without_warnings(self):
+        """The template encodes which tool windows a new project opens with.
+
+        It is the one session.toml nobody edits, so it drifts silently when the
+        session schema or a plugin's session key changes.
+        """
+        import tomllib
+
+        from hyde.paths import HYDE_DIR
+        from hyde.user_interface.shared.plugin import (
+            _TOOL_WINDOW_STATES,
+            coerce_geometry,
+        )
+
+        template = os.path.join(
+            HYDE_DIR, "project_templates", "default.hy", "session.toml"
+        )
+        with open(template, "rb") as handle:
+            session = tomllib.load(handle)
+
+        tool_windows = session.get("tool_windows", {})
+        self.assertTrue(tool_windows, "template records no tool windows")
+        for key, info in tool_windows.items():
+            with self.subTest(tool_window=key):
+                self.assertIn(info.get("window_state"), _TOOL_WINDOW_STATES)
+                self.assertIsNotNone(coerce_geometry(info.get("geometry")))
+
     def test_shared_tool_window_plugin_restores_generic_state_before_widget_state(self):
         class DemoToolWidget(HydeToolWidget):
             def __init__(self, *args, **kwargs):
