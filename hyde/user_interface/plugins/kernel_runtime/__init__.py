@@ -258,7 +258,6 @@ class RuntimeHelper:
         enter_no_project_state,
         activate_project,
         on_project_state_result,
-        on_task_complete,
         request_gui_quit,
         emit_plugin_event,
     ):
@@ -268,7 +267,6 @@ class RuntimeHelper:
         self.enter_no_project_state = enter_no_project_state
         self.activate_project = activate_project
         self.on_project_state_result = on_project_state_result
-        self.on_task_complete = on_task_complete
         self.request_gui_quit = request_gui_quit
         self.emit_plugin_event = emit_plugin_event
         self._stopping = threading.Event()
@@ -303,8 +301,6 @@ class RuntimeHelper:
                 return
             elif task == "PROJECT_STATE_RESULT":
                 self.on_project_state_result(data)
-            elif task == "TASK_COMPLETE":
-                self.on_task_complete(data)
             else:
                 self.emit_plugin_event(
                     "kernel_message",
@@ -493,7 +489,6 @@ class Plugin(HydePlugin):
             enter_no_project_state=self.services["enter_no_project_state"],
             activate_project=self.services["activate_project"],
             on_project_state_result=self.services["on_project_state_result"],
-            on_task_complete=self.services["on_task_complete"],
             request_gui_quit=self.services["request_gui_quit"],
             emit_plugin_event=self.services["emit_plugin_event"],
         )

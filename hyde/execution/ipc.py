@@ -147,20 +147,6 @@ def signal_quit_requested():
         return
 
 
-def signal_task_complete(name, success=True):
-    """Report completion of a named kernel task back to the GUI."""
-    try:
-        put_parent_message([
-            "TASK_COMPLETE",
-            {
-                "name": str(name),
-                "success": bool(success),
-            },
-        ])
-    except Exception:
-        return
-
-
 def push_table_data(names, request_id):
     """
     Fetch structured table data and push it to the parent GUI process.

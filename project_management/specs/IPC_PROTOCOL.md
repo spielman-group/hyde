@@ -221,18 +221,6 @@ GUI behavior:
 - deliver the payload to open tables
 - each table ignores responses whose `request_id` does not match its outstanding fetch
 
-#### `['TASK_COMPLETE', payload]`
-Sent when kernel-side Hyde code reports completion of a named background task through
-the public `hyde.task_complete(...)` API.
-
-Payload:
-```python
-{
-    'name': 'session_restore',
-    'success': True,
-}
-```
-
 GUI behavior:
 - for `session_restore`, finalize deferred project-restore presentation work only on
   success

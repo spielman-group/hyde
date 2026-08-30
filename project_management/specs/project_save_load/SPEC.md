@@ -166,15 +166,16 @@ Muted GUI micro-mutations and kernel-runtime-owned silent execution are excluded
   the loaded `session.toml` payload to plugins so each plugin can restore its own GUI
   session state, and then executes `session.py` silently so saveable windows reopen
   through their normal recreation paths.
-- `session.py` executes inside a wrapper that reports
-  `hyde.task_complete("session_restore", success=...)`.
-- If `session_restore` succeeds, the GUI reapplies saved MDI stacking order and any
-  deferred tool-window minimized/maximized presentation state.
+- `session.py` executes as written. Whether it ran is carried by the kernel's reply
+  to the request that ran it, so nothing is wrapped around it to report the same
+  thing again, and a traceback names the line the user would find in the file.
+- If `session.py` ran, the GUI reapplies saved MDI stacking order and any deferred
+  tool-window minimized/maximized presentation state.
 - First-class figure windows are created over the Jupyter figure `comm` path, so the
   GUI may need a small number of event-loop turns after `session_restore` succeeds
   before all named saveable windows exist. Hyde therefore finalizes saved MDI order
   with a short settling pass rather than assuming every restored subwindow is present
-  immediately when `task_complete(...)` arrives.
+  immediately when the reply arrives.
 - If `session_restore` fails, the existing error path remains intact and that final
   ordering/presentation pass is skipped.
 - If load fails after entering no-project state, both the kernel and the GUI remain in no-project state.
@@ -224,8 +225,8 @@ Hyde command contract for save/load.
 6. kernel restores saved objects into `__main__`
 7. kernel sets `HYDE_PROJECT_DIR` to the loaded project and signals GUI activation
 8. GUI restores `main_window` state and emits `project_loaded` with the parsed `session.toml` payload so plugins restore their own GUI session state
-9. GUI dispatches wrapped `session.py` through the kernel-runtime hidden execution path so saveable windows reopen after normal project activation
-10. On successful `hyde.task_complete("session_restore", True)`, GUI reapplies saved `main_window.mdi_window_order` plus deferred tool-window presentation state
+9. GUI dispatches `session.py` verbatim through the kernel-runtime hidden execution path so saveable windows reopen after normal project activation
+10. When the kernel's reply says it ran, GUI reapplies saved `main_window.mdi_window_order` plus deferred tool-window presentation state
 11. If late-arriving first-class figure windows are still entering through the figure `comm` path, GUI repeats the ordering pass over a small number of event-loop turns until the named restored subwindow set stabilizes
 
 Saved kernel objects override same-name objects produced by `procedures/__init__.py`.

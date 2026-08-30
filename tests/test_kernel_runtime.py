@@ -438,7 +438,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
         from_kernel.put(("ENTER_NO_PROJECT_STATE", None))
         from_kernel.put(("ACTIVATE_PROJECT", {"path": "/tmp/demo.hy"}))
         from_kernel.put(("PROJECT_STATE_RESULT", {"operation": "load"}))
-        from_kernel.put(("TASK_COMPLETE", {"name": "session_restore", "success": True}))
         from_kernel.put(("TABLE_DATA_RESPONSE", {"request_id": "r1"}))
         helper = RuntimeHelper(
             from_kernel=from_kernel,
@@ -449,7 +448,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             on_project_state_result=lambda data: calls.append(
                 ("project_state_result", data)
             ),
-            on_task_complete=lambda data: calls.append(("task_complete", data)),
             request_gui_quit=lambda: calls.append(("request_gui_quit",)),
             emit_plugin_event=stop_after_kernel_message,
         )
@@ -464,7 +462,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 ("no_project",),
                 ("activate_project", "/tmp/demo.hy"),
                 ("project_state_result", {"operation": "load"}),
-                ("task_complete", {"name": "session_restore", "success": True}),
                 (
                     "kernel_message",
                     {
@@ -486,7 +483,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             enter_no_project_state=lambda: None,
             activate_project=lambda path: None,
             on_project_state_result=lambda data: None,
-            on_task_complete=lambda data: None,
             request_gui_quit=lambda: calls.append(("request_gui_quit",)),
             emit_plugin_event=lambda name, data=None: None,
         )
@@ -505,7 +501,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             enter_no_project_state=lambda: None,
             activate_project=lambda path: None,
             on_project_state_result=lambda data: None,
-            on_task_complete=lambda data: None,
             request_gui_quit=lambda: None,
             emit_plugin_event=lambda name, data=None: None,
         )
@@ -552,7 +547,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 enter_no_project_state,
                 activate_project,
                 on_project_state_result,
-                on_task_complete,
                 request_gui_quit,
                 emit_plugin_event,
             ):
@@ -563,8 +557,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
                     enter_no_project_state,
                     activate_project,
                     on_project_state_result,
-                    on_task_complete,
-                    request_gui_quit,
+                        request_gui_quit,
                     emit_plugin_event,
                 )
                 self.started = False
@@ -600,7 +593,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             "enter_no_project_state": lambda: None,
             "activate_project": lambda path: None,
             "on_project_state_result": lambda data: None,
-            "on_task_complete": lambda data: None,
             "request_gui_quit": lambda: None,
             "get_shutting_down": lambda: False,
             "finalize_quit": lambda: None,
@@ -701,7 +693,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             "enter_no_project_state": lambda: None,
             "activate_project": lambda path: None,
             "on_project_state_result": lambda data: None,
-            "on_task_complete": lambda data: None,
             "request_gui_quit": lambda: None,
         }
 
@@ -814,7 +805,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             "enter_no_project_state": lambda: None,
             "activate_project": lambda path: None,
             "on_project_state_result": lambda data: None,
-            "on_task_complete": lambda data: None,
             "request_gui_quit": lambda: None,
             "get_shutting_down": lambda: True,
             "finalize_quit": lambda: calls.append(("finalize_quit",)),
@@ -878,7 +868,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
             "enter_no_project_state": lambda: None,
             "activate_project": lambda path: None,
             "on_project_state_result": lambda data: None,
-            "on_task_complete": lambda data: None,
             "request_gui_quit": lambda: None,
             "get_shutting_down": lambda: True,
             "finalize_quit": lambda: calls.append(("finalize_quit",)),

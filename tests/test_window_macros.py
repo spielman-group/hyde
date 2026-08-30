@@ -572,7 +572,6 @@ class TestDecoratedProcedureRegistries(unittest.TestCase):
     def test_public_hyde_api_uses_numpy_style_docstrings(self):
         expected_sections = {
             "gui_mode": ("Parameters\n----------",),
-            "task_complete": ("Parameters\n----------",),
             "new_project": ("Parameters\n----------", "Raises\n------"),
             "heal_project": (
                 "Parameters\n----------",

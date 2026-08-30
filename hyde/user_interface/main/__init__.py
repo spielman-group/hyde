@@ -261,7 +261,6 @@ class HydeApp:
                     lambda name, subwindow, info: None,
                 )
             ),
-            "on_task_complete": getattr(self, "on_task_complete", lambda data: None),
         }
 
     def get_current_project_dir(self):
@@ -696,22 +695,8 @@ class HydeApp:
 
     @inmain_decorator()
     def _on_session_restore_command_finished(self, kernel_request):
-        """The kernel answered; that reply is the whole outcome.
-
-        The generated cell used to report the same thing again through
-        task_complete, which meant the answer could arrive twice, by two
-        routes, and had to agree.
-        """
+        """The kernel answered; that reply is the whole outcome."""
         self._complete_session_restore(kernel_request.ran())
-
-    @inmain_decorator()
-    def on_task_complete(self, data):
-        """Landing point for `hyde.task_complete`.
-
-        No built-in task uses it: session restore was the last, and it now
-        learns its outcome from the reply to its own request.
-        """
-        del data
 
     def restore_project_session(self):
         self._clear_session_restore_state()
@@ -763,10 +748,10 @@ class HydeApp:
                 restore_ir = self.current_app_ir.with_session_restore_source(
                     session_source
                 )
-                # Correlated, because a session file that does not compile
-                # never reaches its own except branch and so never reports
-                # task_complete. Without the reply the GUI waits forever and
-                # never presents the windows it restored.
+                # Correlated, because the reply is the only report there is:
+                # a session file that does not compile produces no output of
+                # its own, and without the reply the GUI would wait forever
+                # and never present the windows it restored.
                 if python_execution_service.request(
                     self.current_app_ir.current_diff(restore_ir).python_source(),
                     on_finished=self._on_session_restore_command_finished,

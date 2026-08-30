@@ -1262,17 +1262,6 @@ class TestProjectSaveLoadIntegration(unittest.TestCase):
             client.stop_channels()
             child.terminate()
 
-    def test_task_complete_publishes_process_tree_completion_message(self):
-        with patch("hyde.execution.ipc.put_parent_message") as put_parent_message:
-            hyde.task_complete("session_restore", success=False)
-
-        put_parent_message.assert_called_once_with(
-            [
-                "TASK_COMPLETE",
-                {"name": "session_restore", "success": False},
-            ]
-        )
-
     def test_save_project_excludes_live_matplotlib_figures_and_axes(self):
         project_dir = self._project(
             "save_figure_project.hy",
