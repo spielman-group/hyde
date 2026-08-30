@@ -98,10 +98,61 @@ class TestFigureCommActions(unittest.TestCase):
         self.assertIs(again, first)
         self.assertEqual("Graph0", again.get_label())
         self.assertTrue(again._hyde_is_first_class)
+        self.assertEqual(1, len(again.axes), "re-running stacked another axes")
         self.assertEqual(
             [2, 5, 10],
             list(again.axes[0].lines[0].get_ydata()),
         )
+
+    def test_a_macro_may_draw_on_another_figure_while_building_its_own(self):
+        """Drawing on a figure is not the same as building it."""
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            fig.add_subplot(111).plot(x, y)
+            return fig
+
+        neighbour = Graph0([0, 1, 2], [1, 4, 9])
+
+        @hyde.figure(register=False)
+        def Graph1(x, y):
+            plt.figure("Graph0").axes[0].plot(x, y)
+            fig = plt.figure("Graph1")
+            fig.clear()
+            fig.add_subplot(111).plot(x, y)
+            return fig
+
+        built = Graph1([0, 1, 2], [3, 6, 9])
+
+        self.assertEqual("Graph1", built.get_label())
+        self.assertIsNot(built, neighbour)
+
+    def test_a_figure_built_without_hydes_backend_says_so(self):
+        """"must create exactly one figure" sends the reader to the wrong place.
+
+        A plain matplotlib figure means the process is on another backend, and
+        the function plainly did create a figure.
+        """
+        from matplotlib.figure import Figure
+
+        from hyde.matplotlib_backend import (
+            begin_figure_build_session,
+            end_figure_build_session,
+            finalize_figure_build_session,
+        )
+
+        def build():
+            return None
+
+        session = begin_figure_build_session(build, (), {})
+        end_figure_build_session(session)
+        with self.assertRaises(ValueError) as caught:
+            finalize_figure_build_session(session, Figure())
+
+        self.assertIn("backend is not active", str(caught.exception))
 
     def test_apply_figure_action_rejects_routine_semantic_edit_actions(self):
         plt = self._configure_pyplot()

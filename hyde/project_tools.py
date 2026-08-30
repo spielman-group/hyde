@@ -127,10 +127,18 @@ def execute_procedures_bootstrap(project_dir, hyde_source_root, reset_namespace=
 
 
 def configure_gui_matplotlib_backend():
-    import matplotlib
+    """Install Hyde's matplotlib backend, whatever the kernel booted with.
 
-    if "matplotlib.pyplot" in sys.modules:
-        return
+    spyder_kernels configures `IPKernelApp.matplotlib = "inline"`, so pyplot is
+    always already imported by the time this runs. Bailing out on that made
+    this a no-op in every real kernel and left the backend resting entirely on
+    a line in the user-editable procedures/__init__.py.
+
+    Switching backends closes open figures, so the check below matters: once
+    Hyde's backend is installed this returns without touching anything, and a
+    procedure reload does not destroy the user's figures.
+    """
+    import matplotlib
 
     backend = str(matplotlib.get_backend() or "")
     if backend.lower() == HYDE_MATPLOTLIB_BACKEND.lower():

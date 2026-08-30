@@ -238,13 +238,6 @@ def _install_first_class_figure_dirty_tracking(figure):
             previous_callback(artist, stale)
         if stale:
             _mark_first_class_figure_dirty(figure)
-            # A recreation macro re-run against a figure that still exists gets
-            # the existing figure back from `plt.figure(label)`, so no
-            # FigureHyde is constructed and nothing registers itself. Drawing
-            # on it is what identifies the figure the macro is building.
-            session = _current_build_session()
-            if session is not None:
-                session.register_figure(figure)
 
     figure._hyde_dirty_tracking_installed = True
     figure.stale_callback = _on_stale
@@ -331,15 +324,46 @@ def _resolve_runtime_figure(value):
     return None
 
 
+def _is_hyde_figure(value):
+    return value is not None and hasattr(value, "_hyde_ir")
+
+
+def _active_hyde_figure():
+    try:
+        from matplotlib._pylab_helpers import Gcf
+
+        manager = Gcf.get_active()
+    except Exception:
+        return None
+    figure = getattr(getattr(manager, "canvas", None), "figure", None)
+    return figure if _is_hyde_figure(figure) else None
+
+
 def finalize_figure_build_session(session, result):
     created = list(session.created_figures)
+    resolved = _resolve_runtime_figure(result)
     if not created:
-        raise ValueError("@hyde.figure functions must create exactly one figure.")
+        if resolved is not None and not _is_hyde_figure(resolved):
+            # Every figure Hyde builds is a FigureHyde. A plain one means the
+            # process is on some other matplotlib backend, and saying "must
+            # create exactly one figure" about a function that plainly created
+            # one sends the reader looking in the wrong place entirely.
+            raise ValueError(
+                "Hyde's matplotlib backend is not active, so this figure was "
+                "not built by Hyde. Load a Hyde project, and check that "
+                "procedures/__init__.py still selects Hyde's backend."
+            )
+        # A macro run against a figure that already exists gets that figure
+        # back from plt.figure(...), so FigureHyde.__init__ never runs and
+        # nothing registers itself. The figure the macro built is the one it
+        # returned, or failing that the one it left current.
+        adopted = resolved if _is_hyde_figure(resolved) else _active_hyde_figure()
+        if adopted is not None:
+            created = [adopted]
     if len(created) != 1:
         raise ValueError("@hyde.figure functions must create exactly one figure.")
 
     created_figure = created[0]
-    resolved = _resolve_runtime_figure(result)
     if resolved is not None and resolved is not created_figure:
         raise ValueError("@hyde.figure functions must resolve to the one created figure.")
 
