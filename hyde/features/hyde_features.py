@@ -62,34 +62,56 @@ def callable_invocation_source(callable_name, callable_args=()):
 
 
 def session_source_has_statements(session_source):
+    """Whether a session file holds anything worth asking the kernel to run.
+
+    A file of only comments is a legal, ordinary session file with nothing in
+    it. Source that will not parse counts as something to run: the kernel's
+    error is more use to the user than silently restoring nothing.
+    """
     try:
         return bool(ast.parse(str(session_source)).body)
     except SyntaxError:
-        # A malformed session file is still worth sending. The kernel's own
-        # error tells the user which line is wrong; restoring nothing silently
-        # does not.
         return True
 
 
 def session_restore_source(session_source):
-    if not session_source_has_statements(session_source):
-        # Comments are not a block body, so wrapping a file that holds only
-        # comments -- which is what a new project ships -- in `try:` emits
-        # Python that does not compile. There is nothing to run, and the GUI
-        # defers presenting restored windows until it hears that restoring
-        # finished.
-        return "import hyde\n" 'hyde.task_complete("session_restore", True)\n'
-    indented_source = textwrap.indent(f"{session_source}\n", "    ")
-    return (
-        "import hyde\n"
-        "try:\n"
-        f"{indented_source}"
-        "except Exception:\n"
-        '    hyde.task_complete("session_restore", False)\n'
-        "    raise\n"
-        "else:\n"
-        '    hyde.task_complete("session_restore", True)\n'
-    )
+    """Lower a project's session.py for execution in the kernel.
+
+    The source runs as written. Whether it ran is carried by the kernel's reply
+    to the request that ran it, so there is no try/except wrapper reporting the
+    same thing a second time -- and none of the hazards that came with
+    indenting a whole module to fit inside one: a `__future__` import stops
+    being first in the file, the contents of multi-line strings get rewritten,
+    a body of only comments does not compile, and every line number in a
+    traceback moves.
+
+    `import hyde` is added because session.py refers to `hyde`, and the
+    bootstrap binds it inside procedures rather than in the kernel's namespace.
+    It goes after any `__future__` imports, which the language requires to come
+    first, and shifts reported line numbers by one.
+    """
+    source = str(session_source)
+    if not source.endswith("\n"):
+        source += "\n"
+    future_imports, body = _split_leading_future_imports(source)
+    return f"{future_imports}import hyde\n{body}"
+
+
+def _split_leading_future_imports(source):
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "", source
+    last_future_line = 0
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            last_future_line = node.end_lineno
+        else:
+            break
+    if not last_future_line:
+        return "", source
+    lines = source.splitlines(keepends=True)
+    return "".join(lines[:last_future_line]), "".join(lines[last_future_line:])
 
 
 def normalize_namespace_names(namespace_names):

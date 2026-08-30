@@ -24,6 +24,7 @@ import tomllib
 
 import hyde
 import hyde.project_tools
+from hyde.user_interface.plugins.kernel_runtime import KernelRequest
 from tests.kernel_fakes import KernelRequestRecorder
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.user_interface.main import HydeApp
@@ -544,10 +545,9 @@ class TestProjectStateHelpers(unittest.TestCase):
             restored_table.show()
             self.qapp.processEvents()
 
-            HydeApp.on_task_complete(
-                restored_app,
-                {"name": "session_restore", "success": True},
-            )
+            restored_app.plugin_manager.services[
+                "python_execution_service"
+            ].answer_last()
             self.qapp.processEvents()
 
             order = [
@@ -669,10 +669,9 @@ class TestProjectStateHelpers(unittest.TestCase):
                 if str(subwindow.objectName()).strip()
             ]
 
-            HydeApp.on_task_complete(
-                restored_app,
-                {"name": "session_restore", "success": False},
-            )
+            restored_app.plugin_manager.services[
+                "python_execution_service"
+            ].answer_last(KernelRequest.RAISED, "ValueError: session.py failed")
             self.qapp.processEvents()
 
             final_order = [
@@ -885,10 +884,9 @@ class TestProjectStateHelpers(unittest.TestCase):
 
             HydeApp.restore_project_session(restored_app)
 
-            HydeApp.on_task_complete(
-                restored_app,
-                {"name": "session_restore", "success": True},
-            )
+            restored_app.plugin_manager.services[
+                "python_execution_service"
+            ].answer_last()
 
             table_plugin = type("TablePluginStub", (), {})()
             table_plugin.services = {

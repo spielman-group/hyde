@@ -696,17 +696,22 @@ class HydeApp:
 
     @inmain_decorator()
     def _on_session_restore_command_finished(self, kernel_request):
-        if kernel_request.ran():
-            # The session file ran; task_complete carries the real answer.
-            return
-        self._complete_session_restore(False)
+        """The kernel answered; that reply is the whole outcome.
+
+        The generated cell used to report the same thing again through
+        task_complete, which meant the answer could arrive twice, by two
+        routes, and had to agree.
+        """
+        self._complete_session_restore(kernel_request.ran())
 
     @inmain_decorator()
     def on_task_complete(self, data):
-        data = dict(data or {})
-        if data.get("name") != "session_restore":
-            return
-        self._complete_session_restore(bool(data.get("success", False)))
+        """Landing point for `hyde.task_complete`.
+
+        No built-in task uses it: session restore was the last, and it now
+        learns its outcome from the reply to its own request.
+        """
+        del data
 
     def restore_project_session(self):
         self._clear_session_restore_state()

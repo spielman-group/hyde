@@ -154,9 +154,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
 
         source = app_ir.current_diff(restore_ir).python_source(log=False)
 
-        self.assertIn("import hyde", source)
-        self.assertIn("x = 1", source)
-        self.assertIn("hyde.task_complete(\"session_restore\", True)", source)
+        self.assertEqual("import hyde\nx = 1\n", source)
 
     def test_frontend_kernel_service_marks_ready_from_kernel_info_reply(self):
         class FakeQtKernelClient:
@@ -1027,17 +1025,18 @@ class TestRuntimeArchitecture(unittest.TestCase):
             [(app_ir.current_diff(request_ir).python_source(), True)],
         )
 
-    def test_app_ir_session_restore_wraps_session_source(self):
+    def test_app_ir_session_restore_runs_the_session_file_as_written(self):
+        """The reply to the request carries the outcome, so nothing reports it twice."""
         app_ir = HydeAppIR(current_project_dir="/tmp/demo.hy")
         restore_ir = app_ir.with_session_restore_source("Table0()\nFigure0(delay)\n")
 
         source = app_ir.current_diff(restore_ir).python_source()
 
-        self.assertIn("import hyde", source)
-        self.assertIn("Table0()", source)
-        self.assertIn("Figure0(delay)", source)
-        self.assertIn('hyde.task_complete("session_restore", False)', source)
-        self.assertIn('hyde.task_complete("session_restore", True)', source)
+        self.assertEqual(
+            "import hyde\nTable0()\nFigure0(delay)\n",
+            source,
+        )
+        self.assertNotIn("task_complete", source)
 
     def test_python_execution_service_logs_hidden_dispatch(self):
         executed = []

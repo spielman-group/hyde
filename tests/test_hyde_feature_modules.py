@@ -265,22 +265,15 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
                 command="session_restore",
                 session_source="value = 1",
             ),
-            "import hyde\n"
-            "try:\n"
-            "    value = 1\n"
-            "except Exception:\n"
-            '    hyde.task_complete("session_restore", False)\n'
-            "    raise\n"
-            "else:\n"
-            '    hyde.task_complete("session_restore", True)\n',
+            "import hyde\nvalue = 1\n",
         )
 
-    def test_session_restore_source_is_valid_python_for_every_session_file(self):
-        """A session file with no statements is a normal file, not an error.
+    def test_session_restore_source_runs_a_session_file_as_written(self):
+        """session.py is user-editable, so lowering it must not rewrite it.
 
-        Comments are not a block body, so wrapping a comments-only file in
-        `try:` produces Python that does not compile -- which is what a new
-        project's template session.py contains.
+        It used to be indented to fit inside a `try:` block, which broke a
+        `__future__` import, rewrote the contents of multi-line strings, and
+        failed to compile at all when the file held only comments.
         """
         from hyde.features.hyde_features import hyde_app_python_source
 
@@ -289,6 +282,7 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
             ("blank", "\n\n"),
             ("real source", "value = 1\n"),
             ("trailing blank lines", "value = 1\n\n\n"),
+            ("__future__ import", "from __future__ import annotations\nvalue = 1\n"),
         ):
             with self.subTest(session_source=description):
                 compile(
@@ -300,17 +294,41 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
                     "exec",
                 )
 
-    def test_session_restore_with_nothing_to_run_still_reports_completion(self):
-        """The GUI defers presenting restored windows until this arrives."""
+    def test_session_restore_source_preserves_multiline_string_contents(self):
         from hyde.features.hyde_features import hyde_app_python_source
 
-        source = hyde_app_python_source(
-            command="session_restore",
-            session_source="# nothing here\n",
+        namespace = {}
+        exec(
+            compile(
+                hyde_app_python_source(
+                    command="session_restore",
+                    session_source='note = """\nline one\n"""\n',
+                ),
+                "<session_restore>",
+                "exec",
+            ),
+            namespace,
         )
 
-        self.assertIn('hyde.task_complete("session_restore", True)', source)
-        self.assertNotIn("try:", source)
+        self.assertEqual("\nline one\n", namespace["note"])
+
+    def test_session_source_statement_check_classifies_real_session_files(self):
+        """Whether to run session.py is a dispatch decision the GUI makes.
+
+        Source that will not parse counts as something to run: the kernel's
+        error is more use than silently restoring nothing.
+        """
+        from hyde.features.hyde_features import session_source_has_statements
+
+        for description, session_source, expected in (
+            ("comments only", "# written when the project is saved\n", False),
+            ("blank", "\n\n", False),
+            ("empty", "", False),
+            ("real source", "value = 1\n", True),
+            ("will not parse", "def f(:\n", True),
+        ):
+            with self.subTest(session_source=description):
+                self.assertIs(expected, session_source_has_statements(session_source))
 
     def test_numeric_series_eligibility_contract(self):
         eligible = {
