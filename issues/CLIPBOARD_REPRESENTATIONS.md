@@ -9,12 +9,16 @@ representations a clipboard actually distinguishes.
 
 ## Progress Checklist
 
-- [ ] Slice 1: Establish What Linux Already Publishes
 - [ ] Slice 2: Reduce Copy To Vector, Image And LaTeX
 - [ ] Slice 3: Carry Vector And Raster Together, And Let Copy As Force One
 - [ ] Slice 4: Publish A Native Vector Flavour On macOS
-- [ ] Slice 5: Publish A Native Vector Flavour On Linux
 - [ ] Slice 6: Test Cleanup And Spec Resync
+
+Deferred until a Linux machine with the labscript suite is available. Nothing
+below depends on them:
+
+- [ ] Slice 1: Establish What Linux Already Publishes
+- [ ] Slice 5: Publish A Native Vector Flavour On Linux
 
 ## Why
 
@@ -76,7 +80,11 @@ running, so it already satisfies this. A short-lived helper process would not.
 
 ### Type
 
-`HITL`
+`HITL` - **deferred**, no Linux machine with the labscript suite installed.
+
+Slices 2 to 4 do not depend on this. Slice 4 puts the platform mapping behind a
+seam whose Linux side is simply absent, which is also the correct shape if it
+turns out Linux needs nothing, so deferring costs no rework.
 
 ### What to build
 
@@ -193,7 +201,7 @@ needed, rather than a macOS branch in the copy path.
 
 ### Type
 
-`AFK`
+`AFK` - **deferred** with Slice 1.
 
 ### What to build
 
@@ -234,7 +242,10 @@ whose `COPY_TO_CLIPBOARD_REQUEST` payload changes shape in Slice 3.
 
 ### Blocked by
 
-- Slices 2, 3, 4, 5
+- Slices 2, 3, 4
+
+Slice 5 is deferred and does not block this. If Linux later needs a converter,
+its spec wording lands with it.
 
 ## Risks
 
@@ -253,6 +264,10 @@ whose `COPY_TO_CLIPBOARD_REQUEST` payload changes shape in Slice 3.
 
 - **Windows.** `QWindowsMimeConverter` is the equivalent seam and can be filled
   in when Hyde runs there.
+- **Linux, for now.** Slices 1 and 5 are deferred rather than dropped. Until
+  they run, a vector copy on Linux is untested: it may already work, because X11
+  and Wayland selections are MIME-typed at the protocol level, or it may need a
+  converter. Neither is known, and nothing in this branch should claim it is.
 - **Emitting only non-default Python in generated figure source.** A separate
   branch: it needs a default-state source independent of any live figure, which
   means matplotlib's own rcParams rather than a snapshot of an existing figure.
