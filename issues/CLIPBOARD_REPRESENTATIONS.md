@@ -9,7 +9,7 @@ representations a clipboard actually distinguishes.
 
 ## Progress Checklist
 
-- [ ] Slice 2: Reduce Copy To Vector, Image And LaTeX
+- [x] Slice 2: Reduce Copy To Vector, Image And LaTeX
 - [ ] Slice 3: Carry Vector And Raster Together, And Let Copy As Force One
 - [ ] Slice 4: Publish A Native Vector Flavour On macOS
 - [ ] Slice 6: Test Cleanup And Spec Resync
