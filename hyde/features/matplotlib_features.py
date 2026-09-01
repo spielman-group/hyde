@@ -153,37 +153,59 @@ def graphics_export_formats(filetypes=None):
 # this mapping has no clipboard representation at all: `raw` and `rgba` are raw
 # buffers with no MIME type, and `svgz` is gzipped SVG that no application
 # pastes, superseded by `svg`.
+# Only the formats Hyde actually publishes to a clipboard. Every other raster
+# encoding pastes identically, because the platform republishes the image rather
+# than the encoding it was handed.
 GRAPHICS_CLIPBOARD_MIME_TYPES = {
     "pdf": "application/pdf",
-    "png": "image/png",
     "svg": "image/svg+xml",
-    "eps": "application/postscript",
-    "ps": "application/postscript",
-    "jpeg": "image/jpeg",
-    "jpg": "image/jpeg",
-    "tif": "image/tiff",
-    "tiff": "image/tiff",
-    "gif": "image/gif",
-    "webp": "image/webp",
-    "avif": "image/avif",
+    "png": "image/png",
     # LaTeX source, carried as text rather than as an image.
     "pgf": "text/plain",
 }
+
+
+@dataclass(frozen=True)
+class ClipboardRepresentation:
+    """One kind of thing a clipboard can carry a figure as.
+
+    A clipboard distinguishes representations, not file formats: the receiving
+    application asks for a picture or a drawing or some text, and every raster
+    encoding answers the first question identically. `output_format` is which
+    matplotlib format serves the representation, which is Hyde's choice and not
+    something a user picks.
+    """
+
+    key: str
+    display_label: str
+    output_format: str
+
+
+GRAPHICS_CLIPBOARD_REPRESENTATIONS = (
+    ClipboardRepresentation("vector", "Vector", "pdf"),
+    ClipboardRepresentation("image", "Image", "png"),
+    ClipboardRepresentation("latex", "LaTeX", "pgf"),
+)
+
+
+def graphics_clipboard_representations():
+    """The representations a figure can be copied as, in menu order."""
+    return GRAPHICS_CLIPBOARD_REPRESENTATIONS
+
+
+def graphics_clipboard_representation(key):
+    """Return the named representation, or None if there is no such thing."""
+    normalized_key = str(key or "").strip().lower()
+    for representation in GRAPHICS_CLIPBOARD_REPRESENTATIONS:
+        if representation.key == normalized_key:
+            return representation
+    return None
 
 
 def clipboard_mime_type_for_format(output_format):
     """Return the clipboard MIME type for a format, or None if it has none."""
     normalized_format = str(output_format or "").strip().lower()
     return GRAPHICS_CLIPBOARD_MIME_TYPES.get(normalized_format)
-
-
-def graphics_clipboard_formats(filetypes=None):
-    """Export formats that have a clipboard representation."""
-    return tuple(
-        item
-        for item in graphics_export_formats(filetypes)
-        if clipboard_mime_type_for_format(item.key) is not None
-    )
 
 
 def graphics_output_transparency_supported(output_format):

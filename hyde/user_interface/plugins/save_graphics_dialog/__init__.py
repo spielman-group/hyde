@@ -3,7 +3,10 @@ from functools import partial
 
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import graphics_clipboard_formats
+from hyde.features.matplotlib_features import (
+    graphics_clipboard_representation,
+    graphics_clipboard_representations,
+)
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.shared.plugin import HydePlugin
 
@@ -72,7 +75,7 @@ class Plugin(HydePlugin):
         # re-renders the whole `figure` location, and into the same group as
         # Copy so the submenu sits beside it.
         contributions = []
-        for index, item in enumerate(graphics_clipboard_formats()):
+        for index, item in enumerate(graphics_clipboard_representations()):
             for location, group, group_order in self.COPY_AS_LOCATIONS:
                 contributions.append(
                     {
@@ -83,15 +86,24 @@ class Plugin(HydePlugin):
                         "order": 30 + index,
                         "name": item.display_label,
                         "action": partial(
-                            self.copy_active_figure, output_format=item.key
+                            self.copy_active_figure, representation=item.key
                         ),
                         "enabled": self.has_active_editable_figure,
                     }
                 )
         return contributions
 
-    def copy_active_figure(self, checked=False, output_format="pdf"):
+    def copy_active_figure(self, checked=False, representation="vector"):
+        """Copy the active figure as one of the clipboard representations.
+
+        The caller names a representation; which matplotlib format serves it is
+        Hyde's business, not the user's.
+        """
         del checked
+        clipboard_representation = graphics_clipboard_representation(representation)
+        if clipboard_representation is None:
+            return False
+        output_format = clipboard_representation.output_format
         if self.copy_in_flight():
             # One at a time. The rendered bytes arrive on a channel that does
             # not say which copy they answer, so a second copy in flight would

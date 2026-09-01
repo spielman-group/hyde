@@ -29,7 +29,7 @@ from hyde.user_interface.plugins.figure_interactive.context import EditableFigur
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.features.matplotlib_features import (
     clipboard_mime_type_for_format,
-    graphics_clipboard_formats,
+    graphics_clipboard_representations,
     graphics_export_formats,
 )
 from hyde.user_interface.plugins.save_graphics_dialog.clipboard import clipboard_mime_data
@@ -340,7 +340,7 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         import base64
 
         plugin = make_copy_plugin()
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         rendered = b"%PDF-1.4 fake pdf bytes"
 
         plugin.on_kernel_message(
@@ -398,14 +398,15 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         finally:
             plt.close(figure)
 
-    def test_clipboard_capable_formats_exclude_the_unpasteable_ones(self):
-        keys = [item.key for item in graphics_clipboard_formats()]
+    def test_each_representation_renders_through_a_format_matplotlib_exports(self):
+        exportable = {item.key for item in graphics_export_formats()}
 
-        self.assertEqual(["pdf", "png"], keys[:2])
-        for excluded in ("raw", "rgba", "svgz"):
-            self.assertNotIn(excluded, keys)
-        for expected in ("pdf", "png", "svg", "pgf", "jpeg", "tiff"):
-            self.assertIn(expected, keys)
+        for item in graphics_clipboard_representations():
+            with self.subTest(representation=item.key):
+                self.assertIn(item.output_format, exportable)
+                self.assertIsNotNone(
+                    clipboard_mime_type_for_format(item.output_format)
+                )
 
     def test_a_format_with_no_clipboard_representation_yields_no_payload(self):
         self.assertIsNone(clipboard_mime_data(b"junk", output_format="raw"))
@@ -524,7 +525,7 @@ class TestCopyPgfAsText(unittest.TestCase):
         import base64
 
         plugin = make_copy_plugin()
-        plugin.copy_active_figure(output_format="pgf")
+        plugin.copy_active_figure(representation="latex")
         latex = b"\\begingroup%\n\\makeatletter%\n\\begin{pgfpicture}%"
 
         plugin.on_kernel_message(
@@ -688,7 +689,7 @@ class TestPngCompanionRepresentation(unittest.TestCase):
         import base64
 
         plugin = make_copy_plugin()
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
@@ -736,7 +737,7 @@ class TestCopyFeedback(unittest.TestCase):
         import base64
 
         plugin, messages = self._plugin_with_status()
-        plugin.copy_active_figure(output_format="png")
+        plugin.copy_active_figure(representation="image")
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
@@ -754,7 +755,7 @@ class TestCopyFeedback(unittest.TestCase):
     def test_a_copy_waits_for_a_busy_kernel_rather_than_reporting_failure(self):
         """The user's own long cell holds the kernel; the copy is queued, not late."""
         plugin, messages = self._plugin_with_status()
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
 
         self.assertTrue(plugin.copy_in_flight())
         self.assertFalse(any("could not" in str(m).lower() for m in messages), messages)
@@ -762,7 +763,7 @@ class TestCopyFeedback(unittest.TestCase):
     def test_a_rendered_copy_whose_data_never_arrives_reports_failure(self):
         plugin, messages = self._plugin_with_status()
         kernel = plugin.services["python_execution_service"]
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         kernel.render_ran()
 
         self.assertTrue(plugin.copy_in_flight())
@@ -776,7 +777,7 @@ class TestCopyFeedback(unittest.TestCase):
         import base64
 
         plugin, _ = self._plugin_with_status()
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         # Take the slow path: the cursor a lingering copy would have put up.
         plugin._copy_request.show_busy_cursor()
         self.assertIsNotNone(QtWidgets.QApplication.overrideCursor())
@@ -796,7 +797,7 @@ class TestCopyFeedback(unittest.TestCase):
 
     def test_a_failed_render_does_not_confirm_success(self):
         plugin, messages = self._plugin_with_status()
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
@@ -842,7 +843,7 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
 
         messages = []
         plugin = make_copy_plugin(messages)
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
@@ -861,7 +862,7 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
     def test_undecodable_payload_settles_the_request(self):
         messages = []
         plugin = make_copy_plugin(messages)
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
@@ -877,7 +878,7 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
         plugin = make_copy_plugin(messages)
         kernel = plugin.services["python_execution_service"]
         QtWidgets.QApplication.clipboard().setText("untouched")
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         kernel.render_ran()
         plugin.on_copy_payload_timeout()
         self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
@@ -902,11 +903,11 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
-    def _copy_in_flight(self, output_format="pdf"):
+    def _copy_in_flight(self, representation="vector"):
         messages = []
         plugin = make_copy_plugin(messages)
         kernel = plugin.services["python_execution_service"]
-        self.assertTrue(plugin.copy_active_figure(output_format=output_format))
+        self.assertTrue(plugin.copy_active_figure(representation=representation))
         return plugin, kernel, messages
 
     def test_a_copy_in_progress_holds_the_status_bar_but_its_outcome_does_not(self):
@@ -929,7 +930,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
             ),
         }
 
-        plugin.copy_active_figure(output_format="pdf")
+        plugin.copy_active_figure(representation="vector")
         self.assertEqual([("holds", "Copying figure as PDF...")], shown)
 
         plugin.on_kernel_message(copy_payload())
@@ -958,7 +959,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         save_graphics.services["python_execution_service"] = kernel
 
         QtWidgets.QApplication.clipboard().setText("untouched")
-        self.assertTrue(save_graphics.copy_active_figure(output_format="pdf"))
+        self.assertTrue(save_graphics.copy_active_figure(representation="vector"))
         kernel.render_ran()
 
         app.emit_plugin_event(
@@ -973,7 +974,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
     def test_a_second_copy_is_refused_while_one_is_in_flight(self):
         plugin, kernel, messages = self._copy_in_flight()
 
-        self.assertFalse(plugin.copy_active_figure(output_format="png"))
+        self.assertFalse(plugin.copy_active_figure(representation="image"))
         self.assertEqual(1, len(kernel.executed))
         self.assertTrue(
             any("already in progress" in str(m).lower() for m in messages), messages
@@ -984,7 +985,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         plugin.on_kernel_message(copy_payload())
 
         self.assertFalse(plugin.copy_in_flight())
-        self.assertTrue(plugin.copy_active_figure(output_format="png"))
+        self.assertTrue(plugin.copy_active_figure(representation="image"))
         self.assertEqual(2, len(kernel.executed))
 
     def test_a_render_that_raises_reports_what_the_kernel_said(self):
@@ -1028,7 +1029,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         self.assertFalse(plugin.copy_in_flight())
 
         QtWidgets.QApplication.clipboard().setText("untouched")
-        self.assertTrue(plugin.copy_active_figure(output_format="png"))
+        self.assertTrue(plugin.copy_active_figure(representation="image"))
         plugin.on_kernel_message(copy_payload(b"%PDF stale", request_msg_id=stale))
 
         self.assertTrue(plugin.copy_in_flight())
@@ -1085,7 +1086,9 @@ class TestGeneratedGraphicsFormatTable(unittest.TestCase):
 
     def test_copy_offers_only_formats_the_table_can_export(self):
         exportable = {item.key for item in graphics_export_formats()}
-        clipboard = {item.key for item in graphics_clipboard_formats()}
+        clipboard = {
+            item.output_format for item in graphics_clipboard_representations()
+        }
 
         self.assertTrue(
             clipboard <= exportable,
@@ -1143,37 +1146,32 @@ class TestCopyAsSubmenu(unittest.TestCase):
                 return [entry.text() for entry in submenu.actions() if not entry.isSeparator()]
         return None
 
-    def test_copy_as_lists_the_clipboard_capable_formats_in_save_dialog_order(self):
+    def test_copy_as_offers_the_three_representations_a_clipboard_distinguishes(self):
+        """A clipboard carries representations, not file formats.
+
+        Every raster encoding pastes identically, because the platform
+        republishes the image rather than the encoding, so offering a dozen of
+        them was offering choices with no consequence.
+        """
         app = self._host([None])
-        expected = [item.display_label for item in graphics_clipboard_formats()]
 
-        self.assertEqual(expected, self._submenu_labels(app.ui.menuEdit))
-
-    def test_copy_as_omits_formats_with_no_clipboard_representation(self):
-        app = self._host([None])
-        labels = self._submenu_labels(app.ui.menuEdit)
-
-        for excluded in ("RAW", "RGBA", "SVGZ"):
-            self.assertNotIn(excluded, labels)
-        for expected in ("PDF", "PNG", "SVG", "PGF", "JPEG", "TIFF"):
-            self.assertIn(expected, labels)
+        self.assertEqual(
+            ["Vector", "Image", "LaTeX"], self._submenu_labels(app.ui.menuEdit)
+        )
 
     def test_copy_as_appears_in_the_figure_context_menu(self):
         app = self._host([None])
         popup = app.menu_context.build_popup_menu("figure", parent=app.ui)
 
-        self.assertEqual(
-            [item.display_label for item in graphics_clipboard_formats()],
-            self._submenu_labels(popup),
-        )
+        self.assertEqual(["Vector", "Image", "LaTeX"], self._submenu_labels(popup))
 
     def test_each_copy_as_entry_emits_its_own_format(self):
         figure_context = [make_save_graphics_context(title="Graph12")]
         app = self._host(figure_context)
         app.menu_context.refresh_enabled_states()
 
-        for item in graphics_clipboard_formats():
-            with self.subTest(output_format=item.key):
+        for item in graphics_clipboard_representations():
+            with self.subTest(representation=item.key):
                 self.kernel.executed.clear()
                 action = app.menu_context.lookup_action(
                     "edit", item.display_label, path=("Copy As",)
@@ -1183,18 +1181,18 @@ class TestCopyAsSubmenu(unittest.TestCase):
                 self.assertEqual(
                     [
                         "fig = hyde.get_figure('Graph12')\n"
-                        f"hyde.copy_figure(fig, format={item.key!r}, dpi='figure')"
+                        f"hyde.copy_figure(fig, format={item.output_format!r}, dpi='figure')"
                     ],
                     self.kernel.executed,
                 )
-                settle_copy(self.save_graphics, self.kernel, item.key)
+                settle_copy(self.save_graphics, self.kernel, item.output_format)
 
     def test_copy_as_entries_need_an_active_figure(self):
         figure_context = [None]
         app = self._host(figure_context)
 
         app.menu_context.refresh_enabled_states()
-        action = app.menu_context.lookup_action("edit", "PNG", path=("Copy As",))
+        action = app.menu_context.lookup_action("edit", "Image", path=("Copy As",))
         self.assertFalse(action.isEnabled())
 
         figure_context[0] = make_save_graphics_context(title="Graph12")
