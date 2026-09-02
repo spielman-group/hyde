@@ -221,11 +221,41 @@ GUI behavior:
 - deliver the payload to open tables
 - each table ignores responses whose `request_id` does not match its outstanding fetch
 
+#### `['COPY_TO_CLIPBOARD_REQUEST', payload]`
+Sent when the kernel has rendered a figure for the clipboard. The clipboard
+belongs to the GUI process, so the kernel renders and hands the result over
+rather than writing it itself.
+
+Payload:
+```python
+{
+    'representations': [
+        {'output_format': 'pdf', 'payload_base64': '...'},
+        {'output_format': 'png', 'payload_base64': '...'},
+    ],
+    'request_msg_id': 'jupyter-shell-msg-id-or-empty',
+}
+```
+
+One entry per format the copy asked for, in the order the receiving application
+should prefer them. The kernel decides nothing about representation: which MIME
+type a format becomes, and which of them the platform can publish natively, is
+the GUI's business.
+
+`request_msg_id` is the `msg_id` of the Jupyter request that produced the
+rendering, read from the kernel's parent header. This channel carries no Jupyter
+header of its own, so without it a payload cannot be matched to the copy that
+asked for it.
+
 GUI behavior:
-- for `session_restore`, finalize deferred project-restore presentation work only on
-  success
-- on failure, keep the existing error/reporting path and skip deferred restore
-  ordering/state application
+- ignore a payload whose `request_msg_id` names a copy that is no longer
+  outstanding; an abandoned copy's bytes can still arrive, and would otherwise
+  satisfy a later one
+- an empty `request_msg_id` means the kernel could not name the request, which
+  is not evidence the bytes are stale, so it is accepted
+- place every representation under its format's MIME type, publish a raster
+  additionally as an image, and publish a vector under the platform's own
+  identifier
 
 #### `['TABLE_MACROS_RESPONSE', payload]`
 Sent when the kernel publishes a serialized table-macro registry snapshot.

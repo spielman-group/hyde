@@ -11,8 +11,8 @@ representations a clipboard actually distinguishes.
 
 - [x] Slice 2: Reduce Copy To Vector, Image And LaTeX
 - [x] Slice 3: Carry Vector And Raster Together, And Let Copy As Force One
-- [ ] Slice 4: Publish A Native Vector Flavour On macOS
-- [ ] Slice 6: Test Cleanup And Spec Resync
+- [x] Slice 4: Publish A Native Vector Flavour On macOS
+- [x] Slice 6: Test Cleanup And Spec Resync
 
 Deferred until a Linux machine with the labscript suite is available. Nothing
 below depends on them:
@@ -246,6 +246,22 @@ whose `COPY_TO_CLIPBOARD_REQUEST` payload changes shape in Slice 3.
 
 Slice 5 is deferred and does not block this. If Linux later needs a converter,
 its spec wording lands with it.
+
+## Outcome
+
+Slices 2, 3, 4 and 6 are done. A copied figure now pastes as vector into
+applications outside Qt on macOS, verified against the system pasteboard rather
+than through Qt's own reading of it: a vector-only copy reports no usable
+flavour without the converter and a PDF with it.
+
+Copy offers three representations instead of thirteen formats, a plain Copy
+carries a vector and a raster together, and Copy As forces one. Only the vector
+format the running platform can publish is rendered.
+
+Slices 1 and 5 remain deferred, so a vector copy on Linux is still untested. It
+may already work, because X11 and Wayland selections are MIME-typed at the
+protocol level, or it may need a converter of its own; the platform table has
+one obvious line to gain once it is measured.
 
 ## Risks
 
