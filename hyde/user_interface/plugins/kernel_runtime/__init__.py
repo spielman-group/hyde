@@ -1,4 +1,3 @@
-import inspect
 import logging
 import os
 import threading
@@ -312,43 +311,6 @@ class RuntimeHelper:
                 )
 
 
-# Hyde asks for a longer heartbeat interval than zprocess's default, because a
-# kernel busy with the user's own work does not answer promptly and must not be
-# killed for it. Those options live on an unmerged zprocess branch.
-_PERMISSIVE_HEARTBEAT_OPTIONS = ("heartbeat_interval", "allowed_missed_heartbeats")
-_PERMISSIVE_HEARTBEAT_BRANCH = "PermissiveHeartBeat"
-
-
-def _require_permissive_heartbeats(process_tree):
-    """Fail with the reason when zprocess cannot take Hyde's heartbeat options.
-
-    Passing them to a zprocess that does not accept them raised an
-    unexpected-keyword TypeError from inside the launch. The plugin host caught
-    it, logged that this plugin "may not be functional", and Hyde came up
-    looking entirely normal with no kernel -- so the one piece of evidence was
-    a caught exception in a log nobody reads until something else goes wrong.
-    """
-    try:
-        parameters = inspect.signature(process_tree.subprocess).parameters
-    except (TypeError, ValueError):
-        return
-    missing = [name for name in _PERMISSIVE_HEARTBEAT_OPTIONS if name not in parameters]
-    if not missing:
-        return
-    try:
-        import zprocess
-
-        installed = f"zprocess {getattr(zprocess, '__version__', 'unknown')}"
-    except Exception:
-        installed = "the installed zprocess"
-    raise RuntimeError(
-        f"{installed} has no {' or '.join(missing)} on "
-        "ProcessTree.subprocess(), which Hyde needs so a busy kernel is not "
-        "killed for answering a heartbeat late. Check out the "
-        f"{_PERMISSIVE_HEARTBEAT_BRANCH} branch of zprocess."
-    )
-
-
 class _MainThreadExecutor(QtCore.QObject):
     execute_requested = QtCore.Signal(str, bool)
 
@@ -477,7 +439,6 @@ class Plugin(HydePlugin):
         }
 
     def start_runtime(self):
-        _require_permissive_heartbeats(self.services["process_tree"])
         if os.path.exists(CONNECTION_FILE):
             os.remove(CONNECTION_FILE)
         output_redirection_port = None
@@ -516,6 +477,9 @@ class Plugin(HydePlugin):
             args=["-f", CONNECTION_FILE],
             output_redirection_port=output_redirection_port,
             startup_timeout=60,
+            # Longer than zprocess's default, because a kernel busy with the
+            # user's own work does not answer promptly and must not be killed
+            # for it. Which zprocess accepts these is a packaging question.
             heartbeat_interval=10,
             allowed_missed_heartbeats=10,
         )

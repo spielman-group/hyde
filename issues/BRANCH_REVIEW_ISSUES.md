@@ -21,6 +21,7 @@ exercised.
 - [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 - [ ] Slice 8: One Format Field On FigureIR
 - [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
+      — probe deleted; the version floor still waits on the upstream `v2.28.0` tag
 - [ ] Slice 10: Retire `current_ir` And Its Second Source Of Truth
 - [ ] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
@@ -536,11 +537,14 @@ not part of a versioning fix.
 
 ### Acceptance criteria
 
-- [ ] `_require_permissive_heartbeats` and `_PERMISSIVE_HEARTBEAT_BRANCH` are
+- [x] `_require_permissive_heartbeats` and `_PERMISSIVE_HEARTBEAT_BRANCH` are
       gone, along with the test that pins the probe.
-- [ ] An incompatible zprocess produces its own `TypeError`, not a Hyde refusal.
+- [x] An incompatible zprocess produces its own `TypeError`, not a Hyde refusal.
+      Measured against a checkout of the `v2.27.1` tag, the last release before
+      the heartbeat options existed: `TypeError: ProcessTree.subprocess() got an
+      unexpected keyword argument 'heartbeat_interval'`.
 - [ ] `pyproject.toml` declares `zprocess>=2.28.0` in place of `>=2.18.0`.
-- [ ] A `ProcessTree` whose `subprocess` forwards `**kwargs` does not prevent
+- [x] A `ProcessTree` whose `subprocess` forwards `**kwargs` does not prevent
       startup.
 
 ### Blocked by
@@ -554,6 +558,12 @@ currently refusing to start a working kernel, so removing it is the urgent
 half. The floor is only honest once the tag exists, so if the tag has not
 happened yet, land the deletion and leave `pyproject.toml` for a follow-up
 rather than declaring a floor nothing satisfies.
+
+**Status: the deletion has landed; the floor has not.** As of 2026-09-02 the
+zprocess tags stop at `v2.27.1` (`git describe` → `v2.27.1-2-g5da28e4`), so
+`pyproject.toml` still declares `zprocess>=2.18.0` — a floor that is knowingly
+false, since no released zprocess carries the heartbeat options. It stays that
+way until the tag exists; the remaining work is that one line.
 
 ## Slice 10: Retire `current_ir` And Its Second Source Of Truth
 

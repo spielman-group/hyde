@@ -510,35 +510,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
 
         self.assertEqual(calls, [("kernel_crashed",)])
 
-    def test_a_process_tree_without_permissive_heartbeats_is_named(self):
-        """Hyde needs an unmerged zprocess branch and says so when it is absent.
-
-        Without it the kernel launch raised an unexpected-keyword TypeError,
-        the plugin host caught it and logged that the plugin "may not be
-        functional", and Hyde came up looking normal with no kernel at all.
-        """
-
-        class ProcessTreeWithoutHeartbeatOptions:
-            def subprocess(
-                self,
-                path,
-                args=None,
-                output_redirection_port=None,
-                startup_timeout=None,
-            ):
-                raise AssertionError("should not be reached")
-
-        plugin = KernelRuntimePlugin({})
-        plugin.services = {"process_tree": ProcessTreeWithoutHeartbeatOptions()}
-
-        with self.assertRaises(RuntimeError) as caught:
-            plugin.start_runtime()
-
-        message = str(caught.exception)
-        self.assertIn("zprocess", message)
-        self.assertIn("PermissiveHeartBeat", message)
-        self.assertIn("heartbeat_interval", message)
-
     def test_kernel_runtime_plugin_starts_shared_frontend_client_and_worker(self):
         class FakeProcessTree:
             def __init__(self):
