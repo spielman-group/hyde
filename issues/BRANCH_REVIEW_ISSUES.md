@@ -28,6 +28,7 @@ exercised.
 - [ ] Slice 13: Figure Backend Leftovers
 - [ ] Slice 14: Trivia, Second Bundle
 - [ ] Slice 15: Let The Feature-Module Guard See Re-Exports
+- [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
 
 ## How to work these
 
@@ -939,3 +940,57 @@ assert, since it catches the forked-copy case too.
 ### Blocked by
 
 - Slice 6, which is done.
+
+## Slice 16: Stop The Variables Tool Stalling On A Lost Callback
+
+### Type
+
+`AFK`
+
+### What to build
+
+The Python Variables tool has a request-in-flight guard with no recovery, so a
+namespace-view request whose callback never arrives stalls the tool for the life
+of the window — silently, with no error, no log, and no way back short of
+closing and reopening it.
+
+In `hyde/user_interface/plugins/python_variables_tool/__init__.py`:
+`refresh_namespace()` returns early when `_refresh_in_flight` is set, recording
+`_refresh_pending`; `_refresh_in_flight` is cleared **only** in
+`_on_namespace_view`, the success callback; and the request goes out through
+`SpyderFrontendComm.request_namespace_view`. So a closed comm, a kernel that
+died mid-request, or a dropped comm message leaves the flag set permanently and
+every later refresh returns early. The view then shows stale variables
+indefinitely while appearing to work.
+
+Found while verifying Slice 7. It is **not** a fifth copy of the lifecycle that
+slice collapsed: this surface rides Spyder's comm channel rather than the
+shell-reply-plus-payload path, and it has no payload timer at all. The
+`_refresh_in_flight` / `_refresh_pending` pair here is the same *coalescing*
+policy Slice 7 deliberately left in the two windows, not the lifecycle Slice 7
+took ownership of. So the name matches and the mechanism does not.
+
+Decide, rather than assume, whether this should reuse `KernelPayloadRequest`
+(`hyde/user_interface/base_hyde_widgets.py`). Read it first: its bounded timer
+covers the gap *after* a reply says a command ran, and a comm request has no
+separate reply, so the shapes may not map. A comm request may want its own
+bounded recovery instead. Either way the outcome is the same three properties:
+the flag clears on failure, the user or the log learns why, and the tool can
+refresh again.
+
+### Acceptance criteria
+
+- [ ] A refresh whose callback never arrives is shown to stall the tool at
+      `HEAD` — demonstrated by execution, with a later refresh returning early
+      and the view staying stale.
+- [ ] After the fix, that same lost callback leaves the tool able to refresh
+      again, and says why it failed.
+- [ ] A refresh that succeeds normally is unaffected, including the pending-
+      refresh coalescing that already works.
+- [ ] Whether `KernelPayloadRequest` was reused or not is stated with the
+      reason.
+
+### Blocked by
+
+None - can start immediately. Independent of Slices 8 and 10 to 15; touches a
+plugin none of them edit.
