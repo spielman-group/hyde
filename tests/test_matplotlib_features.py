@@ -1658,7 +1658,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                     },
                 }
             )
-            widget.REFRESH_PAYLOAD_TIMEOUT_MS = 0
+            widget.PAYLOAD_TIMEOUT_MS = 0
             widget.refresh_figure()
             execution.answer_last()
             for _ in range(3):
@@ -1920,7 +1920,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.show()
         self.qapp.processEvents()
 
-        widget.CLOSE_PAYLOAD_TIMEOUT_MS = 0
+        widget.PAYLOAD_TIMEOUT_MS = 0
         subwindow.close()
         execution.answer_last()
         for _ in range(3):
@@ -1949,14 +1949,17 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         subwindow.show()
         self.qapp.processEvents()
 
-        widget.CLOSE_PAYLOAD_TIMEOUT_MS = 0
+        widget.PAYLOAD_TIMEOUT_MS = 0
         with self.assertLogs("hyde", level="WARNING") as logs:
             subwindow.close()
             execution.answer_last()
             for _ in range(3):
                 self.qapp.processEvents()
 
-        self.assertTrue(any("never confirmed" in message for message in logs.output))
+        self.assertTrue(
+            any("its data never arrived" in message for message in logs.output),
+            logs.output,
+        )
         widget.force_close()
 
     def test_figure_window_uses_snapshot_size_for_initial_subwindow_geometry(self):

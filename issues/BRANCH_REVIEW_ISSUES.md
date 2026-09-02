@@ -18,7 +18,7 @@ exercised.
 - [x] Slice 4: Survive A Raising Request Consumer
 - [x] Slice 5: Report Only What Reached The Clipboard
 - [x] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
-- [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
+- [x] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 - [ ] Slice 8: One Format Field On FigureIR
 - [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
       — probe deleted; the version floor still waits on the upstream `v2.28.0` tag
@@ -400,13 +400,40 @@ retry hook becomes a callable.
 
 ### Acceptance criteria
 
-- [ ] One object owns the payload timer, the in-flight flag, and the settle path.
-- [ ] The two windows keep only their own `refresh_data` / `refresh_figure` and
+- [x] One object owns the payload timer, the in-flight flag, and the settle path.
+- [x] The two windows keep only their own `refresh_data` / `refresh_figure` and
       lose the duplicated lifecycle methods.
-- [ ] Cursor restoration, user-facing failure reporting, and logging behave the
+- [x] Cursor restoration, user-facing failure reporting, and logging behave the
       same for every consumer, rather than differing per copy.
-- [ ] A refresh or close still waits indefinitely for a busy kernel, and still
+- [x] A refresh or close still waits indefinitely for a busy kernel, and still
       bounds only the gap after the reply says the command ran.
+
+### Landed
+
+`KernelPayloadRequest` (`base_hyde_widgets.py`), reached through
+`KernelCommands.begin_payload_request(lane, code, ...)`. `lane` names the one
+outstanding request of its kind, so a figure window keeps a refresh and a close
+apart while still refusing a second of either. `FigureCopyRequest` is gone.
+Four payload-timeout constants became one `PAYLOAD_TIMEOUT_MS`.
+
+Two deliberate differences remain, both with two callers on each side rather
+than one:
+
+- **Whether progress is announced.** The owner always restores the cursor and
+  always reports and logs a failure. Whether it *raises* a wait cursor and holds
+  a status message is declared per request: yes for copy and close, which are
+  gestures the user is waiting on; no for the two refreshes, which are reactive
+  syncs. A figure refresh runs on every namespace update, so announcing it would
+  flicker a wait cursor through ordinary typing.
+- **A command the kernel never took.** `begin_payload_request` returns None
+  without reporting: the lifecycle never started, and reporting it would put
+  start-up refreshes in the status bar. Each consumer keeps the "no kernel"
+  message it already had.
+
+Each window also keeps a three-line `_retry_pending_refresh`: coalescing a
+refresh asked for while one was in flight is the refresh surfaces' own policy
+(copy refuses a second request, and a close cannot recur), not part of the
+lifecycle.
 
 ### Blocked by
 

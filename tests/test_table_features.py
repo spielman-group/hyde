@@ -989,7 +989,7 @@ class TestTableWidget(unittest.TestCase):
         widget = self._refreshing_table(queued, namespace_service)
         execution = widget.services["python_execution_service"]
         try:
-            widget.REFRESH_PAYLOAD_TIMEOUT_MS = 0
+            widget.PAYLOAD_TIMEOUT_MS = 0
             widget.refresh_data()
             for _ in range(3):
                 self.qapp.processEvents()
@@ -1010,7 +1010,7 @@ class TestTableWidget(unittest.TestCase):
         widget = self._refreshing_table(queued, namespace_service)
         execution = widget.services["python_execution_service"]
         try:
-            widget.REFRESH_PAYLOAD_TIMEOUT_MS = 0
+            widget.PAYLOAD_TIMEOUT_MS = 0
             widget.refresh_data()
             queued_after_first_refresh = len(queued)
             execution.answer_last()

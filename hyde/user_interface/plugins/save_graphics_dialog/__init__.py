@@ -4,6 +4,7 @@ from functools import partial
 from qtutils.qt import QtGui, QtWidgets
 
 from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.base_hyde_widgets import KernelCommands
 from hyde.user_interface.shared.plugin import HydePlugin
 
 from .clipboard import (
@@ -16,31 +17,16 @@ from .clipboard_platform import (
     preferred_clipboard_format,
     register_clipboard_converters,
 )
-from .copy_request import FigureCopyRequest
 from .dialogs import SaveGraphicsDialog
 
 
-class Plugin(HydePlugin):
+class Plugin(KernelCommands, HydePlugin):
     # Where the Copy As submenu is contributed, and the group it joins in each
     # location so it sits beside that location's Copy entry.
     COPY_AS_LOCATIONS = (
         ("edit", "clipboard", 0),
         ("figure", "figure_export", 100),
     )
-
-    # Copy renders in the kernel and the bytes come back asynchronously, so a
-    # fast copy must show nothing while a slow one must not look like a hang.
-    # Neither clock bounds the kernel: a copy queued behind the user's own cell
-    # waits as long as that takes.
-    busy_cursor_delay_ms = 200
-    busy_cursor_hold_ms = 2000
-    # Once the render has run its bytes are already in transit on the other
-    # channel, so this gap is transport, not work.
-    payload_timeout_ms = 2000
-
-    def __init__(self, initial_settings):
-        super().__init__(initial_settings)
-        self._copy_request = None
 
     def get_menu_contributions(self):
         return [
@@ -127,17 +113,20 @@ class Plugin(HydePlugin):
             .with_copy_graphics(clipboard_formats=clipboard_formats)
             .python_source()
         )
-        python_execution_service = self.services.get("python_execution_service")
-        if python_execution_service is None:
+        label = self._copy_label(representation)
+        if (
+            self.begin_payload_request(
+                "copy",
+                source,
+                description=(
+                    f"Copying figure as {label}" if label else "Copying figure"
+                ),
+                announce_progress=True,
+            )
+            is None
+        ):
+            self._outcome_message("Could not reach the kernel to copy the figure.")
             return False
-        self._begin_copy(self._copy_label(representation))
-        kernel_request = python_execution_service.request(
-            source, on_finished=self.on_copy_render_finished
-        )
-        if kernel_request is None:
-            self._fail_copy("Could not reach the kernel to copy the figure.")
-            return False
-        self._copy_request.kernel_request = kernel_request
         return True
 
     def _copy_label(self, representation):
@@ -166,67 +155,27 @@ class Plugin(HydePlugin):
         return tuple(formats)
 
     def copy_in_flight(self):
-        return self._copy_request is not None
-
-    def on_copy_render_finished(self, kernel_request):
-        """The kernel answered the render command. The bytes are separate."""
-        if not self.copy_in_flight():
-            # The bytes beat the reply and the copy is already done.
-            return
-        if self._copy_request.kernel_request is not kernel_request:
-            return
-        if kernel_request.ran():
-            self._copy_request.await_payload(self.payload_timeout_ms)
-            return
-        # Until the GUI read replies, a command that raised in the kernel was
-        # invisible here and the copy could only time out anonymously.
-        self._fail_copy(
-            f"Could not copy the figure: {kernel_request.error}"
-            if kernel_request.error
-            else None
-        )
-
-    def on_copy_payload_timeout(self):
-        # Mandatory rather than optional: an unrestored busy cursor makes the
-        # whole application look hung, which is worse than no feedback at all.
-        if not self.copy_in_flight():
-            return
-        self._fail_copy(
-            "Could not copy the figure: it rendered, but its data never arrived."
-        )
+        return self.payload_request_in_flight("copy")
 
     def _fail_copy(self, message=None):
+        """The bytes arrived and there is nothing pasteable in them.
+
+        A lifecycle failure -- a render that raised, or bytes that never came
+        -- is reported by the request itself. This is the copy's own reading of
+        a payload it did receive.
+        """
         self._end_copy()
         self._outcome_message(
             message or "Could not copy the figure to the clipboard."
         )
-
-    def _status_message(self, text):
-        """A copy still in flight; it stays until the outcome replaces it."""
-        service = self.services.get("status_message_service")
-        if service is not None:
-            service.show_status_message(text)
 
     def _outcome_message(self, text):
         service = self.services.get("status_message_service")
         if service is not None:
             service.show_transient_message(text)
 
-    def _begin_copy(self, label):
-        self._end_copy()
-        self._copy_request = FigureCopyRequest(
-            busy_delay_ms=self.busy_cursor_delay_ms,
-            busy_hold_ms=self.busy_cursor_hold_ms,
-            on_payload_timeout=self.on_copy_payload_timeout,
-        )
-        self._status_message(
-            f"Copying figure as {label}..." if label else "Copying figure..."
-        )
-
     def _end_copy(self):
-        if self._copy_request is not None:
-            self._copy_request.settle()
-            self._copy_request = None
+        self.settle_payload_request("copy")
 
     def setup(self, data=None):
         del data
@@ -300,7 +249,8 @@ class Plugin(HydePlugin):
         payload_msg_id = str(data.get("request_msg_id") or "")
         if not payload_msg_id:
             return True
-        kernel_request = self._copy_request.kernel_request
+        copy_request = self.payload_request("copy")
+        kernel_request = None if copy_request is None else copy_request.kernel_request
         return kernel_request is None or kernel_request.msg_id == payload_msg_id
 
     def show_save_graphics_dialog(self, checked=False):

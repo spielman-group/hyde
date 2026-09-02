@@ -13,6 +13,7 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from tests.kernel_fakes import KernelRequestRecorder
 from hyde.features.matplotlib_figure_state import FigureIRAuthority
+from hyde.user_interface.plugins.kernel_runtime import KernelRequest
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.base_hyde_widgets import (
     HydeDialogWidget,
@@ -20,6 +21,7 @@ from hyde.user_interface.base_hyde_widgets import (
     HydeFileDialog,
     HydeFileWidget,
     HydeToolWidget,
+    KernelCommands,
 )
 from hyde.user_interface.main import HydeApp
 from hyde.features.matplotlib_ir import FigureIR
@@ -146,6 +148,50 @@ class RecordingExecutionService(KernelRequestRecorder):
     def execute_visible(self, code):
         self.visible_calls.append(code)
         return True
+
+
+class RecordingStatusMessageService:
+    """The status bar, split by how long a message is meant to last."""
+
+    def __init__(self):
+        self.held = []
+        self.transient = []
+        self.cleared = 0
+
+    def show_status_message(self, label):
+        self.held.append(label)
+
+    def show_transient_message(self, label):
+        self.transient.append(label)
+
+    def clear_status_message(self):
+        self.cleared += 1
+
+
+class PayloadAwaitingSurface(KernelCommands):
+    """A surface that asks the kernel for something and waits for the answer.
+
+    Deliberately not one of the production consumers. What is under test is the
+    lifecycle all of them now share, and reaching through a figure window would
+    measure the figure window instead.
+    """
+
+    def __init__(self, services):
+        self.services = services
+        self.picked_up = []
+
+    def ask(self, lane="answer", *, description="Fetching the answer", announce=False):
+        return self.begin_payload_request(
+            lane,
+            f"push({lane!r})",
+            description=description,
+            on_failed=self.pick_up_after_failure,
+            announce_progress=announce,
+        )
+
+    def pick_up_after_failure(self):
+        """What a consumer does once the request is settled and reported."""
+        self.picked_up.append(True)
 
 
 class DemoCommandIR(HydeIR):
@@ -1100,3 +1146,228 @@ class TestHydeToolWidget(unittest.TestCase):
         self.assertEqual(widget.shutdown_calls, 1)
         self.assertIsNone(context.widget("demo_tool"))
         self.assertIsNone(context.subwindow("demo_tool"))
+
+
+class TestKernelPayloadRequestLifecycle(unittest.TestCase):
+    """One owner for a command whose answer arrives as a separate payload.
+
+    Figure refresh, table refresh, figure close and figure copy had each
+    written this wait by hand and drifted apart doing it. These assert the wait
+    itself: what waits, what is bounded, what the user is told, and what the
+    cursor does -- for any consumer, rather than four times over.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def setUp(self):
+        while QtWidgets.QApplication.overrideCursor() is not None:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _surface(self):
+        execution = RecordingExecutionService()
+        status = RecordingStatusMessageService()
+        surface = PayloadAwaitingSurface(
+            {
+                "python_execution_service": execution,
+                "status_message_service": status,
+            }
+        )
+        return surface, execution, status
+
+    def _settle_pending_timers(self):
+        for _ in range(5):
+            self.qapp.processEvents()
+
+    def test_a_request_waits_indefinitely_while_the_kernel_is_busy(self):
+        """The kernel runs one request at a time, so a request issued behind
+        the user's own hour-long cell is waiting, not late.
+
+        A zero payload timeout would fire on the next event-loop turn if
+        anything had armed it, so this also says nothing armed one.
+        """
+        surface, _, status = self._surface()
+        surface.PAYLOAD_TIMEOUT_MS = 0
+
+        surface.ask()
+        self._settle_pending_timers()
+
+        self.assertTrue(surface.payload_request_in_flight("answer"))
+        self.assertEqual([], status.transient)
+        self.assertEqual([], surface.picked_up)
+
+    def test_the_bounded_wait_starts_only_once_the_reply_says_it_ran(self):
+        """A payload that never follows a successful run is a real fault, and
+        the only thing a clock may legitimately catch."""
+        surface, execution, status = self._surface()
+        surface.PAYLOAD_TIMEOUT_MS = 0
+
+        surface.ask(description="Fetching rows")
+        execution.answer_last()
+
+        # Armed, not fired: nothing has given the event loop a turn yet.
+        self.assertTrue(surface.payload_request_in_flight("answer"))
+
+        with self.assertLogs("hyde", level="WARNING") as logs:
+            self._settle_pending_timers()
+
+        self.assertFalse(surface.payload_request_in_flight("answer"))
+        self.assertEqual([True], surface.picked_up)
+        self.assertEqual(1, len(status.transient), status.transient)
+        self.assertIn("Fetching rows failed", status.transient[0])
+        self.assertIn("never arrived", status.transient[0])
+        self.assertTrue(
+            any("Fetching rows failed" in message for message in logs.output),
+            logs.output,
+        )
+
+    def test_a_payload_that_arrives_settles_the_request_and_says_nothing(self):
+        surface, execution, status = self._surface()
+        surface.PAYLOAD_TIMEOUT_MS = 0
+
+        surface.ask()
+        execution.answer_last()
+        surface.settle_payload_request("answer")
+        self._settle_pending_timers()
+
+        self.assertFalse(surface.payload_request_in_flight("answer"))
+        self.assertEqual([], status.transient)
+        self.assertEqual([], surface.picked_up)
+
+    def test_a_command_that_raised_is_reported_at_once_with_the_kernels_reason(self):
+        """There is nothing to wait for: the kernel has already answered."""
+        surface, execution, status = self._surface()
+
+        with self.assertLogs("hyde", level="WARNING") as logs:
+            surface.ask(description="Closing figure 7 in the kernel")
+            execution.answer_last(KernelRequest.RAISED, "KeyError: 7")
+
+        self.assertFalse(surface.payload_request_in_flight("answer"))
+        self.assertEqual([True], surface.picked_up)
+        self.assertIn("Closing figure 7 in the kernel failed", status.transient[0])
+        self.assertIn("KeyError: 7", status.transient[0])
+        self.assertTrue(any("KeyError: 7" in message for message in logs.output))
+
+    def test_a_kernel_that_goes_away_settles_the_request_rather_than_stranding_it(self):
+        surface, execution, status = self._surface()
+
+        surface.ask(description="Refreshing table Table0")
+        execution.answer_last(KernelRequest.ABANDONED, "The kernel is no longer available.")
+
+        self.assertFalse(surface.payload_request_in_flight("answer"))
+        self.assertIn("no longer available", status.transient[0])
+
+    def test_a_reply_with_no_reason_still_says_something(self):
+        surface, execution, status = self._surface()
+
+        surface.ask(description="Refreshing figure Figure1")
+        execution.answer_last(KernelRequest.RAISED, "")
+
+        self.assertEqual(1, len(status.transient), status.transient)
+        self.assertIn("Refreshing figure Figure1 failed", status.transient[0])
+
+    def test_an_announced_request_holds_a_wait_cursor_and_lowers_it_by_itself(self):
+        """The cursor says something started, not how long it will take: held
+        for a minute behind a long cell it would read as a hung application."""
+        surface, _, status = self._surface()
+        surface.BUSY_CURSOR_DELAY_MS = 0
+        surface.BUSY_CURSOR_HOLD_MS = 0
+
+        surface.ask(description="Copying figure", announce=True)
+        self._settle_pending_timers()
+
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+        self.assertTrue(surface.payload_request_in_flight("answer"))
+        self.assertEqual(["Copying figure..."], status.held)
+
+    def test_the_cursor_comes_back_down_however_the_request_ends(self):
+        endings = {
+            "its payload arrived": lambda surface, execution: (
+                execution.answer_last(),
+                surface.settle_payload_request("answer"),
+            ),
+            "the command raised": lambda surface, execution: execution.answer_last(
+                KernelRequest.RAISED, "boom"
+            ),
+            "its payload never arrived": lambda surface, execution: (
+                execution.answer_last(),
+                self._settle_pending_timers(),
+            ),
+            "the surface was torn down": lambda surface, execution: (
+                surface.settle_payload_requests()
+            ),
+        }
+        for ending, finish in endings.items():
+            with self.subTest(ending=ending):
+                surface, execution, _ = self._surface()
+                surface.BUSY_CURSOR_DELAY_MS = 0
+                surface.BUSY_CURSOR_HOLD_MS = 60000
+                surface.PAYLOAD_TIMEOUT_MS = 0
+
+                surface.ask(announce=True)
+                self._settle_pending_timers()
+                self.assertIsNotNone(QtWidgets.QApplication.overrideCursor())
+
+                finish(surface, execution)
+
+                self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+                self.assertFalse(surface.payload_request_in_flight("answer"))
+
+    def test_a_request_nobody_announced_shows_no_cursor_and_no_progress(self):
+        """A background sync is not a gesture the user is waiting on. A figure
+        refresh that raised a wait cursor every time the namespace changed
+        would flicker one through ordinary typing."""
+        surface, _, status = self._surface()
+        surface.BUSY_CURSOR_DELAY_MS = 0
+
+        surface.ask()
+        self._settle_pending_timers()
+
+        self.assertIsNone(QtWidgets.QApplication.overrideCursor())
+        self.assertEqual([], status.held)
+
+    def test_two_kinds_of_request_wait_independently(self):
+        """A figure window can have a refresh and a close outstanding at once,
+        and finishing one must not settle the other."""
+        surface, execution, _ = self._surface()
+
+        surface.ask("refresh")
+        surface.ask("close")
+        surface.settle_payload_request("refresh")
+
+        self.assertFalse(surface.payload_request_in_flight("refresh"))
+        self.assertTrue(surface.payload_request_in_flight("close"))
+        self.assertEqual(2, len(execution.kernel_requests))
+
+    def test_a_second_request_of_the_same_kind_is_refused(self):
+        """The payload channel does not say which request it answers, so a
+        second request in flight makes "the next payload is mine" untrue for
+        both."""
+        surface, execution, _ = self._surface()
+        surface.ask()
+
+        self.assertIsNone(surface.ask())
+        self.assertEqual(1, len(execution.kernel_requests))
+
+    def test_a_request_the_kernel_never_took_leaves_nothing_in_flight(self):
+        surface = PayloadAwaitingSurface({})
+
+        self.assertIsNone(surface.ask())
+        self.assertFalse(surface.payload_request_in_flight("answer"))
+
+    def test_a_reply_arriving_after_teardown_reports_nothing(self):
+        """Consumers are torn down on their own schedule, and a settled request
+        is inert."""
+        surface, execution, status = self._surface()
+        surface.PAYLOAD_TIMEOUT_MS = 0
+        surface.ask()
+
+        surface.settle_payload_requests()
+        execution.answer_last()
+        self._settle_pending_timers()
+
+        self.assertEqual([], status.transient)
+        self.assertEqual([], surface.picked_up)

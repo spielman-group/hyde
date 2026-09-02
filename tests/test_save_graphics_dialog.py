@@ -251,6 +251,35 @@ def make_copy_plugin(messages=None):
     return plugin
 
 
+def a_failure_was_reported(messages):
+    """Did anything tell the user the copy did not work?
+
+    Two voices reach the status bar: the request owner's "<operation> failed:
+    <why>" for a render that raised or bytes that never came, and the plugin's
+    own "Could not ..." for bytes it did receive and could not use. A test that
+    looks for only one of them passes whenever the other is the one missing,
+    which is the opposite of what it is asking.
+    """
+    return any(
+        "failed" in str(message).lower() or "could not" in str(message).lower()
+        for message in messages
+    )
+
+
+def let_the_payload_wait_expire(test, plugin, kernel):
+    """The kernel says the render ran, and then no bytes ever follow.
+
+    Drives the real bounded timer rather than calling a handler by name: the
+    point under test is that something eventually gives up, not that a
+    particular method exists to be called.
+    """
+    plugin.PAYLOAD_TIMEOUT_MS = 0
+    kernel.render_ran()
+    test.assertTrue(plugin.copy_in_flight())
+    for _ in range(5):
+        test.qapp.processEvents()
+
+
 class TestFigureCopyCommand(unittest.TestCase):
     """Copy lowers to a Hyde helper because the clipboard is GUI-owned.
 
@@ -704,7 +733,7 @@ class TestCopyFeedback(unittest.TestCase):
         plugin.on_kernel_message(copy_payload((b"\x89PNG fake", "png")))
 
         self.assertFalse(any("Copied" in str(m) for m in messages), messages)
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertTrue(a_failure_was_reported(messages), messages)
         self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
 
     def test_a_copy_whose_picture_will_not_decode_still_names_the_vector(self):
@@ -728,7 +757,7 @@ class TestCopyFeedback(unittest.TestCase):
         plugin.copy_active_figure(representation="vector")
 
         self.assertTrue(plugin.copy_in_flight())
-        self.assertFalse(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertFalse(a_failure_was_reported(messages), messages)
 
     def test_a_copy_with_no_usable_format_says_so_rather_than_doing_nothing(self):
         """A copy that never reaches the kernel is invisible unless it reports.
@@ -742,19 +771,20 @@ class TestCopyFeedback(unittest.TestCase):
 
         self.assertEqual([], plugin.services["python_execution_service"].executed)
         self.assertFalse(plugin.copy_in_flight())
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertTrue(a_failure_was_reported(messages), messages)
 
     def test_a_rendered_copy_whose_data_never_arrives_reports_failure(self):
         plugin, messages = self._plugin_with_status()
         kernel = plugin.services["python_execution_service"]
         plugin.copy_active_figure(representation="vector")
-        kernel.render_ran()
 
-        self.assertTrue(plugin.copy_in_flight())
-        plugin.on_copy_payload_timeout()
+        let_the_payload_wait_expire(self, plugin, kernel)
 
         self.assertFalse(plugin.copy_in_flight())
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertTrue(a_failure_was_reported(messages), messages)
+        self.assertTrue(
+            any("never arrived" in str(m) for m in messages), messages
+        )
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
 
     def test_the_cursor_is_never_left_busy_after_a_completed_copy(self):
@@ -763,8 +793,8 @@ class TestCopyFeedback(unittest.TestCase):
         plugin, _ = self._plugin_with_status()
         # Take the slow path: the cursor a lingering copy puts up, held long
         # enough that only completing the copy can take it down again.
-        plugin.busy_cursor_delay_ms = 0
-        plugin.busy_cursor_hold_ms = 60000
+        plugin.BUSY_CURSOR_DELAY_MS = 0
+        plugin.BUSY_CURSOR_HOLD_MS = 60000
         plugin.copy_active_figure(representation="vector")
         for _ in range(3):
             self.qapp.processEvents()
@@ -794,7 +824,7 @@ class TestCopyFeedback(unittest.TestCase):
         )
 
         self.assertFalse(any("Copied" in str(m) for m in messages), messages)
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertTrue(a_failure_was_reported(messages), messages)
 
     def test_copy_works_without_a_status_service(self):
         kernel = FakeKernelRequests()
@@ -845,7 +875,7 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
 
         self.assertFalse(plugin.copy_in_flight())
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertTrue(a_failure_was_reported(messages), messages)
 
     def test_undecodable_payload_settles_the_request(self):
         messages = []
@@ -859,7 +889,7 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
         )
 
         self.assertFalse(plugin.copy_in_flight())
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertTrue(a_failure_was_reported(messages), messages)
 
     def test_data_arriving_after_a_failure_does_not_overwrite_it(self):
         messages = []
@@ -867,9 +897,8 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
         kernel = plugin.services["python_execution_service"]
         QtWidgets.QApplication.clipboard().setText("untouched")
         plugin.copy_active_figure(representation="vector")
-        kernel.render_ran()
-        plugin.on_copy_payload_timeout()
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        let_the_payload_wait_expire(self, plugin, kernel)
+        self.assertTrue(a_failure_was_reported(messages), messages)
 
         plugin.on_kernel_message(copy_payload((b"%PDF late", "pdf")))
 
@@ -1076,7 +1105,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         kernel.kernel_went_away()
 
         self.assertFalse(plugin.copy_in_flight())
-        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertTrue(a_failure_was_reported(messages), messages)
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
 
     def test_data_arriving_before_the_reply_still_reaches_the_clipboard(self):
@@ -1090,14 +1119,13 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         # The reply lands afterwards against a copy that is already settled.
         kernel.render_ran()
         self.assertFalse(plugin.copy_in_flight())
-        self.assertFalse(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertFalse(a_failure_was_reported(messages), messages)
 
     def test_data_left_over_from_an_abandoned_copy_is_not_taken_for_a_new_one(self):
         """The bytes name the request that produced them."""
         plugin, kernel, messages = self._copy_in_flight()
         stale = kernel.kernel_requests[-1][0].msg_id
-        kernel.render_ran()
-        plugin.on_copy_payload_timeout()
+        let_the_payload_wait_expire(self, plugin, kernel)
         self.assertFalse(plugin.copy_in_flight())
 
         QtWidgets.QApplication.clipboard().setText("untouched")
@@ -1130,8 +1158,8 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         """
         messages = []
         plugin = make_copy_plugin(messages)
-        plugin.busy_cursor_delay_ms = 0
-        plugin.busy_cursor_hold_ms = 0
+        plugin.BUSY_CURSOR_DELAY_MS = 0
+        plugin.BUSY_CURSOR_HOLD_MS = 0
         self.assertTrue(plugin.copy_active_figure(representation="vector"))
         for _ in range(5):
             self.qapp.processEvents()

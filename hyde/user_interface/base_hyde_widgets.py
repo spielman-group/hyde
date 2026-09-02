@@ -1,10 +1,19 @@
+import logging
 import os
 import sys
 
-from qtutils import UiLoader
+from qtutils import UiLoader, inmain_decorator
 from qtutils.qt import QtCore, QtWidgets
 from qtutils.qt.QtCore import QUrl
 from qtutils.qt.QtGui import QDesktopServices
+
+LOGGER = logging.getLogger("hyde")
+
+# What a failure says when the kernel did not say anything useful.
+NO_REASON_GIVEN = "the kernel did not say why"
+# The one thing a bounded timer can legitimately catch: a payload that never
+# follows a command the kernel said it ran.
+PAYLOAD_NEVER_ARRIVED = "it ran in the kernel, but its data never arrived"
 
 
 def resolve_owner_path(owner, filename, *, module_name=None):
@@ -20,12 +29,143 @@ def load_ui_for_owner(owner, ui_filename, *, module_name=None):
     return loader.load(ui_path, owner)
 
 
+def _single_shot_timer(receiver):
+    # Bound methods only; see STYLE.md on Qt receiver lifetimes. A partial or a
+    # closure here is collected and then segfaults far from its cause.
+    timer = QtCore.QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(receiver)
+    return timer
+
+
+class KernelPayloadRequest:
+    """One GUI request the kernel answers twice, from dispatch to settled.
+
+    A payload-bearing command is answered by two routes that nothing orders
+    against each other: the Jupyter shell channel says whether the command ran
+    and carries the reason when it did not, and the data itself arrives
+    separately -- table rows, a figure draw, rendered clipboard bytes, a close
+    confirmation. Either can turn up first, so the request stays open until it
+    has what it needs.
+
+    **Nothing here bounds how long the kernel may take.** The kernel runs one
+    request at a time, so a request issued while the user's own cell is running
+    waits its turn, and waiting is not failing. The payload timer is armed only
+    once the reply says the command ran: at that point the data is already in
+    transit, and its absence is a real fault rather than a slow kernel.
+
+    A settled request is inert: settling twice, or a timer firing after
+    settling, does nothing.
+    """
+
+    def __init__(
+        self,
+        owner,
+        lane,
+        description,
+        *,
+        on_failed=None,
+        announce_progress=False,
+    ):
+        self.lane = str(lane)
+        self.description = str(description)
+        self.kernel_request = None
+        self._owner = owner
+        self._on_failed = on_failed
+        self._announce_progress = bool(announce_progress)
+        self._progress_shown = False
+        self._busy_cursor_shown = False
+        self._settled = False
+        self._payload_timer = _single_shot_timer(self._on_payload_timeout)
+        self._busy_timer = _single_shot_timer(self._show_busy_cursor)
+        self._hold_timer = _single_shot_timer(self._release_busy_cursor)
+
+    def dispatch(self, code):
+        """Send the command. False when there is no kernel to send it to."""
+        self.kernel_request = self._owner.request_command(code, self._on_reply)
+        if self.kernel_request is None:
+            self.settle()
+            return False
+        if self._announce_progress:
+            self._busy_timer.start(int(self._owner.BUSY_CURSOR_DELAY_MS))
+            self._progress_shown = self._owner.show_kernel_progress(
+                f"{self.description}..."
+            )
+        return True
+
+    @inmain_decorator()
+    def _on_reply(self, kernel_request):
+        """The kernel answered the command. Its payload is separate."""
+        if self._settled or kernel_request is not self.kernel_request:
+            return
+        if kernel_request.ran():
+            self._payload_timer.start(int(self._owner.PAYLOAD_TIMEOUT_MS))
+            return
+        self.fail(kernel_request.error or NO_REASON_GIVEN)
+
+    @inmain_decorator()
+    def _on_payload_timeout(self):
+        if self._settled:
+            return
+        self.fail(PAYLOAD_NEVER_ARRIVED)
+
+    def fail(self, reason):
+        """Settle, say why, and let the consumer pick up where it left off."""
+        self.settle()
+        self._owner.report_kernel_failure(self.description, reason)
+        if self._on_failed is not None:
+            self._on_failed()
+
+    def settle(self):
+        """The request is over, however it ended. Safe to call more than once."""
+        if self._settled:
+            return
+        self._settled = True
+        for timer in (self._payload_timer, self._busy_timer, self._hold_timer):
+            timer.stop()
+        self._release_busy_cursor()
+        if self._progress_shown:
+            self._progress_shown = False
+            self._owner.clear_kernel_progress()
+        self._owner.drop_payload_request(self)
+
+    def _show_busy_cursor(self):
+        if self._busy_cursor_shown or self._settled:
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        self._busy_cursor_shown = True
+        # The cursor says something started, not how long it will take. Held
+        # for a minute behind a long user cell it would read as a hang, so it
+        # comes back down on its own and the status message carries the rest.
+        self._hold_timer.start(int(self._owner.BUSY_CURSOR_HOLD_MS))
+
+    def _release_busy_cursor(self):
+        """Lower the cursor without settling; the request may still be waiting."""
+        if not self._busy_cursor_shown:
+            return
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self._busy_cursor_shown = False
+
+
 class KernelCommands:
     """Dispatching a command, and asking what became of it.
 
     Mixed into both widget roots. A dialog and an interactive window reach the
     kernel identically and had grown separate copies of the dispatch helper.
+
+    A command whose answer arrives as a separate payload goes through
+    `begin_payload_request`, which owns the whole wait: the in-flight flag, the
+    bounded payload timer, the wait cursor, the failure report and the settle
+    path. Four surfaces had written that by hand and drifted apart doing it.
     """
+
+    # The only clock in the lifecycle, and it starts only once the kernel has
+    # said the command ran, so it bounds transport rather than the kernel.
+    PAYLOAD_TIMEOUT_MS = 2000
+    # Cosmetic. A fast request must show nothing; a slow one must not look like
+    # a hang, and must not look like one for as long as the kernel takes.
+    BUSY_CURSOR_DELAY_MS = 200
+    BUSY_CURSOR_HOLD_MS = 2000
 
     def execute_hidden_command(self, code):
         python_execution_service = self.services.get("python_execution_service")
@@ -45,17 +185,110 @@ class KernelCommands:
             return None
         return python_execution_service.request(code, on_finished=on_finished)
 
-    def report_failed_command(self, kernel_request):
+    def begin_payload_request(
+        self,
+        lane,
+        code,
+        *,
+        description,
+        on_failed=None,
+        announce_progress=False,
+    ):
+        """Dispatch `code` and wait for the payload it will produce.
+
+        `lane` names the one outstanding request of its kind, so a surface with
+        a refresh and a close in flight keeps them apart, and a second request
+        in an occupied lane is refused rather than making "the next payload is
+        mine" untrue for both. `description` is a gerund phrase naming the
+        operation -- it becomes the progress message and the failure message.
+        `on_failed` is called once the request has been settled and reported,
+        for a consumer with something to pick up afterwards.
+
+        Returns the request, or None when the lane is busy or there is no
+        kernel to ask. Nothing bounds how long the kernel may take; see
+        `KernelPayloadRequest`.
+        """
+        if self.payload_request_in_flight(lane):
+            return None
+        request = KernelPayloadRequest(
+            self,
+            lane,
+            description,
+            on_failed=on_failed,
+            announce_progress=announce_progress,
+        )
+        self._payload_request_lanes()[request.lane] = request
+        return request if request.dispatch(code) else None
+
+    def payload_request(self, lane):
+        """The request outstanding in `lane`, or None."""
+        return self._payload_request_lanes().get(str(lane))
+
+    def payload_request_in_flight(self, lane):
+        return self.payload_request(lane) is not None
+
+    def settle_payload_request(self, lane):
+        """Its payload arrived, or the surface no longer wants it."""
+        request = self.payload_request(lane)
+        if request is None:
+            return False
+        request.settle()
+        return True
+
+    def settle_payload_requests(self):
+        """Teardown: nothing is left waiting for a payload nobody will read."""
+        for request in list(self._payload_request_lanes().values()):
+            request.settle()
+
+    def drop_payload_request(self, request):
+        """Owner-internal: a settled request stops being its lane's request."""
+        lanes = self._payload_request_lanes()
+        if lanes.get(request.lane) is request:
+            del lanes[request.lane]
+
+    def _payload_request_lanes(self):
+        # Created on demand: the mixin deliberately has no __init__, so a
+        # widget root does not have to remember to call one.
+        lanes = getattr(self, "_kernel_payload_request_lanes", None)
+        if lanes is None:
+            lanes = {}
+            self._kernel_payload_request_lanes = lanes
+        return lanes
+
+    def show_kernel_progress(self, text):
+        """Say a command is still running. Returns True if anyone heard."""
+        service = self.services.get("status_message_service")
+        if service is None:
+            return False
+        service.show_status_message(text)
+        return True
+
+    def clear_kernel_progress(self):
+        service = self.services.get("status_message_service")
+        if service is not None:
+            service.clear_status_message()
+
+    def report_kernel_failure(self, description, reason):
+        """One voice for every kernel command failure: the log and the user.
+
+        Both, always. Each kernel-facing surface used to pick one -- a refresh
+        told nobody, a close only logged, a copy only reported -- so the same
+        fault was silent, or invisible in a bug report, depending on which
+        surface hit it.
+        """
+        message = f"{description} failed: {reason}"
+        LOGGER.warning("%s", message)
+        service = self.services.get("status_message_service")
+        if service is not None:
+            service.show_transient_message(message)
+
+    def report_failed_command(self, kernel_request, description="The command"):
         """Say what the kernel said. Returns True if the command failed."""
         if kernel_request.ran():
             return False
-        service = self.services.get("status_message_service")
-        if service is not None:
-            service.show_transient_message(
-                f"Command failed: {kernel_request.error}"
-                if kernel_request.error
-                else "Command failed in the kernel."
-            )
+        self.report_kernel_failure(
+            description, kernel_request.error or NO_REASON_GIVEN
+        )
         return True
 
     def on_kernel_command_finished(self, kernel_request):

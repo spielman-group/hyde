@@ -1,4 +1,3 @@
-import logging
 import os
 import uuid
 
@@ -7,9 +6,6 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.hyde_ir import TableIR, TableIRDiff
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
-
-
-LOGGER = logging.getLogger("hyde")
 
 
 class TableViewModel(QtCore.QAbstractTableModel):
@@ -127,11 +123,6 @@ class TableViewModel(QtCore.QAbstractTableModel):
         )
 
 class TableWidget(HydeInteractiveWidget):
-    # The kernel runs one request at a time, so a refresh issued while the
-    # user's own cell is running waits its turn -- and waiting is not failing.
-    # This bounds only the gap between the kernel saying the push ran and its
-    # data arriving on the parent-message channel.
-    REFRESH_PAYLOAD_TIMEOUT_MS = 2000
     ui_filename = os.path.join("plugins", "table_interactive", "table.ui")
 
     def __init__(
@@ -180,12 +171,7 @@ class TableWidget(HydeInteractiveWidget):
             column_widths=column_widths,
         )
         self._current_request_id = None
-        self._refresh_request = None
-        self._refresh_in_flight = False
         self._refresh_requested = False
-        self._refresh_payload_timer = QtCore.QTimer(self)
-        self._refresh_payload_timer.setSingleShot(True)
-        self._refresh_payload_timer.timeout.connect(self._on_refresh_payload_timeout)
         self._selected_cell = None
         self._value_edit_dirty = False
         self._initial_size_applied = False
@@ -259,9 +245,12 @@ class TableWidget(HydeInteractiveWidget):
         if self._closed:
             return False
         prefix = [command for command in (prefix_commands or []) if command]
+        # A mutation supersedes a refresh already in flight rather than queuing
+        # behind it: that refresh answers the table as it was before the edit,
+        # so its rows are stale the moment the mutation is sent.
+        self.settle_payload_request("refresh")
         request_id = str(uuid.uuid4())
         self._current_request_id = request_id
-        self._refresh_in_flight = True
         self._refresh_requested = False
         refresh_command = self.widget_ir.with_push_table_data(request_id).python_source()
         for command in prefix:
@@ -270,34 +259,45 @@ class TableWidget(HydeInteractiveWidget):
             # it. Uncorrelated, the refresh would return unchanged data and the
             # failed edit would look like it simply had no effect.
             if self.request_command(command, self._on_table_command_finished) is None:
-                self._clear_refresh_in_flight()
                 return False
-        self._refresh_request = self.request_command(
-            refresh_command, self._on_refresh_finished
+        return (
+            self.begin_payload_request(
+                "refresh",
+                refresh_command,
+                description=f"Refreshing table {self.window_handle()}",
+                on_failed=self._retry_pending_refresh,
+            )
+            is not None
         )
-        if self._refresh_request is not None:
-            return True
-        self._clear_refresh_in_flight()
-        return False
 
     def refresh_data(self):
         if self._closed:
             return
-        if self._refresh_in_flight:
+        if self.payload_request_in_flight("refresh"):
             self._refresh_requested = True
             return
         self._queue_refresh()
 
+    def _retry_pending_refresh(self):
+        """Run the refresh asked for while the last one was still in flight."""
+        if self._refresh_requested and not self._closed:
+            self._refresh_requested = False
+            self.refresh_data()
+
     @inmain_decorator()
     def on_data_received(self, data, request_id):
         if request_id != self._current_request_id:
+            return
+        if not self.payload_request_in_flight("refresh"):
+            # Rows for a refresh this window has already given up on. Showing
+            # them would present data the user has no reason to trust as live.
             return
 
         selected_index = self.ui.tableView.currentIndex()
         selected_row = selected_index.row() if selected_index.isValid() else None
         selected_col = selected_index.column() if selected_index.isValid() else None
 
-        self._clear_refresh_in_flight()
+        self.settle_payload_request("refresh")
         self.model.update_data(data)
         self._apply_saved_column_widths()
 
@@ -317,20 +317,7 @@ class TableWidget(HydeInteractiveWidget):
                 self.capture_layout_state()
             else:
                 QtCore.QTimer.singleShot(0, self._fit_subwindow_to_contents)
-        if self._refresh_requested and not self._closed:
-            self._refresh_requested = False
-            self.refresh_data()
-
-    def _report_command_failure(self, kernel_request):
-        """A table command the user asked for did not run. Say so."""
-        if not self.report_failed_command(kernel_request):
-            return False
-        LOGGER.warning(
-            "Table %s command failed: %s",
-            self.window_handle(),
-            kernel_request.error,
-        )
-        return True
+        self._retry_pending_refresh()
 
     @inmain_decorator()
     def _on_table_command_finished(self, kernel_request):
@@ -338,47 +325,27 @@ class TableWidget(HydeInteractiveWidget):
             return
         # The refresh behind this still runs. Showing the unchanged data is
         # what tells the user the edit did not take.
-        self._report_command_failure(kernel_request)
+        self.report_failed_command(
+            kernel_request,
+            description=f"Editing table {self.window_handle()}",
+        )
 
     @inmain_decorator()
     def _on_create_column_finished(self, kernel_request):
         pending_new_name = self._pending_column_requests.pop(
             kernel_request.msg_id, None
         )
-        if self._closed or not self._report_command_failure(kernel_request):
+        if self._closed or not self.report_failed_command(
+            kernel_request,
+            description=(
+                f"Adding column '{pending_new_name}' to table {self.window_handle()}"
+            ),
+        ):
             return
         if pending_new_name in self._pending_created_columns:
             # The column was never created, so stop waiting for a name that
             # does not exist in the kernel.
             self._pending_created_columns.remove(pending_new_name)
-
-    def _clear_refresh_in_flight(self):
-        self._refresh_payload_timer.stop()
-        self._refresh_in_flight = False
-        self._current_request_id = None
-        self._refresh_request = None
-
-    @inmain_decorator()
-    def _on_refresh_finished(self, kernel_request):
-        """The kernel answered the push command. Its data is separate."""
-        if self._closed or kernel_request is not self._refresh_request:
-            return
-        if kernel_request.ran():
-            self._refresh_payload_timer.start(self.REFRESH_PAYLOAD_TIMEOUT_MS)
-            return
-        self._abandon_refresh()
-
-    @inmain_decorator()
-    def _on_refresh_payload_timeout(self):
-        if self._closed or not self._refresh_in_flight:
-            return
-        self._abandon_refresh()
-
-    def _abandon_refresh(self):
-        self._clear_refresh_in_flight()
-        if self._refresh_requested and not self._closed:
-            self._refresh_requested = False
-            self.refresh_data()
 
     @inmain_decorator()
     def _on_namespace_view_updated(self, view):
@@ -783,7 +750,7 @@ class TableWidget(HydeInteractiveWidget):
         if self._closed:
             return
         self._closed = True
-        self._refresh_payload_timer.stop()
+        self.settle_payload_requests()
         try:
             python_variables_service = self.services.get("namespace_view_service")
             if python_variables_service is not None:
