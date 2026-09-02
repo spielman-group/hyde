@@ -29,6 +29,7 @@ exercised.
 - [ ] Slice 14: Trivia, Second Bundle
 - [ ] Slice 15: Let The Feature-Module Guard See Re-Exports
 - [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
+- [ ] Slice 17: Settle The Orphaned `tracked_names` Payload Field
 
 ## How to work these
 
@@ -1023,3 +1024,63 @@ refresh again.
 
 None - can start immediately. Independent of Slices 8 and 10 to 15; touches a
 plugin none of them edit.
+
+## Slice 17: Settle The Orphaned `tracked_names` Payload Field
+
+### Type
+
+`AFK`
+
+### What to build
+
+Slice 10 made `widget_ir.tracked_names()` the single source for "which
+namespace names does this figure track". A consequence it did not address: the
+kernel still computes and ships a `tracked_names` list in the figure snapshot
+payload that **no production code reads any more**.
+
+Verified after Slice 10 landed:
+
+- `hyde/matplotlib_backend.py` still produces it — computed at line 783, shipped
+  at 793, and shipped empty at 814.
+- No module under `hyde/user_interface/` reads the field. The GUI derives
+  tracking from the IR instead.
+- It is not documented in `project_management/` as part of the IPC protocol.
+- Three tests still assert on it: `tests/test_matplotlib_features.py:1104` and
+  `:1268`, and `tests/test_figure_comm_actions.py:192`.
+
+So it is dead protocol surface with a test suite pinning it — assertions on a
+payload field that can no longer change any behaviour, which is the shape the
+project's test rule excludes.
+
+Decide which way it goes, and say why:
+
+- **Remove it.** The IR the kernel ships already determines the tracked names,
+  the GUI derives them from it, and a redundant field that can disagree with the
+  IR is the very hazard Slice 10 removed from the GUI. The three tests then
+  assert the tracked names the GUI actually acts on.
+- **Keep it and make the GUI use it.** Hyde's rule is that the kernel is
+  authoritative, and a list computed kernel-side is arguably more authoritative
+  than one the GUI re-derives. But note the field is *already* derived from the
+  IR kernel-side, so this buys no new authority — and it would make a dormant
+  ordering bug live: `figure_snapshot_payload` computes `state_to_python` before
+  `tracked_names` (`hyde/matplotlib_backend.py:777-785`), so a lowering failure
+  silently zeroes the list even though computing it would have succeeded. That
+  fault is currently harmless *only* because nothing reads the field.
+
+Removal looks right, but the decision belongs to whoever holds the IPC protocol
+in view; state the reasoning either way.
+
+### Acceptance criteria
+
+- [ ] `tracked_names` is either gone from the payload, or read by production
+      code — not produced-and-ignored.
+- [ ] If removed, the ordering hazard at `matplotlib_backend.py:777-785` goes
+      with it or is stated as moot.
+- [ ] The three tests assert tracked names the GUI acts on, or are removed with
+      the field.
+- [ ] Figure refresh on a namespace change still works, and a figure that tracks
+      nothing still does not refresh.
+
+### Blocked by
+
+- Slice 10, which is done.
