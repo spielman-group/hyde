@@ -31,6 +31,7 @@ exercised.
 - [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
 - [ ] Slice 17: Settle The Orphaned `tracked_names` Payload Field
 - [ ] Slice 18: Make A Plugin That Fails To Load Visible
+- [ ] Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
 
 ## How to work these
 
@@ -1151,3 +1152,64 @@ Whoever takes this should decide the product behaviour first, then implement.
 ### Blocked by
 
 None - can start immediately, but needs the product decision above first.
+
+## Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
+
+### Type
+
+`HITL` — the two ways to close it are both substantial, and which one is right
+is a design decision.
+
+### What to build
+
+Slice 13 stopped a failed macro leaving an appended *trace* on a neighbour
+figure. Every **non-trace** mutation it made to that neighbour still survives.
+
+Measured at both `205110b` and `63ec5dc`: a macro that calls
+`ax.legend(["a","b"])` on a neighbour and then fails leaves the neighbour's
+subplot IR carrying `legend: true`, while the appended trace is correctly rewound.
+The same holds for a title, axis limits, or a scatter or image artist — anything
+that is not one of the lines the rewind removes.
+
+The underlying asymmetry, which is worth stating because it explains both this
+gap and why part of Slice 13's rewind looked redundant: **the IR is normally a
+projection of the live artists.** `_refresh_first_class_figure_metadata` ends
+with `figure._hyde_ir = imported_ir`, re-deriving the IR from live state on every
+publish. So anything the rewind cannot remove from the *live* figure comes back
+on the next publish, and anything the rewind writes into the *IR* is discarded.
+Slice 13's IR snapshot matters only in the one window where that projection is
+unavailable — when the live-state read-back raises, which
+`line.set_data(np.zeros((2,3)), ...)` reaches with
+`ValueError: Only 1D line data can be imported into Hyde figure macros`.
+
+Closing the general case means one of:
+
+- **Undo every artist a macro adds to a neighbour**, not just lines — which
+  means tracking artist creation across the whole matplotlib surface a macro can
+  touch, and reversing property mutations that created no artist at all
+  (`legend`, limits, labels). Broad, and `abandon_figure_build_session`'s
+  docstring already declines general undo of live matplotlib mutations for the
+  figure the macro was *building*.
+- **Suppress the re-import for the rest of the failed run**, so the neighbour's
+  IR keeps its pre-macro projection until something legitimately redraws it.
+  Narrower, but it makes the IR and the live figure disagree on purpose, and
+  that divergence is what the projection design exists to avoid.
+
+Neither is obviously right, and the status quo may be defensible: the user can
+see the stray legend on the neighbour, and a failed macro is already an error
+they must act on. Decide the intended behaviour first.
+
+### Acceptance criteria
+
+- [ ] The intended behaviour for a neighbour's non-trace mutations after a
+      failed macro is written down, with the reasoning.
+- [ ] If they are to be undone, a failed macro leaves the neighbour's IR and its
+      live figure agreeing with their pre-macro state, verified for at least a
+      legend, an axis limit, and a non-line artist.
+- [ ] If they are to be kept, the rewind's scope is documented so the next
+      reader does not mistake the asymmetry for a bug.
+- [ ] Drawing on a neighbour from a macro that *succeeds* keeps working.
+
+### Blocked by
+
+- Slice 13, which is done.
