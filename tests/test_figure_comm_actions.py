@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -380,6 +382,133 @@ class TestFigureCommActions(unittest.TestCase):
             self.assertIn("hyde.refresh_figure(fig, use_bound_values=True)", output)
         finally:
             window.force_close()
+
+    def _figure_workspace(self):
+        """A figure plugin with a real workspace, as the running app has one."""
+        from qtutils.qt import QtWidgets
+
+        from hyde.user_interface.plugins.figure_interactive import Plugin
+
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        plugin = Plugin({})
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "get_shutting_down": lambda: True,
+            "save_window_dialog_service": type(
+                "SaveWindowDialogService",
+                (),
+                {"prompt_to_save_window_macro": lambda _self, **kwargs: True},
+            )(),
+        }
+        return plugin, mdi_area
+
+    def test_a_saved_figure_session_restores_the_same_figure(self):
+        """Saving a project and reopening it must bring the figure back.
+
+        The window's account of the figure is what gets written, and running
+        the written session.py is the only thing that says whether it was
+        enough: the restored figure has to read the same namespace names, carry
+        the same identity, and look the same.
+        """
+        from qtutils.qt import QtWidgets
+
+        from hyde.user_interface.main.project_state import (
+            read_session,
+            read_session_source,
+            write_session,
+        )
+
+        plt = self._configure_pyplot()
+        namespace = {
+            "hyde": hyde,
+            "plt": plt,
+            "np": np,
+            "delay": [0.0, 1.0, 2.0],
+            "fit_delay": [1.0, 4.0, 9.0],
+        }
+
+        @hyde.figure(register=False)
+        def Graph0(delay, fit_delay):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            ax = fig.add_subplot(111)
+            ax.plot(delay, fit_delay, label="fit_delay")
+            ax.set_xlabel("delay")
+            ax.set_ylabel("signal")
+            return fig
+
+        saved_figure = Graph0(namespace["delay"], namespace["fit_delay"])
+        saved_number = saved_figure.canvas.manager.num
+        plugin, mdi_area = self._figure_workspace()
+        try:
+            saved_window = plugin.workspace.open_or_update_figure(
+                {
+                    "figure_number": saved_number,
+                    "snapshot": figure_snapshot_payload(saved_figure, saved_number),
+                }
+            )
+            saved_window.parentWidget().setGeometry(30, 40, 320, 240)
+            saved = {
+                "handle": saved_window.window_handle(),
+                "tracked": tuple(saved_window.tracked_namespace_names()),
+                "arguments": tuple(saved_window.session_restore_arguments()),
+                "figure_ir": saved_window.figure_ir(),
+            }
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                project_dir = Path(tmpdir) / "roundtrip.hy"
+                project_dir.mkdir()
+                app = type("App", (), {})()
+                app.ui = QtWidgets.QMainWindow()
+                app.plugin_manager = type(
+                    "PluginManager", (), {"plugins": {"figures": plugin}}
+                )()
+
+                self.assertEqual(write_session(app, str(project_dir)), [])
+                session = read_session(str(project_dir))
+                session_source = read_session_source(str(project_dir))
+
+            plugin.workspace.clear()
+            plt.close("all")
+            self.assertNotIn(saved["handle"], plt.get_figlabels())
+
+            exec(compile(session_source, "<session.py>", "exec"), namespace)
+
+            self.assertIn("format_version", session)
+            self.assertIn(saved["handle"], plt.get_figlabels())
+            restored_figure = plt.figure(saved["handle"])
+            restored_number = restored_figure.canvas.manager.num
+            restored_window = plugin.workspace.open_or_update_figure(
+                {
+                    "figure_number": restored_number,
+                    "snapshot": figure_snapshot_payload(
+                        restored_figure, restored_number
+                    ),
+                }
+            )
+
+            self.assertEqual(restored_window.window_handle(), saved["handle"])
+            self.assertEqual(
+                tuple(restored_window.tracked_namespace_names()),
+                saved["tracked"],
+            )
+            self.assertEqual(("delay", "fit_delay"), saved["tracked"])
+            self.assertEqual(
+                tuple(restored_window.session_restore_arguments()),
+                saved["arguments"],
+            )
+            self.assertEqual(restored_window.figure_ir(), saved["figure_ir"])
+            restored_subplot = restored_figure.axes[0]
+            self.assertEqual(restored_subplot.get_xlabel(), "delay")
+            self.assertEqual(restored_subplot.get_ylabel(), "signal")
+            self.assertEqual(
+                [1.0, 4.0, 9.0],
+                list(restored_subplot.lines[0].get_ydata()),
+            )
+        finally:
+            plugin.workspace.clear()
+            mdi_area.close()
 
     def test_refresh_figure_regenerates_first_class_figure_from_ir(self):
         plt = self._configure_pyplot()

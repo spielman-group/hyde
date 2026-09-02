@@ -2311,7 +2311,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             result = harness.namespace["signal_fit_result"]
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()[
+            subplot = attached_figure.figure_window.figure_ir()[
                 "layout"
             ]["subplots"][0]
 
@@ -2342,7 +2342,7 @@ class TestCurveFitPlugin(unittest.TestCase):
         _, _, harness, dialog = create_configured_line_fit_dialog(
             figure_context=FigureIROnlyContext(
                 figure_ir,
-                figure_name=attached_figure.figure_window.snapshot_state.default_macro_name(),
+                figure_name=attached_figure.figure_window.saveable_default_macro_name(),
             )
         )
         try:
@@ -2360,7 +2360,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.cancel_button.click()
             QtWidgets.QApplication.processEvents()
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+            subplot = attached_figure.figure_window.figure_ir()["layout"][
                 "subplots"
             ][0]
             self.assertEqual(len(subplot["traces"]), 1)
@@ -2450,7 +2450,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.show_fit_checkbox.setChecked(True)
             QtWidgets.QApplication.processEvents()
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+            subplot = attached_figure.figure_window.figure_ir()["layout"][
                 "subplots"
             ][0]
             fit_trace = subplot["traces"][-1]
@@ -2643,7 +2643,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
             result = harness.namespace["signal_fit_result"]
-            figure_ir = attached_figure.figure_window.snapshot_state.figure_ir()
+            figure_ir = attached_figure.figure_window.figure_ir()
 
             self.assertEqual(len(figure_ir["layout"]["subplots"]), 1)
             self.assertEqual(len(attached_figure.figure.axes), 1)
@@ -2701,7 +2701,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             figure_window=attached_figure.figure_window,
         )
         try:
-            opening_subplot = attached_figure.figure_window.snapshot_state.figure_ir()[
+            opening_subplot = attached_figure.figure_window.figure_ir()[
                 "layout"
             ]["subplots"][0]
             self.assertEqual(len(opening_subplot["traces"]), 1)
@@ -2717,7 +2717,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.reject()
             QtWidgets.QApplication.processEvents()
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+            subplot = attached_figure.figure_window.figure_ir()["layout"][
                 "subplots"
             ][0]
             self.assertEqual(len(subplot["traces"]), 1)
@@ -2986,7 +2986,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             figure_window=attached_figure.figure_window
         )
         try:
-            opening_subplot = attached_figure.figure_window.snapshot_state.figure_ir()[
+            opening_subplot = attached_figure.figure_window.figure_ir()[
                 "layout"
             ]["subplots"][0]
             self.assertEqual(len(opening_subplot["traces"]), 1)
@@ -3002,7 +3002,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             dialog.cancel_button.click()
             QtWidgets.QApplication.processEvents()
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+            subplot = attached_figure.figure_window.figure_ir()["layout"][
                 "subplots"
             ][0]
             self.assertEqual(len(subplot["traces"]), 1)
@@ -3116,7 +3116,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             reopening_dialog.cancel_button.click()
             QtWidgets.QApplication.processEvents()
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+            subplot = attached_figure.figure_window.figure_ir()["layout"][
                 "subplots"
             ][0]
             self.assertEqual(len(subplot["traces"]), 2)
@@ -3161,7 +3161,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                     "    legend.set_visible(False)"
                 )
             )
-            hidden_legend_subplot = attached_figure.figure_window.snapshot_state.figure_ir()[
+            hidden_legend_subplot = attached_figure.figure_window.figure_ir()[
                 "layout"
             ]["subplots"][0]
             self.assertFalse(hidden_legend_subplot["legend"])
@@ -3176,7 +3176,7 @@ class TestCurveFitPlugin(unittest.TestCase):
             reopening_dialog.suppress_screen_updates_checkbox.setChecked(False)
             QtWidgets.QApplication.processEvents()
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+            subplot = attached_figure.figure_window.figure_ir()["layout"][
                 "subplots"
             ][0]
             self.assertFalse(subplot["legend"])
@@ -3188,7 +3188,7 @@ class TestCurveFitPlugin(unittest.TestCase):
                 "0.5",
             )
 
-            subplot = attached_figure.figure_window.snapshot_state.figure_ir()["layout"][
+            subplot = attached_figure.figure_window.figure_ir()["layout"][
                 "subplots"
             ][0]
             self.assertFalse(subplot["legend"])

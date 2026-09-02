@@ -1,5 +1,4 @@
 import base64
-import copy
 import logging
 
 from qtutils import inmain_decorator
@@ -8,9 +7,7 @@ from qtutils.qt import QtCore, QtGui, QtWidgets
 from hyde.features.matplotlib_ir import (
     FigureIR,
     canonicalize_figure_window_name as _canonicalize_figure_window_name,
-    normalize_figure_defaults as _normalize_figure_defaults,
 )
-from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.features.matplotlib_figure_records import supported_trace_records
 from hyde.features.hyde_features import figure_decorator_source
 from hyde.user_interface.base_hyde_widgets import HydeInteractiveWidget
@@ -21,37 +18,20 @@ LOGGER = logging.getLogger("hyde")
 
 
 class FigureSnapshotState:
-    def __init__(
-        self,
-        default_macro_name="Figure",
-        call_source=None,
-        save_error=None,
-        figure_size=None,
-        tracked_names=None,
-        figure_ir=None,
-        figure_defaults=None,
-        resolved_axis_limits=None,
-        trace_styles=None,
-    ):
+    """What the kernel says about a figure that the figure's IR cannot carry.
+
+    The IR is the window's only account of the figure's contents, so nothing
+    here duplicates it. What is left is the pixel size matplotlib resolved (the
+    IR carries inches, and carries none at all for a default-sized figure), the
+    warning for a figure Hyde could not fully describe, and the call source
+    that is all a figure without an IR has to be saved from.
+    """
+
+    def __init__(self, default_macro_name="Figure"):
         self._default_macro_name = default_macro_name or "Figure"
-        self._tracked_names = ()
-        self._figure_ir = None
-        self._figure_defaults = None
         self._call_source = None
         self._save_error = None
         self._figure_size = None
-        self._trace_styles = {}
-        self.update(
-            default_macro_name=default_macro_name,
-            call_source=call_source,
-            save_error=save_error,
-            figure_size=figure_size,
-            tracked_names=tracked_names,
-            figure_ir=figure_ir,
-            figure_defaults=figure_defaults,
-            resolved_axis_limits=resolved_axis_limits,
-            trace_styles=trace_styles,
-        )
 
     def update(
         self,
@@ -59,64 +39,18 @@ class FigureSnapshotState:
         call_source=None,
         save_error=None,
         figure_size=None,
-        tracked_names=None,
-        figure_ir=None,
-        figure_defaults=None,
-        resolved_axis_limits=None,
-        trace_styles=None,
     ):
-        self._figure_ir = copy.deepcopy(figure_ir)
-        self._figure_defaults = _normalize_figure_defaults(figure_defaults)
-        self._resolved_axis_limits = copy.deepcopy(resolved_axis_limits) or {}
         if default_macro_name:
             self._default_macro_name = str(default_macro_name)
-        elif self._figure_ir is not None:
-            title = FigureIRAuthority.validate_state(self._figure_ir)["settings"]["title"]
-            if title:
-                self._default_macro_name = title
         self._call_source = call_source
-        if not self._call_source and self._figure_ir is not None:
-            current_ir = FigureIR(
-                figure_state=self._figure_ir,
-                figure_defaults=self._figure_defaults,
-            )
-            self._call_source = current_ir.python_source(log=False)
-        if tracked_names:
-            self._tracked_names = tuple(tracked_names)
-        elif self._figure_ir is not None:
-            self._tracked_names = FigureIR(
-                figure_state=self._figure_ir,
-                figure_defaults=self._figure_defaults,
-            ).tracked_names()
-        else:
-            self._tracked_names = ()
         self._save_error = save_error
         self._figure_size = None if figure_size is None else tuple(figure_size)
-        self._trace_styles = copy.deepcopy(trace_styles) or {}
 
     def default_macro_name(self):
         return self._default_macro_name
 
-    def call_source(self):
-        return self._call_source
-
     def figure_size(self):
         return self._figure_size
-
-    def tracked_names(self):
-        return self._tracked_names
-
-    def figure_ir(self):
-        return copy.deepcopy(self._figure_ir)
-
-    def figure_defaults(self):
-        return copy.deepcopy(self._figure_defaults)
-
-    def resolved_axis_limits(self):
-        return copy.deepcopy(self._resolved_axis_limits)
-
-    def has_save_warning(self):
-        return bool(self._save_error)
 
     def window_warning_text(self):
         if not self._save_error:
@@ -131,25 +65,14 @@ class FigureSnapshotState:
             return ""
         return f"{warning_text}: {self._save_error}"
 
-    def trace_styles(self):
-        return copy.deepcopy(self._trace_styles)
-
-    def macro_source(self, macro_name, figure_title=None):
-        if self._save_error and self._figure_ir is None:
+    def macro_source(self, macro_name, *, register=True):
+        if self._save_error:
             raise MacroStoreError(self._save_error)
-        if self._figure_ir is not None:
-            return FigureIR(
-                figure_state=self._figure_ir,
-                figure_defaults=self._figure_defaults,
-            ).recreation_function_source(
-                macro_name,
-                name=figure_title,
-            )
         if not self._call_source:
             raise MacroStoreError("This figure does not have a saveable recreation macro yet.")
         body = "\n".join(f"    {line}" for line in self._call_source.splitlines())
         return (
-            f"{figure_decorator_source()}\n"
+            f"{figure_decorator_source(register=register)}\n"
             f"def {macro_name}():\n"
             f"{body}\n"
             "    return fig\n"
@@ -220,10 +143,6 @@ class FigureWindow(HydeInteractiveWidget):
         )
         super().bind_subwindow(subwindow, stable_name=resolved_name)
 
-    @property
-    def current_ir(self):
-        return self.widget_ir
-
     def update_payload(self, payload):
         snapshot = dict(payload.get("snapshot", {}) or {})
         self.widget_ir = FigureIR.from_snapshot(snapshot)
@@ -232,11 +151,6 @@ class FigureWindow(HydeInteractiveWidget):
             call_source=snapshot.get("call_source"),
             save_error=snapshot.get("save_error"),
             figure_size=snapshot.get("figure_size"),
-            tracked_names=snapshot.get("tracked_names"),
-            figure_ir=snapshot.get("figure_ir"),
-            figure_defaults=snapshot.get("figure_defaults"),
-            resolved_axis_limits=snapshot.get("resolved_axis_limits"),
-            trace_styles=snapshot.get("trace_styles"),
         )
         if self._subwindow is not None:
             self._subwindow.setWindowTitle(
@@ -245,6 +159,8 @@ class FigureWindow(HydeInteractiveWidget):
         warning_message = self.snapshot_state.window_warning_message()
         self.warning_label.setVisible(bool(warning_message))
         self.warning_label.setText(warning_message)
+        # The new IR may track different names, so the signature the next
+        # namespace update is compared against has to be rebuilt over them.
         self._tracked_namespace_state = self.current_tracked_namespace_state()
 
         image_base64 = payload.get("image_png_base64")
@@ -377,20 +293,9 @@ class FigureWindow(HydeInteractiveWidget):
         )
 
     def figure_ir(self):
-        if self.current_ir is None:
+        if self.widget_ir is None:
             return None
-        return self.current_ir.normalized_state()
-
-    def figure_defaults(self):
-        if self.current_ir is None:
-            return self.snapshot_state.figure_defaults()
-        return copy.deepcopy(self.current_ir.figure_defaults)
-
-    def resolved_axis_limits(self):
-        return self.snapshot_state.resolved_axis_limits()
-
-    def trace_styles(self):
-        return self.snapshot_state.trace_styles()
+        return self.widget_ir.normalized_state()
 
     def has_figure_ir(self):
         return self.figure_ir() is not None
@@ -407,11 +312,6 @@ class FigureWindow(HydeInteractiveWidget):
     def has_supported_traces(self):
         return bool(self.supported_trace_records())
 
-    def _visible_title_name(self):
-        if self.current_ir is not None:
-            return self.current_ir.default_macro_name()
-        return self.snapshot_state.default_macro_name() or self.window_handle()
-
     def _visible_trace_title_suffix(self):
         return ", ".join(
             record["display_name"] for record in self.supported_trace_records()
@@ -419,7 +319,7 @@ class FigureWindow(HydeInteractiveWidget):
 
     def _visible_window_title(self):
         return self.formatted_window_title(
-            title_name=self._visible_title_name(),
+            title_name=self.saveable_default_macro_name(),
             title_suffix=self._visible_trace_title_suffix(),
             warning_text=self.snapshot_state.window_warning_text(),
         )
@@ -440,19 +340,24 @@ class FigureWindow(HydeInteractiveWidget):
         self.request_resize_redraw()
 
     def tracked_namespace_names(self):
-        if self.current_ir is not None:
-            return self.current_ir.tracked_names()
-        return self.snapshot_state.tracked_names()
+        """The figure's one account of what it reads from the namespace.
+
+        Both halves of tracking read this: the signature that decides whether a
+        namespace update touched this figure at all, and `refresh_figure`'s own
+        gate. Asking the IR twice, once here and once there, let a figure be
+        watched for names it would never refresh on.
+        """
+        if self.widget_ir is None:
+            return ()
+        return self.widget_ir.tracked_names()
 
     def refresh_figure(self):
         if self._closed:
             return False
-        if not self.snapshot_state.tracked_names():
+        if not self.tracked_namespace_names():
             return False
         if self.payload_request_in_flight("refresh"):
             self._refresh_requested = True
-            return False
-        if not self.has_figure_ir():
             return False
         self._refresh_requested = False
         return (
@@ -472,20 +377,16 @@ class FigureWindow(HydeInteractiveWidget):
             self.refresh_figure()
 
     def _refresh_command_source(self, *, use_bound_values):
-        figure_name = (
-            self.current_ir.default_macro_name()
-            if self.current_ir is not None
-            else self.snapshot_state.default_macro_name() or self.window_handle()
-        )
-        command_ir = (
+        # A refresh lowers to the figure's name and a flag, so the command
+        # carries no figure state and the window's own IR is not part of it.
+        return (
             FigureIR()
-            if self.current_ir is None
-            else self.current_ir
+            .with_refresh_figure(
+                self.saveable_default_macro_name(),
+                use_bound_values=use_bound_values,
+            )
+            .python_source(log=False)
         )
-        return command_ir.with_refresh_figure(
-            figure_name,
-            use_bound_values=use_bound_values,
-        ).python_source(log=False)
 
     def _on_namespace_view_updated(self, view):
         if self._closed:
@@ -514,29 +415,29 @@ class FigureWindow(HydeInteractiveWidget):
         self.close_from_kernel()
 
     def saveable_default_macro_name(self):
-        if self.current_ir is not None:
-            return self.current_ir.default_macro_name()
-        return self.snapshot_state.default_macro_name()
+        if self.widget_ir is not None:
+            return self.widget_ir.default_macro_name()
+        return self.snapshot_state.default_macro_name() or self.window_handle()
 
     def saveable_decorator_name(self):
         return figure_decorator_source()
 
-    def macro_definition_source(self, macro_name, *, handle):
-        if self.current_ir is not None:
-            return self.current_ir.recreation_function_source(
-                macro_name,
-                name=handle,
-            )
-        return self.snapshot_state.macro_source(macro_name, figure_title=handle)
+    def macro_definition_source(self, macro_name, *, handle, register=True):
+        # Whether Hyde could describe this figure as an IR is the one thing the
+        # snapshot still answers that the IR cannot: without one, all the
+        # window has to save is the call the kernel recorded.
+        if self.widget_ir is None:
+            return self.snapshot_state.macro_source(macro_name, register=register)
+        return self.widget_ir.recreation_function_source(
+            macro_name,
+            name=handle,
+            register=register,
+        )
 
     def session_restore_definition_source(self, handle):
-        if self.current_ir is not None:
-            return self.current_ir.recreation_function_source(
-                handle,
-                name=handle,
-                register=False,
-            )
-        return self.snapshot_state.macro_source(handle, figure_title=handle)
+        # A restored figure is rebuilt, not re-registered: the session file
+        # calls the function it defines rather than adding it to the project.
+        return self.macro_definition_source(handle, handle=handle, register=False)
 
     def session_restore_warning(self):
         message = self.snapshot_state.window_warning_message()
@@ -545,9 +446,7 @@ class FigureWindow(HydeInteractiveWidget):
         return f"{self.window_handle()}: {message}"
 
     def session_restore_arguments(self):
-        if self.current_ir is not None:
-            return self.current_ir.tracked_names()
-        return self.snapshot_state.tracked_names()
+        return self.tracked_namespace_names()
 
     def macro_window_metadata(self, geometry, window_state):
         return {
@@ -586,11 +485,12 @@ class FigureWindow(HydeInteractiveWidget):
         if get_shutting_down is not None and get_shutting_down():
             self.complete_interactive_close(event)
             return
-        command_ir = FigureIR() if self.current_ir is None else self.current_ir
         if (
             self.begin_payload_request(
                 "close",
-                command_ir.with_close_figure(self.figure_number).python_source(
+                # A close lowers to the figure number alone, so it carries no
+                # figure state either.
+                FigureIR().with_close_figure(self.figure_number).python_source(
                     log=False
                 ),
                 description=f"Closing figure {self.figure_number} in the kernel",

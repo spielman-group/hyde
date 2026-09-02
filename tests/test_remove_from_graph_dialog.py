@@ -572,7 +572,7 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
             },
         )
 
-        figure_ir = figure.current_ir
+        figure_ir = figure.widget_ir
         opening_state = figure_ir.effective_state()
 
         updated_ir = figure_ir.remove_traces(("trace1", "trace0"))

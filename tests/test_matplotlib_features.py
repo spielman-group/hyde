@@ -1573,6 +1573,88 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         finally:
             widget.close()
 
+    def test_figure_window_ignores_namespace_names_its_figure_does_not_read(self):
+        """A figure refreshes for its own data and nothing else.
+
+        Whether a name is watched and whether a refresh for it is allowed
+        through must be the same question. Answered separately, a figure can be
+        woken by a variable it never plots, or left stale by one it does.
+        """
+        execution = FakeExecutionService()
+        view = {
+            "delay": {"type": "ndarray", "view": "[0 1 2]"},
+            "fit_delay": {"type": "ndarray", "view": "[1 4 9]"},
+            "raw_delay": {"type": "ndarray", "view": "[1 2 3]"},
+            "unrelated": {"type": "int", "view": "1"},
+        }
+        namespace_service = FakeNamespaceViewService(view)
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "namespace_view_service": namespace_service,
+                "python_execution_service": execution,
+            },
+        )
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "live_state": None,
+                    },
+                }
+            )
+
+            namespace_service.emit({**view, "unrelated": {"type": "int", "view": "2"}})
+            self.assertEqual(execution.hidden_calls, [])
+
+            namespace_service.emit(
+                {
+                    **view,
+                    "unrelated": {"type": "int", "view": "2"},
+                    "raw_delay": {"type": "ndarray", "view": "[9 9 9]"},
+                }
+            )
+            self.assertEqual(len(execution.hidden_calls), 1)
+        finally:
+            widget.close()
+
+    def test_figure_window_reading_nothing_from_the_namespace_never_refreshes(self):
+        """A figure of frozen data has nothing to refresh from."""
+        execution = FakeExecutionService()
+        namespace_service = FakeNamespaceViewService(
+            {"delay": {"type": "ndarray", "view": "[0 1 2]"}}
+        )
+        widget = FigureWindow(
+            figure_number=1,
+            services={
+                "namespace_view_service": namespace_service,
+                "python_execution_service": execution,
+            },
+        )
+        frozen_state = self._live_state()
+        frozen_state["settings"]["x_name"] = None
+        frozen_state["items"] = []
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "figure_ir": figure_ir_from_live_state(frozen_state),
+                        "live_state": None,
+                    },
+                }
+            )
+
+            self.assertEqual(widget.tracked_namespace_names(), ())
+            namespace_service.emit({"delay": {"type": "ndarray", "view": "[9 9 9]"}})
+
+            self.assertFalse(widget.refresh_figure())
+            self.assertEqual(execution.hidden_calls, [])
+        finally:
+            widget.close()
+
     def test_figure_window_detects_in_place_namespace_metadata_mutation(self):
         shared_view = ["[1 4 9]"]
         execution = FakeExecutionService()
@@ -2102,7 +2184,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             figure.parentWidget().windowTitle(),
             "FigureA: fit_delay: fit_delay vs delay, raw_delay: raw_delay vs delay",
         )
-        self.assertEqual(figure.snapshot_state.figure_ir()["settings"]["title"], "FigureA")
+        self.assertEqual(figure.figure_ir()["settings"]["title"], "FigureA")
         workspace.clear()
         mdi_area.close()
 

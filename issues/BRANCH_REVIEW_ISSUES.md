@@ -22,7 +22,7 @@ exercised.
 - [x] Slice 8: One Format Field On FigureIR
 - [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
       — probe deleted; the version floor still waits on the upstream `v2.28.0` tag
-- [ ] Slice 10: Retire `current_ir` And Its Second Source Of Truth
+- [x] Slice 10: Retire `current_ir` And Its Second Source Of Truth
 - [ ] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
 - [ ] Slice 13: Figure Backend Leftovers
@@ -619,13 +619,42 @@ branch `if self.current_ir is not None: ... else: self.snapshot_state...`.
 `FigureIR.from_snapshot` already carries most of what `FigureSnapshotState`
 holds; the remainder is the warning text and the figure size.
 
+**Verified before the fix: the defect is real in the code and unreachable from
+the kernel.** Driving `FigureWindow` over all eighteen `(figure_ir,
+tracked_names)` payload shapes, four of them produced a window that reported a
+name from `tracked_namespace_names()` which no namespace change could ever
+refresh — the failure named above, demonstrated by execution. All four need a
+payload carrying `tracked_names` without a `figure_ir`, and
+`figure_snapshot_payload` never emits one: its first-class branch always ships
+`figure_ir`, its other branch ships `tracked_names: []` and the workspace
+discards it before a window sees it. Over real payloads from real figures the
+two sources agreed every time, because the kernel computes `tracked_names` from
+the very `figure_ir` it ships, and `FigureSnapshotState` re-derives from that
+`figure_ir` whenever the shipped list is empty. Neither half of that invariant
+was stated anywhere, and it spanned the kernel/GUI boundary. After the fix the
+same eighteen shapes all agree, and by construction rather than by coincidence.
+
 ### Acceptance criteria
 
-- [ ] `current_ir` is gone and call sites use `widget_ir`.
-- [ ] One source answers "which namespace names does this figure track", used by
+- [x] `current_ir` is gone and call sites use `widget_ir`.
+- [x] One source answers "which namespace names does this figure track", used by
       both tracking and refresh.
-- [ ] The dual-source branches are gone or reduced to a stated minimum.
-- [ ] Session save and restore of a figure window still round-trip.
+- [x] The dual-source branches are gone or reduced to a stated minimum.
+      `FigureSnapshotState` no longer holds the IR, the figure defaults, the
+      resolved axis limits, the trace styles or the tracked names, so no
+      question has two holders. Four `widget_ir is None` checks remain, all
+      answering the one question the IR cannot answer — whether Hyde could
+      describe this figure at all: `figure_ir()` (the editability gate),
+      `tracked_namespace_names()` (the single source itself),
+      `saveable_default_macro_name()` (IR title, else the name the kernel
+      reported) and `macro_definition_source()` (an IR recreation, else the
+      call the kernel recorded).
+- [x] Session save and restore of a figure window still round-trip.
+      `test_a_saved_figure_session_restores_the_same_figure` writes a real
+      figure's `session.toml` and `session.py` through `write_session`, closes
+      everything, executes the written `session.py` in the Hyde backend, and
+      compares the restored window's tracked names, handle, figure IR and drawn
+      appearance against the saved one's.
 
 ### Blocked by
 

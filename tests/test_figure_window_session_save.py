@@ -4,7 +4,7 @@ from qtutils.qt import QtWidgets
 
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
 from hyde.features.matplotlib_ir import FigureIR
-from hyde.user_interface.plugins.figure_interactive.window import FigureSnapshotState, FigureWindow
+from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 
 
 class TestFigureWindowSessionSave(unittest.TestCase):
@@ -36,25 +36,68 @@ class TestFigureWindowSessionSave(unittest.TestCase):
     def test_figure_window_inherits_shared_shell(self):
         self.assertTrue(issubclass(FigureWindow, HydeToolWidget))
 
-    def test_snapshot_state_derives_recreation_source_from_figure_ir(self):
-        snapshot = FigureSnapshotState()
+    def test_figure_window_names_and_parameterises_a_macro_from_the_figures_ir(self):
+        widget = FigureWindow(figure_number=1)
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {"figure_ir": self._live_state_with_title("Figure0")},
+                }
+            )
+
+            self.assertEqual(widget.saveable_default_macro_name(), "Figure0")
+            self.assertEqual(
+                widget.tracked_namespace_names(),
+                ("delay", "fit_delay", "raw_delay"),
+            )
+            macro = widget.macro_definition_source("Graph0", handle="Figure0")
+            self.assertIn("def Graph0(delay, fit_delay, raw_delay):", macro)
+            self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
+            self.assertIn("fig.show()", macro)
+            self.assertNotIn("fig.canvas.draw_idle()", macro)
+            self.assertNotIn("return fig", macro)
+        finally:
+            widget.force_close()
+
+    def test_figure_window_macro_omits_a_style_the_kernel_reports_as_a_default(self):
+        """A figure's macro must not freeze the rcParams it happened to inherit.
+
+        A colour that came from the kernel's defaults is not something the user
+        chose, so restating it in the macro would pin the figure to whatever
+        style was in force the day it was saved.
+        """
         figure_ir = self._live_state_with_title("Figure0")
+        figure_ir["layout"]["subplots"][0]["traces"][0]["kwargs"]["color"] = "#123456"
+        chosen = FigureWindow(figure_number=1)
+        inherited = FigureWindow(figure_number=2)
+        try:
+            chosen.update_payload(
+                {"figure_number": 1, "snapshot": {"figure_ir": figure_ir}}
+            )
+            inherited.update_payload(
+                {
+                    "figure_number": 2,
+                    "snapshot": {
+                        "figure_ir": figure_ir,
+                        "figure_defaults": {
+                            "trace_styles": {"subplot0": {"trace0": {"color": "#123456"}}}
+                        },
+                    },
+                }
+            )
 
-        snapshot.update(
-            default_macro_name=None,
-            call_source=None,
-            tracked_names=None,
-            figure_ir=figure_ir,
-        )
-
-        self.assertEqual(snapshot.default_macro_name(), "Figure0")
-        self.assertEqual(snapshot.tracked_names(), ("delay", "fit_delay", "raw_delay"))
-        self.assertIn("fig = plt.figure('Figure0')", snapshot.call_source())
-        macro = snapshot.macro_source("Graph0")
-        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
-        self.assertIn("fig.show()", macro)
-        self.assertNotIn("fig.canvas.draw_idle()", macro)
-        self.assertNotIn("return fig", macro)
+            self.assertIn(
+                "color='#123456'",
+                chosen.macro_definition_source("Graph0", handle="Figure0"),
+            )
+            self.assertNotIn(
+                "color='#123456'",
+                inherited.macro_definition_source("Graph0", handle="Figure0"),
+            )
+        finally:
+            chosen.force_close()
+            inherited.force_close()
 
     def test_figure_window_tracks_live_figure_ir_in_widget_ir_from_backend_payloads(self):
         widget = FigureWindow(figure_number=1)
@@ -88,26 +131,37 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         finally:
             widget.force_close()
 
-    def test_snapshot_state_preserves_figure_defaults_metadata(self):
-        snapshot = FigureSnapshotState()
-        figure_ir = self._live_state_with_title("Figure0")
-        figure_defaults = {
-            "settings": {"title": None, "figsize": (6.4, 4.8)},
-            "trace_styles": {"subplot0": {"trace0": {"color": "#123456"}}},
-        }
+    def test_figure_window_falls_back_to_the_recorded_call_when_hyde_has_no_ir(self):
+        """A figure Hyde could not describe still has the call that made it."""
+        widget = FigureWindow(figure_number=1)
+        try:
+            widget.update_payload(
+                {
+                    "figure_number": 1,
+                    "snapshot": {
+                        "default_macro_name": "Figure0",
+                        "call_source": "fig = plt.figure('Figure0')",
+                        "figure_ir": None,
+                        "is_first_class": True,
+                    },
+                }
+            )
 
-        snapshot.update(
-            default_macro_name=None,
-            call_source=None,
-            tracked_names=None,
-            figure_ir=figure_ir,
-            figure_defaults=figure_defaults,
-        )
-
-        self.assertEqual(
-            snapshot.figure_defaults()["trace_styles"]["subplot0"]["trace0"]["color"],
-            "#123456",
-        )
+            self.assertEqual(widget.tracked_namespace_names(), ())
+            self.assertEqual(widget.session_restore_arguments(), ())
+            self.assertEqual(
+                widget.macro_definition_source("Graph0", handle="Figure0"),
+                "@hyde.figure\n"
+                "def Graph0():\n"
+                "    fig = plt.figure('Figure0')\n"
+                "    return fig\n",
+            )
+            self.assertIn(
+                "@hyde.figure(register=False)",
+                widget.session_restore_definition_source("Figure0"),
+            )
+        finally:
+            widget.force_close()
 
     def test_figure_window_macro_source_includes_window_pos_metadata(self):
         widget = FigureWindow(figure_number=1)
