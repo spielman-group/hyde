@@ -188,15 +188,28 @@ class FakeKernelRequests(KernelRequestRecorder):
         )
 
 
-def copy_payload(
-    data=b"%PDF fake", output_format="pdf", is_text=False, request_msg_id=None
-):
+def _one_pixel_png():
     import base64
 
+    return base64.b64decode(_ONE_PIXEL_PNG_BASE64)
+
+
+def copy_payload(*rendered, request_msg_id=None):
+    """A kernel payload carrying one representation per `(format, bytes)` pair.
+
+    Defaults to a lone PDF, which is what a forced vector copy sends.
+    """
+    import base64
+
+    pairs = rendered or ((b"%PDF fake", "pdf"),)
     payload = {
-        "payload_base64": base64.b64encode(data).decode("ascii"),
-        "output_format": output_format,
-        "is_text": is_text,
+        "representations": [
+            {
+                "output_format": output_format,
+                "payload_base64": base64.b64encode(data).decode("ascii"),
+            }
+            for data, output_format in pairs
+        ]
     }
     if request_msg_id is not None:
         payload["request_msg_id"] = request_msg_id
@@ -210,7 +223,7 @@ def settle_copy(plugin, kernel, output_format="pdf"):
     triggers several in a row has to let each finish first.
     """
     kernel.render_ran()
-    plugin.on_kernel_message(copy_payload(output_format=output_format))
+    plugin.on_kernel_message(copy_payload((b"%PDF fake", output_format)))
 
 
 _ONE_PIXEL_PNG_BASE64 = (
@@ -246,13 +259,13 @@ class TestFigureCopyCommand(unittest.TestCase):
     """
 
     def test_copy_lowers_to_a_hyde_clipboard_call_on_the_looked_up_figure(self):
-        source = FigureIR(figure_name="Graph12").with_copy_graphics().python_source(log=False)
+        source = FigureIR(figure_name="Graph12").with_copy_graphics(clipboard_formats=('pdf',)).python_source(log=False)
 
         self.assertEqual(
             source.splitlines(),
             [
                 "fig = hyde.get_figure('Graph12')",
-                "hyde.copy_figure(fig, format='pdf', dpi='figure')",
+                "hyde.copy_figure(fig, formats=('pdf',), dpi='figure')",
             ],
         )
 
@@ -261,15 +274,15 @@ class TestFigureCopyCommand(unittest.TestCase):
             with self.subTest(output_format=output_format):
                 source = (
                     FigureIR(figure_name="Graph12")
-                    .with_copy_graphics(output_format=output_format)
+                    .with_copy_graphics(clipboard_formats=(output_format,))
                     .python_source(log=False)
                 )
-                self.assertIn(f"format={output_format!r}", source)
+                self.assertIn(f"formats=({output_format!r},)", source)
 
     def test_copy_always_resolves_a_figure_name_to_look_up(self):
         # The emitted Python has to name a figure for hyde.get_figure, so an
         # absent name falls back to the default the save path uses too.
-        source = FigureIR().with_copy_graphics().python_source(log=False)
+        source = FigureIR().with_copy_graphics(clipboard_formats=('pdf',)).python_source(log=False)
 
         self.assertRegex(source.splitlines()[0], r"^fig = hyde\.get_figure\('.+'\)$")
 
@@ -278,7 +291,7 @@ class TestFigureCopyCommand(unittest.TestCase):
         # took the wrong branch.
         with self.assertRaises(ValueError):
             dataclass_replace(
-                FigureIR(figure_name="Graph12").with_copy_graphics(),
+                FigureIR(figure_name="Graph12").with_copy_graphics(clipboard_formats=('pdf',)),
                 output_path="/tmp/Graph12.pdf",
             ).validate()
 
@@ -290,7 +303,7 @@ class TestFigureCopyCommand(unittest.TestCase):
             ).validate()
 
     def test_copy_does_not_emit_savefig_or_touch_figure_size(self):
-        source = FigureIR(figure_name="Graph12").with_copy_graphics().python_source(log=False)
+        source = FigureIR(figure_name="Graph12").with_copy_graphics(clipboard_formats=('pdf',)).python_source(log=False)
 
         self.assertNotIn("savefig", source)
         self.assertNotIn("set_size_inches", source)
@@ -319,7 +332,7 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
             kernel.executed,
             [
                 "fig = hyde.get_figure('Graph12')\n"
-                "hyde.copy_figure(fig, format='pdf', dpi='figure')"
+                "hyde.copy_figure(fig, formats=('pdf', 'png'), dpi='figure')"
             ],
         )
 
@@ -343,16 +356,7 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         plugin.copy_active_figure(representation="vector")
         rendered = b"%PDF-1.4 fake pdf bytes"
 
-        plugin.on_kernel_message(
-            {
-                "task": "COPY_TO_CLIPBOARD_REQUEST",
-                "data": {
-                    "payload_base64": base64.b64encode(rendered).decode("ascii"),
-                    "output_format": "pdf",
-                    "is_text": False,
-                },
-            }
-        )
+        plugin.on_kernel_message(copy_payload((rendered, "pdf")))
 
         mime_data = QtWidgets.QApplication.clipboard().mimeData()
         self.assertIn("application/pdf", mime_data.formats())
@@ -384,15 +388,19 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         try:
             with patch(
                 "hyde.execution.ipc.signal_copy_to_clipboard",
-                side_effect=lambda payload, **kw: captured.append((payload, kw)),
+                side_effect=captured.append,
             ):
-                self.assertTrue(hyde.copy_figure(figure, format="pdf"))
+                self.assertTrue(hyde.copy_figure(figure, formats=("pdf", "png")))
 
             self.assertEqual(1, len(captured))
-            payload, kwargs = captured[0]
-            self.assertEqual("pdf", kwargs["output_format"])
-            self.assertFalse(kwargs["is_text"])
-            self.assertTrue(base64.b64decode(payload).startswith(b"%PDF"))
+            representations = captured[0]
+            self.assertEqual(
+                ["pdf", "png"],
+                [item["output_format"] for item in representations],
+            )
+            self.assertTrue(
+                base64.b64decode(representations[0]["payload_base64"]).startswith(b"%PDF")
+            )
             self.assertEqual(original_size, tuple(figure.get_size_inches()))
             self.assertEqual(original_dpi, figure.dpi)
         finally:
@@ -403,13 +411,12 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
 
         for item in graphics_clipboard_representations():
             with self.subTest(representation=item.key):
-                self.assertIn(item.output_format, exportable)
-                self.assertIsNotNone(
-                    clipboard_mime_type_for_format(item.output_format)
-                )
+                for candidate in item.output_formats:
+                    self.assertIn(candidate, exportable)
+                    self.assertIsNotNone(clipboard_mime_type_for_format(candidate))
 
     def test_a_format_with_no_clipboard_representation_yields_no_payload(self):
-        self.assertIsNone(clipboard_mime_data(b"junk", output_format="raw"))
+        self.assertIsNone(clipboard_mime_data([("raw", b"junk")]))
         self.assertIsNone(clipboard_mime_type_for_format("rgba"))
 
 
@@ -499,7 +506,7 @@ class TestEditMenuCopy(unittest.TestCase):
         self.assertEqual(
             [
                 "fig = hyde.get_figure('Graph12')\n"
-                "hyde.copy_figure(fig, format='pdf', dpi='figure')"
+                "hyde.copy_figure(fig, formats=('pdf', 'png'), dpi='figure')"
             ],
             from_edit,
         )
@@ -528,56 +535,22 @@ class TestCopyPgfAsText(unittest.TestCase):
         plugin.copy_active_figure(representation="latex")
         latex = b"\\begingroup%\n\\makeatletter%\n\\begin{pgfpicture}%"
 
-        plugin.on_kernel_message(
-            {
-                "task": "COPY_TO_CLIPBOARD_REQUEST",
-                "data": {
-                    "payload_base64": base64.b64encode(latex).decode("ascii"),
-                    "output_format": "pgf",
-                    "is_text": True,
-                },
-            }
-        )
+        plugin.on_kernel_message(copy_payload((latex, "pgf")))
 
         mime_data = QtWidgets.QApplication.clipboard().mimeData()
         self.assertTrue(mime_data.hasText())
         self.assertIn("pgfpicture", mime_data.text())
 
     def test_pgf_payload_carries_no_image_representation(self):
-        payload = clipboard_mime_data(b"\\begin{pgfpicture}", output_format="pgf", is_text=True)
+        payload = clipboard_mime_data([("pgf", b"\\begin{pgfpicture}")])
 
         self.assertTrue(payload.hasText())
         for image_type in ("image/png", "application/pdf", "image/svg+xml"):
             self.assertNotIn(image_type, payload.formats())
 
-    def test_the_kernel_marks_pgf_as_text_and_other_formats_as_not(self):
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import hyde
 
-        figure = plt.figure(figsize=(3.0, 2.0))
-        figure.add_subplot(111).plot([0, 1], [1, 2])
-        try:
-            for output_format, expected_text in (("pgf", True), ("png", False), ("pdf", False)):
-                with self.subTest(output_format=output_format):
-                    captured = []
-                    with patch(
-                        "hyde.execution.ipc.signal_copy_to_clipboard",
-                        side_effect=lambda payload, **kw: captured.append(kw),
-                    ):
-                        hyde.copy_figure(figure, format=output_format)
-                    self.assertEqual(expected_text, captured[0]["is_text"])
-        finally:
-            plt.close(figure)
-
-
-class TestPngCompanionRepresentation(unittest.TestCase):
-    """A clipboard payload can carry several representations of one content.
-
-    Without a PNG alongside the requested format, a PDF copy appears to do
-    nothing in the many applications that do not accept PDF from the clipboard.
-    """
+class TestClipboardPayloadRepresentations(unittest.TestCase):
+    """A clipboard payload carries several representations of one content."""
 
     @classmethod
     def setUpClass(cls):
@@ -586,11 +559,7 @@ class TestPngCompanionRepresentation(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def test_an_image_copy_carries_both_its_own_format_and_png(self):
-        payload = clipboard_mime_data(
-            b"%PDF-1.4 fake",
-            output_format="pdf",
-            companion_png=b"\x89PNG\r\n\x1a\n fake",
-        )
+        payload = clipboard_mime_data([("pdf", b"%PDF-1.4 fake"), ('png', b"\x89PNG\r\n\x1a\n fake")])
 
         self.assertIn("application/pdf", payload.formats())
         self.assertIn("image/png", payload.formats())
@@ -598,56 +567,10 @@ class TestPngCompanionRepresentation(unittest.TestCase):
         self.assertEqual(b"\x89PNG\r\n\x1a\n fake", bytes(payload.data("image/png")))
 
     def test_a_png_copy_does_not_duplicate_itself(self):
-        payload = clipboard_mime_data(
-            b"\x89PNG fake", output_format="png", companion_png=b"\x89PNG fake"
-        )
+        payload = clipboard_mime_data([("png", b"\x89PNG fake"), ('png', b"\x89PNG fake"
+        )])
 
         self.assertEqual(["image/png"], [f for f in payload.formats() if f.startswith("image/")])
-
-    def test_pgf_is_excluded_from_the_companion(self):
-        # Attaching an image to a text copy would mean pasting into a word
-        # processor silently yields a picture instead of the LaTeX source.
-        payload = clipboard_mime_data(
-            b"\\begin{pgfpicture}",
-            output_format="pgf",
-            is_text=True,
-            companion_png=b"\x89PNG fake",
-        )
-
-        self.assertTrue(payload.hasText())
-        self.assertNotIn("image/png", payload.formats())
-
-    def test_the_kernel_renders_a_companion_png_for_image_formats_only(self):
-        import base64
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import hyde
-
-        figure = plt.figure(figsize=(3.0, 2.0))
-        figure.add_subplot(111).plot([0, 1], [1, 2])
-        try:
-            for output_format, expect_companion in (
-                ("pdf", True),
-                ("svg", True),
-                ("png", False),
-                ("pgf", False),
-            ):
-                with self.subTest(output_format=output_format):
-                    captured = []
-                    with patch(
-                        "hyde.execution.ipc.signal_copy_to_clipboard",
-                        side_effect=lambda payload, **kw: captured.append(kw),
-                    ):
-                        hyde.copy_figure(figure, format=output_format)
-                    companion = captured[0].get("companion_png_base64")
-                    if expect_companion:
-                        self.assertTrue(companion, f"{output_format} should carry a PNG")
-                        self.assertTrue(base64.b64decode(companion).startswith(b"\x89PNG"))
-                    else:
-                        self.assertFalse(companion, f"{output_format} should carry no PNG")
-        finally:
-            plt.close(figure)
 
     def test_a_copy_carries_an_image_the_platform_can_republish(self):
         """MIME types reach other Qt applications; everything else reads the
@@ -666,21 +589,14 @@ class TestPngCompanionRepresentation(unittest.TestCase):
             ("png", png, None),
         ):
             with self.subTest(output_format=output_format):
-                mime = clipboard_mime_data(
-                    rendered,
-                    output_format=output_format,
-                    is_text=False,
-                    companion_png=companion,
-                )
+                mime = clipboard_mime_data([(output_format, rendered), ('png', companion)])
                 self.assertTrue(
                     mime.hasImage(),
                     f"a {output_format} copy cannot be pasted outside Qt",
                 )
 
     def test_a_pgf_copy_carries_no_image_the_platform_could_paste(self):
-        mime = clipboard_mime_data(
-            b"\\begin{pgfpicture}", output_format="pgf", is_text=True
-        )
+        mime = clipboard_mime_data([("pgf", b"\\begin{pgfpicture}")])
 
         self.assertFalse(mime.hasImage())
         self.assertTrue(mime.hasText())
@@ -693,12 +609,9 @@ class TestPngCompanionRepresentation(unittest.TestCase):
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
-                "data": {
-                    "payload_base64": base64.b64encode(b"%PDF-1.4 fake").decode("ascii"),
-                    "output_format": "pdf",
-                    "is_text": False,
-                    "companion_png_base64": base64.b64encode(b"\x89PNG fake").decode("ascii"),
-                },
+                "data": copy_payload(
+                    (b"%PDF-1.4 fake", "pdf"), (b"\x89PNG fake", "png")
+                )["data"],
             }
         )
 
@@ -738,16 +651,7 @@ class TestCopyFeedback(unittest.TestCase):
 
         plugin, messages = self._plugin_with_status()
         plugin.copy_active_figure(representation="image")
-        plugin.on_kernel_message(
-            {
-                "task": "COPY_TO_CLIPBOARD_REQUEST",
-                "data": {
-                    "payload_base64": base64.b64encode(b"\x89PNG fake").decode("ascii"),
-                    "output_format": "png",
-                    "is_text": False,
-                },
-            }
-        )
+        plugin.on_kernel_message(copy_payload((b"\x89PNG fake", "png")))
 
         self.assertTrue(any("PNG" in str(m) for m in messages), messages)
         self.assertTrue(any("clipboard" in str(m).lower() for m in messages), messages)
@@ -883,7 +787,7 @@ class TestCopySettlesOnEveryPath(unittest.TestCase):
         plugin.on_copy_payload_timeout()
         self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
 
-        plugin.on_kernel_message(copy_payload(b"%PDF late"))
+        plugin.on_kernel_message(copy_payload((b"%PDF late", "pdf")))
 
         self.assertFalse(any("Copied" in str(m) for m in messages), messages)
         self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
@@ -931,7 +835,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         }
 
         plugin.copy_active_figure(representation="vector")
-        self.assertEqual([("holds", "Copying figure as PDF...")], shown)
+        self.assertEqual([("holds", "Copying figure as Vector...")], shown)
 
         plugin.on_kernel_message(copy_payload())
         self.assertEqual("fades", shown[-1][0])
@@ -964,12 +868,59 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
 
         app.emit_plugin_event(
             "kernel_message",
-            copy_payload(b"%PDF real", request_msg_id=kernel.kernel_requests[-1][0].msg_id),
+            copy_payload((b"%PDF real", "pdf"), request_msg_id=kernel.kernel_requests[-1][0].msg_id),
         )
 
         self.assertFalse(save_graphics.copy_in_flight())
         mime = QtWidgets.QApplication.clipboard().mimeData()
         self.assertTrue(mime.hasFormat("application/pdf"))
+
+    def test_a_plain_copy_carries_a_vector_and_a_raster_together(self):
+        """The receiving application picks; the user does not have to know."""
+        plugin, kernel, _ = self._copy_in_flight(representation=None)
+
+        self.assertEqual(
+            [
+                "fig = hyde.get_figure('Graph12')\n"
+                "hyde.copy_figure(fig, formats=('pdf', 'png'), dpi='figure')"
+            ],
+            kernel.executed,
+        )
+
+    def test_forcing_vector_carries_no_raster_to_fall_back_on(self):
+        """The point of forcing: an application that would have settled for the
+        raster gets nothing to settle for."""
+        plugin, kernel, _ = self._copy_in_flight(representation="vector")
+        self.assertIn("formats=('pdf',)", kernel.executed[0])
+
+        plugin.on_kernel_message(copy_payload((b"%PDF-1.4 fake", "pdf")))
+        mime = QtWidgets.QApplication.clipboard().mimeData()
+
+        self.assertIn("application/pdf", mime.formats())
+        self.assertNotIn("image/png", mime.formats())
+        self.assertFalse(mime.hasImage())
+
+    def test_forcing_image_carries_no_vector(self):
+        plugin, kernel, _ = self._copy_in_flight(representation="image")
+        self.assertIn("formats=('png',)", kernel.executed[0])
+
+        plugin.on_kernel_message(copy_payload((_one_pixel_png(), "png")))
+        mime = QtWidgets.QApplication.clipboard().mimeData()
+
+        self.assertNotIn("application/pdf", mime.formats())
+        self.assertTrue(mime.hasImage())
+
+    def test_only_the_format_this_platform_publishes_is_rendered(self):
+        """A vector representation offers candidates; rendering every one would
+        render figures nothing on this machine can paste."""
+        plugin, kernel, _ = self._copy_in_flight(representation="vector")
+        requested = kernel.executed[0]
+
+        self.assertEqual(
+            1,
+            sum(requested.count(f"'{candidate}'") for candidate in ("pdf", "svg")),
+            f"expected one vector format in {requested!r}",
+        )
 
     def test_a_second_copy_is_refused_while_one_is_in_flight(self):
         plugin, kernel, messages = self._copy_in_flight()
@@ -1011,7 +962,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         plugin, kernel, messages = self._copy_in_flight()
         QtWidgets.QApplication.clipboard().setText("untouched")
 
-        plugin.on_kernel_message(copy_payload(b"%PDF early"))
+        plugin.on_kernel_message(copy_payload((b"%PDF early", "pdf")))
         self.assertFalse(plugin.copy_in_flight())
         self.assertTrue(any("Copied" in str(m) for m in messages), messages)
 
@@ -1030,14 +981,14 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
 
         QtWidgets.QApplication.clipboard().setText("untouched")
         self.assertTrue(plugin.copy_active_figure(representation="image"))
-        plugin.on_kernel_message(copy_payload(b"%PDF stale", request_msg_id=stale))
+        plugin.on_kernel_message(copy_payload((b"%PDF stale", "pdf"), request_msg_id=stale))
 
         self.assertTrue(plugin.copy_in_flight())
         self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
 
         current = kernel.kernel_requests[-1][0].msg_id
         plugin.on_kernel_message(
-            copy_payload(b"\x89PNG real", output_format="png", request_msg_id=current)
+            copy_payload((b"\x89PNG real", "png"), request_msg_id=current)
         )
         self.assertFalse(plugin.copy_in_flight())
         self.assertTrue(any("Copied" in str(m) for m in messages), messages)
@@ -1087,7 +1038,9 @@ class TestGeneratedGraphicsFormatTable(unittest.TestCase):
     def test_copy_offers_only_formats_the_table_can_export(self):
         exportable = {item.key for item in graphics_export_formats()}
         clipboard = {
-            item.output_format for item in graphics_clipboard_representations()
+            candidate
+            for item in graphics_clipboard_representations()
+            for candidate in item.output_formats
         }
 
         self.assertTrue(
@@ -1181,11 +1134,11 @@ class TestCopyAsSubmenu(unittest.TestCase):
                 self.assertEqual(
                     [
                         "fig = hyde.get_figure('Graph12')\n"
-                        f"hyde.copy_figure(fig, format={item.output_format!r}, dpi='figure')"
+                        f"hyde.copy_figure(fig, formats=({item.output_formats[0]!r},), dpi='figure')"
                     ],
                     self.kernel.executed,
                 )
-                settle_copy(self.save_graphics, self.kernel, item.output_format)
+                settle_copy(self.save_graphics, self.kernel, item.output_formats[0])
 
     def test_copy_as_entries_need_an_active_figure(self):
         figure_context = [None]

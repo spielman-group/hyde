@@ -36,13 +36,13 @@ class FigureCopyRequest:
 
     def __init__(
         self,
-        output_format,
+        label,
         *,
         busy_delay_ms,
         busy_hold_ms,
         on_payload_timeout,
     ):
-        self.output_format = str(output_format)
+        self.label = str(label)
         self.kernel_request = None
         self._busy_hold_ms = int(busy_hold_ms)
         self._busy_cursor_shown = False

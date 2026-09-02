@@ -190,20 +190,20 @@ def figure_refresh_source(figure_name, *, use_bound_values=False):
     )
 
 
-def figure_graphics_copy_source(figure_name, *, output_format="pdf", dpi="figure"):
+def figure_graphics_copy_source(figure_name, *, clipboard_formats=("pdf",), dpi="figure"):
     """Emit Python that copies a live first-class figure to the clipboard.
 
     The clipboard is GUI-owned and plain matplotlib cannot express it, so this
-    is a Hyde helper rather than a `savefig` call. `dpi` is normally the
-    `'figure'` sentinel, which defers resolution to the kernel's live figure
-    instead of mirroring the figure's DPI in the GUI.
+    is a Hyde helper rather than a `savefig` call. Several formats are asked for
+    at once because a clipboard holds several representations of one content and
+    the receiving application picks. `dpi` is normally the `'figure'` sentinel,
+    which defers resolution to the kernel's live figure instead of mirroring the
+    figure's DPI in the GUI.
     """
+    formats = tuple(str(item) for item in clipboard_formats)
     return "\n".join(
         figure_lookup_prelude_lines(figure_name)
-        + [
-            "hyde.copy_figure(fig, "
-            f"format={str(output_format)!r}, dpi={dpi!r})"
-        ]
+        + [f"hyde.copy_figure(fig, formats={formats!r}, dpi={dpi!r})"]
     )
 
 

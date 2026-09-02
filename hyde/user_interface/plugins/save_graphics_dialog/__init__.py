@@ -4,10 +4,12 @@ from functools import partial
 from qtutils.qt import QtCore, QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import (
+    combinable_clipboard_representations,
     graphics_clipboard_representation,
     graphics_clipboard_representations,
 )
 from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.shared.clipboard_platform import preferred_clipboard_format
 from hyde.user_interface.shared.plugin import HydePlugin
 
 from .clipboard import clipboard_mime_data
@@ -93,17 +95,18 @@ class Plugin(HydePlugin):
                 )
         return contributions
 
-    def copy_active_figure(self, checked=False, representation="vector"):
-        """Copy the active figure as one of the clipboard representations.
+    def copy_active_figure(self, checked=False, representation=None):
+        """Copy the active figure to the clipboard.
 
-        The caller names a representation; which matplotlib format serves it is
-        Hyde's business, not the user's.
+        With no representation named, the copy carries every representation a
+        picture-or-drawing consumer might want and the receiving application
+        picks. Naming one forces it, which is the way to insist on a vector when
+        an application would otherwise settle for the raster.
         """
         del checked
-        clipboard_representation = graphics_clipboard_representation(representation)
-        if clipboard_representation is None:
+        clipboard_formats = self._clipboard_formats(representation)
+        if not clipboard_formats:
             return False
-        output_format = clipboard_representation.output_format
         if self.copy_in_flight():
             # One at a time. The rendered bytes arrive on a channel that does
             # not say which copy they answer, so a second copy in flight would
@@ -115,13 +118,13 @@ class Plugin(HydePlugin):
             return False
         source = (
             FigureIR(figure_name=figure_context.figure_name())
-            .with_copy_graphics(output_format=output_format)
+            .with_copy_graphics(clipboard_formats=clipboard_formats)
             .python_source()
         )
         python_execution_service = self.services.get("python_execution_service")
         if python_execution_service is None:
             return False
-        self._begin_copy(output_format)
+        self._begin_copy(self._copy_label(representation))
         kernel_request = python_execution_service.request(
             source, on_finished=self.on_copy_render_finished
         )
@@ -130,6 +133,31 @@ class Plugin(HydePlugin):
             return False
         self._copy_request.kernel_request = kernel_request
         return True
+
+    def _copy_label(self, representation):
+        """What to call this copy while it is in flight."""
+        named = graphics_clipboard_representation(representation)
+        return "" if named is None else named.display_label
+
+    def _clipboard_formats(self, representation):
+        """One format per representation, chosen by what the platform can use.
+
+        A representation offers several candidate formats because platforms
+        differ in which they republish natively. Only the chosen one is
+        rendered: asking the kernel for every candidate would render figures
+        nothing on this machine can paste.
+        """
+        if representation is None:
+            representations = combinable_clipboard_representations()
+        else:
+            named = graphics_clipboard_representation(representation)
+            representations = () if named is None else (named,)
+        formats = []
+        for item in representations:
+            output_format = preferred_clipboard_format(item.output_formats)
+            if output_format is not None:
+                formats.append(output_format)
+        return tuple(formats)
 
     def copy_in_flight(self):
         return self._copy_request is not None
@@ -178,16 +206,16 @@ class Plugin(HydePlugin):
         if service is not None:
             service.show_transient_message(text)
 
-    def _begin_copy(self, output_format):
+    def _begin_copy(self, label):
         self._end_copy()
         self._copy_request = FigureCopyRequest(
-            output_format,
+            label,
             busy_delay_ms=self.busy_cursor_delay_ms,
             busy_hold_ms=self.busy_cursor_hold_ms,
             on_payload_timeout=self.on_copy_payload_timeout,
         )
         self._status_message(
-            f"Copying figure as {self._copy_request.output_format.upper()}..."
+            f"Copying figure as {label}..." if label else "Copying figure..."
         )
 
     def _end_copy(self):
@@ -215,20 +243,25 @@ class Plugin(HydePlugin):
         if not self._payload_answers_current_copy(data):
             return
         try:
-            rendered = base64.b64decode(data.get("payload_base64", ""))
-            companion_png = base64.b64decode(data.get("companion_png_base64") or "")
+            representations = [
+                (
+                    str(item.get("output_format", "")),
+                    base64.b64decode(item.get("payload_base64", "")),
+                )
+                for item in data.get("representations", []) or []
+            ]
         except Exception:
             self._fail_copy()
             return
-        if not rendered:
+        representations = [
+            (output_format, rendered)
+            for output_format, rendered in representations
+            if rendered
+        ]
+        if not representations:
             self._fail_copy()
             return
-        mime_data = clipboard_mime_data(
-            rendered,
-            output_format=data.get("output_format", "pdf"),
-            is_text=bool(data.get("is_text")),
-            companion_png=companion_png or None,
-        )
+        mime_data = clipboard_mime_data(representations)
         clipboard = QtWidgets.QApplication.clipboard()
         if mime_data is None or clipboard is None:
             # Nothing pasteable to hand over. Settle the request rather than
@@ -236,9 +269,11 @@ class Plugin(HydePlugin):
             self._fail_copy()
             return
         clipboard.setMimeData(mime_data)
-        output_format = str(data.get("output_format", "") or "").upper()
+        placed = ", ".join(
+            output_format.upper() for output_format, _ in representations
+        )
         self._end_copy()
-        self._outcome_message(f"Copied figure to the clipboard as {output_format}.")
+        self._outcome_message(f"Copied figure to the clipboard as {placed}.")
 
     def _payload_answers_current_copy(self, data):
         """Reject bytes that belong to a copy this one already gave up on.

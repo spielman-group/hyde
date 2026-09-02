@@ -49,18 +49,13 @@ def _executing_request_id():
         return ""
 
 
-def signal_copy_to_clipboard(
-    payload_base64,
-    *,
-    output_format,
-    is_text=False,
-    companion_png_base64=None,
-):
-    """
-    Signal the parent GUI process to place rendered figure bytes on the clipboard.
+def signal_copy_to_clipboard(representations):
+    """Hand rendered figure representations to the parent GUI process.
 
     The clipboard belongs to the GUI process, so the kernel renders and hands
-    the result over rather than writing it itself.
+    the result over rather than writing it itself. Each representation names
+    the matplotlib format it was rendered in; which MIME type that becomes is
+    the GUI's business.
 
     This helper is intended to be called from a Hyde-managed kernel process,
     which is a direct ProcessTree child of the GUI process.
@@ -69,10 +64,13 @@ def signal_copy_to_clipboard(
         put_parent_message([
             "COPY_TO_CLIPBOARD_REQUEST",
             {
-                "payload_base64": str(payload_base64),
-                "output_format": str(output_format),
-                "is_text": bool(is_text),
-                "companion_png_base64": companion_png_base64,
+                "representations": [
+                    {
+                        "output_format": str(item["output_format"]),
+                        "payload_base64": str(item["payload_base64"]),
+                    }
+                    for item in representations
+                ],
                 "request_msg_id": _executing_request_id(),
             },
         ])

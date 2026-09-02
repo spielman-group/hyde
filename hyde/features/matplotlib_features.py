@@ -178,19 +178,39 @@ class ClipboardRepresentation:
 
     key: str
     display_label: str
-    output_format: str
+    output_formats: tuple
+    """Candidate formats in preference order; the platform picks one."""
+
+    is_text: bool = False
 
 
 GRAPHICS_CLIPBOARD_REPRESENTATIONS = (
-    ClipboardRepresentation("vector", "Vector", "pdf"),
-    ClipboardRepresentation("image", "Image", "png"),
-    ClipboardRepresentation("latex", "LaTeX", "pgf"),
+    # A vector representation carries both, because which one a platform can
+    # publish natively differs and the user picks "vector", not a format.
+    ClipboardRepresentation("vector", "Vector", ("pdf", "svg")),
+    ClipboardRepresentation("image", "Image", ("png",)),
+    ClipboardRepresentation("latex", "LaTeX", ("pgf",), is_text=True),
 )
 
 
 def graphics_clipboard_representations():
     """The representations a figure can be copied as, in menu order."""
     return GRAPHICS_CLIPBOARD_REPRESENTATIONS
+
+
+def combinable_clipboard_representations():
+    """The representations a plain Copy carries together.
+
+    Every representation a picture-or-drawing consumer might want, so the
+    receiving application takes the best it understands. Text is left out: it is
+    exclusive, because an image alongside LaTeX source means pasting into a word
+    processor silently yields a picture instead of the source.
+    """
+    return tuple(
+        representation
+        for representation in GRAPHICS_CLIPBOARD_REPRESENTATIONS
+        if not representation.is_text
+    )
 
 
 def graphics_clipboard_representation(key):

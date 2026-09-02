@@ -2,43 +2,58 @@
 
 Which MIME type a rendered figure carries is a property of the format, so the
 format-to-MIME mapping lives in the feature layer. This module is the Qt-facing
-half: it turns rendered bytes into a `QMimeData` the GUI can hand to the
-clipboard.
+half: it turns rendered representations into a `QMimeData` the GUI can hand to
+the clipboard.
 """
 
 from qtutils.qt import QtCore, QtGui
 
 from hyde.features.matplotlib_features import clipboard_mime_type_for_format
 
+_TEXT_MIME_TYPE = "text/plain"
 
-def clipboard_mime_data(rendered, *, output_format, is_text=False, companion_png=None):
-    """Return a `QMimeData` carrying `rendered` under its format's MIME type.
 
-    `companion_png`, when given, is attached as an additional `image/png`
-    representation so a paste still succeeds in applications that reject the
-    requested format.
+def clipboard_mime_data(representations):
+    """Return a `QMimeData` carrying each rendered representation.
 
-    Returns `None` when the format has no clipboard representation, so a caller
-    never places an unpasteable payload on the clipboard.
+    `representations` is a sequence of `(output_format, rendered_bytes)` in the
+    order the receiving application should prefer them. A clipboard holds
+    several representations of one content, so a copy can offer a drawing and a
+    picture together and let the application pick.
+
+    Returns `None` when nothing in `representations` has a clipboard
+    representation, so a caller never places an unpasteable payload.
     """
-    mime_type = clipboard_mime_type_for_format(output_format)
-    if mime_type is None:
+    typed = [
+        (clipboard_mime_type_for_format(output_format), rendered)
+        for output_format, rendered in representations
+        if rendered
+    ]
+    typed = [(mime_type, rendered) for mime_type, rendered in typed if mime_type]
+    if not typed:
         return None
 
     mime_data = QtCore.QMimeData()
-    if is_text:
-        # PGF is LaTeX source. It goes on as text because that is what someone
-        # copying it intends to paste, and it deliberately carries no image
-        # representation: an image companion would mean pasting into a word
+
+    text = next(
+        (rendered for mime_type, rendered in typed if mime_type == _TEXT_MIME_TYPE),
+        None,
+    )
+    if text is not None:
+        # LaTeX source is what someone copying it intends to paste, and text is
+        # exclusive: an image alongside it would mean pasting into a word
         # processor silently yields a picture instead of the source.
-        mime_data.setText(rendered.decode("utf-8", errors="replace"))
+        mime_data.setText(text.decode("utf-8", errors="replace"))
         return mime_data
 
-    mime_data.setData(mime_type, QtCore.QByteArray(rendered))
-    raster = rendered if mime_type == "image/png" else companion_png
-    if raster:
-        if mime_type != "image/png":
-            mime_data.setData("image/png", QtCore.QByteArray(raster))
+    for mime_type, rendered in typed:
+        mime_data.setData(mime_type, QtCore.QByteArray(rendered))
+
+    raster = next(
+        (rendered for mime_type, rendered in typed if mime_type == "image/png"),
+        None,
+    )
+    if raster is not None:
         # The MIME types above reach other Qt applications. Everything else on
         # this platform reads the native pasteboard, where Qt publishes an
         # unrecognised MIME type under a private flavour nothing can paste --

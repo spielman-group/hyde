@@ -991,7 +991,7 @@ def refresh_figure(figure, *, use_bound_values=False):
     return None
 
 
-def copy_figure(figure, *, format="pdf", dpi="figure", transparent=False):
+def copy_figure(figure, *, formats=("pdf",), dpi="figure", transparent=False):
     """Copy a live figure to the GUI clipboard.
 
     Rendering happens here, in the kernel, because the kernel owns the figure.
@@ -1004,8 +1004,11 @@ def copy_figure(figure, *, format="pdf", dpi="figure", transparent=False):
     figure : matplotlib.figure.Figure or int
         Live matplotlib figure or figure-manager number resolvable to a live
         figure.
-    format : str, optional
-        A matplotlib output format. Defaults to ``"pdf"``.
+    formats : sequence of str, optional
+        Matplotlib output formats to render. A clipboard holds several
+        representations of one content and the receiving application picks the
+        one it understands, so more than one may be given. Defaults to
+        ``("pdf",)``.
     dpi : int or str, optional
         Resolution for raster output. Defaults to ``"figure"``, matplotlib's own
         default, meaning the figure's own DPI is used.
@@ -1023,9 +1026,13 @@ def copy_figure(figure, *, format="pdf", dpi="figure", transparent=False):
     from .execution.ipc import signal_copy_to_clipboard
 
     resolved_figure = _resolve_matplotlib_figure(figure)
-    normalized_format = str(format or "pdf").strip().lower()
-    # PGF is LaTeX source, so it travels as text rather than as an image.
-    is_text = normalized_format == "pgf"
+    requested_formats = tuple(
+        str(output_format).strip().lower()
+        for output_format in formats
+        if str(output_format).strip()
+    )
+    if not requested_formats:
+        return False
 
     def render(output_format):
         buffer = io.BytesIO()
@@ -1037,22 +1044,14 @@ def copy_figure(figure, *, format="pdf", dpi="figure", transparent=False):
         )
         return base64.b64encode(buffer.getvalue()).decode("ascii")
 
-    rendered = render(normalized_format)
-
-    # A clipboard payload can carry several representations of one content.
-    # Attaching a PNG lets a paste succeed in applications that reject the
-    # requested format, while ones preferring vector still receive it. PGF is
-    # excluded: it copies as text, and an image companion would mean pasting
-    # into a word processor silently yields a picture instead of the source.
-    companion_png_base64 = None
-    if not is_text and normalized_format != "png":
-        companion_png_base64 = render("png")
-
     signal_copy_to_clipboard(
-        rendered,
-        output_format=normalized_format,
-        is_text=is_text,
-        companion_png_base64=companion_png_base64,
+        [
+            {
+                "output_format": output_format,
+                "payload_base64": render(output_format),
+            }
+            for output_format in requested_formats
+        ]
     )
     return True
 

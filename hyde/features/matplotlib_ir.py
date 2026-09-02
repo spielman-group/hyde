@@ -182,6 +182,9 @@ class FigureIR(HydeIR):
     creation_x_name: str | None = None
     output_path: str | None = None
     output_format: str = "pdf"
+    # Copy carries several representations of the same figure; save writes one
+    # file, so it uses output_format above.
+    clipboard_formats: tuple[str, ...] = ()
     dpi: int = 300
     transparent: bool = False
     size_inches: tuple[float, float] | None = None
@@ -280,6 +283,8 @@ class FigureIR(HydeIR):
         if self.command == "copy_graphics":
             if not self.figure_name:
                 raise ValueError("Figure copy_graphics requires figure_name.")
+            if not self.clipboard_formats:
+                raise ValueError("Figure copy_graphics requires clipboard_formats.")
             if self.output_path:
                 raise ValueError("Figure copy_graphics does not take an output_path.")
             if self.dpi != self.FIGURE_DPI and not (
@@ -390,11 +395,14 @@ class FigureIR(HydeIR):
             use_bound_values=False,
         )
 
-    def with_copy_graphics(self, *, figure_name=None, output_format="pdf"):
+    def with_copy_graphics(self, *, figure_name=None, clipboard_formats=("pdf",)):
         """Return an IR that copies the figure to the clipboard.
 
         Copy carries no output path and defers DPI to the kernel, so it is a
-        separate command rather than a save with a null target.
+        separate command rather than a save with a null target. It carries
+        several formats rather than one: a clipboard holds several
+        representations of the same content, and the receiving application
+        picks the one it understands.
         """
         resolved_figure_name = self.figure_name
         if figure_name is not None:
@@ -408,7 +416,10 @@ class FigureIR(HydeIR):
             figure_number=None,
             use_bound_values=False,
             output_path=None,
-            output_format=output_format,
+            output_format=None,
+            clipboard_formats=tuple(
+                str(item).strip().lower() for item in clipboard_formats if str(item).strip()
+            ),
             dpi=self.FIGURE_DPI,
             transparent=False,
             size_inches=None,
@@ -1085,7 +1096,7 @@ class FigureIR(HydeIR):
         if self.command == "copy_graphics":
             return figure_graphics_copy_source(
                 self.figure_name,
-                output_format=self.output_format,
+                clipboard_formats=self.clipboard_formats,
                 dpi=self.dpi,
             )
         if self.command == "save_graphics":
