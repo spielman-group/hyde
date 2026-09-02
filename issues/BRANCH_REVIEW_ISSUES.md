@@ -24,6 +24,7 @@ exercised.
 - [ ] Slice 10: Retire `current_ir` And Its Second Source Of Truth
 - [ ] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
+- [ ] Slice 13: Figure Backend Leftovers
 
 ## How to work these
 
@@ -589,6 +590,67 @@ by construction rather than by coincidence.
 ### Blocked by
 
 None - needs a decision, not other slices.
+
+## Slice 13: Figure Backend Leftovers
+
+### Type
+
+`AFK`
+
+### What to build
+
+Four things Slice 2 surfaced in the figure backend and deliberately left alone.
+
+1. **`_hyde_building` never turns off.** `finalize_figure_build_session` does not
+   reset it, so a macro-built figure carries it for life. The name reads as
+   "currently building"; the value means "Hyde-tracked". It is what makes a
+   prompt-level `ax.plot(z)` append a trace to a first-class figure's IR, and
+   Slice 2 made `_is_windowed_figure` depend on it — so it is now load-bearing
+   under a misleading name. Rename it to what it means, or split the two ideas.
+2. **`_hyde_source_artifact` and `_hyde_ast_artifact` have no readers.** Written
+   at `hyde/matplotlib_backend.py:403-404`; nothing in the product reads either,
+   only `tests/test_window_macros.py:232-233` asserts they are non-`None`. A
+   parsed AST is retained per figure for the life of the process with no
+   consumer. Establish whether anything is meant to read them; if not, remove
+   them and the test that pins them.
+3. **A macro that raises leaves its appended trace behind.** A macro that draws
+   onto another figure and then fails in `finalize` leaves that trace in the
+   other figure's IR. Pre-existing, and drawing onto a neighbour is intended
+   (`test_a_macro_may_draw_on_another_figure_while_building_its_own`), but a
+   half-applied side effect from a failed macro is still a defect.
+4. **`hyde/matplotlib_backend.py:374`** — `figure = created_figure if resolved
+   is None else resolved` is dead branching, because the guard three lines above
+   already proves `resolved is created_figure` whenever it is not `None`.
+
+### Acceptance criteria
+
+- [ ] No attribute's name contradicts what it holds.
+- [ ] No per-figure state is retained for the process lifetime with no reader.
+- [ ] A macro that fails does not leave a partial trace in another figure's IR,
+      or the reason it must is written down.
+- [ ] No dead branch survives in `finalize_figure_build_session`.
+
+### Blocked by
+
+- Slice 2
+
+## Behaviour change accepted in Slice 2
+
+Recorded because it changes what existing user code does.
+
+A hand-written `@hyde.figure` macro that rebuilds a figure **without clearing
+it** now raises on the second run, with a message naming the missing
+`fig.clear()`. Before, it returned a figure carrying two live axes against a
+one-subplot IR — which could not be saved as a macro
+(`save_error: 'unsupported live figure features were omitted during Hyde
+import'`). So nothing that worked stopped working; an incorrect result became an
+actionable error.
+
+Verified: run 1 succeeds, run 2 raises. `fig.clf()`, `plt.clf()` and
+`plt.figure(name, clear=True)` all route through `FigureHyde.clear()` and
+register correctly, so only the no-clear form is affected.
+`specs/new_graph_dialog/SPEC.md:123` already specifies rejection when a macro
+creates no figure, so this moves the implementation toward the spec.
 
 ## Environment notes
 
