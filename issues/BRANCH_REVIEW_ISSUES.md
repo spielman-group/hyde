@@ -14,7 +14,7 @@ exercised.
 
 - [x] Slice 1: Stop A Figure Macro Re-Run From Raising
 - [x] Slice 2: Stop A Macro From Adopting And Overwriting Another Figure
-- [ ] Slice 3: Trivial Fixes, Bundled
+- [x] Slice 3: Trivial Fixes, Bundled
 - [ ] Slice 4: Survive A Raising Request Consumer
 - [ ] Slice 5: Report Only What Reached The Clipboard
 - [ ] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
@@ -472,11 +472,27 @@ runtime, and it guesses wrong: verified by execution, any `ProcessTree` whose
 `subprocess` forwards `**kwargs` is refused, so Hyde declines to start and tells
 the user to check out a branch they may already be on.
 
-Express the truth in the metadata instead. Hyde depends on unreleased upstream
-code, so the honest forms are a VCS requirement pinning the git ref, or a
-version floor that is only correct once the branch merges and releases, plus a
-stated prerequisite. Decide which fits this project's install story and say why
-in the commit message.
+Express the truth in the metadata instead. **The branch has since been merged
+into zprocess's `Production` and pushed**, so a version floor can now be honest
+— but not the obvious one. Measured with `packaging` against the two versions
+that matter:
+
+| floor | working `2.28.0.dev2` | broken `2.27.1` |
+| --- | --- | --- |
+| `>=2.18.0` (what Hyde declares) | accepts | accepts — discriminates nothing |
+| `>=2.28.0` | **rejects** | rejects — would refuse a working install |
+| `>=2.28.0.dev0` | accepts | rejects — correct |
+
+The heartbeat commit sits two commits past the `v2.27.1` tag with no release tag
+containing it (`git describe` → `v2.27.1-2-g5da28e4`), and zprocess derives its
+version from git, so a working checkout reports the pre-release `2.28.0.dev2`.
+Under PEP 440 that is *below* `2.28.0`, which is why the obvious floor rejects
+it.
+
+So declare `zprocess>=2.28.0.dev0` now, and note in the commit message that it
+becomes a plain `>=2.28.0` once zprocess tags a 2.28.0 release. Do not pin a
+git ref: the code is on a pushed branch of the upstream project and a floor
+expresses the requirement without freezing Hyde to one commit.
 
 Deleting the probe also removes `_PERMISSIVE_HEARTBEAT_BRANCH`, a dependency's
 branch name embedded in production code.
