@@ -9,7 +9,10 @@ from hyde.features.matplotlib_features import (
     graphics_clipboard_representations,
 )
 from hyde.features.matplotlib_ir import FigureIR
-from hyde.user_interface.shared.clipboard_platform import preferred_clipboard_format
+from hyde.user_interface.shared.clipboard_platform import (
+    preferred_clipboard_format,
+    register_clipboard_converters,
+)
 from hyde.user_interface.shared.plugin import HydePlugin
 
 from .clipboard import clipboard_mime_data
@@ -222,6 +225,12 @@ class Plugin(HydePlugin):
         if self._copy_request is not None:
             self._copy_request.settle()
             self._copy_request = None
+
+    def setup(self, data=None):
+        del data
+        # Copy is the only feature that puts a vector on the clipboard, so it
+        # is the one that has to teach the platform about vector types.
+        register_clipboard_converters()
 
     def get_event_handlers(self):
         # Without this the rendered bytes are dispatched to every plugin that

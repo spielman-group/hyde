@@ -681,9 +681,13 @@ class TestCopyFeedback(unittest.TestCase):
         import base64
 
         plugin, _ = self._plugin_with_status()
+        # Take the slow path: the cursor a lingering copy puts up, held long
+        # enough that only completing the copy can take it down again.
+        plugin.busy_cursor_delay_ms = 0
+        plugin.busy_cursor_hold_ms = 60000
         plugin.copy_active_figure(representation="vector")
-        # Take the slow path: the cursor a lingering copy would have put up.
-        plugin._copy_request.show_busy_cursor()
+        for _ in range(3):
+            self.qapp.processEvents()
         self.assertIsNotNone(QtWidgets.QApplication.overrideCursor())
         plugin.on_kernel_message(
             {
@@ -875,6 +879,43 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         mime = QtWidgets.QApplication.clipboard().mimeData()
         self.assertTrue(mime.hasFormat("application/pdf"))
 
+    def test_a_vector_copy_is_published_under_the_platform_identifier(self):
+        """Qt maps a MIME type it does not recognise onto a private pasteboard
+        flavour, so vector bytes were on the clipboard and invisible outside
+        Qt."""
+        from hyde.user_interface.shared.clipboard_platform import (
+            register_clipboard_converters,
+        )
+
+        converters = register_clipboard_converters()
+        if not converters:
+            self.skipTest("this platform's clipboard needs no MIME translation")
+        converter = converters[0]
+
+        self.assertEqual("com.adobe.pdf", converter.utiForMime("application/pdf"))
+        self.assertEqual("application/pdf", converter.mimeForUti("com.adobe.pdf"))
+        self.assertTrue(converter.canConvert("application/pdf", "com.adobe.pdf"))
+        self.assertFalse(converter.canConvert("application/pdf", "public.png"))
+        self.assertEqual("", converter.utiForMime("image/png"))
+
+    def test_registering_clipboard_converters_keeps_them_alive(self):
+        """Qt unregisters a converter when it is destroyed, so something has to
+        own it; dropping it presents as vector paste working sometimes."""
+        import gc
+
+        from hyde.user_interface.shared.clipboard_platform import (
+            register_clipboard_converters,
+            registered_clipboard_converters,
+        )
+
+        first = register_clipboard_converters()
+        if not first:
+            self.skipTest("this platform's clipboard needs no MIME translation")
+        gc.collect()
+
+        self.assertEqual(first, register_clipboard_converters())
+        self.assertEqual(first, registered_clipboard_converters())
+
     def test_a_plain_copy_carries_a_vector_and_a_raster_together(self):
         """The receiving application picks; the user does not have to know."""
         plugin, kernel, _ = self._copy_in_flight(representation=None)
@@ -1002,12 +1043,18 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         self.assertTrue(any("Copied" in str(m) for m in messages), messages)
 
     def test_the_wait_cursor_is_released_while_the_copy_is_still_waiting(self):
-        """A minute-long wait cursor reads as a hung application."""
-        plugin, _, _ = self._copy_in_flight()
-        plugin._copy_request.show_busy_cursor()
-        self.assertIsNotNone(QtWidgets.QApplication.overrideCursor())
+        """A minute-long wait cursor reads as a hung application.
 
-        plugin._copy_request.release_busy_cursor()
+        The cursor says something started, not how long it will take, so it
+        lowers itself while the copy carries on waiting for the kernel.
+        """
+        messages = []
+        plugin = make_copy_plugin(messages)
+        plugin.busy_cursor_delay_ms = 0
+        plugin.busy_cursor_hold_ms = 0
+        self.assertTrue(plugin.copy_active_figure(representation="vector"))
+        for _ in range(5):
+            self.qapp.processEvents()
 
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
         self.assertTrue(plugin.copy_in_flight())
