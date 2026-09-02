@@ -34,6 +34,7 @@ from hyde.features.matplotlib_figure_schema import (
 )
 from hyde.features.matplotlib_figure_state import (
     figure_ir_apply_title,
+    figure_ir_clear_layout,
     figure_ir_default_state,
 )
 from hyde.user_interface.shared.project import resolve_requested_name
@@ -1426,6 +1427,9 @@ def regenerate_figure_from_ir(figure, use_bound_values=True):
     try:
         figure._hyde_building = False
         figure.clear()
+        # The clear emptied the IR along with the figure. This function draws
+        # that same IR back, and stamps the subplot ids itself below.
+        figure._hyde_ir = normalized
         figsize = normalized["settings"].get("figsize")
         if figsize is None:
             figure.set_size_inches(preserved_size, forward=False)
@@ -1739,6 +1743,20 @@ class FigureHyde(Figure):
                 **payload,
             }
         )
+
+    def clear(self, *args, **kwargs):
+        result = super().clear(*args, **kwargs)
+        # The IR and the command log describe the artists the figure holds, so
+        # a clear empties them with the figure. Without this, add_subplot sees
+        # a non-empty subplot list and leaves the new axes unstamped, and
+        # nothing can resolve the subplot ids the IR still names.
+        #
+        # Figure.__init__ ends with a clear(), which runs before __init__
+        # above has given this figure any Hyde bookkeeping to empty.
+        if getattr(self, "_hyde_ir", None) is not None:
+            self._hyde_ir = figure_ir_clear_layout(self._hyde_ir)
+            self._hyde_command_log = []
+        return result
 
     def set_label(self, s):
         if not _is_windowed_figure(self):

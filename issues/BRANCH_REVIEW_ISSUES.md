@@ -12,7 +12,7 @@ exercised.
 
 ## Progress Checklist
 
-- [ ] Slice 1: Stop A Figure Macro Re-Run From Raising
+- [x] Slice 1: Stop A Figure Macro Re-Run From Raising
 - [ ] Slice 2: Stop A Macro From Adopting And Overwriting Another Figure
 - [ ] Slice 3: Trivial Fixes, Bundled
 - [ ] Slice 4: Survive A Raising Request Consumer

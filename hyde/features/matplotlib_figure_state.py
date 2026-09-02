@@ -656,6 +656,11 @@ class FigureIRAuthority:
         if figsize is not None and figsize != default_settings.get("figsize"):
             figure_args.append(f"figsize={figsize!r}")
         lines = [f"fig = plt.figure({', '.join(figure_args)})" if figure_args else "fig = plt.figure()"]
+        # A named figure that still exists comes back from plt.figure() with
+        # its old contents, and this source replaces a figure rather than
+        # drawing over it. FigureHyde.clear() empties the figure's Hyde
+        # bookkeeping with it, so what follows is stamped as a first draw.
+        lines.append("fig.clear()")
         for figure_opaque in normalized["opaque_nodes"]:
             if figure_opaque["source"]:
                 lines.extend(figure_opaque["source"].splitlines())
@@ -726,6 +731,18 @@ def figure_ir_default_state():
 def figure_ir_apply_title(figure_ir, title):
     normalized = FigureIRAuthority.normalize_state(figure_ir)
     normalized["settings"]["title"] = None if title in (None, "") else str(title)
+    return FigureIRAuthority.validate_state(normalized)
+
+
+def figure_ir_clear_layout(figure_ir):
+    """Drop everything a cleared figure no longer draws.
+
+    A figure keeps its name and its size across a clear, so the settings
+    survive and the drawn content does not.
+    """
+    normalized = FigureIRAuthority.normalize_state(figure_ir)
+    normalized["layout"]["subplots"] = []
+    normalized["opaque_nodes"] = []
     return FigureIRAuthority.validate_state(normalized)
 
 

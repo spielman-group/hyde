@@ -1,4 +1,7 @@
 import unittest
+from unittest.mock import patch
+
+import numpy as np
 
 import hyde
 
@@ -7,7 +10,7 @@ try:
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("matplotlib is required") from exc
 
-from hyde.matplotlib_backend import apply_figure_action
+from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
 from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
@@ -75,34 +78,95 @@ class TestFigureCommActions(unittest.TestCase):
             3.25,
         )
 
-    def test_a_recreation_macro_can_be_run_again(self):
+    def _saved_recreation_macro(self, plt):
+        """Hyde's own saved macro for a figure built at the prompt.
+
+        Taking the macro from Hyde rather than writing one that resembles it
+        is the whole point: what breaks a re-run is a line Hyde emits.
+        """
+
+        @hyde.figure(register=False)
+        def Graph0(y):
+            fig = plt.figure("Graph0")
+            ax = fig.add_subplot(111)
+            ax.plot(y, label="y")
+            fig.show()
+            return fig
+
+        figure = Graph0([1.0, 4.0, 9.0])
+        payload = figure_snapshot_payload(figure, figure.canvas.manager.num)
+        source = FigureIR(
+            figure_state=payload["figure_ir"],
+            figure_defaults=payload["figure_defaults"],
+        ).recreation_function_source("Graph0", register=False)
+        plt.close("all")
+        namespace = {"hyde": hyde, "plt": plt, "np": np}
+        exec(compile(source, "<session.py>", "exec"), namespace)
+        return namespace["Graph0"]
+
+    def test_a_saved_recreation_macro_can_be_run_again(self):
         """Re-running is what a recreation macro is for.
 
         `plt.figure(label)` hands back the figure that already exists rather
-        than constructing one, so nothing registers itself with the build
-        session and the macro used to fail every time after the first.
+        than constructing one, so a macro that runs a second time replaces
+        that figure's contents instead of drawing over them. Its `fig.show()`
+        pushes the result straight through the open comm, so a figure Hyde
+        can no longer describe raises inside the macro.
         """
         plt = self._configure_pyplot()
+        pushed = []
 
-        @hyde.figure(register=False)
-        def Graph0(x, y):
-            fig = plt.figure("Graph0")
-            fig.clear()
-            ax = fig.add_subplot(111)
-            ax.plot(x, y, label="y")
-            return fig
+        class RecordingComm:
+            def __init__(self, *args, **kwargs):
+                del args, kwargs
 
-        first = Graph0([0, 1, 2], [1, 4, 9])
-        again = Graph0([0, 1, 2], [2, 5, 10])
+            def on_msg(self, callback):
+                del callback
+
+            def on_close(self, callback):
+                del callback
+
+            def send(self, payload):
+                pushed.append(payload)
+
+            def close(self):
+                return None
+
+        with patch("hyde.matplotlib_backend.Comm", RecordingComm):
+            macro = self._saved_recreation_macro(plt)
+            first = macro([1.0, 4.0, 9.0])
+            again = macro([2.0, 5.0, 10.0])
 
         self.assertIs(again, first)
         self.assertEqual("Graph0", again.get_label())
-        self.assertTrue(again._hyde_is_first_class)
         self.assertEqual(1, len(again.axes), "re-running stacked another axes")
         self.assertEqual(
-            [2, 5, 10],
+            [2.0, 5.0, 10.0],
             list(again.axes[0].lines[0].get_ydata()),
         )
+        drawn = [payload for payload in pushed if payload["event"] == "draw"]
+        self.assertTrue(drawn, "the re-run pushed no drawing to Hyde")
+        self.assertIsNone(drawn[-1]["snapshot"]["save_error"])
+
+    def test_a_re_run_figure_can_still_be_saved_as_a_macro(self):
+        """A figure Hyde cannot snapshot is a figure the user cannot save.
+
+        Nothing pushes a snapshot while the figure window is closed, so a
+        re-run that leaves the figure undescribable surfaces only when the
+        user next saves the project.
+        """
+        plt = self._configure_pyplot()
+        macro = self._saved_recreation_macro(plt)
+
+        macro([1.0, 4.0, 9.0])
+        again = macro([2.0, 5.0, 10.0])
+        payload = figure_snapshot_payload(again, again.canvas.manager.num)
+
+        self.assertTrue(payload["is_first_class"])
+        self.assertIsNone(payload["save_error"])
+        subplots = payload["figure_ir"]["layout"]["subplots"]
+        self.assertEqual(1, len(subplots))
+        self.assertEqual(1, len(subplots[0]["traces"]))
 
     def test_a_macro_may_draw_on_another_figure_while_building_its_own(self):
         """Drawing on a figure is not the same as building it."""
