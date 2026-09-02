@@ -168,6 +168,29 @@ class TestFigureCommActions(unittest.TestCase):
         self.assertEqual(1, len(subplots))
         self.assertEqual(1, len(subplots[0]["traces"]))
 
+    def test_a_re_run_figure_still_takes_its_data_as_a_parameter(self):
+        """A re-run must not quietly un-parameterise the figure's macro.
+
+        The figure draws correctly either way, so nothing on screen says
+        anything is wrong. What is lost is that the macro Hyde saves for the
+        figure takes its data as an argument, instead of carrying a frozen
+        copy of whatever the last run happened to plot.
+        """
+        plt = self._configure_pyplot()
+        macro = self._saved_recreation_macro(plt)
+
+        macro([1.0, 4.0, 9.0])
+        again = macro([2.0, 5.0, 10.0])
+        payload = figure_snapshot_payload(again, again.canvas.manager.num)
+        source = FigureIR(
+            figure_state=payload["figure_ir"],
+            figure_defaults=payload["figure_defaults"],
+        ).recreation_function_source("Graph0", register=False)
+
+        self.assertEqual(["y"], payload["tracked_names"])
+        self.assertIn("def Graph0(y):", source)
+        self.assertNotIn("np.array(", source)
+
     def test_a_macro_may_draw_on_another_figure_while_building_its_own(self):
         """Drawing on a figure is not the same as building it."""
         plt = self._configure_pyplot()
@@ -193,6 +216,41 @@ class TestFigureCommActions(unittest.TestCase):
 
         self.assertEqual("Graph1", built.get_label())
         self.assertIsNot(built, neighbour)
+
+    def test_a_trace_drawn_on_another_figure_keeps_its_own_data(self):
+        """A macro's parameter names describe the figure that macro built.
+
+        A trace one macro leaves on another figure is rebuilt from the host
+        figure's own arguments, and the drawing macro's parameters are not
+        among them. Naming the trace after them makes the host redraw its own
+        data twice and lose the trace it was handed.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            fig.add_subplot(111).plot(x, y)
+            return fig
+
+        neighbour = Graph0([0.0, 1.0, 2.0], [1.0, 4.0, 9.0])
+
+        @hyde.figure(register=False)
+        def Graph1(x, y):
+            plt.figure("Graph0").axes[0].plot(x, y)
+            fig = plt.figure("Graph1")
+            fig.clear()
+            fig.add_subplot(111).plot(x, y)
+            return fig
+
+        Graph1([0.0, 1.0, 2.0], [3.0, 6.0, 9.0])
+
+        hyde.refresh_figure(neighbour, use_bound_values=True)
+        self.assertEqual(
+            [[1.0, 4.0, 9.0], [3.0, 6.0, 9.0]],
+            [list(line.get_ydata()) for line in neighbour.axes[0].lines],
+        )
 
     def test_a_figure_built_without_hydes_backend_says_so(self):
         """"must create exactly one figure" sends the reader to the wrong place.

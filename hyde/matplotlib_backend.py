@@ -64,9 +64,14 @@ def _default_figure_title(figure, number):
 
 
 def _is_windowed_figure(figure):
+    # A figure gets a Hyde window either because it is already first-class or
+    # because a macro constructed it, which is what _hyde_building records: it
+    # is set once, when the figure is built inside a build session, and only
+    # regenerate_figure_from_ir turns it off, around a figure that is
+    # first-class anyway.
     return bool(
         getattr(figure, "_hyde_is_first_class", False)
-        or getattr(figure, "_hyde_build_session", None) is not None
+        or getattr(figure, "_hyde_building", False)
     )
 
 
@@ -294,8 +299,13 @@ class FigureBuildSession:
             self.named_values[id(value)] = name
             self.bound_values[name] = value
 
+    def built(self, figure):
+        # Which object this macro built is an identity question, so ask it by
+        # identity rather than through whatever `==` on a figure means.
+        return any(candidate is figure for candidate in self.created_figures)
+
     def register_figure(self, figure):
-        if figure not in self.created_figures:
+        if not self.built(figure):
             self.created_figures.append(figure)
 
 
@@ -1648,9 +1658,14 @@ class AxesHyde(Axes):
         lines = super().plot(*args, **kwargs)
         figure = self.figure
         if getattr(figure, "_hyde_building", False):
+            # A name for the values being plotted comes from the macro running
+            # now, and only if that macro is building this figure. named_values
+            # is keyed by id(), which says nothing about a value from any other
+            # call: a stale table matches nothing on a re-run with fresh
+            # arrays, and could match the wrong name once an id is reused.
             named_values = {}
-            session = getattr(figure, "_hyde_build_session", None)
-            if session is not None:
+            session = _current_build_session()
+            if session is not None and session.built(figure):
                 named_values = session.named_values
             x_source = None
             y_source = None
@@ -1722,11 +1737,14 @@ class FigureHyde(Figure):
         self._hyde_ast_artifact = None
         self._hyde_bound_values = {}
         self._hyde_metadata = {}
-        self._hyde_build_session = _current_build_session()
-        self._hyde_building = self._hyde_build_session is not None
-        if self._hyde_build_session is not None:
-            self._hyde_metadata = dict(self._hyde_build_session.metadata)
-            self._hyde_build_session.register_figure(self)
+        # The session is not kept. It belongs to one call, and a figure that
+        # held on to it would be offering a second answer to which session is
+        # authoritative -- a stale one -- every time it was consulted again.
+        session = _current_build_session()
+        self._hyde_building = session is not None
+        if session is not None:
+            self._hyde_metadata = dict(session.metadata)
+            session.register_figure(self)
 
     def _record_command(self, op, source, **payload):
         self._hyde_command_log.append(
