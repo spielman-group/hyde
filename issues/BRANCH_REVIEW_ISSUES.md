@@ -27,7 +27,10 @@ exercised.
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
 - [x] Slice 13: Figure Backend Leftovers
 - [x] Slice 14: Trivia, Second Bundle
-- [ ] Slice 15: Let The Feature-Module Guard See Re-Exports
+- [x] Slice 15: Let The Feature-Module Guard See Re-Exports
+      — the re-export was already caught, unactionably, by the existing closure
+      guard; the forked copy was not caught by any import rule, so it took a
+      second name-collision guard
 - [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
 - [ ] Slice 17: Settle The Orphaned `tracked_names` Payload Field
 - [ ] Slice 18: Make A Plugin That Fails To Load Visible
@@ -977,14 +980,52 @@ assert, since it catches the forked-copy case too.
 
 ### Acceptance criteria
 
-- [ ] A feature module that re-exports a plugin's symbol fails the guard.
+- [x] A feature module that re-exports a plugin's symbol fails the guard.
       Demonstrate by adding such a re-export, showing the failure, and removing
       it.
-- [ ] The guard states which module and which symbol, so a failure is
+- [x] The guard states which module and which symbol, so a failure is
       actionable without reading the test.
-- [ ] No new structural assertion beyond the architecture contract itself; the
+- [x] No new structural assertion beyond the architecture contract itself; the
       guard tests the rule, not any particular symbol's current home.
-- [ ] The existing feature-module tests still pass unchanged.
+- [x] The existing feature-module tests still pass unchanged — the inline
+      definition collector in
+      `test_no_feature_module_redefines_another_feature_module_name` was
+      extracted to a shared helper so the new guard does not carry a second
+      copy of it. Its assertion is untouched, and it was re-verified to still
+      fail on an injected duplicate.
+
+### Settled: which rule, and what each shape costs
+
+The direction rule was chosen — a feature module must never import from
+`hyde/user_interface/plugins/` — asserted as a direct-import scan that names
+the file, the symbol and the plugin module.
+
+Two corrections to the premise above, both established by execution:
+
+- The direction is **already** asserted, at closure granularity, by
+  `test_kernel_side_modules_never_reach_gui_plugins_or_qt`. Injecting the
+  re-export makes it fail. It is inadequate rather than absent: it reported 252
+  violations in a 27k-character diff truncated by `maxDiff`, whose first entry
+  was `hyde -> GUI plugin hyde.user_interface.plugins` — naming neither the
+  feature module responsible nor the symbol — while two neighbouring tests
+  buried it under circular-import errors.
+- The direction rule does **not** catch the forked copy. A copy re-typed as a
+  literal imports nothing, so both import-direction guards stay green on it.
+  Verified: with a forked `GRAPHICS_CLIPBOARD_MIME_TYPES` literal in
+  `hyde/features/matplotlib_features.py`, the new import guard and the existing
+  closure guard both passed. That shape needs the separate name-collision rule,
+  `test_no_public_name_lives_in_both_a_feature_module_and_a_gui_plugin`.
+
+The wider rule "a feature module never imports from `hyde/user_interface/`"
+was rejected: `hyde/features/hyde_ir.py`, `lmfit_ir.py` and `matplotlib_ir.py`
+all import `HydeIR` / `HydeIRDiff` from `hyde.user_interface.shared.core`, which
+IR-CONTROL sanctions as the base IR contract. It would need three carve-outs on
+day one. The `plugins/`-scoped rule needs none.
+
+Not caught by either guard: a dynamic
+`importlib.import_module("hyde.user_interface.plugins...")`, which is a string
+rather than an import node; and a forked copy renamed on the way in, which a
+name-based rule cannot see. No kernel-side module uses a dynamic import today.
 
 ### Blocked by
 

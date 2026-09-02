@@ -14,6 +14,7 @@ from hyde.features.base import (
 
 HYDE_DIR = Path(__file__).resolve().parents[1] / "hyde"
 FEATURES_DIR = HYDE_DIR / "features"
+PLUGINS_DIR = HYDE_DIR / "user_interface" / "plugins"
 PLUGIN_PACKAGE = "hyde.user_interface.plugins"
 QT_ROOT_PACKAGES = frozenset({"qtutils", "PyQt5", "PyQt6", "PySide2", "PySide6"})
 
@@ -23,16 +24,82 @@ QT_ROOT_PACKAGES = frozenset({"qtutils", "PyQt5", "PyQt6", "PySide2", "PySide6"}
 GUI_ENTRY_POINT = "hyde.__main__"
 
 
+def dotted_module_name(path):
+    parts = list(path.relative_to(HYDE_DIR.parent).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
 def hyde_module_files():
     modules = {}
     for path in HYDE_DIR.rglob("*.py"):
         if "__pycache__" in path.parts:
             continue
-        parts = list(path.relative_to(HYDE_DIR.parent).with_suffix("").parts)
-        if parts[-1] == "__init__":
-            parts = parts[:-1]
-        modules[".".join(parts)] = path
+        modules[dotted_module_name(path)] = path
     return modules
+
+
+def python_files(directory):
+    return sorted(
+        path
+        for path in directory.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+
+
+def is_gui_plugin_module(target):
+    return target == PLUGIN_PACKAGE or target.startswith(f"{PLUGIN_PACKAGE}.")
+
+
+def top_level_definitions(path):
+    """Names `path` binds at module scope by defining them.
+
+    Covers `async def` and annotated or unpacked assignment as well as the
+    plain forms, because a guard that walks only some node types is exactly the
+    hole it thinks it is closing: `NAME: dict = {...}` defines `NAME` just as
+    `NAME = {...}` does.
+    """
+    names = set()
+    for node in ast.parse(path.read_text(), filename=str(path)).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            pending = list(node.targets)
+            while pending:
+                target = pending.pop()
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+                elif isinstance(target, (ast.Tuple, ast.List)):
+                    pending.extend(target.elts)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
+
+
+def imported_targets(path):
+    """Every `(module, symbol)` pair an import statement in `path` names.
+
+    Walks the whole tree rather than `tree.body`, so an import deferred into a
+    function body or an `if TYPE_CHECKING:` block counts too. `symbol` is None
+    for `import a.b.c`, which names no symbol. Relative imports are resolved,
+    since `from ..user_interface.plugins.x import y` reaches the same module as
+    the absolute spelling.
+    """
+    parts = dotted_module_name(path).split(".")
+    package = parts if path.name == "__init__.py" else parts[:-1]
+    targets = []
+    for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+        if isinstance(node, ast.Import):
+            targets.extend((alias.name, None) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package[: len(package) - (node.level - 1)]
+                module = ".".join(base + ([node.module] if node.module else []))
+            else:
+                module = node.module or ""
+            targets.extend((module, alias.name) for alias in node.names)
+    return targets
 
 
 def module_imports(module_name, modules):
@@ -114,20 +181,8 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
         # through different copies of it.
         definitions = {}
         for path in sorted(FEATURES_DIR.glob("*.py")):
-            tree = ast.parse(path.read_text())
-            for node in tree.body:
-                if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-                    names = [node.name]
-                elif isinstance(node, ast.Assign):
-                    names = [
-                        target.id
-                        for target in node.targets
-                        if isinstance(target, ast.Name)
-                    ]
-                else:
-                    continue
-                for name in names:
-                    definitions.setdefault(name, []).append(path.name)
+            for name in top_level_definitions(path):
+                definitions.setdefault(name, []).append(path.name)
 
         duplicated = {
             name: sorted(files)
@@ -135,6 +190,58 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
             if len(set(files)) > 1
         }
         self.assertEqual({}, duplicated)
+
+    def test_no_public_name_lives_in_both_a_feature_module_and_a_gui_plugin(self):
+        """One public name, one home, across the feature/plugin boundary.
+
+        Deliberately an architecture-contract assertion. The house rule is that
+        tests assert what the code does and not how it is - *except* to the
+        extent the codebase must follow its own modular structure, and this is
+        that exception. Do not delete it as a structural assertion; asserting
+        the structure is the whole job.
+
+        This is the forked-copy shape, which no import rule can see. A shim
+        re-export at least leaves an import statement to find. Re-typing a
+        plugin's policy as a literal back in `hyde/features/` imports nothing,
+        so `test_no_feature_module_imports_gui_plugin_code` is blind to it and
+        only the name collision gives it away. Whichever side owns a contract,
+        the other side imports it rather than keeping a second copy.
+
+        Public names only. A private top-level name cannot be a second
+        authority over a shared contract, because nothing outside its own
+        module can reference it, and two unrelated private helpers that happen
+        to share a name are not an architecture violation. The honest cost is
+        that a copy renamed on the way in escapes this guard - a name-based
+        rule can only see names.
+        """
+        homes = {}
+        for directory in (FEATURES_DIR, PLUGINS_DIR):
+            for path in python_files(directory):
+                for name in top_level_definitions(path):
+                    if name.startswith("_"):
+                        continue
+                    homes.setdefault(name, {}).setdefault(directory, []).append(
+                        str(path.relative_to(HYDE_DIR.parent))
+                    )
+
+        shared = sorted(name for name, sides in homes.items() if len(sides) > 1)
+        self.assertEqual(
+            [],
+            shared,
+            "these public names are defined on both sides of the "
+            "feature/plugin boundary, so the same contract has two homes:\n  "
+            + "\n  ".join(
+                f"{name}: "
+                + " and ".join(
+                    sorted(
+                        file
+                        for files in homes[name].values()
+                        for file in files
+                    )
+                )
+                for name in shared
+            ),
+        )
 
     def test_hyde_features_is_an_importable_package(self):
         # Without __init__.py, setuptools drops hyde.features from every
@@ -165,6 +272,56 @@ class TestHydeFeatureModuleLayout(unittest.TestCase):
                     violations.append(f"{name} -> {reached} -> Qt ({package})")
 
         self.assertEqual([], sorted(set(violations)))
+
+    def test_no_feature_module_imports_gui_plugin_code(self):
+        """Dependencies run plugin -> feature, never the reverse.
+
+        Deliberately an architecture-contract assertion, for the reason given
+        in `test_no_public_name_lives_in_both_a_feature_module_and_a_gui_plugin`.
+        Do not delete it as a structural assertion.
+
+        IR-CONTROL puts feature lowerers under `hyde/features/` and widget
+        workflow IR plugin-local under `hyde/user_interface/plugins/`, with the
+        plugin composing the feature family. A feature module importing a
+        plugin inverts that. It also re-opens an import path a move was
+        supposed to retire, which is a forwarding shim under another name, and
+        it hands the kernel side a GUI import path.
+
+        `hyde/user_interface/shared/core` is out of scope and must stay out:
+        the `HydeIR` / `HydeIRDiff` base contract lives there and the package
+        IR modules subclass it, so the rule is scoped to `plugins/` rather than
+        to `hyde/user_interface/` as a whole.
+
+        `test_kernel_side_modules_never_reach_gui_plugins_or_qt` asserts this
+        same direction over whole import closures and does catch a re-export,
+        but it reports a closure edge from whichever root reaches it and never
+        names the symbol. This one names the file, the symbol and the plugin
+        module, so a failure says which line to delete.
+
+        Blind spot: a dynamic `importlib.import_module("hyde.user_interface...")`
+        is a string, not an import node, and no AST guard here sees it.
+        """
+        violations = []
+        for path in sorted(FEATURES_DIR.glob("*.py")):
+            for module, symbol in imported_targets(path):
+                if symbol is None:
+                    if is_gui_plugin_module(module):
+                        violations.append(
+                            f"{path.name} imports the GUI plugin module {module}"
+                        )
+                elif is_gui_plugin_module(module) or is_gui_plugin_module(
+                    f"{module}.{symbol}"
+                ):
+                    violations.append(
+                        f"{path.name} imports {symbol!r} from GUI plugin {module}"
+                    )
+
+        self.assertEqual(
+            [],
+            violations,
+            "feature modules must not import GUI plugin code:\n  "
+            + "\n  ".join(violations),
+        )
 
     def test_hyde_codec_rejects_non_hyde_mutation_feature_state(self):
         from hyde.features.hyde_features import HydeCodec
