@@ -17,7 +17,7 @@ exercised.
 - [x] Slice 3: Trivial Fixes, Bundled
 - [x] Slice 4: Survive A Raising Request Consumer
 - [x] Slice 5: Report Only What Reached The Clipboard
-- [ ] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
+- [x] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 - [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 - [ ] Slice 8: One Format Field On FigureIR
 - [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
@@ -359,11 +359,11 @@ place authority where it is used now.
 
 ### Acceptance criteria
 
-- [ ] `matplotlib_features.py` contains no MIME types and no user-facing labels.
-- [ ] No module under `hyde/user_interface/shared/` owns clipboard policy.
-- [ ] The moved code lives under `save_graphics_dialog/`.
-- [ ] `hyde/features/` no longer needs importing for anything clipboard-shaped.
-- [ ] Copy behaviour is unchanged: all three representations still paste, and a
+- [x] `matplotlib_features.py` contains no MIME types and no user-facing labels.
+- [x] No module under `hyde/user_interface/shared/` owns clipboard policy.
+- [x] The moved code lives under `save_graphics_dialog/`.
+- [x] `hyde/features/` no longer needs importing for anything clipboard-shaped.
+- [x] Copy behaviour is unchanged: all three representations still paste, and a
       vector still publishes natively on macOS. Verify the last one against the
       system clipboard, not through Qt's own reading of it.
 

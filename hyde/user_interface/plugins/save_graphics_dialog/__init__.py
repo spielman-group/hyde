@@ -3,19 +3,19 @@ from functools import partial
 
 from qtutils.qt import QtGui, QtWidgets
 
-from hyde.features.matplotlib_features import (
+from hyde.features.matplotlib_ir import FigureIR
+from hyde.user_interface.shared.plugin import HydePlugin
+
+from .clipboard import (
+    clipboard_mime_data,
     combinable_clipboard_representations,
     graphics_clipboard_representation,
     graphics_clipboard_representations,
 )
-from hyde.features.matplotlib_ir import FigureIR
-from hyde.user_interface.shared.clipboard_platform import (
+from .clipboard_platform import (
     preferred_clipboard_format,
     register_clipboard_converters,
 )
-from hyde.user_interface.shared.plugin import HydePlugin
-
-from .clipboard import clipboard_mime_data
 from .copy_request import FigureCopyRequest
 from .dialogs import SaveGraphicsDialog
 

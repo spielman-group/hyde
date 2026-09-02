@@ -28,11 +28,13 @@ from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugi
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.features.matplotlib_features import (
-    clipboard_mime_type_for_format,
-    graphics_clipboard_representations,
     graphics_export_formats,
 )
-from hyde.user_interface.plugins.save_graphics_dialog.clipboard import clipboard_mime_data
+from hyde.user_interface.plugins.save_graphics_dialog.clipboard import (
+    clipboard_mime_data,
+    clipboard_mime_type_for_format,
+    graphics_clipboard_representations,
+)
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.kernel_runtime import KernelRequest
@@ -961,7 +963,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         """Qt maps a MIME type it does not recognise onto a private pasteboard
         flavour, so vector bytes were on the clipboard and invisible outside
         Qt."""
-        from hyde.user_interface.shared.clipboard_platform import (
+        from hyde.user_interface.plugins.save_graphics_dialog.clipboard_platform import (
             register_clipboard_converters,
         )
 
@@ -981,7 +983,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         own it; dropping it presents as vector paste working sometimes."""
         import gc
 
-        from hyde.user_interface.shared.clipboard_platform import (
+        from hyde.user_interface.plugins.save_graphics_dialog.clipboard_platform import (
             register_clipboard_converters,
             registered_clipboard_converters,
         )

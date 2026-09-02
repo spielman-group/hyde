@@ -1,21 +1,109 @@
-"""Clipboard payload construction for figure copy.
+"""What a figure copy can carry, and the payload that carries it.
 
-Which MIME type a rendered figure carries is a property of the format, so the
-format-to-MIME mapping lives in the feature layer. This module is the Qt-facing
-half: it turns rendered representations into a `QMimeData` the GUI can hand to
-the clipboard, and says which representations reached it.
+A clipboard MIME type and a `Copy As` menu label are neither matplotlib strings
+nor scientific state, so they are not the feature lowerer's to own. They are the
+figure export feature's policy, and this is where it lives: which
+representations a figure can be copied as, which matplotlib format renders each,
+which MIME type that format becomes, and the `QMimeData` the GUI hands to the
+clipboard.
 """
 
 from dataclasses import dataclass
 
 from qtutils.qt import QtCore, QtGui
 
-from hyde.features.matplotlib_features import (
-    clipboard_mime_type_for_format,
-    clipboard_representation_for_format,
+# Clipboard representation per matplotlib output format. A format absent from
+# this mapping has no clipboard representation at all: `raw` and `rgba` are raw
+# buffers with no MIME type, and `svgz` is gzipped SVG that no application
+# pastes, superseded by `svg`.
+# Only the formats Hyde actually publishes to a clipboard. Every other raster
+# encoding pastes identically, because the platform republishes the image rather
+# than the encoding it was handed.
+GRAPHICS_CLIPBOARD_MIME_TYPES = {
+    "pdf": "application/pdf",
+    "svg": "image/svg+xml",
+    "png": "image/png",
+    # LaTeX source, carried as text rather than as an image.
+    "pgf": "text/plain",
+}
+
+_RASTER_MIME_TYPE = GRAPHICS_CLIPBOARD_MIME_TYPES["png"]
+
+
+@dataclass(frozen=True)
+class ClipboardRepresentation:
+    """One kind of thing a clipboard can carry a figure as.
+
+    A clipboard distinguishes representations, not file formats: the receiving
+    application asks for a picture or a drawing or some text, and every raster
+    encoding answers the first question identically. `output_format` is which
+    matplotlib format serves the representation, which is Hyde's choice and not
+    something a user picks.
+    """
+
+    key: str
+    display_label: str
+    output_formats: tuple
+    """Candidate formats in preference order; the platform picks one."""
+
+    is_text: bool = False
+
+
+GRAPHICS_CLIPBOARD_REPRESENTATIONS = (
+    # A vector representation carries both, because which one a platform can
+    # publish natively differs and the user picks "vector", not a format.
+    ClipboardRepresentation("vector", "Vector", ("pdf", "svg")),
+    ClipboardRepresentation("image", "Image", ("png",)),
+    ClipboardRepresentation("latex", "LaTeX", ("pgf",), is_text=True),
 )
 
-_RASTER_MIME_TYPE = "image/png"
+
+def graphics_clipboard_representations():
+    """The representations a figure can be copied as, in menu order."""
+    return GRAPHICS_CLIPBOARD_REPRESENTATIONS
+
+
+def combinable_clipboard_representations():
+    """The representations a plain Copy carries together.
+
+    Every representation a picture-or-drawing consumer might want, so the
+    receiving application takes the best it understands. Text is left out: it is
+    exclusive, because an image alongside LaTeX source means pasting into a word
+    processor silently yields a picture instead of the source.
+    """
+    return tuple(
+        representation
+        for representation in GRAPHICS_CLIPBOARD_REPRESENTATIONS
+        if not representation.is_text
+    )
+
+
+def graphics_clipboard_representation(key):
+    """Return the named representation, or None if there is no such thing."""
+    normalized_key = str(key or "").strip().lower()
+    for representation in GRAPHICS_CLIPBOARD_REPRESENTATIONS:
+        if representation.key == normalized_key:
+            return representation
+    return None
+
+
+def clipboard_representation_for_format(output_format):
+    """Return the representation a format is carried as, or None if it is not.
+
+    A format is how Hyde renders a representation, so this is the way back from
+    the rendered bytes to the thing the user asked for and has to be told about.
+    """
+    normalized_format = str(output_format or "").strip().lower()
+    for representation in GRAPHICS_CLIPBOARD_REPRESENTATIONS:
+        if normalized_format in representation.output_formats:
+            return representation
+    return None
+
+
+def clipboard_mime_type_for_format(output_format):
+    """Return the clipboard MIME type for a format, or None if it has none."""
+    normalized_format = str(output_format or "").strip().lower()
+    return GRAPHICS_CLIPBOARD_MIME_TYPES.get(normalized_format)
 
 
 @dataclass(frozen=True)
