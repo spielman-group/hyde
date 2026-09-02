@@ -27,6 +27,7 @@ exercised.
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
 - [ ] Slice 13: Figure Backend Leftovers
 - [ ] Slice 14: Trivia, Second Bundle
+- [ ] Slice 15: Let The Feature-Module Guard See Re-Exports
 
 ## How to work these
 
@@ -864,3 +865,50 @@ together.
 
 None - can start immediately. Item 3 overlaps Slice 5's file; sequence them
 rather than running both at once.
+
+## Slice 15: Let The Feature-Module Guard See Re-Exports
+
+### Type
+
+`AFK`
+
+### What to build
+
+Slice 6 moved clipboard policy out of `hyde/features/matplotlib_features.py`
+and left no shim. Nothing mechanically stops the next change from putting one
+back.
+
+`test_no_feature_module_redefines_another_feature_module_name` inspects only
+top-level `FunctionDef`, `ClassDef` and `Assign` nodes, so an `ImportFrom`
+re-export is invisible to it: `from ...plugins.save_graphics_dialog.clipboard
+import GRAPHICS_CLIPBOARD_MIME_TYPES` in a feature module would restore the old
+import path and the guard would not notice. It also compares feature modules
+only against each other, so a forked copy of the representation list re-added to
+`hyde/features/` would not be caught at all.
+
+This is the one place an architecture-contract test is warranted rather than
+excluded. The project's test rule is that tests assert what the code does, not
+how it is — *except* to the extent the codebase follows its desired modular
+structure, which is exactly this. IR-CONTROL states the package-purity rule
+normatively; today enforcement is review alone, and review already let this
+particular violation through once.
+
+Treat a re-export as a definition for the purposes of that guard, and consider
+whether a feature module importing from `hyde/user_interface/plugins/` is ever
+legitimate — if it is not, that direction is the simpler and stronger rule to
+assert, since it catches the forked-copy case too.
+
+### Acceptance criteria
+
+- [ ] A feature module that re-exports a plugin's symbol fails the guard.
+      Demonstrate by adding such a re-export, showing the failure, and removing
+      it.
+- [ ] The guard states which module and which symbol, so a failure is
+      actionable without reading the test.
+- [ ] No new structural assertion beyond the architecture contract itself; the
+      guard tests the rule, not any particular symbol's current home.
+- [ ] The existing feature-module tests still pass unchanged.
+
+### Blocked by
+
+- Slice 6, which is done.
