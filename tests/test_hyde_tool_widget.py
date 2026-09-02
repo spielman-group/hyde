@@ -371,8 +371,17 @@ class TestHydeToolWidget(unittest.TestCase):
 
         self.assertIs(dialog.service("demo_service"), service)
         self.assertEqual(dialog.service("missing", "fallback"), "fallback")
-        self.assertFalse(hasattr(dialog, "shell_ui"))
         self.assertIsNotNone(dialog.ui.saveButton)
+        # The plain base adds no tool-shell footer, so the only buttons are the
+        # ones the loaded .ui declares -- no OK/To IPython/Copy row on top.
+        self.assertEqual(
+            sorted(
+                button.text()
+                for button in dialog.findChildren(QtWidgets.QPushButton)
+                if button.text()
+            ),
+            ["Cancel", "Help", "No Save", "Save"],
+        )
 
     def test_tool_dialog_shell_exposes_content_mount_preview_and_fixed_footer(self):
         dialog = DemoDialogWidget()

@@ -26,7 +26,7 @@ exercised.
 - [x] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
 - [x] Slice 13: Figure Backend Leftovers
-- [ ] Slice 14: Trivia, Second Bundle
+- [x] Slice 14: Trivia, Second Bundle
 - [ ] Slice 15: Let The Feature-Module Guard See Re-Exports
 - [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
 - [ ] Slice 17: Settle The Orphaned `tracked_names` Payload Field
@@ -928,14 +928,14 @@ together.
 
 ### Acceptance criteria
 
-- [ ] Only one `FakeShellChannel` and one `FinishedCollector` remain, and the
+- [x] Only one `FakeShellChannel` and one `FinishedCollector` remain, and the
       suite still passes — proving the surviving copy is the one in use.
-- [ ] `apply_figure_state` is gone, with zero callers shown first.
-- [ ] No test claims to check the installed matplotlib while reading the
+- [x] `apply_figure_state` is gone, with zero callers shown first.
+- [x] No test claims to check the installed matplotlib while reading the
       checked-in table.
-- [ ] Each sentinel in item 5 is either deleted as vacuous or kept with a stated
+- [x] Each sentinel in item 5 is either deleted as vacuous or kept with a stated
       contract.
-- [ ] Every import removed is shown to have no reader; the template's imports are
+- [x] Every import removed is shown to have no reader; the template's imports are
       untouched.
 
 ### Blocked by

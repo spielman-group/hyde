@@ -30,9 +30,6 @@ from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureCo
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.features.matplotlib_ir import FigureIR
-from hyde.features.matplotlib_features import (
-    graphics_export_formats,
-)
 from hyde.user_interface.plugins.save_graphics_dialog.clipboard import (
     clipboard_mime_data,
     clipboard_mime_type_for_format,
@@ -570,7 +567,10 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         finally:
             plt.close(figure)
 
-    def test_each_representation_renders_through_a_format_matplotlib_exports(self):
+    def test_each_representation_renders_through_a_format_the_table_lists(self):
+        # The table, not the installed matplotlib: the runtime-sourced version of
+        # this check is
+        # `TestGeneratedGraphicsFormatTable.test_copy_offers_only_formats_the_installed_matplotlib_can_export`.
         exportable = {item.key for item in graphics_export_formats()}
 
         for item in graphics_clipboard_representations():

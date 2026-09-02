@@ -557,39 +557,6 @@ class FigureCommandModel:
             f"{body}\n"
             "    return fig\n"
         )
-def apply_figure_state(figure, state, namespace):
-    normalized = MatplotlibCodec.normalize_state(state)
-    settings = normalized["settings"]
-    title = settings["title"]
-    x_name = settings["x_name"]
-    figsize = settings["figsize"]
-    y_names = list(normalized["items"])
-
-    namespace = dict(namespace or {})
-    x_values = namespace.get(x_name) if x_name else None
-
-    figure.clear()
-    if figsize is not None:
-        figure.set_size_inches(*figsize, forward=False)
-    if title:
-        figure.set_label(title)
-    axis = figure.add_subplot(int(settings["subplot_code"]))
-
-    plotted = 0
-    for y_name in y_names:
-        if y_name not in namespace:
-            continue
-        y_values = namespace[y_name]
-        if x_name and x_name in namespace:
-            axis.plot(x_values, y_values, label=y_name)
-        else:
-            axis.plot(y_values, label=y_name)
-        plotted += 1
-
-    if plotted > 1:
-        axis.legend()
-    figure.canvas.draw_idle()
-    return plotted
 
 
 class MatplotlibCodec(FeatureCodec):

@@ -1,9 +1,5 @@
 from qtutils.qt import QtCore, QtWidgets
 
-from hyde.features.lmfit_features import (
-    CALCULATED_X_NAME,
-    attached_display_label,
-)
 from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_widget import (
     HydeFigureDialogWidget,
 )

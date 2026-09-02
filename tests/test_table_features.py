@@ -217,8 +217,6 @@ class TestSaveWindowDialog(unittest.TestCase):
                 for button in dialog.findChildren(QtWidgets.QPushButton)
                 if button.text()
             )
-            self.assertFalse(hasattr(dialog, "shell_ui"))
-            self.assertFalse(hasattr(dialog, "lower_text_edit"))
         finally:
             dialog.close()
 
@@ -478,7 +476,14 @@ class TestNewTableDialog(unittest.TestCase):
             dialog.show()
             self.qapp.processEvents()
 
-            self.assertFalse(hasattr(dialog.ui, "buttonBox"))
+            self.assertEqual(
+                sorted(
+                    button.text()
+                    for button in dialog.findChildren(QtWidgets.QPushButton)
+                    if button.text()
+                ),
+                ["Cancel", "Copy", "Help", "OK", "To IPython"],
+            )
             self.assertEqual(
                 dialog.lower_text_edit.toPlainText(),
                 "hyde.create_table(alpha)",
@@ -514,8 +519,6 @@ class TestNewTableDialog(unittest.TestCase):
 
             self.assertIsInstance(dialog.widget_ir, TableIR)
             self.assertEqual(dialog.widget_ir.names, ("alpha",))
-            self.assertFalse(hasattr(dialog, "initial_ir"))
-            self.assertFalse(hasattr(dialog, "current_ir"))
         finally:
             dialog.close()
 
@@ -643,8 +646,6 @@ class TestTableWidget(unittest.TestCase):
             self.assertIsInstance(widget.widget_ir, TableIR)
             self.assertEqual(widget.widget_ir.names, ("a",))
             self.assertEqual(widget.widget_ir.name, "Table0")
-            self.assertFalse(hasattr(widget, "initial_ir"))
-            self.assertFalse(hasattr(widget, "current_ir"))
         finally:
             widget.shutdown_client()
             widget.close()

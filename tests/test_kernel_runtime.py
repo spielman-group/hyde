@@ -62,21 +62,6 @@ class FinishedCollector:
         self.finished.append(request)
 
 
-class FakeShellChannel:
-    def __init__(self):
-        self.message_received = FakeSignal()
-
-
-class FinishedCollector:
-    """Bound-method callback receiver; see STYLE.md on Qt receiver lifetimes."""
-
-    def __init__(self):
-        self.finished = []
-
-    def collect(self, request):
-        self.finished.append(request)
-
-
 class RaisingConsumer:
     """A consumer torn down mid-flight: it raises when the reply arrives.
 
@@ -687,7 +672,7 @@ class TestRuntimeArchitecture(unittest.TestCase):
                     enter_no_project_state,
                     activate_project,
                     on_project_state_result,
-                        request_gui_quit,
+                    request_gui_quit,
                     emit_plugin_event,
                 )
                 self.started = False

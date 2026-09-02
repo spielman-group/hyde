@@ -570,7 +570,14 @@ class TestFigurePluginDispatch(unittest.TestCase):
             dialog.show()
             self.qapp.processEvents()
 
-            self.assertFalse(hasattr(dialog.ui, "buttonBox"))
+            self.assertEqual(
+                sorted(
+                    button.text()
+                    for button in dialog.findChildren(QtWidgets.QPushButton)
+                    if button.text()
+                ),
+                ["Cancel", "Copy", "Help", "OK", "To IPython"],
+            )
             self.assertEqual(
                 dialog.lower_text_edit.toPlainText(),
                 dialog.preview_string(),
