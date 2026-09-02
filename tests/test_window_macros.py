@@ -507,6 +507,99 @@ class TestFigureDecorator(unittest.TestCase):
         ):
             Graph0([0, 1, 2], [1, 4, 9])
 
+    def test_a_macro_that_builds_nothing_leaves_the_current_figure_alone(self):
+        """Being current is not a claim on a figure.
+
+        A figure rebuilds itself from the values its own macro was called
+        with, so a macro that took over whichever figure happened to be
+        current would leave that figure unable to draw its own data.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Alpha(f):
+            fig = plt.figure("Alpha")
+            fig.clear()
+            ax = fig.add_subplot(111)
+            ax.plot(f, label="f")
+            return fig
+
+        alpha = Alpha([1.0, 2.0, 3.0])
+
+        @hyde.figure(register=False)
+        def unrelated_macro():
+            return None
+
+        with self.assertRaisesRegex(ValueError, "must create exactly one figure"):
+            unrelated_macro()
+
+        hyde.refresh_figure(alpha, use_bound_values=True)
+        self.assertEqual(
+            [[1.0, 2.0, 3.0]],
+            [list(line.get_ydata()) for line in alpha.axes[0].lines],
+        )
+
+    def test_a_macro_that_only_draws_on_a_figure_does_not_become_its_macro(self):
+        """Drawing on a figure is not building it.
+
+        The appended trace belongs on the host figure, but the host is still
+        rebuilt from its own macro's arguments, and this macro's argument is
+        not one of them.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Host(y):
+            fig = plt.figure("Host")
+            fig.clear()
+            ax = fig.add_subplot(111)
+            ax.plot(y, label="y")
+            return fig
+
+        host = Host([1.0, 2.0, 3.0])
+
+        @hyde.figure(register=False)
+        def AppendToHost(z):
+            fig = plt.figure("Host")
+            fig.axes[0].plot(z, label="z")
+            return fig
+
+        with self.assertRaisesRegex(ValueError, "must create exactly one figure"):
+            AppendToHost([7.0, 8.0, 9.0])
+
+        hyde.refresh_figure(host, use_bound_values=True)
+        self.assertIn(
+            [1.0, 2.0, 3.0],
+            [list(line.get_ydata()) for line in host.axes[0].lines],
+        )
+
+    def test_a_re_run_updates_the_figure_it_rebuilds(self):
+        """Replacing a figure's contents is a claim on it.
+
+        A macro run a second time gets its figure back from plt.figure(name)
+        without constructing one, so clearing it is the only thing that tells
+        Hyde which figure this run built.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            ax = fig.add_subplot(111)
+            ax.plot(y, label="y")
+            return fig
+
+        first = Graph0([1.0, 2.0, 3.0])
+        again = Graph0([4.0, 5.0, 6.0])
+
+        self.assertIs(first, again)
+        hyde.refresh_figure(again, use_bound_values=True)
+        self.assertEqual(
+            [[4.0, 5.0, 6.0]],
+            [list(line.get_ydata()) for line in again.axes[0].lines],
+        )
+
 
 class TestDecoratedProcedureRegistries(unittest.TestCase):
     def setUp(self):

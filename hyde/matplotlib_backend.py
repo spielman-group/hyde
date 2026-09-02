@@ -329,17 +329,6 @@ def _is_hyde_figure(value):
     return value is not None and hasattr(value, "_hyde_ir")
 
 
-def _active_hyde_figure():
-    try:
-        from matplotlib._pylab_helpers import Gcf
-
-        manager = Gcf.get_active()
-    except Exception:
-        return None
-    figure = getattr(getattr(manager, "canvas", None), "figure", None)
-    return figure if _is_hyde_figure(figure) else None
-
-
 def finalize_figure_build_session(session, result):
     created = list(session.created_figures)
     resolved = _resolve_runtime_figure(result)
@@ -354,13 +343,17 @@ def finalize_figure_build_session(session, result):
                 "not built by Hyde. Load a Hyde project, and check that "
                 "procedures/__init__.py still selects Hyde's backend."
             )
-        # A macro run against a figure that already exists gets that figure
-        # back from plt.figure(...), so FigureHyde.__init__ never runs and
-        # nothing registers itself. The figure the macro built is the one it
-        # returned, or failing that the one it left current.
-        adopted = resolved if _is_hyde_figure(resolved) else _active_hyde_figure()
-        if adopted is not None:
-            created = [adopted]
+        # Nothing constructed a figure and nothing replaced one, so no figure
+        # here belongs to this macro -- including whatever the macro returned
+        # or left current. A macro run against a name that already exists gets
+        # that figure back from plt.figure(...) rather than constructing one,
+        # and clearing it is how it says it is rebuilding it.
+        raise ValueError(
+            "@hyde.figure functions must create exactly one figure. "
+            "plt.figure(name) hands back the figure that already exists "
+            "rather than creating one, so call fig.clear() to replace its "
+            "contents, the way a saved Hyde figure macro does."
+        )
     if len(created) != 1:
         raise ValueError("@hyde.figure functions must create exactly one figure.")
 
@@ -1753,9 +1746,19 @@ class FigureHyde(Figure):
         #
         # Figure.__init__ ends with a clear(), which runs before __init__
         # above has given this figure any Hyde bookkeeping to empty.
-        if getattr(self, "_hyde_ir", None) is not None:
-            self._hyde_ir = figure_ir_clear_layout(self._hyde_ir)
-            self._hyde_command_log = []
+        if getattr(self, "_hyde_ir", None) is None:
+            return result
+        self._hyde_ir = figure_ir_clear_layout(self._hyde_ir)
+        self._hyde_command_log = []
+        # Replacing a figure's contents is how a macro says it is rebuilding a
+        # figure it did not construct. plt.figure(name) hands back the figure
+        # that already exists without running __init__, so this is the only
+        # thing that tells the running session which figure the macro built.
+        # regenerate_figure_from_ir clears with _hyde_building off, because it
+        # is drawing back an IR it already owns rather than building anything.
+        session = _current_build_session()
+        if session is not None and getattr(self, "_hyde_building", False):
+            session.register_figure(self)
         return result
 
     def set_label(self, s):
