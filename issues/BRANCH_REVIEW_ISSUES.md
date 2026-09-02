@@ -30,6 +30,7 @@ exercised.
 - [ ] Slice 15: Let The Feature-Module Guard See Re-Exports
 - [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
 - [ ] Slice 17: Settle The Orphaned `tracked_names` Payload Field
+- [ ] Slice 18: Make A Plugin That Fails To Load Visible
 
 ## How to work these
 
@@ -1101,3 +1102,52 @@ in view; state the reasoning either way.
 ### Blocked by
 
 - Slice 10, which is done.
+
+## Slice 18: Make A Plugin That Fails To Load Visible
+
+### Type
+
+`HITL` — the decision is a product one: how loudly should Hyde fail when part
+of itself does not load.
+
+### What to build
+
+A plugin that raises on import is silently absent from a running Hyde — its
+menus, windows and commands simply are not there. The app starts and looks
+merely featureless rather than broken.
+
+`HydePluginManager` (`hyde/user_interface/shared/plugin.py`) swallows and logs in
+three places — `discover_modules`, `instantiate_plugins` and
+`_get_contributions` — and `discover_modules` skips a plugin directory whose
+module has no `Plugin` attribute **without logging at all**. Separately,
+labscript-utils' plugin host catches a failed `start_runtime` activity and only
+logs it, which is why a broken kernel launch once let Hyde come up looking
+normal with no kernel.
+
+This has now surfaced twice from different directions: as the reason a kernel
+launch failure was invisible (noted in Slice 9, deliberately not fixed there),
+and as the one framework path a start-up guard could not observe (found while
+building Slice 11's guard, whose disk-vs-discovered comparison covers it only
+inside that test).
+
+The swallowing is partly the host's design — one bad plugin must not stop the
+app — so this is not simply "raise instead". The question is what the user
+should see. Options worth weighing: a visible notice naming the plugins that
+failed; a status-bar or log-pane surface for start-up failures; failing loudly
+only for Hyde's own first-party plugins while still tolerating third-party ones;
+or leaving it as is and documenting the diagnostic path.
+
+Whoever takes this should decide the product behaviour first, then implement.
+
+### Acceptance criteria
+
+- [ ] A first-party plugin that raises on import produces something the user can
+      see, or a written decision that it should not.
+- [ ] A plugin directory with no `Plugin` attribute is at least logged.
+- [ ] One bad third-party plugin still does not prevent Hyde from starting.
+- [ ] The kernel-launch case is covered by whatever surface is chosen, since
+      that is the failure that motivated it.
+
+### Blocked by
+
+None - can start immediately, but needs the product decision above first.
