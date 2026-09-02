@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import base64
 import copy
 import io
@@ -9,7 +8,6 @@ import logging
 import numbers
 import re
 import sys
-import textwrap
 import threading
 import weakref
 
@@ -64,13 +62,13 @@ def _default_figure_title(figure, number):
 
 def _is_windowed_figure(figure):
     # A figure gets a Hyde window either because it is already first-class or
-    # because a macro constructed it, which is what _hyde_building records: it
-    # is set once, when the figure is built inside a build session, and only
-    # regenerate_figure_from_ir turns it off, around a figure that is
-    # first-class anyway.
+    # because Hyde tracks it, which is what _hyde_is_tracked records. Only a
+    # figure a macro constructed is ever tracked, so a tracked figure is one
+    # Hyde owns, and it keeps its window between the moment it is built and
+    # the moment finalize makes it first-class.
     return bool(
         getattr(figure, "_hyde_is_first_class", False)
-        or getattr(figure, "_hyde_building", False)
+        or getattr(figure, "_hyde_is_tracked", False)
     )
 
 
@@ -272,21 +270,8 @@ class FigureBuildSession:
         self.created_figures = []
         self.named_values = {}
         self.bound_values = {}
-        self.source_artifact = None
-        self.ast_artifact = None
-        self._capture_artifacts()
+        self.drawn_on_figures = {}
         self._bind_named_values()
-
-    def _capture_artifacts(self):
-        try:
-            source = inspect.getsource(self.func)
-        except (OSError, TypeError):
-            return
-        self.source_artifact = textwrap.dedent(source)
-        try:
-            self.ast_artifact = ast.parse(self.source_artifact)
-        except SyntaxError:
-            self.ast_artifact = None
 
     def _bind_named_values(self):
         try:
@@ -307,6 +292,25 @@ class FigureBuildSession:
         if not self.built(figure):
             self.created_figures.append(figure)
 
+    def record_drawn_trace(self, figure, line):
+        # Remembered so a macro that fails can take back what it drew on a
+        # figure it did not build. The snapshot is taken the first time this
+        # macro touches that figure, which is the state to put back.
+        #
+        # Strong references are fine: a session belongs to one call, and is
+        # dropped when that call returns.
+        record = self.drawn_on_figures.get(id(figure))
+        if record is None:
+            record = {
+                "figure": figure,
+                "figure_ir": copy.deepcopy(getattr(figure, "_hyde_ir", None)),
+                "command_log": list(getattr(figure, "_hyde_command_log", None) or []),
+                "lines": [],
+            }
+            self.drawn_on_figures[id(figure)] = record
+        if line is not None:
+            record["lines"].append(line)
+
 
 def begin_figure_build_session(func, args, kwargs, metadata=None):
     session = FigureBuildSession(func, args, kwargs, metadata=metadata)
@@ -320,6 +324,47 @@ def end_figure_build_session(session):
     if current is not session:
         return
     _BUILD_SESSION_LOCAL.session = session.previous
+
+
+def abandon_figure_build_session(session):
+    """Take back what a failed macro drew on figures it did not build.
+
+    Drawing on a neighbouring figure is deliberate, and when the macro
+    succeeds that trace belongs to the neighbour from then on. A macro that
+    raised said nothing, so the neighbour goes back to the figure it was:
+    otherwise a run that ended in an error still moves another figure's IR,
+    and nothing later says which trace came from a macro that failed.
+
+    The figure the macro was building is left as it stands. Its live artists
+    cannot be put back -- a rebuild starts by clearing the figure -- so
+    rewinding only its IR would leave the two describing different figures,
+    which is worse than a half-built figure the error message names.
+    """
+    for record in getattr(session, "drawn_on_figures", {}).values():
+        figure = record["figure"]
+        if session.built(figure):
+            continue
+        # This runs while the macro's own exception is in flight, and that
+        # exception is what the user needs to read. Nothing that goes wrong
+        # putting a neighbour back is allowed to replace it.
+        try:
+            for line in record["lines"]:
+                if getattr(line, "axes", None) is not None:
+                    line.remove()
+            if record["figure_ir"] is not None:
+                figure._hyde_ir = record["figure_ir"]
+            figure._hyde_command_log = record["command_log"]
+            canvas = getattr(figure, "canvas", None)
+            draw_idle = getattr(canvas, "draw_idle", None)
+            if callable(draw_idle):
+                draw_idle()
+        except Exception:
+            LOGGER.exception(
+                "Figure backend could not take back what a failed macro drew "
+                "on figure %r.",
+                str(figure.get_label() or ""),
+            )
+    session.drawn_on_figures = {}
 
 
 def _resolve_runtime_figure(value):
@@ -370,7 +415,9 @@ def finalize_figure_build_session(session, result):
     if resolved is not None and resolved is not created_figure:
         raise ValueError("@hyde.figure functions must resolve to the one created figure.")
 
-    figure = created_figure if resolved is None else resolved
+    # Past the guard above, a resolved figure is the created one, so the
+    # created figure is the only answer either way.
+    figure = created_figure
     requested_name = figure.get_label() or figure._hyde_ir["settings"].get("title")
     existing_names = set()
     try:
@@ -399,8 +446,6 @@ def finalize_figure_build_session(session, result):
     )
     figure._hyde_defaults = _figure_defaults_snapshot(figure._hyde_ir)
     figure._hyde_is_first_class = True
-    figure._hyde_source_artifact = session.source_artifact
-    figure._hyde_ast_artifact = session.ast_artifact
     figure._hyde_bound_values = dict(session.bound_values)
     figure._hyde_metadata = dict(session.metadata)
     _install_first_class_figure_dirty_tracking(figure)
@@ -1422,12 +1467,12 @@ def regenerate_figure_from_ir(figure, use_bound_values=True):
     preserved_size = figure.get_size_inches()
     manager = getattr(figure.canvas, "manager", None)
     was_ready_to_push = None
-    was_building = getattr(figure, "_hyde_building", False)
+    was_tracked = getattr(figure, "_hyde_is_tracked", False)
     if manager is not None and hasattr(manager, "_ready_to_push"):
         was_ready_to_push = manager._ready_to_push
         manager._ready_to_push = False
     try:
-        figure._hyde_building = False
+        figure._hyde_is_tracked = False
         figure.clear()
         # The clear emptied the IR along with the figure. This function draws
         # that same IR back, and stamps the subplot ids itself below.
@@ -1492,7 +1537,7 @@ def regenerate_figure_from_ir(figure, use_bound_values=True):
             axis.legend()
         _apply_subplot_axis_state(axis, subplot)
     finally:
-        figure._hyde_building = was_building
+        figure._hyde_is_tracked = was_tracked
         if was_ready_to_push is not None:
             manager._ready_to_push = was_ready_to_push
     figure.canvas.draw_idle()
@@ -1656,7 +1701,7 @@ class AxesHyde(Axes):
     def plot(self, *args, **kwargs):
         lines = super().plot(*args, **kwargs)
         figure = self.figure
-        if getattr(figure, "_hyde_building", False):
+        if getattr(figure, "_hyde_is_tracked", False):
             # A name for the values being plotted comes from the macro running
             # now, and only if that macro is building this figure. named_values
             # is keyed by id(), which says nothing about a value from any other
@@ -1695,6 +1740,8 @@ class AxesHyde(Axes):
                     if name == "label" and value in (None, "", "_nolegend_"):
                         continue
                     trace_kwargs[name] = value
+                if session is not None:
+                    session.record_drawn_trace(figure, lines[0] if lines else None)
                 figure._hyde_ir = figure_ir_append_trace(
                     figure._hyde_ir,
                     {
@@ -1732,15 +1779,22 @@ class FigureHyde(Figure):
                 float(value) for value in self.get_size_inches()
             )
         self._hyde_command_log = []
-        self._hyde_source_artifact = None
-        self._hyde_ast_artifact = None
         self._hyde_bound_values = {}
         self._hyde_metadata = {}
         # The session is not kept. It belongs to one call, and a figure that
         # held on to it would be offering a second answer to which session is
         # authoritative -- a stale one -- every time it was consulted again.
+        #
+        # _hyde_is_tracked says Hyde owns this figure, so plot, add_subplot
+        # and clear mirror what they do into _hyde_ir. Being constructed
+        # inside a macro is the only way to earn it, and it stays on for the
+        # life of the figure: that is what lets a later ax.plot(z) typed at
+        # the prompt append a trace to a first-class figure's IR. It is not a
+        # "build in progress" flag; the running session is asked for
+        # separately, and only regenerate_figure_from_ir turns tracking off,
+        # while it drives the figure from an IR it already owns.
         session = _current_build_session()
-        self._hyde_building = session is not None
+        self._hyde_is_tracked = session is not None
         if session is not None:
             self._hyde_metadata = dict(session.metadata)
             session.register_figure(self)
@@ -1771,10 +1825,10 @@ class FigureHyde(Figure):
         # figure it did not construct. plt.figure(name) hands back the figure
         # that already exists without running __init__, so this is the only
         # thing that tells the running session which figure the macro built.
-        # regenerate_figure_from_ir clears with _hyde_building off, because it
-        # is drawing back an IR it already owns rather than building anything.
+        # regenerate_figure_from_ir clears with tracking off, because it is
+        # drawing back an IR it already owns rather than building anything.
         session = _current_build_session()
-        if session is not None and getattr(self, "_hyde_building", False):
+        if session is not None and getattr(self, "_hyde_is_tracked", False):
             session.register_figure(self)
         return result
 
@@ -1798,7 +1852,7 @@ class FigureHyde(Figure):
         if "axes_class" not in kwargs and "projection" not in kwargs:
             kwargs["axes_class"] = AxesHyde
         axis = super().add_subplot(*args, **kwargs)
-        if getattr(self, "_hyde_building", False):
+        if getattr(self, "_hyde_is_tracked", False):
             subplots = self._hyde_ir["layout"]["subplots"]
             if not subplots:
                 subplot_id = "subplot0"

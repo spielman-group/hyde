@@ -665,6 +665,7 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
         @functools.wraps(func)
         def wrapped(*wrapper_args, **wrapper_kwargs):
             from .matplotlib_backend import (
+                abandon_figure_build_session,
                 begin_figure_build_session,
                 end_figure_build_session,
                 finalize_figure_build_session,
@@ -676,11 +677,18 @@ def figure(_func=None, *, window_pos=None, window_state=None, register=True):
                 wrapper_kwargs,
                 metadata=figure_metadata,
             )
+            # A macro that raises -- in the body or in finalize -- has said
+            # nothing about the figures it drew on, so it does not get to
+            # leave a trace on a figure it did not build.
             try:
-                result = func(*wrapper_args, **wrapper_kwargs)
-            finally:
-                end_figure_build_session(session)
-            return finalize_figure_build_session(session, result)
+                try:
+                    result = func(*wrapper_args, **wrapper_kwargs)
+                finally:
+                    end_figure_build_session(session)
+                return finalize_figure_build_session(session, result)
+            except BaseException:
+                abandon_figure_build_session(session)
+                raise
 
         try:
             wrapped.__signature__ = inspect.signature(func)

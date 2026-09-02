@@ -76,7 +76,7 @@ helper API. First-class figures are created through `@hyde.figure`. Those figure
 
 - a live kernel `Figure` as runtime truth
 - a kernel-owned figure IR as recreation/editability truth
-- a parallel figure-local command log and optional source/AST artifacts for diagnostics
+- a parallel figure-local command log for diagnostics
 
 Hyde also exposes narrow first-class figure runtime helpers where the operation is
 explicitly Hyde-owned rather than ordinary matplotlib construction. Current examples
@@ -402,12 +402,14 @@ figure-window control traffic for Hyde figure windows. Only first-class
 ### Figure-local kernel artifacts
 First-class figures may carry artifacts such as:
 - `fig._hyde_ir`
+- `fig._hyde_defaults`
 - `fig._hyde_command_log`
-- `fig._hyde_source_artifact`
-- `fig._hyde_ast_artifact`
 
-The figure IR is authoritative for recreation and editability. The command log and
-captured artifacts are auxiliary and do not outrank the IR once the figure exists.
+The figure IR is authoritative for recreation and editability. The command log is
+auxiliary and does not outrank the IR once the figure exists. A figure carries no
+retained copy of its macro's source or parsed AST: nothing reads one, and keeping a
+parse tree per figure for the life of the kernel buys no diagnostic the source in
+`session.py` or the traceback does not already give.
 
 ### Responsibilities
 - publish figure metadata and rendered-image updates from the kernel to the GUI

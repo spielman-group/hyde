@@ -254,6 +254,88 @@ class TestFigureCommActions(unittest.TestCase):
             [list(line.get_ydata()) for line in neighbour.axes[0].lines],
         )
 
+    def test_a_failed_macro_leaves_no_trace_on_another_figure(self):
+        """A macro that raised has said nothing about its neighbour.
+
+        Drawing on a neighbour is deliberate, so a macro that finishes keeps
+        that trace there. One that raises leaves nothing behind: otherwise a
+        run that ended in an error still moves another figure's recreation
+        state, and nothing later says which trace came from a failed macro.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(x, y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            fig.add_subplot(111).plot(x, y)
+            return fig
+
+        neighbour = Graph0([0.0, 1.0, 2.0], [1.0, 4.0, 9.0])
+
+        @hyde.figure(register=False)
+        def Graph1(x, y):
+            plt.figure("Graph0").axes[0].plot(x, y)
+            return None
+
+        with self.assertRaisesRegex(ValueError, "must create exactly one figure"):
+            Graph1([0.0, 1.0, 2.0], [7.0, 7.0, 7.0])
+
+        self.assertEqual(
+            [[1.0, 4.0, 9.0]],
+            [list(line.get_ydata()) for line in neighbour.axes[0].lines],
+        )
+        hyde.refresh_figure(neighbour, use_bound_values=True)
+        self.assertEqual(
+            [[1.0, 4.0, 9.0]],
+            [list(line.get_ydata()) for line in neighbour.axes[0].lines],
+        )
+
+    def test_a_trace_plotted_outside_a_macro_joins_a_first_class_figures_ir(self):
+        """A figure Hyde owns keeps describing itself after the macro returns.
+
+        Plotting onto a first-class figure from the prompt is ordinary
+        matplotlib, and the figure has to carry that trace in the state it is
+        regenerated and saved from, or a refresh silently drops it.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            fig.add_subplot(111).plot(y)
+            return fig
+
+        built = Graph0([1.0, 4.0, 9.0])
+        built.axes[0].plot([5.0, 6.0, 7.0])
+
+        hyde.refresh_figure(built, use_bound_values=True)
+        self.assertEqual(
+            [[1.0, 4.0, 9.0], [5.0, 6.0, 7.0]],
+            [list(line.get_ydata()) for line in built.axes[0].lines],
+        )
+
+    def test_a_figure_no_macro_built_is_not_hydes_to_describe(self):
+        """Only `@hyde.figure` figures are Hyde's.
+
+        A figure the user makes with plain pyplot stays an ordinary
+        matplotlib figure: Hyde does not claim it, does not describe it, and
+        does not offer to save it as a macro.
+        """
+        plt = self._configure_pyplot()
+
+        plain = plt.figure("Plain")
+        plain.add_subplot(111).plot([1.0, 2.0, 3.0])
+
+        payload = figure_snapshot_payload(plain, plain.canvas.manager.num)
+
+        self.assertFalse(payload["is_first_class"])
+        self.assertIsNone(payload.get("figure_ir"))
+        self.assertEqual([], payload["tracked_names"])
+        with self.assertRaises(ValueError):
+            hyde.get_figure("Plain")
+
     def test_a_figure_built_without_hydes_backend_says_so(self):
         """"must create exactly one figure" sends the reader to the wrong place.
 

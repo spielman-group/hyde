@@ -25,7 +25,7 @@ exercised.
 - [x] Slice 10: Retire `current_ir` And Its Second Source Of Truth
 - [x] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
-- [ ] Slice 13: Figure Backend Leftovers
+- [x] Slice 13: Figure Backend Leftovers
 - [ ] Slice 14: Trivia, Second Bundle
 - [ ] Slice 15: Let The Feature-Module Guard See Re-Exports
 - [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
@@ -783,11 +783,11 @@ Four things Slice 2 surfaced in the figure backend and deliberately left alone.
 
 ### Acceptance criteria
 
-- [ ] No attribute's name contradicts what it holds.
-- [ ] No per-figure state is retained for the process lifetime with no reader.
-- [ ] A macro that fails does not leave a partial trace in another figure's IR,
+- [x] No attribute's name contradicts what it holds.
+- [x] No per-figure state is retained for the process lifetime with no reader.
+- [x] A macro that fails does not leave a partial trace in another figure's IR,
       or the reason it must is written down.
-- [ ] No dead branch survives in `finalize_figure_build_session`.
+- [x] No dead branch survives in `finalize_figure_build_session`.
 
 ### Blocked by
 

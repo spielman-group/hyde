@@ -229,8 +229,6 @@ class TestFigureDecorator(unittest.TestCase):
         self.assertTrue(getattr(figure, "_hyde_is_first_class", False))
         self.assertIn("layout", figure._hyde_ir)
         self.assertTrue(figure._hyde_command_log)
-        self.assertIsNotNone(getattr(figure, "_hyde_source_artifact", None))
-        self.assertIsNotNone(getattr(figure, "_hyde_ast_artifact", None))
 
     def test_decorated_builder_attaches_window_pos_metadata_to_figure(self):
         plt = self._configure_pyplot()
@@ -456,8 +454,6 @@ class TestFigureDecorator(unittest.TestCase):
             (),
             {
                 "created_figures": [second],
-                "source_artifact": None,
-                "ast_artifact": None,
                 "bound_values": {},
                 "metadata": {},
             },
@@ -542,9 +538,9 @@ class TestFigureDecorator(unittest.TestCase):
     def test_a_macro_that_only_draws_on_a_figure_does_not_become_its_macro(self):
         """Drawing on a figure is not building it.
 
-        The appended trace belongs on the host figure, but the host is still
-        rebuilt from its own macro's arguments, and this macro's argument is
-        not one of them.
+        Claiming the host would make the host rebuild from this macro's
+        arguments instead of its own, so the run is rejected and the host is
+        still rebuilt from the data its own macro was given.
         """
         plt = self._configure_pyplot()
 

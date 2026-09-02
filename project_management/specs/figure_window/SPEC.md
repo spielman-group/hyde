@@ -293,8 +293,7 @@ The synchronization contract is:
 - the kernel owns the live matplotlib `Figure`
 - the kernel owns the authoritative `fig._hyde_ir`
 - the kernel owns the effective-defaults snapshot `fig._hyde_defaults`
-- the kernel may also retain `fig._hyde_command_log` plus preserved source and AST
-  artifacts for diagnostics
+- the kernel may also retain `fig._hyde_command_log` for diagnostics
 - the GUI receives only the metadata and rendered output needed to display the figure
   and launch valid edits
 - only first-class `@hyde.figure` figures publish figure-window metadata over this lane
