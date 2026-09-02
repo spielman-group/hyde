@@ -1,7 +1,6 @@
 import ast
 import copy
 import keyword
-import textwrap
 
 from hyde.features.base import FeatureCodec, set_path
 

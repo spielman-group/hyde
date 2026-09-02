@@ -20,7 +20,7 @@ exercised.
 - [ ] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 - [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 - [ ] Slice 8: One Format Field On FigureIR
-- [ ] Slice 9: Detect A Missing Dependency Without Guessing At Signatures
+- [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
 - [ ] Slice 10: Retire `current_ir` And Its Second Source Of Truth
 - [ ] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
@@ -448,46 +448,59 @@ mechanical fixes simply disappear with the field.
 
 - Slice 3 (avoid conflicting edits to the same lines)
 
-## Slice 9: Detect A Missing Dependency Without Guessing At Signatures
+## Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
 
 ### Type
 
-`HITL`
+`AFK`
 
 ### What to build
 
-`_require_permissive_heartbeats` (`kernel_runtime/__init__.py:322`) decides via
-`inspect.signature`, so any `ProcessTree` whose `subprocess` forwards `**kwargs`
-— a wrapper, a decorated method, a test double — reports no named parameters and
-Hyde refuses to start, telling the user to check out a zprocess branch they may
-already be on. Verified by execution against a `**kwargs` forwarder.
+Delete `_require_permissive_heartbeats` (`kernel_runtime/__init__.py:322`) and
+let the call fail. Then declare the requirement where requirements are declared.
 
-The guard was added to replace a silent failure with a loud one, and introduced
-a new false refusal instead.
+This was a versioning problem being solved at the wrong layer. Hyde passes
+`heartbeat_interval` and `allowed_missed_heartbeats` to
+`ProcessTree.subprocess()`, which exist only on zprocess's unmerged
+`PermissiveHeartBeat` branch — `git log -S heartbeat_interval` over
+`zprocess/process_tree.py` finds them on that branch and nowhere else. So **no
+released zprocess satisfies what Hyde actually needs**, while `pyproject.toml`
+declares `zprocess>=2.18.0`, which happily accepts the `2.27.1` on `master`
+that does not work. That mis-declaration is the defect. A probe that inspects a
+function signature at launch is Hyde guessing at a dependency's version at
+runtime, and it guesses wrong: verified by execution, any `ProcessTree` whose
+`subprocess` forwards `**kwargs` is refused, so Hyde declines to start and tells
+the user to check out a branch they may already be on.
 
-The defect it was written for is general: `start_runtime` raised, the plugin host
-caught it and logged that the plugin "may not be functional", and Hyde came up
-looking normal with no kernel. That also covers a missing `KERNEL_LAUNCHER`, a
-failed `os.remove(CONNECTION_FILE)`, and a launch failure — none of which a
-signature probe sees.
+Express the truth in the metadata instead. Hyde depends on unreleased upstream
+code, so the honest forms are a VCS requirement pinning the git ref, or a
+version floor that is only correct once the branch merges and releases, plus a
+stated prerequisite. Decide which fits this project's install story and say why
+in the commit message.
 
-Needs a decision: make a failed `start_runtime_activity` user-visible and let
-the real `TypeError` surface with its own message, or keep a targeted check that
-cannot false-positive. Also decide whether `_PERMISSIVE_HEARTBEAT_BRANCH` — a
-dependency's branch name hard-coded in production code — belongs there or in a
-setup document.
+Deleting the probe also removes `_PERMISSIVE_HEARTBEAT_BRANCH`, a dependency's
+branch name embedded in production code.
+
+Note what is *not* being fixed here, deliberately: a failed `start_runtime`
+activity is caught by labscript-utils' plugin host and only logged, which is why
+a broken kernel launch let Hyde come up looking normal with no kernel. That
+swallowing is the host's design — one bad plugin must not stop the app — and
+making Hyde's own setup failures visible is a separate question about that seam,
+not part of a versioning fix.
 
 ### Acceptance criteria
 
+- [ ] `_require_permissive_heartbeats` and `_PERMISSIVE_HEARTBEAT_BRANCH` are
+      gone, along with the test that pins the probe.
+- [ ] An incompatible zprocess produces its own `TypeError`, not a Hyde refusal.
+- [ ] `pyproject.toml` expresses a requirement that a working zprocess satisfies
+      and a non-working one does not.
 - [ ] A `ProcessTree` whose `subprocess` forwards `**kwargs` does not prevent
       startup.
-- [ ] A genuinely incompatible zprocess still produces a message naming the
-      cause, not a bare `TypeError` swallowed into a log.
-- [ ] Hyde never comes up looking normal with no kernel and no visible reason.
 
 ### Blocked by
 
-None - needs a decision, not other slices.
+None - can start immediately.
 
 ## Slice 10: Retire `current_ir` And Its Second Source Of Truth
 

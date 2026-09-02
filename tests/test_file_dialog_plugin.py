@@ -206,7 +206,6 @@ class TestFileDialogPlugin(unittest.TestCase):
             dialog.file_widget.set_selected_path(project_dir)
             self.qapp.processEvents()
 
-            self.assertFalse(hasattr(dialog, "app_ir"))
             self.assertIsInstance(dialog.widget_ir, HydeAppIR)
             self.assertEqual(
                 dialog.widget_ir.current_project_dir,

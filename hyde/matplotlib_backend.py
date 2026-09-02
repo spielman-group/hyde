@@ -26,7 +26,6 @@ from matplotlib.projections import register_projection
 
 from hyde.features.matplotlib_features import (
     MatplotlibCodec,
-    apply_figure_state,
     figure_ir_append_trace,
 )
 from hyde.features.matplotlib_figure_schema import (

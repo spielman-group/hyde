@@ -11,8 +11,8 @@ failing. The only clocks are cosmetic -- when to raise and lower a wait cursor
 -- and the short gap between a successful render and its bytes.
 
 Keeping that in one object is what makes forgetting hard: the plugin asks
-whether a copy is in flight and settles it, rather than tracking a format, three
-timers and a cursor flag by hand at each return.
+whether a copy is in flight and settles it, rather than tracking three timers
+and a cursor flag by hand at each return.
 """
 
 from qtutils.qt import QtCore, QtWidgets
@@ -36,13 +36,11 @@ class FigureCopyRequest:
 
     def __init__(
         self,
-        label,
         *,
         busy_delay_ms,
         busy_hold_ms,
         on_payload_timeout,
     ):
-        self.label = str(label)
         self.kernel_request = None
         self._busy_hold_ms = int(busy_hold_ms)
         self._busy_cursor_shown = False

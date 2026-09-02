@@ -4,11 +4,8 @@ from dataclasses import dataclass
 
 from hyde.features.base import (
     FeatureCodec,
-    normalize_optional_text,
     ordered_unique,
     set_path,
-    sorted_eligible_names,
-    valid_python_identifier,
 )
 from hyde.features.matplotlib_graphics_formats import GRAPHICS_EXPORT_FILETYPES
 from hyde.features.matplotlib_figure_schema import (

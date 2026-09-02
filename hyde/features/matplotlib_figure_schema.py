@@ -11,7 +11,6 @@ import numbers
 import numpy as np
 from matplotlib import rcParams
 
-from hyde.features.base import ordered_unique
 from hyde.features.matplotlib_color import normalize_matplotlib_color_text
 
 

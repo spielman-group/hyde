@@ -664,6 +664,20 @@ class TestCopyFeedback(unittest.TestCase):
         self.assertTrue(plugin.copy_in_flight())
         self.assertFalse(any("could not" in str(m).lower() for m in messages), messages)
 
+    def test_a_copy_with_no_usable_format_says_so_rather_than_doing_nothing(self):
+        """A copy that never reaches the kernel is invisible unless it reports.
+
+        Every other refusal says why. This one returned quietly, so the action
+        was indistinguishable from a copy that had worked.
+        """
+        plugin, messages = self._plugin_with_status()
+
+        self.assertFalse(plugin.copy_active_figure(representation="no-such-thing"))
+
+        self.assertEqual([], plugin.services["python_execution_service"].executed)
+        self.assertFalse(plugin.copy_in_flight())
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+
     def test_a_rendered_copy_whose_data_never_arrives_reports_failure(self):
         plugin, messages = self._plugin_with_status()
         kernel = plugin.services["python_execution_service"]
@@ -1082,8 +1096,15 @@ class TestGeneratedGraphicsFormatTable(unittest.TestCase):
             "scripts/regenerate_graphics_formats.py",
         )
 
-    def test_copy_offers_only_formats_the_table_can_export(self):
-        exportable = {item.key for item in graphics_export_formats()}
+    def test_copy_offers_only_formats_the_installed_matplotlib_can_export(self):
+        # Asked of matplotlib rather than of the generated table, like the
+        # sibling above: a table that still lists a format matplotlib has
+        # dropped would vouch for a menu entry that renders nothing.
+        from hyde.features.matplotlib_features import (
+            runtime_graphics_export_filetypes,
+        )
+
+        exportable = set(runtime_graphics_export_filetypes())
         clipboard = {
             candidate
             for item in graphics_clipboard_representations()

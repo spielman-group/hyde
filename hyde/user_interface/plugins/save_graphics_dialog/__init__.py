@@ -1,7 +1,7 @@
 import base64
 from functools import partial
 
-from qtutils.qt import QtCore, QtGui, QtWidgets
+from qtutils.qt import QtGui, QtWidgets
 
 from hyde.features.matplotlib_features import (
     combinable_clipboard_representations,
@@ -109,6 +109,9 @@ class Plugin(HydePlugin):
         del checked
         clipboard_formats = self._clipboard_formats(representation)
         if not clipboard_formats:
+            self._outcome_message(
+                "Could not copy the figure: no clipboard format is available."
+            )
             return False
         if self.copy_in_flight():
             # One at a time. The rendered bytes arrive on a channel that does
@@ -212,7 +215,6 @@ class Plugin(HydePlugin):
     def _begin_copy(self, label):
         self._end_copy()
         self._copy_request = FigureCopyRequest(
-            label,
             busy_delay_ms=self.busy_cursor_delay_ms,
             busy_hold_ms=self.busy_cursor_hold_ms,
             on_payload_timeout=self.on_copy_payload_timeout,
