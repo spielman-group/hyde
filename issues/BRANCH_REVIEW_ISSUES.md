@@ -473,26 +473,56 @@ runtime, and it guesses wrong: verified by execution, any `ProcessTree` whose
 the user to check out a branch they may already be on.
 
 Express the truth in the metadata instead. **The branch has since been merged
-into zprocess's `Production` and pushed**, so a version floor can now be honest
-— but not the obvious one. Measured with `packaging` against the two versions
-that matter:
+into zprocess's `Production` and pushed**, so a version floor can be honest now.
+Two measurements decide which floor, and both rule out the obvious candidates.
 
-| floor | working `2.28.0.dev2` | broken `2.27.1` |
-| --- | --- | --- |
-| `>=2.18.0` (what Hyde declares) | accepts | accepts — discriminates nothing |
-| `>=2.28.0` | **rejects** | rejects — would refuse a working install |
-| `>=2.28.0.dev0` | accepts | rejects — correct |
+First, what the versions actually are. The heartbeat commit sits two commits past
+the `v2.27.1` tag with no release tag containing it (`git describe` →
+`v2.27.1-2-g5da28e4`). zprocess has no version literal anywhere in the tree; it
+derives one from git via setuptools-scm with `version_scheme =
+"release-branch-semver"` and `local_scheme = "no-local-version"`, so an
+untagged commit past a tag reports the *guessed next release* as a pre-release:
+`2.28.0.dev2`. Under PEP 440 that sorts *below* `2.28.0`.
 
-The heartbeat commit sits two commits past the `v2.27.1` tag with no release tag
-containing it (`git describe` → `v2.27.1-2-g5da28e4`), and zprocess derives its
-version from git, so a working checkout reports the pre-release `2.28.0.dev2`.
-Under PEP 440 that is *below* `2.28.0`, which is why the obvious floor rejects
-it.
+Second, and decisive: for an editable install the metadata a resolver reads and
+the version the code reports **disagree**. Measured in the working environment:
 
-So declare `zprocess>=2.28.0.dev0` now, and note in the commit message that it
-becomes a plain `>=2.28.0` once zprocess tags a 2.28.0 release. Do not pin a
-git ref: the code is on a pushed branch of the upstream project and a floor
-expresses the requirement without freezing Hyde to one commit.
+| source | reports |
+| --- | --- |
+| `importlib.metadata.version("zprocess")` — what pip and any check read | `2.27.0.dev19` |
+| `import zprocess; zprocess.__version__` — recomputed from git per import | `2.28.0.dev2` |
+
+The `.dist-info` was frozen when the package was installed; `__version__.py`
+re-derives from git on every import. So a floor tuned to the pre-release the
+*code* reports would be tested against the stale number in the *metadata* and
+fail on a machine that works. Chasing `.dev` versions is a trap, not a fix, and
+`>=2.28.0.dev0` must not be what Hyde declares.
+
+The floor Hyde should declare is the plain `zprocess>=2.28.0`, which requires
+one action upstream first: **tag `v2.28.0` on zprocess's `Production` and push
+the tag**. Verified in a throwaway clone — tagging that commit makes
+setuptools-scm report exactly `2.28.0`, with no pre-release suffix, and commits
+after the tag report a higher version, so the floor keeps holding as `Production`
+moves. The editable install then needs reinstalling once so its `.dist-info`
+catches up; until it does, no floor above `2.27.0.dev19` can be satisfied on
+that machine regardless of what the code contains.
+
+Renaming the version to carry a marker — `2.28.0.spielman`, `2.28.0.production`
+— is not available: both are invalid PEP 440 and `packaging` rejects them, so no
+resolver could compare against them. Only a `+local` suffix admits arbitrary
+text, and local versions are prohibited on PyPI and order confusingly in
+specifiers.
+
+Do not pin a git ref: the code is on a pushed branch of the upstream project,
+and a floor expresses the requirement without freezing Hyde to one commit.
+
+Note also what the floor does and does not buy. Nothing in `hyde/` calls
+`check_version` or any runtime version gate, so the declaration is install-time
+documentation rather than a live guard. That is the correct place for it — a
+dependency's version is a packaging fact — but it means deleting the probe
+removes the only thing that was failing loudly, and an incompatible zprocess
+will surface as a `TypeError` from zprocess itself. That is the intended
+outcome: the error names the real problem instead of Hyde guessing at it.
 
 Deleting the probe also removes `_PERMISSIVE_HEARTBEAT_BRANCH`, a dependency's
 branch name embedded in production code.
@@ -509,14 +539,21 @@ not part of a versioning fix.
 - [ ] `_require_permissive_heartbeats` and `_PERMISSIVE_HEARTBEAT_BRANCH` are
       gone, along with the test that pins the probe.
 - [ ] An incompatible zprocess produces its own `TypeError`, not a Hyde refusal.
-- [ ] `pyproject.toml` expresses a requirement that a working zprocess satisfies
-      and a non-working one does not.
+- [ ] `pyproject.toml` declares `zprocess>=2.28.0` in place of `>=2.18.0`.
 - [ ] A `ProcessTree` whose `subprocess` forwards `**kwargs` does not prevent
       startup.
 
 ### Blocked by
 
-None - can start immediately.
+**One upstream action, which only the maintainer can take:** tag `v2.28.0` on
+zprocess's `Production` and push the tag, then reinstall the editable zprocess
+so its `.dist-info` reports `2.28.0` rather than the frozen `2.27.0.dev19`.
+
+Deleting the probe is not blocked by that and can land first — the probe is
+currently refusing to start a working kernel, so removing it is the urgent
+half. The floor is only honest once the tag exists, so if the tag has not
+happened yet, land the deletion and leave `pyproject.toml` for a follow-up
+rather than declaring a floor nothing satisfies.
 
 ## Slice 10: Retire `current_ir` And Its Second Source Of Truth
 
