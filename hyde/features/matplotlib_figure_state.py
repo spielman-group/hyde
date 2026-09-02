@@ -656,11 +656,6 @@ class FigureIRAuthority:
         if figsize is not None and figsize != default_settings.get("figsize"):
             figure_args.append(f"figsize={figsize!r}")
         lines = [f"fig = plt.figure({', '.join(figure_args)})" if figure_args else "fig = plt.figure()"]
-        # A named figure that still exists comes back from plt.figure() with its
-        # old contents, and a recreation macro replaces a figure rather than
-        # drawing over it. Without this, re-running stacks another set of axes
-        # each time until the figure can no longer be saved.
-        lines.append("fig.clear()")
         for figure_opaque in normalized["opaque_nodes"]:
             if figure_opaque["source"]:
                 lines.extend(figure_opaque["source"].splitlines())
