@@ -272,19 +272,20 @@ class Plugin(HydePlugin):
         if not representations:
             self._fail_copy()
             return
-        mime_data = clipboard_mime_data(representations)
+        payload = clipboard_mime_data(representations)
         clipboard = QtWidgets.QApplication.clipboard()
-        if mime_data is None or clipboard is None:
+        if payload is None or clipboard is None:
             # Nothing pasteable to hand over. Settle the request rather than
             # leaving its timers armed and its cursor on the way.
             self._fail_copy()
             return
-        clipboard.setMimeData(mime_data)
-        placed = ", ".join(
-            output_format.upper() for output_format, _ in representations
-        )
+        clipboard.setMimeData(payload.mime_data)
         self._end_copy()
-        self._outcome_message(f"Copied figure to the clipboard as {placed}.")
+        # What the payload placed, not what was rendered for it: a copy that
+        # named everything it asked for would claim a paste that cannot happen.
+        self._outcome_message(
+            f"Copied figure to the clipboard as {payload.describe()}."
+        )
 
     def _payload_answers_current_copy(self, data):
         """Reject bytes that belong to a copy this one already gave up on.

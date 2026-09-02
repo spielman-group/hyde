@@ -16,7 +16,7 @@ exercised.
 - [x] Slice 2: Stop A Macro From Adopting And Overwriting Another Figure
 - [x] Slice 3: Trivial Fixes, Bundled
 - [x] Slice 4: Survive A Raising Request Consumer
-- [ ] Slice 5: Report Only What Reached The Clipboard
+- [x] Slice 5: Report Only What Reached The Clipboard
 - [ ] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 - [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 - [ ] Slice 8: One Format Field On FigureIR
@@ -310,11 +310,11 @@ describe that rather than what it asked for.
 
 ### Acceptance criteria
 
-- [ ] The status message names only representations actually on the clipboard.
-- [ ] A rendering that cannot be turned into a usable clipboard entry is
+- [x] The status message names only representations actually on the clipboard.
+- [x] A rendering that cannot be turned into a usable clipboard entry is
       reported as a failure, not a success.
-- [ ] An undecodable raster does not produce a success message.
-- [ ] Tests assert the message against what the payload placed, not against the
+- [x] An undecodable raster does not produce a success message.
+- [x] Tests assert the message against what the payload placed, not against the
       formats requested.
 
 ### Blocked by

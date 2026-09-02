@@ -219,6 +219,19 @@ def graphics_clipboard_representation(key):
     return None
 
 
+def clipboard_representation_for_format(output_format):
+    """Return the representation a format is carried as, or None if it is not.
+
+    A format is how Hyde renders a representation, so this is the way back from
+    the rendered bytes to the thing the user asked for and has to be told about.
+    """
+    normalized_format = str(output_format or "").strip().lower()
+    for representation in GRAPHICS_CLIPBOARD_REPRESENTATIONS:
+        if normalized_format in representation.output_formats:
+            return representation
+    return None
+
+
 def clipboard_mime_type_for_format(output_format):
     """Return the clipboard MIME type for a format, or None if it has none."""
     normalized_format = str(output_format or "").strip().lower()

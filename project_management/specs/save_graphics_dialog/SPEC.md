@@ -228,10 +228,17 @@ hook refuses a stale one.
   publishes an unrecognised MIME type under a private flavour no application can
   paste -- so a copy that only set bytes put nothing usable on the clipboard at
   all. Set as an image, it is republished as the platform's own image flavours.
+  A raster that will not decode can be neither, so it is left off the payload
+  entirely rather than placed as a picture that is not one.
 - A vector rendering is published under the identifier the platform knows it by,
   through a converter registered for the life of the process. Without one, the
   vector bytes are on the clipboard and invisible to everything outside Qt.
 - `LaTeX` is placed as text, which every platform already understands.
+- The payload says which representations it placed, and that is the only source
+  for what the copy reports. A payload is offered more than it carries -- text
+  is exclusive, and a rendering that cannot become a usable entry is dropped --
+  so a copy that described what it asked for would claim a paste that cannot
+  happen.
 
 ### Output Options
 
@@ -305,8 +312,10 @@ Copying does not alter the live figure's size, DPI, or any other state.
 Copy's entire effect is invisible until the user pastes elsewhere, so it reports
 what happened:
 
-- the status bar names the format that reached the clipboard on success
-- a render that produces nothing reports failure rather than confirming success
+- the status bar names the representations that reached the clipboard on
+  success, in the vocabulary the `Copy As` menu uses, and names nothing else
+- a render that produces nothing reports failure rather than confirming success,
+  and so does one whose renderings cannot become usable clipboard entries
 - a render that raises reports what the kernel said, rather than a generic
   failure. The reply carries the exception, so the copy does not have to guess
 - a copy fails if the kernel goes away while it is outstanding

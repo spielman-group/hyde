@@ -544,9 +544,9 @@ class TestCopyPgfAsText(unittest.TestCase):
     def test_pgf_payload_carries_no_image_representation(self):
         payload = clipboard_mime_data([("pgf", b"\\begin{pgfpicture}")])
 
-        self.assertTrue(payload.hasText())
+        self.assertTrue(payload.mime_data.hasText())
         for image_type in ("image/png", "application/pdf", "image/svg+xml"):
-            self.assertNotIn(image_type, payload.formats())
+            self.assertNotIn(image_type, payload.mime_data.formats())
 
 
 class TestClipboardPayloadRepresentations(unittest.TestCase):
@@ -559,18 +559,22 @@ class TestClipboardPayloadRepresentations(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def test_an_image_copy_carries_both_its_own_format_and_png(self):
-        payload = clipboard_mime_data([("pdf", b"%PDF-1.4 fake"), ('png', b"\x89PNG\r\n\x1a\n fake")])
+        png = _one_pixel_png()
+        payload = clipboard_mime_data([("pdf", b"%PDF-1.4 fake"), ('png', png)])
 
-        self.assertIn("application/pdf", payload.formats())
-        self.assertIn("image/png", payload.formats())
-        self.assertEqual(b"%PDF-1.4 fake", bytes(payload.data("application/pdf")))
-        self.assertEqual(b"\x89PNG\r\n\x1a\n fake", bytes(payload.data("image/png")))
+        self.assertIn("application/pdf", payload.mime_data.formats())
+        self.assertIn("image/png", payload.mime_data.formats())
+        self.assertEqual(b"%PDF-1.4 fake", bytes(payload.mime_data.data("application/pdf")))
+        self.assertEqual(png, bytes(payload.mime_data.data("image/png")))
 
     def test_a_png_copy_does_not_duplicate_itself(self):
-        payload = clipboard_mime_data([("png", b"\x89PNG fake"), ('png', b"\x89PNG fake"
-        )])
+        png = _one_pixel_png()
+        payload = clipboard_mime_data([("png", png), ('png', png)])
 
-        self.assertEqual(["image/png"], [f for f in payload.formats() if f.startswith("image/")])
+        self.assertEqual(
+            ["image/png"],
+            [f for f in payload.mime_data.formats() if f.startswith("image/")],
+        )
 
     def test_a_copy_carries_an_image_the_platform_can_republish(self):
         """MIME types reach other Qt applications; everything else reads the
@@ -580,42 +584,41 @@ class TestClipboardPayloadRepresentations(unittest.TestCase):
         that nothing can paste, so a copy that only set bytes put nothing
         usable on the clipboard at all.
         """
-        import base64
-
-        png = base64.b64decode(_ONE_PIXEL_PNG_BASE64)
+        png = _one_pixel_png()
         for output_format, rendered, companion in (
             ("pdf", b"%PDF-1.4 fake", png),
             ("svg", b"<svg/>", png),
             ("png", png, None),
         ):
             with self.subTest(output_format=output_format):
-                mime = clipboard_mime_data([(output_format, rendered), ('png', companion)])
+                payload = clipboard_mime_data(
+                    [(output_format, rendered), ('png', companion)]
+                )
                 self.assertTrue(
-                    mime.hasImage(),
+                    payload.mime_data.hasImage(),
                     f"a {output_format} copy cannot be pasted outside Qt",
                 )
 
     def test_a_pgf_copy_carries_no_image_the_platform_could_paste(self):
-        mime = clipboard_mime_data([("pgf", b"\\begin{pgfpicture}")])
+        payload = clipboard_mime_data([("pgf", b"\\begin{pgfpicture}")])
 
-        self.assertFalse(mime.hasImage())
-        self.assertTrue(mime.hasText())
+        self.assertFalse(payload.mime_data.hasImage())
+        self.assertTrue(payload.mime_data.hasText())
 
     def test_a_pdf_copy_is_pasteable_by_a_png_only_consumer(self):
-        import base64
-
         plugin = make_copy_plugin()
         plugin.copy_active_figure(representation="vector")
         plugin.on_kernel_message(
             {
                 "task": "COPY_TO_CLIPBOARD_REQUEST",
                 "data": copy_payload(
-                    (b"%PDF-1.4 fake", "pdf"), (b"\x89PNG fake", "png")
+                    (b"%PDF-1.4 fake", "pdf"), (_one_pixel_png(), "png")
                 )["data"],
             }
         )
 
         mime_data = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertTrue(mime_data.hasImage())
         self.assertIn("image/png", mime_data.formats())
         self.assertIn("application/pdf", mime_data.formats())
 
@@ -646,15 +649,76 @@ class TestCopyFeedback(unittest.TestCase):
         }
         return plugin, messages
 
-    def test_a_completed_copy_confirms_which_format_reached_the_clipboard(self):
-        import base64
-
+    def test_a_completed_copy_confirms_which_representation_reached_the_clipboard(self):
         plugin, messages = self._plugin_with_status()
+        plugin.copy_active_figure(representation="image")
+        plugin.on_kernel_message(copy_payload((_one_pixel_png(), "png")))
+
+        self.assertIn("Copied figure to the clipboard as Image.", messages)
+
+    def test_a_copy_names_only_the_representations_the_clipboard_took(self):
+        """A payload can offer more than the clipboard ends up carrying.
+
+        LaTeX source is exclusive -- an image alongside it would mean pasting
+        into a word processor silently yields a picture instead of the source --
+        so a payload carrying text as well places only the text. Naming the
+        rest promises a paste that cannot happen.
+        """
+        plugin, messages = self._plugin_with_status()
+        plugin.copy_active_figure()
+        plugin.on_kernel_message(
+            copy_payload(
+                (b"%PDF-1.4 fake", "pdf"),
+                (_one_pixel_png(), "png"),
+                (b"\\begin{pgfpicture}", "pgf"),
+            )
+        )
+
+        self.assertIn("Copied figure to the clipboard as LaTeX.", messages)
+        mime_data = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertTrue(mime_data.hasText())
+        self.assertFalse(mime_data.hasImage())
+
+    def test_a_plain_copy_names_both_the_drawing_and_the_picture_it_placed(self):
+        plugin, messages = self._plugin_with_status()
+        plugin.copy_active_figure()
+        plugin.on_kernel_message(
+            copy_payload((b"%PDF-1.4 fake", "pdf"), (_one_pixel_png(), "png"))
+        )
+
+        self.assertIn("Copied figure to the clipboard as Vector, Image.", messages)
+        mime_data = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertIn("application/pdf", mime_data.formats())
+        self.assertTrue(mime_data.hasImage())
+
+    def test_a_picture_that_will_not_decode_is_not_reported_as_copied(self):
+        """Image bytes Qt cannot decode reach nobody: no image flavour is
+        published for the platform to paste, and the raw bytes another Qt
+        application would read are not a picture. A copy that placed only those
+        has copied nothing."""
+        plugin, messages = self._plugin_with_status()
+        QtWidgets.QApplication.clipboard().setText("untouched")
         plugin.copy_active_figure(representation="image")
         plugin.on_kernel_message(copy_payload((b"\x89PNG fake", "png")))
 
-        self.assertTrue(any("PNG" in str(m) for m in messages), messages)
-        self.assertTrue(any("clipboard" in str(m).lower() for m in messages), messages)
+        self.assertFalse(any("Copied" in str(m) for m in messages), messages)
+        self.assertTrue(any("could not" in str(m).lower() for m in messages), messages)
+        self.assertEqual("untouched", QtWidgets.QApplication.clipboard().text())
+
+    def test_a_copy_whose_picture_will_not_decode_still_names_the_vector(self):
+        """The vector did reach the clipboard, so this is not a failed copy --
+        but the picture did not, and a message naming it would send someone to
+        paste into an application that gets nothing."""
+        plugin, messages = self._plugin_with_status()
+        plugin.copy_active_figure()
+        plugin.on_kernel_message(
+            copy_payload((b"%PDF-1.4 fake", "pdf"), (b"\x89PNG fake", "png"))
+        )
+
+        self.assertIn("Copied figure to the clipboard as Vector.", messages)
+        mime_data = QtWidgets.QApplication.clipboard().mimeData()
+        self.assertIn("application/pdf", mime_data.formats())
+        self.assertFalse(mime_data.hasImage())
 
     def test_a_copy_waits_for_a_busy_kernel_rather_than_reporting_failure(self):
         """The user's own long cell holds the kernel; the copy is queued, not late."""
@@ -1043,7 +1107,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
 
         current = kernel.kernel_requests[-1][0].msg_id
         plugin.on_kernel_message(
-            copy_payload((b"\x89PNG real", "png"), request_msg_id=current)
+            copy_payload((_one_pixel_png(), "png"), request_msg_id=current)
         )
         self.assertFalse(plugin.copy_in_flight())
         self.assertTrue(any("Copied" in str(m) for m in messages), messages)
