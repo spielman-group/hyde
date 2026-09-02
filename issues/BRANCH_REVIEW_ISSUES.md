@@ -26,6 +26,7 @@ exercised.
 - [ ] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
 - [ ] Slice 13: Figure Backend Leftovers
+- [ ] Slice 14: Trivia, Second Bundle
 
 ## How to work these
 
@@ -781,3 +782,85 @@ under direct probing:
 - **`hyde.task_complete` removal and the `shared/figure.py` deletion.** Both
   fully migrated: no stale caller anywhere, including saved projects on this
   machine, and all 26 symbols from the deleted module accounted for.
+
+## Slice 14: Trivia, Second Bundle
+
+### Type
+
+`AFK`
+
+### What to build
+
+Findings the Slice 3 and Slice 4 agents surfaced while working, each verified
+but outside the slice that found it. Independent of each other; land them
+together.
+
+1. **A duplicate definition that silently shadows its twin.**
+   `tests/test_kernel_runtime.py` defines `FakeShellChannel` and
+   `FinishedCollector` twice, at lines 50-63 and 65-77. Verified identical by
+   diff, so the second pair wins and an edit to the first has no effect. Delete
+   the first pair. This is the trap that matters most in this bundle: it makes a
+   future test change appear to do nothing.
+
+2. **`apply_figure_state` has no callers.** Defined at
+   `hyde/features/matplotlib_features.py:635`. Removing the dead import in
+   `hyde/matplotlib_backend.py` during Slice 3 took its last reference anywhere,
+   tests included. Confirm zero callers, then delete it.
+
+3. **A guard that names the wrong subject**, the same defect Slice 3 item 7
+   fixed one instance of. `tests/test_save_graphics_dialog.py:409`,
+   `test_each_representation_renders_through_a_format_matplotlib_exports`,
+   claims "matplotlib exports" while `exportable` comes from
+   `graphics_export_formats()` — the checked-in table, not the installed
+   matplotlib. Source it from `runtime_graphics_export_filetypes()` as item 7
+   did, or rename it to say it checks the table.
+
+4. **A doubled import.** `tests/test_save_graphics_dialog.py` imports
+   `graphics_export_formats` in two separate `matplotlib_features` import
+   blocks, around lines 21-23 and 30-34.
+
+5. **More structural sentinels**, the same shape Slice 3 item 6 removed seven
+   of. These assert the absence or presence of a name rather than a behaviour,
+   which the project's test rule excludes: `tests/test_table_features.py`
+   lines 517-518, 646-647 (`initial_ir`/`current_ir`), 220-221 (`shell_ui`,
+   `lower_text_edit`) and 481 (`dialog.ui.buttonBox`);
+   `tests/test_matplotlib_features.py:573` (`buttonBox`);
+   `tests/test_hyde_tool_widget.py:328` (`shell_ui`). Establish each one is
+   inert the way item 6 did — does the name resolve in the object's MRO, and can
+   anything write it — and delete what is vacuous. Keep any that turns out to
+   assert a real contract, and say which and why.
+
+6. **Unused imports** beyond Slice 3 item 10's five:
+   `CALCULATED_X_NAME` and `attached_display_label` in
+   `curve_fit_dialog/dialogs.py:3`, and `QtWidgets` in
+   `figure_control_dialog/trace_edit_dialog.py:1`.
+
+   Three more look deliberate and need judgement rather than deletion:
+   `labscript_utils` in `hyde/execution/kernel_launcher.py:21` may be an
+   intentional side-effect import; `HydeIR`/`HydeIRDiff` in
+   `hyde/user_interface/__init__.py:3` are probably intentional re-exports; and
+   the `project_templates/default.hy/procedures/__init__.py` ones exist for the
+   user's namespace and **must stay**. Decide each by what removing it would
+   change, and leave the template alone.
+
+7. **A misindented line**, cosmetic and valid Python:
+   `tests/test_kernel_runtime.py:560`, where `request_gui_quit,` inside
+   `FakeRuntimeHelper.__init__`'s `del` tuple sits four columns deeper than its
+   siblings.
+
+### Acceptance criteria
+
+- [ ] Only one `FakeShellChannel` and one `FinishedCollector` remain, and the
+      suite still passes — proving the surviving copy is the one in use.
+- [ ] `apply_figure_state` is gone, with zero callers shown first.
+- [ ] No test claims to check the installed matplotlib while reading the
+      checked-in table.
+- [ ] Each sentinel in item 5 is either deleted as vacuous or kept with a stated
+      contract.
+- [ ] Every import removed is shown to have no reader; the template's imports are
+      untouched.
+
+### Blocked by
+
+None - can start immediately. Item 3 overlaps Slice 5's file; sequence them
+rather than running both at once.
