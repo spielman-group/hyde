@@ -1,0 +1,606 @@
+# Branch Review Issues
+
+Source: a maximum-effort code review of `plugins/export_graphics` against
+`4a25f45`, run with four independent finder angles plus verification. Every
+finding below was confirmed by execution or by a quoted rule, not accepted on
+an agent's word. This file is the plan of record.
+
+Purpose: repair two regressions this branch shipped, and settle the structural
+shortcuts it took. Most of these are self-inflicted: the branch added a request
+owner and a clipboard feature, then updated only the paths its own tests
+exercised.
+
+## Progress Checklist
+
+- [ ] Slice 1: Stop A Figure Macro Re-Run From Raising
+- [ ] Slice 2: Stop A Macro From Adopting And Overwriting Another Figure
+- [ ] Slice 3: Trivial Fixes, Bundled
+- [ ] Slice 4: Survive A Raising Request Consumer
+- [ ] Slice 5: Report Only What Reached The Clipboard
+- [ ] Slice 6: Give Clipboard Policy A Home Outside The Matplotlib Lowerer
+- [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
+- [ ] Slice 8: One Format Field On FigureIR
+- [ ] Slice 9: Detect A Missing Dependency Without Guessing At Signatures
+- [ ] Slice 10: Retire `current_ir` And Its Second Source Of Truth
+- [ ] Slice 11: Guard The Start-Up Pyplot Rule By Observation
+- [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
+
+## How to work these
+
+Each slice is independently grabbable. Run the whole suite in one process
+before and after — `test_project_save_load` fails spuriously if a Hyde instance
+is already running, so close the app first:
+
+```bash
+QT_QPA_PLATFORM=offscreen /Users/ispielma/miniforge3/envs/labscript/bin/python - <<'PY'
+import os, unittest
+mods = sorted('tests.'+f[:-3] for f in os.listdir('tests')
+              if f.startswith('test_') and f.endswith('.py'))
+suite = unittest.TestSuite()
+for m in mods:
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromName(m))
+unittest.TextTestRunner(verbosity=1).run(suite)
+PY
+```
+
+There is no pytest and `conda` does not work here. Tests assert what the code
+does, not how it is; a guard must be verified by breaking what it guards.
+
+## Slice 1: Stop A Figure Macro Re-Run From Raising
+
+### Type
+
+`AFK`
+
+### What to build
+
+Re-running a `@hyde.figure` macro raises. `hyde/features/matplotlib_figure_state.py:663`
+emits `fig.clear()` into generated recreation source. That deletes the axes
+carrying `_hyde_subplot_id`, and `FigureHyde.add_subplot`
+(`hyde/matplotlib_backend.py:1763`) only stamps that id while
+`_hyde_ir["layout"]["subplots"]` is still empty — which it is not on a re-run.
+The trailing `fig.show()` then reaches `_resolve_live_axis` through
+`figure_snapshot_payload` and raises, and `_push_draw`'s `try` wraps only
+`self._comm.send`, so it escapes.
+
+Reproduce:
+
+```python
+# after execute_procedures_bootstrap on a template project
+@hyde.figure(register=False)
+def _hyde_figure(f):
+    fig = plt.figure('Graph0', figsize=(4.0, 3.0))
+    fig.clear()
+    ax = fig.add_subplot(111)
+    ax.plot(f, label='f')
+    fig.show()
+_hyde_figure(f)   # OK
+_hyde_figure(f)   # ValueError: Unknown live subplot id: 'subplot0'
+```
+
+**Start by reverting the emitted `fig.clear()`.** That restores the older
+behaviour, where a re-run silently stacked another axes — which is worse than
+correct but strictly better than raising, and it is one line. Land that first
+and separately, so the repair is not blocked on the redesign.
+
+Then fix the real problem, which is that a recreation macro has no way to
+replace a figure's contents. The emitted `fig.clear()` was reaching for
+something the backend does not support: clearing a Hyde figure has to reset the
+IR's subplot bookkeeping too, or `add_subplot` has to re-stamp ids when the
+live axes no longer match the IR. Decide which, in the backend rather than in
+emitted source.
+
+### Acceptance criteria
+
+- [ ] Re-running a generated figure macro succeeds, twice or more.
+- [ ] Re-running does not stack axes: after two runs the figure has one axes and
+      the data from the second run.
+- [ ] `figure_snapshot_payload` succeeds after a re-run, with a comm open and
+      without one.
+- [ ] A saved figure macro still rebuilds its figure after a project reload.
+- [ ] A test fails if the emitted source regains an unconditional `fig.clear()`
+      without backend support for it.
+
+### Blocked by
+
+None - can start immediately.
+
+## Slice 2: Stop A Macro From Adopting And Overwriting Another Figure
+
+### Type
+
+`AFK`
+
+### What to build
+
+`finalize_figure_build_session` (`hyde/matplotlib_backend.py:345`) falls back to
+`_active_hyde_figure()` when a macro registered nothing, then unconditionally
+assigns `_hyde_source_artifact`, `_hyde_ast_artifact`, `_hyde_bound_values`,
+`_hyde_metadata` and recomputes `_hyde_defaults` from the calling function. So a
+macro that creates nothing adopts whatever figure is current and destroys that
+figure's ability to rebuild itself.
+
+Reproduced: with `Alpha` current and holding
+`_hyde_bound_values == {'f': array([1., 2., 3.])}`, calling
+
+```python
+@hyde.figure(register=False)
+def unrelated_macro():
+    return None
+```
+
+returns `Alpha` and leaves `Alpha._hyde_bound_values == {}`. `resolved is None`
+on this path, so the "must resolve to the one created figure" guard never fires.
+A macro that only plots onto the current figure triggers it too.
+
+The fallback exists because a macro re-run against an existing figure registers
+nothing — the same root cause as Slice 1. Decide whether the fallback should
+exist at all once a re-run can register its figure properly, and if it stays,
+it must not adopt a figure the macro did not build.
+
+### Acceptance criteria
+
+- [ ] A macro that creates nothing and returns nothing does not adopt a live
+      figure; it reports that it built no figure.
+- [ ] A macro that plots onto an existing figure without creating one does not
+      silently become that figure's recreation macro.
+- [ ] An adopted figure's `_hyde_bound_values`, `_hyde_source_artifact` and
+      `_hyde_defaults` are never replaced by a macro that did not build it.
+- [ ] A legitimate re-run still updates the figure it rebuilds.
+
+### Blocked by
+
+- Slice 1 (same root cause; do not fix the fallback before the re-run works)
+
+## Slice 3: Trivial Fixes, Bundled
+
+### Type
+
+`AFK`
+
+### What to build
+
+Ten mechanical fixes with no design decision between them. Land as one change.
+
+1. **`project_management/specs/save_graphics_dialog/SPEC.md:258`** documents
+   `hyde.copy_figure(fig, format='pdf', dpi='figure')`. The keyword is `formats`
+   and is keyword-only, so the documented call raises `TypeError`. It is the only
+   stale `copy_figure` caller left anywhere.
+2. **`.agents/skills/hyde-dialog-widget/assets/template_plugin/tests/test_example_dialog.py:8`** —
+   the template's `FakeExecutionService` implements only `execute_hidden`, but
+   `HydeDialogWidget.execute_ok_payload` now dispatches through
+   `request_command`. Every plugin scaffolded from this template raises
+   `AttributeError` on OK. Mirror `tests/kernel_fakes.KernelRequestRecorder`.
+3. **`hyde/features/matplotlib_ir.py:1144`**, `FigureIRDiff.from_irs` omits
+   `clipboard_formats` from the field enumeration, so a copy IR through the diff
+   path loses its formats and then fails its own validation with
+   `ValueError: Figure copy_graphics requires clipboard_formats`.
+4. **`hyde/features/matplotlib_ir.py:206`**, `__post_init__` normalizes every
+   field except `clipboard_formats`, so `['PDF','png']` survives verbatim and
+   compares unequal to the tuple-valued equivalent.
+5. **`hyde/features/matplotlib_ir.py:249`**, `debug_state` omits
+   `clipboard_formats` — the one field that distinguishes one copy from another.
+6. **Seven inert sentinels** assert a pre-refactor name is absent from an
+   instance dict: `tests/test_figure_window_session_save.py:88-89`,
+   `test_matplotlib_features.py:583`, `test_trace_edit_dialog.py:306`,
+   `test_remove_from_graph_dialog.py:438`, `test_axis_edit_dialog.py:445`,
+   `test_hyde_tool_widget.py:828`, `test_file_dialog_plugin.py:209`. One is
+   provably inert: `FigureWindow.current_ir` exists as a class-level property, so
+   it is never in `__dict__` and the guard passes while the forbidden name is
+   present. Delete them; they cannot catch a defect in the running app.
+7. **`tests/test_save_graphics_dialog.py:1085`**,
+   `test_copy_offers_only_formats_the_table_can_export` draws both sides from the
+   same hand-written module it guards. Compare against
+   `runtime_graphics_export_filetypes()`, as the sibling test at line 1072 does.
+8. **`hyde/user_interface/plugins/save_graphics_dialog/__init__.py:110`** —
+   `copy_active_figure` returns `False` with no message when `_clipboard_formats`
+   is empty. Every other failure path reports.
+9. **`FigureCopyRequest.label`** (`copy_request.py:45`) is assigned and never
+   read, and `_copy_label` exists only to feed it. Remove both, or read the label.
+10. **Dead imports**: `QtCore` in `save_graphics_dialog/__init__.py`, `textwrap`
+    in `hyde/features/hyde_features.py`, `ordered_unique` in
+    `matplotlib_figure_schema.py`, `apply_figure_state` in `matplotlib_backend.py`,
+    and the unused names imported into `matplotlib_features.py`. Confirm each is
+    genuinely unreferenced before removing it.
+
+### Acceptance criteria
+
+- [ ] The spec's documented `copy_figure` call runs without `TypeError`.
+- [ ] The plugin template's own test passes against the current dialog base.
+- [ ] A copy IR survives `current_diff()` with its formats and validates.
+- [ ] Two `FigureIR` copy objects built by different routes with the same intent
+      compare equal.
+- [ ] `debug_state()` shows a copy's formats.
+- [ ] No test asserts a name's absence from an instance dict.
+- [ ] The format guard fails when the generated table drifts from matplotlib.
+- [ ] Removing any dead import leaves the suite green.
+
+### Blocked by
+
+None - can start immediately.
+
+## Slice 4: Survive A Raising Request Consumer
+
+### Type
+
+`AFK`
+
+### What to build
+
+`_settle_request` and `_abandon_pending_requests`
+(`hyde/user_interface/plugins/kernel_runtime/__init__.py:174` and `:183`) call
+`on_finished(request)` with no `try/except`. `_settle_request` runs inside
+`_on_shell_message`, a Qt slot invoked from C++, where an unhandled Python
+exception calls `qFatal()` — the process aborts with SIGABRT rather than
+raising. `HydeApp.emit_plugin_event` wraps every handler in `try/except`; this
+path does not.
+
+Candidate raisers are real: `_on_session_restore_command_finished` reaching
+`finalize_subwindow_state` on a subwindow torn down while `session.py` ran, or
+`_fail_copy` touching `self.ui.statusbar` during teardown.
+
+The second variant is worse than a crash: `_abandon_pending_requests` raising
+inside `stop()` inside `_handle_kernel_crash` means the `start_runtime()` on the
+next line never runs, leaving Hyde with no kernel *and* no kernel watcher,
+permanently and silently.
+
+### Acceptance criteria
+
+- [ ] A consumer that raises in `on_finished` does not abort the process.
+- [ ] The failure is logged with the consumer identified.
+- [ ] One raising consumer does not prevent other pending requests from
+      settling.
+- [ ] A raising consumer during `_handle_kernel_crash` still leaves the runtime
+      restarted.
+- [ ] A test drives a raising consumer through the real settle path.
+
+### Blocked by
+
+None - can start immediately.
+
+## Slice 5: Report Only What Reached The Clipboard
+
+### Type
+
+`AFK`
+
+### What to build
+
+Two ways a copy claims success it did not achieve.
+
+`save_graphics_dialog/__init__.py:281` builds the success message from every
+decoded representation rather than from what `clipboard_mime_data` attached.
+Verified: a `pdf`+`png`+`pgf` payload reports "Copied figure to the clipboard as
+PDF, PNG, PGF" while the exclusive-text branch placed only `text/plain`.
+
+`clipboard.py:63` skips `setImageData` when `QImage.fromData` returns null but
+still returns a non-`None` `QMimeData`, so the copy reports success having
+placed only a raw `image/png` entry — which the module's own comment describes
+as putting nothing usable on the clipboard.
+
+Both are latent today and both are wrong the moment a representation is added.
+The fix is for the builder to report what it placed, and for the caller to
+describe that rather than what it asked for.
+
+### Acceptance criteria
+
+- [ ] The status message names only representations actually on the clipboard.
+- [ ] A rendering that cannot be turned into a usable clipboard entry is
+      reported as a failure, not a success.
+- [ ] An undecodable raster does not produce a success message.
+- [ ] Tests assert the message against what the payload placed, not against the
+      formats requested.
+
+### Blocked by
+
+None - can start immediately.
+
+## Slice 6: Give Clipboard Policy A Home Outside The Matplotlib Lowerer
+
+### Type
+
+`HITL`
+
+### What to build
+
+Two placement violations that are one decision.
+
+`hyde/features/matplotlib_features.py:159` holds `GRAPHICS_CLIPBOARD_MIME_TYPES`
+and `GRAPHICS_CLIPBOARD_REPRESENTATIONS`, so a package-pure matplotlib lowerer
+now owns clipboard MIME types (`application/pdf`, `image/png`, `text/plain`) and
+user-facing menu labels (`Vector`, `Image`, `LaTeX`). IR-CONTROL: "The boundary
+is package-pure: `hyde_features.py` emits only Hyde strings,
+`matplotlib_features.py` emits only matplotlib strings." Neither a MIME type nor
+a menu label is a matplotlib string.
+
+`hyde/user_interface/shared/clipboard_platform.py` decides which format a vector
+copy renders and is imported by exactly one plugin. IR-CONTROL Placement Rules:
+"Supporting material that carries runtime authority for one IR family belongs in
+that plugin directory, not in `hyde/user_interface/shared/`", and "Do not hide
+feature authority in `shared/` modules. This file-shape rule is first-class." It
+was put in `shared/` on the speculative grounds that later table and terminal
+copy would use it — the justification the rule exists to refuse.
+
+Needs a decision before implementation: does clipboard representation policy
+belong in a plugin-local module under `save_graphics_dialog/`, or is a clipboard
+a genuinely cross-family concern that earns its own feature module? Table and
+terminal copy are both planned but neither exists. The rule says place it where
+it is used now.
+
+### Acceptance criteria
+
+- [ ] `matplotlib_features.py` contains no MIME types and no user-facing labels.
+- [ ] No module under `hyde/user_interface/shared/` owns clipboard policy.
+- [ ] The chosen placement is justified against the quoted Placement Rules in
+      the commit message.
+- [ ] Copy behaviour is unchanged: all three representations still paste, and a
+      vector still publishes natively on macOS.
+
+### Blocked by
+
+None - needs a decision, not other slices.
+
+## Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
+
+### Type
+
+`AFK`
+
+### What to build
+
+The lifecycle is written four times: figure refresh
+(`figure_interactive/window.py:503`), table refresh
+(`table_interactive/window.py:355`), figure close
+(`figure_interactive/window.py:632`), and `FigureCopyRequest` as a class. Each
+repeats a single-shot payload timer, a `_clear_*_in_flight`, an `_on_*_finished`
+that arms the timer only when the reply says the command ran, and an
+`_on_*_payload_timeout`.
+
+They have already drifted: only `FigureCopyRequest` restores the override
+cursor, only the table path reports failure to the user, only the close path
+logs. The invariant that a pending request is *waiting* rather than *late* now
+has to hold in four places, and the next kernel-facing surface will write a
+fifth.
+
+`KernelCommands` (`base_hyde_widgets.py`) was introduced on this branch as the
+owner for exactly this. `FigureCopyRequest` generalizes with one change — its
+retry hook becomes a callable.
+
+### Acceptance criteria
+
+- [ ] One object owns the payload timer, the in-flight flag, and the settle path.
+- [ ] The two windows keep only their own `refresh_data` / `refresh_figure` and
+      lose the duplicated lifecycle methods.
+- [ ] Cursor restoration, user-facing failure reporting, and logging behave the
+      same for every consumer, rather than differing per copy.
+- [ ] A refresh or close still waits indefinitely for a busy kernel, and still
+      bounds only the gap after the reply says the command ran.
+
+### Blocked by
+
+None - can start immediately.
+
+## Slice 8: One Format Field On FigureIR
+
+### Type
+
+`AFK`
+
+### What to build
+
+`FigureIR` carries two parallel format concepts. `with_copy_graphics`
+(`matplotlib_ir.py:419`) sets `output_format=None` to mean not-applicable, and
+`__post_init__` immediately coerces it back to `'pdf'`, so every copy IR carries
+a format field nothing reads and validation never checks. Verified: a copy IR
+reports `output_format == 'pdf'` alongside `clipboard_formats == ('pdf','png')`,
+and `validate()` accepts it. `FigureIRDiff` then propagates the dead field while
+dropping the live one.
+
+Separately `dpi: int = 300` legally holds the string `'figure'`, which forces
+three dpi branches in `validate()`.
+
+One `output_formats: tuple[str, ...]` — length 1 for save, several for copy —
+removes a field, a lying type annotation, and the ambiguity about which field a
+copy honours. `dpi: int | None = None` with `None` meaning "defer to the live
+figure" removes two validate branches.
+
+This supersedes items 3, 4 and 5 of Slice 3; if Slice 3 has landed, the
+mechanical fixes simply disappear with the field.
+
+### Acceptance criteria
+
+- [ ] `FigureIR` has one format field, normalized in `__post_init__` and carried
+      by `FigureIRDiff` and `debug_state`.
+- [ ] Save validates exactly one format; copy validates at least one.
+- [ ] The `'figure'` dpi sentinel no longer requires a string in an `int` field.
+- [ ] Emitted Python is unchanged for both save and copy.
+
+### Blocked by
+
+- Slice 3 (avoid conflicting edits to the same lines)
+
+## Slice 9: Detect A Missing Dependency Without Guessing At Signatures
+
+### Type
+
+`HITL`
+
+### What to build
+
+`_require_permissive_heartbeats` (`kernel_runtime/__init__.py:322`) decides via
+`inspect.signature`, so any `ProcessTree` whose `subprocess` forwards `**kwargs`
+— a wrapper, a decorated method, a test double — reports no named parameters and
+Hyde refuses to start, telling the user to check out a zprocess branch they may
+already be on. Verified by execution against a `**kwargs` forwarder.
+
+The guard was added to replace a silent failure with a loud one, and introduced
+a new false refusal instead.
+
+The defect it was written for is general: `start_runtime` raised, the plugin host
+caught it and logged that the plugin "may not be functional", and Hyde came up
+looking normal with no kernel. That also covers a missing `KERNEL_LAUNCHER`, a
+failed `os.remove(CONNECTION_FILE)`, and a launch failure — none of which a
+signature probe sees.
+
+Needs a decision: make a failed `start_runtime_activity` user-visible and let
+the real `TypeError` surface with its own message, or keep a targeted check that
+cannot false-positive. Also decide whether `_PERMISSIVE_HEARTBEAT_BRANCH` — a
+dependency's branch name hard-coded in production code — belongs there or in a
+setup document.
+
+### Acceptance criteria
+
+- [ ] A `ProcessTree` whose `subprocess` forwards `**kwargs` does not prevent
+      startup.
+- [ ] A genuinely incompatible zprocess still produces a message naming the
+      cause, not a bare `TypeError` swallowed into a log.
+- [ ] Hyde never comes up looking normal with no kernel and no visible reason.
+
+### Blocked by
+
+None - needs a decision, not other slices.
+
+## Slice 10: Retire `current_ir` And Its Second Source Of Truth
+
+### Type
+
+`AFK`
+
+### What to build
+
+`FigureWindow.current_ir` (`figure_interactive/window.py:240`) is a property that
+returns `self.widget_ir` and nothing else. AGENTS.md: "Do not add trivial
+pass-through helpers or wrapper methods that only rename or forward to a shared
+helper without adding real local policy. Prefer making the shared helper the
+actual interface." The sibling `table_interactive/window.py` uses `widget_ir`
+directly, so the two windows name the same base-class attribute differently.
+
+The alias also hides that the window answers one question from two sources:
+`tracked_namespace_names()` answers from `current_ir.tracked_names()` while
+`refresh_figure()` gates on `snapshot_state.tracked_names()`. If the two
+disagree, a figure can be namespace-tracked yet never refreshed. Eight methods
+branch `if self.current_ir is not None: ... else: self.snapshot_state...`.
+
+`FigureIR.from_snapshot` already carries most of what `FigureSnapshotState`
+holds; the remainder is the warning text and the figure size.
+
+### Acceptance criteria
+
+- [ ] `current_ir` is gone and call sites use `widget_ir`.
+- [ ] One source answers "which namespace names does this figure track", used by
+      both tracking and refresh.
+- [ ] The dual-source branches are gone or reduced to a stated minimum.
+- [ ] Session save and restore of a figure window still round-trip.
+
+### Blocked by
+
+- Slice 3 (removes the inert sentinel that names `current_ir`)
+
+## Slice 11: Guard The Start-Up Pyplot Rule By Observation
+
+### Type
+
+`AFK`
+
+### What to build
+
+`tests/test_save_graphics_dialog.py:1098`,
+`test_building_the_copy_menu_never_imports_pyplot`, reads one module's text and
+asserts the substring `runtime_graphics_export` is absent. A reintroduced
+`import matplotlib.pyplot`, or a call routed through any other module, passes.
+
+Meanwhile the live trap is invisible to it:
+`graphics_export_suffixes_for_format(format_key, filetypes=None)`
+(`matplotlib_features.py:89`) defaults to `runtime_graphics_export_filetypes()`,
+whose own docstring says nothing on a GUI or start-up path may call it because it
+resolves an interactive backend. The only in-repo caller passes `filetypes`
+explicitly, so the landmine is armed for the next caller.
+
+The behavioural guard is three lines: snapshot `sys.modules`, build the menu,
+assert `matplotlib.pyplot` did not appear. Then decide whether that default
+argument should exist at all.
+
+### Acceptance criteria
+
+- [ ] The guard fails if any start-up path imports `matplotlib.pyplot`, however
+      it is reached.
+- [ ] Verified by deliberately adding such an import and watching it fail.
+- [ ] A caller cannot reach `runtime_graphics_export_filetypes()` by omitting an
+      argument.
+
+### Blocked by
+
+None - can start immediately.
+
+## Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
+
+### Type
+
+`HITL`
+
+### What to build
+
+This branch widened the menu-contribution `enabled` key to accept a callable, so
+six plugins now pass `self.has_active_editable_figure`. Hyde resolves it in
+`resolve_menu_enabled` (`shared/plugin.py:470`), but the framework base class
+Hyde subclasses does `action.setEnabled(enabled)` on the raw value
+(`labscript-utils/labscript_utils/plugins.py:1053`) and documents `enabled` as a
+plain action property (line 353).
+
+A bound method is truthy, so any Hyde contribution rendered through the base path
+becomes permanently enabled — including copy actions that must be disabled
+without an active figure, whose shortcuts would then fire on nothing.
+`HydeMenuContext.render` fully overrides `render` today, so this is latent.
+
+Needs a decision, and it is cross-repo: extend the framework's contract and its
+documentation, or keep the extension in Hyde and make the base path unreachable
+by construction rather than by coincidence.
+
+### Acceptance criteria
+
+- [ ] A callable `enabled` cannot silently render as permanently enabled.
+- [ ] The contract is documented where the key is documented.
+- [ ] If the framework changes, the labscript-utils change is a separate,
+      reviewable commit in that repository.
+
+### Blocked by
+
+None - needs a decision, not other slices.
+
+## Findings deliberately not filed
+
+- **A stale payload with an empty `request_msg_id`** can satisfy a later copy
+  (`save_graphics_dialog/__init__.py:297`). Triggered only when
+  `_executing_request_id()` returns `""`, which needs a degraded or foreign
+  kernel; a healthy Hyde kernel always names the request. Recorded in
+  `issues/KERNEL_REQUEST_OWNER.md` as the known stray-payload gap.
+- **`session_source_has_statements` catches only `SyntaxError`**, so a
+  `session.py` with a UTF-8 BOM is classed as having statements and fails in the
+  kernel with `invalid non-printable character U+FEFF`. That is the intended
+  "the kernel's error is more use than silence" behaviour; noted so the next
+  reader does not mistake it for an encoding bug.
+- **`scripts/hooks/pre-commit` uses bare `python`**, which resolves to the base
+  environment rather than the `labscript` env Hyde runs in. Both carry matplotlib
+  3.11.1 today, so the generated-table check is correct by coincidence. Worth an
+  absolute interpreter path, but it is a one-line hook change with no user-facing
+  behaviour.
+
+## What the review cleared
+
+Worth recording, because these were the branch's riskiest areas and they held up
+under direct probing:
+
+- **The two-transport copy race.** All four orderings of reply and payload, plus
+  kernel-abandonment, end with the copy settled, the override-cursor stack back
+  to zero, and exactly one outcome message. Real timers were driven, including
+  `busy_cursor_hold_ms = 0` and a copy settling before the busy timer fires.
+- **`_pending_requests`.** No leak reachable, including across `stop()`/`start()`.
+  It ignores replies it never issued, replies with no `parent_header`, and
+  non-`execute_reply` messages for its own id; it settles exactly once on a
+  duplicate reply.
+- **The `QUtiMimeConverter` subclass.** Declines every MIME type it does not
+  claim, round-trips PDF bytes both directions, and returns `[]` rather than
+  crashing on non-buffer data.
+- **`hyde.task_complete` removal and the `shared/figure.py` deletion.** Both
+  fully migrated: no stale caller anywhere, including saved projects on this
+  machine, and all 26 symbols from the deleted module accounted for.
