@@ -34,6 +34,28 @@ def _reply_error_text(content):
     return ename or evalue or status
 
 
+def _notify_consumer(request, on_finished):
+    """Hand a settled request to its consumer, containing any failure.
+
+    A raising consumer must not escape either settle path. `_settle_request`
+    runs inside `_on_shell_message`, a Qt slot invoked from C++, where an
+    unhandled Python exception calls `qFatal()` and aborts the process rather
+    than raising. `_abandon_pending_requests` runs inside `stop()` inside the
+    kernel-crash handler, where escaping would skip the restart on the next line
+    and leave Hyde with no kernel and no kernel watcher. Consumers are torn down
+    on their own schedule -- a subwindow closed while a reply was in flight --
+    so this is containment, the same as `HydeApp.emit_plugin_event` gives a
+    plugin event handler, not a retry.
+    """
+    try:
+        on_finished(request)
+    except Exception:
+        LOGGER.exception(
+            "Kernel request consumer '%s' failed.",
+            getattr(on_finished, "__qualname__", None) or repr(on_finished),
+        )
+
+
 class KernelRequest:
     """One GUI-initiated kernel request, from sent to settled.
 
@@ -145,7 +167,9 @@ class FrontendKernelService(QtCore.QObject):
         Returns a `KernelRequest`, or None if there is no kernel to ask.
         `on_finished(request)` is called exactly once: when the kernel answers,
         or when the kernel goes away with the request still outstanding. It is
-        never called for a timeout, because there is none.
+        never called for a timeout, because there is none. If it raises, the
+        failure is logged against the consumer and goes no further -- it cannot
+        take down the settle path other requests share.
         """
         msg_id = self.execute(code, silent=True)
         if msg_id is None:
@@ -170,7 +194,7 @@ class FrontendKernelService(QtCore.QObject):
             request.settle(KernelRequest.RAN)
         else:
             request.settle(KernelRequest.RAISED, _reply_error_text(content))
-        on_finished(request)
+        _notify_consumer(request, on_finished)
 
     def _abandon_pending_requests(self, reason):
         # A dead kernel settles every outstanding request at once. Nothing is
@@ -179,7 +203,7 @@ class FrontendKernelService(QtCore.QObject):
         self._pending_requests.clear()
         for request, on_finished in entries:
             request.settle(KernelRequest.ABANDONED, reason)
-            on_finished(request)
+            _notify_consumer(request, on_finished)
 
     def shutdown_kernel(self):
         if self._kernel_client is None:

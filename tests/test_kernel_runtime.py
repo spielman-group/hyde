@@ -77,6 +77,23 @@ class FinishedCollector:
         self.finished.append(request)
 
 
+class RaisingConsumer:
+    """A consumer torn down mid-flight: it raises when the reply arrives.
+
+    Stands in for a real one -- `_on_session_restore_command_finished` reaching a
+    subwindow `session.py` already tore down, or `_fail_copy` touching a
+    statusbar during teardown.
+    """
+
+    def __init__(self, message="the consumer is gone"):
+        self.message = message
+        self.calls = []
+
+    def on_finished(self, request):
+        self.calls.append(request)
+        raise RuntimeError(self.message)
+
+
 class ReplyCollector:
     """Bound-method signal receiver; see STYLE.md on Qt receiver lifetimes."""
 
@@ -361,6 +378,119 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertFalse(request.ran())
         self.assertTrue(request.error)
         self.assertEqual(service.pending_requests(), ())
+
+    # The replies below travel over FakeSignal rather than a real Qt signal on
+    # purpose: an escaping exception then fails the test, where a real signal
+    # would reach Qt's qFatal() and abort the whole suite process.
+    def test_a_raising_consumer_does_not_stop_the_next_reply_settling(self):
+        service, client = self._ready_service_with_client()
+        raiser = RaisingConsumer()
+        collector = FinishedCollector()
+
+        doomed = service.request("doomed()", on_finished=raiser.on_finished)
+        survivor = service.request("survivor()", on_finished=collector.collect)
+
+        with self.assertLogs("hyde", level="ERROR") as logs:
+            client.shell_channel.message_received.emit(
+                self._execute_reply(doomed.msg_id, {"status": "ok"})
+            )
+        client.shell_channel.message_received.emit(
+            self._execute_reply(survivor.msg_id, {"status": "ok"})
+        )
+
+        self.assertEqual(raiser.calls, [doomed])
+        self.assertTrue(doomed.ran())
+        self.assertEqual(collector.finished, [survivor])
+        self.assertTrue(survivor.ran())
+        self.assertEqual(service.pending_requests(), ())
+        output = "\n".join(logs.output)
+        self.assertIn("RaisingConsumer.on_finished", output)
+        self.assertIn("the consumer is gone", output)
+
+    def test_a_raising_consumer_does_not_stop_the_rest_being_abandoned(self):
+        service, _ = self._ready_service_with_client()
+        raiser = RaisingConsumer()
+        collector = FinishedCollector()
+
+        doomed = service.request("doomed()", on_finished=raiser.on_finished)
+        survivor = service.request("survivor()", on_finished=collector.collect)
+
+        with self.assertLogs("hyde", level="ERROR") as logs:
+            service.stop()
+
+        self.assertEqual(raiser.calls, [doomed])
+        self.assertEqual(collector.finished, [survivor])
+        self.assertFalse(survivor.is_pending())
+        self.assertFalse(survivor.ran())
+        self.assertTrue(survivor.error)
+        self.assertEqual(service.pending_requests(), ())
+        self.assertIn("RaisingConsumer.on_finished", "\n".join(logs.output))
+
+    def test_a_raising_consumer_during_a_kernel_crash_still_restarts_the_runtime(self):
+        """Losing the kernel must not also lose the watcher that would notice."""
+
+        class FakeProcess:
+            def poll(self):
+                return None
+
+        class FakeProcessTree:
+            def __init__(self):
+                self.launched = []
+
+            def subprocess(self, path, args=None, **kwargs):
+                del args, kwargs
+                self.launched.append(path)
+                return "to-kernel", "from-kernel", FakeProcess()
+
+        class FakeRuntimeHelper:
+            def __init__(self, *args, **kwargs):
+                del args, kwargs
+                self.started = False
+
+            def start(self):
+                self.started = True
+
+            def stop(self):
+                return None
+
+        service, _ = self._ready_service_with_client()
+        self.addCleanup(service.stop)
+        raiser = RaisingConsumer()
+        doomed = service.request("doomed()", on_finished=raiser.on_finished)
+
+        process_tree = FakeProcessTree()
+        plugin = KernelRuntimePlugin({})
+        plugin.frontend_kernel_service = service
+        plugin.runtime_helper = FakeRuntimeHelper()
+        plugin.kernel_process = FakeProcess()
+        plugin.services = {
+            "process_tree": process_tree,
+            "emit_plugin_event": lambda name, data=None: None,
+            "on_kernel_crashed": lambda: None,
+            "enter_no_project_state": lambda: None,
+            "activate_project": lambda path: None,
+            "on_project_state_result": lambda data: None,
+            "request_gui_quit": lambda: None,
+            "get_shutting_down": lambda: False,
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch(
+                "hyde.user_interface.plugins.kernel_runtime.CONNECTION_FILE",
+                os.path.join(tmpdir, "kernel.json"),
+            ):
+                with patch(
+                    "hyde.user_interface.plugins.kernel_runtime.RuntimeHelper",
+                    FakeRuntimeHelper,
+                ):
+                    with self.assertLogs("hyde", level="ERROR") as logs:
+                        plugin._handle_kernel_crash()
+
+        self.assertEqual(raiser.calls, [doomed])
+        self.assertFalse(doomed.is_pending())
+        self.assertEqual(process_tree.launched, [KERNEL_LAUNCHER])
+        self.assertTrue(plugin.runtime_helper.started)
+        self.assertIn("RaisingConsumer.on_finished", "\n".join(logs.output))
 
     def test_kernel_request_is_refused_when_there_is_no_kernel(self):
         service = FrontendKernelService("/tmp/kernel.json")

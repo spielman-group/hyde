@@ -15,7 +15,7 @@ exercised.
 - [x] Slice 1: Stop A Figure Macro Re-Run From Raising
 - [x] Slice 2: Stop A Macro From Adopting And Overwriting Another Figure
 - [x] Slice 3: Trivial Fixes, Bundled
-- [ ] Slice 4: Survive A Raising Request Consumer
+- [x] Slice 4: Survive A Raising Request Consumer
 - [ ] Slice 5: Report Only What Reached The Clipboard
 - [ ] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 - [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
@@ -271,13 +271,13 @@ permanently and silently.
 
 ### Acceptance criteria
 
-- [ ] A consumer that raises in `on_finished` does not abort the process.
-- [ ] The failure is logged with the consumer identified.
-- [ ] One raising consumer does not prevent other pending requests from
+- [x] A consumer that raises in `on_finished` does not abort the process.
+- [x] The failure is logged with the consumer identified.
+- [x] One raising consumer does not prevent other pending requests from
       settling.
-- [ ] A raising consumer during `_handle_kernel_crash` still leaves the runtime
+- [x] A raising consumer during `_handle_kernel_crash` still leaves the runtime
       restarted.
-- [ ] A test drives a raising consumer through the real settle path.
+- [x] A test drives a raising consumer through the real settle path.
 
 ### Blocked by
 
