@@ -138,6 +138,27 @@ nothing — the same root cause as Slice 1. Decide whether the fallback should
 exist at all once a re-run can register its figure properly, and if it stays,
 it must not adopt a figure the macro did not build.
 
+**A second defect in the same area, found while landing Slice 1 and reproduced
+independently.** A re-run silently un-parameterises the figure's saved macro.
+`FigureHyde.__init__` sets `_hyde_build_session` once
+(`hyde/matplotlib_backend.py:1732`) and never updates it, and
+`AxesHyde.plot` resolves operand names against that stored session's
+`named_values` (`:1659`), which is keyed by `id(value)`. On a re-run with fresh
+arrays no id matches, so a trace's `y_source` degrades from
+`{'kind': 'name', 'value': 'y'}` to `{'kind': 'array_literal', ...}` and the
+figure stops being namespace-tracked.
+
+Observed across three runs of one macro: `y_source` is `name` on the first run
+and `array_literal` on every run after. The figure still draws correctly; what
+is lost is its ability to be saved as a macro that takes its data as a
+parameter. This was unreachable before Slice 1 — a re-run either raised or
+stacked axes — so it is newly exposed rather than newly broken.
+
+The candidate fix is for `AxesHyde.plot` to prefer `_current_build_session()`
+over the figure's stored session, but that is the same ownership question as the
+adoption fallback: which session is authoritative while a macro runs. Decide
+both together.
+
 ### Acceptance criteria
 
 - [ ] A macro that creates nothing and returns nothing does not adopt a live
@@ -147,6 +168,8 @@ it must not adopt a figure the macro did not build.
 - [ ] An adopted figure's `_hyde_bound_values`, `_hyde_source_artifact` and
       `_hyde_defaults` are never replaced by a macro that did not build it.
 - [ ] A legitimate re-run still updates the figure it rebuilds.
+- [ ] A re-run keeps a trace's `y_source` as a namespace name, so the figure's
+      saved macro still takes its data as a parameter.
 
 ### Blocked by
 
@@ -566,6 +589,16 @@ by construction rather than by coincidence.
 ### Blocked by
 
 None - needs a decision, not other slices.
+
+## Environment notes
+
+- **The suite can hang for ~15 minutes with no zlog server running.** The kernel
+  launcher's `ensure_connected_to_zlog` starts a daemon, whose cold start can
+  run past its 15-second ping while matplotlib builds its font cache;
+  labscript-utils' excepthook then opens a **Tk** dialog that blocks forever.
+  `QT_QPA_PLATFORM=offscreen` does not affect Tk, so nothing suppresses it.
+  Starting a zlog daemon first — `python -m zprocess.zlog`, the same one the
+  product starts for itself — avoids it.
 
 ## Findings deliberately not filed
 
