@@ -291,6 +291,93 @@ class TestFigureCommActions(unittest.TestCase):
             [list(line.get_ydata()) for line in neighbour.axes[0].lines],
         )
 
+    def test_a_failed_macro_leaves_a_neighbour_like_a_figure_it_never_touched(self):
+        """A failed macro leaves no record of having run, either.
+
+        A figure publishes what was done to it alongside what it holds, and
+        a plot from a macro that raised is not something that was done to
+        this figure. The figure the failed macro drew on is compared against
+        a second figure built the same way from the same data and never
+        touched, so what to expect comes from an independent figure rather
+        than from the one under test.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            fig.add_subplot(111).plot(y)
+            return fig
+
+        @hyde.figure(register=False)
+        def Graph1(y):
+            fig = plt.figure("Graph1")
+            fig.clear()
+            fig.add_subplot(111).plot(y)
+            return fig
+
+        drawn_on = Graph0([1.0, 4.0, 9.0])
+        untouched = Graph1([1.0, 4.0, 9.0])
+
+        @hyde.figure(register=False)
+        def Doomed(z):
+            plt.figure("Graph0").axes[0].plot(z)
+            return None
+
+        with self.assertRaisesRegex(ValueError, "must create exactly one figure"):
+            Doomed([7.0, 7.0, 7.0])
+
+        self.assertEqual(
+            figure_snapshot_payload(
+                untouched,
+                untouched.canvas.manager.num,
+            )["command_log"],
+            figure_snapshot_payload(
+                drawn_on,
+                drawn_on.canvas.manager.num,
+            )["command_log"],
+        )
+
+    def test_a_failed_macro_leaves_no_trace_on_a_neighbour_hyde_cannot_read_back(self):
+        """The rewind cannot lean on Hyde re-reading the live figure.
+
+        Hyde re-derives a first-class figure's recreation state from its live
+        artists whenever it publishes it, which hides a stale trace by
+        accident as long as that read-back succeeds. A macro can leave the
+        neighbour in a state Hyde cannot read back, and then the rewind is
+        the only thing standing between the user and a figure that
+        regenerates a trace nothing drew.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(y):
+            fig = plt.figure("Graph0")
+            fig.clear()
+            fig.add_subplot(111).plot(y)
+            return fig
+
+        neighbour = Graph0([1.0, 4.0, 9.0])
+
+        @hyde.figure(register=False)
+        def Doomed(z):
+            axis = plt.figure("Graph0").axes[0]
+            axis.plot(z)
+            # Re-pointing a line at 2D data leaves a figure Hyde cannot
+            # describe, so reading the live figure back fails from here on.
+            axis.lines[0].set_data(np.zeros((2, 3)), np.zeros((2, 3)))
+            return None
+
+        with self.assertRaisesRegex(ValueError, "must create exactly one figure"):
+            Doomed([7.0, 7.0, 7.0])
+
+        hyde.refresh_figure(neighbour, use_bound_values=True)
+        self.assertEqual(
+            [[1.0, 4.0, 9.0]],
+            [list(line.get_ydata()) for line in neighbour.axes[0].lines],
+        )
+
     def test_a_trace_plotted_outside_a_macro_joins_a_first_class_figures_ir(self):
         """A figure Hyde owns keeps describing itself after the macro returns.
 

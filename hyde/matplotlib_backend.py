@@ -332,8 +332,20 @@ def abandon_figure_build_session(session):
     Drawing on a neighbouring figure is deliberate, and when the macro
     succeeds that trace belongs to the neighbour from then on. A macro that
     raised said nothing, so the neighbour goes back to the figure it was:
-    otherwise a run that ended in an error still moves another figure's IR,
-    and nothing later says which trace came from a macro that failed.
+    otherwise a run that ended in an error still moves another figure's
+    recreation state, and nothing later says which trace came from a macro
+    that failed.
+
+    Three things come back, and each is here for its own reason:
+
+    - the line, because the IR is re-derived from the live artists every time
+      the figure is published (`_refresh_first_class_figure_metadata`), so
+      removing the line is what actually settles the published trace list;
+    - the command log, because nothing re-derives it from live state;
+    - the IR, for when that re-derivation is not available. It gives up and
+      leaves the IR alone if it cannot read the live figure back, and a macro
+      can leave a neighbour in exactly that state, so the snapshot is the
+      only thing left. It looks redundant on the healthy path; it is not.
 
     The figure the macro was building is left as it stands. Its live artists
     cannot be put back -- a rebuild starts by clearing the figure -- so
