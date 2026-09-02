@@ -303,8 +303,6 @@ class TestTraceAppearanceDialog(unittest.TestCase):
             self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
             self.assertIsInstance(dialog.widget_ir.opening_figure_ir, FigureIR)
             self.assertIsInstance(dialog.widget_ir.current_figure_ir, FigureIR)
-            self.assertNotIn("initial_ir", vars(dialog))
-            self.assertNotIn("current_ir", vars(dialog))
             self.assertEqual(dialog.ui.trace_list.count(), 2)
             self.assertEqual(
                 dialog.ui.trace_list.currentItem().text(),

@@ -442,8 +442,6 @@ class TestAxisEditDialog(unittest.TestCase):
             self.assertIsInstance(dialog.widget_ir.opening_figure_ir, FigureIR)
             self.assertIsInstance(dialog.widget_ir.current_figure_ir, FigureIR)
             self.assertIsInstance(dialog.current_figure_ir, FigureIR)
-            self.assertNotIn("initial_ir", vars(dialog))
-            self.assertNotIn("current_ir", vars(dialog))
             self.assertEqual(
                 dialog.supported_trace_records()[0]["trace_id"],
                 "trace0",

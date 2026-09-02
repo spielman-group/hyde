@@ -255,7 +255,7 @@ figure by its stable Hyde name and calls a Hyde runtime helper:
 
 ```
 fig = hyde.get_figure('Graph12')
-hyde.copy_figure(fig, format='pdf', dpi='figure')
+hyde.copy_figure(fig, formats=('pdf',), dpi='figure')
 ```
 
 Copy is a distinct command from save rather than a save with a null target: copy

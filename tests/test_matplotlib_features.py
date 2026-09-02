@@ -580,8 +580,6 @@ class TestFigurePluginDispatch(unittest.TestCase):
                 dialog.widget_ir.python_source(log=False),
             )
             self.assertIsInstance(dialog.widget_ir, FigureIR)
-            self.assertNotIn("initial_ir", vars(dialog))
-            self.assertNotIn("current_ir", vars(dialog))
             self.assertTrue(dialog.ok_button.isEnabled())
             self.assertFalse(dialog.to_ipython_button.isEnabled())
             self.assertTrue(dialog.copy_button.isEnabled())

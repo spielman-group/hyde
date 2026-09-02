@@ -223,6 +223,15 @@ class FigureIR(HydeIR):
         object.__setattr__(self, "creation_x_name", normalize_optional_text(self.creation_x_name))
         object.__setattr__(self, "output_path", normalize_optional_text(self.output_path))
         object.__setattr__(self, "output_format", str(self.output_format or "pdf"))
+        object.__setattr__(
+            self,
+            "clipboard_formats",
+            tuple(
+                str(item).strip().lower()
+                for item in (self.clipboard_formats or ())
+                if str(item).strip()
+            ),
+        )
         # 'figure' defers DPI resolution to the kernel's live figure; every
         # other value is a concrete integer.
         object.__setattr__(
@@ -258,6 +267,7 @@ class FigureIR(HydeIR):
             "creation_x_name": self.creation_x_name,
             "output_path": self.output_path,
             "output_format": self.output_format,
+            "clipboard_formats": self.clipboard_formats,
             "dpi": self.dpi,
             "transparent": self.transparent,
             "size_inches": self.size_inches,
@@ -417,9 +427,7 @@ class FigureIR(HydeIR):
             use_bound_values=False,
             output_path=None,
             output_format=None,
-            clipboard_formats=tuple(
-                str(item).strip().lower() for item in clipboard_formats if str(item).strip()
-            ),
+            clipboard_formats=clipboard_formats,
             dpi=self.FIGURE_DPI,
             transparent=False,
             size_inches=None,
@@ -1154,6 +1162,7 @@ class FigureIRDiff(FigureIR, HydeIRDiff):
             creation_x_name=current_ir.creation_x_name,
             output_path=current_ir.output_path,
             output_format=current_ir.output_format,
+            clipboard_formats=current_ir.clipboard_formats,
             dpi=current_ir.dpi,
             transparent=current_ir.transparent,
             size_inches=current_ir.size_inches,

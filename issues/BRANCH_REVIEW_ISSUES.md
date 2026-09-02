@@ -17,7 +17,7 @@ exercised.
 - [ ] Slice 3: Trivial Fixes, Bundled
 - [ ] Slice 4: Survive A Raising Request Consumer
 - [ ] Slice 5: Report Only What Reached The Clipboard
-- [ ] Slice 6: Give Clipboard Policy A Home Outside The Matplotlib Lowerer
+- [ ] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 - [ ] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 - [ ] Slice 8: One Format Field On FigureIR
 - [ ] Slice 9: Detect A Missing Dependency Without Guessing At Signatures
@@ -319,50 +319,55 @@ describe that rather than what it asked for.
 
 None - can start immediately.
 
-## Slice 6: Give Clipboard Policy A Home Outside The Matplotlib Lowerer
+## Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 
 ### Type
 
-`HITL`
+`AFK`
 
 ### What to build
 
-Two placement violations that are one decision.
+Two placement violations with one destination.
 
 `hyde/features/matplotlib_features.py:159` holds `GRAPHICS_CLIPBOARD_MIME_TYPES`
 and `GRAPHICS_CLIPBOARD_REPRESENTATIONS`, so a package-pure matplotlib lowerer
-now owns clipboard MIME types (`application/pdf`, `image/png`, `text/plain`) and
+owns clipboard MIME types (`application/pdf`, `image/png`, `text/plain`) and
 user-facing menu labels (`Vector`, `Image`, `LaTeX`). IR-CONTROL: "The boundary
 is package-pure: `hyde_features.py` emits only Hyde strings,
 `matplotlib_features.py` emits only matplotlib strings." Neither a MIME type nor
 a menu label is a matplotlib string.
 
 `hyde/user_interface/shared/clipboard_platform.py` decides which format a vector
-copy renders and is imported by exactly one plugin. IR-CONTROL Placement Rules:
-"Supporting material that carries runtime authority for one IR family belongs in
-that plugin directory, not in `hyde/user_interface/shared/`", and "Do not hide
-feature authority in `shared/` modules. This file-shape rule is first-class." It
-was put in `shared/` on the speculative grounds that later table and terminal
-copy would use it — the justification the rule exists to refuse.
+copy renders and registers the platform's mime converters. IR-CONTROL Placement
+Rules: "Supporting material that carries runtime authority for one IR family
+belongs in that plugin directory, not in `hyde/user_interface/shared/`", and "Do
+not hide feature authority in `shared/` modules. This file-shape rule is
+first-class."
 
-Needs a decision before implementation: does clipboard representation policy
-belong in a plugin-local module under `save_graphics_dialog/`, or is a clipboard
-a genuinely cross-family concern that earns its own feature module? Table and
-terminal copy are both planned but neither exists. The rule says place it where
-it is used now.
+**The destination is settled and is not part of this slice's work.** The figure
+clipboard is part of the figure export feature — `SPEC.md` states that `Copy`
+and `Copy As` are "the clipboard half of the same feature" as
+`Save Graphics...` — so all of it belongs in
+`hyde/user_interface/plugins/save_graphics_dialog/`, beside the `clipboard.py`
+and `copy_request.py` that are already there.
+
+Both files were misplaced by reasoning about a table and terminal copy that do
+not exist. When they arrive they will make their own decision; the rule is to
+place authority where it is used now.
 
 ### Acceptance criteria
 
 - [ ] `matplotlib_features.py` contains no MIME types and no user-facing labels.
 - [ ] No module under `hyde/user_interface/shared/` owns clipboard policy.
-- [ ] The chosen placement is justified against the quoted Placement Rules in
-      the commit message.
+- [ ] The moved code lives under `save_graphics_dialog/`.
+- [ ] `hyde/features/` no longer needs importing for anything clipboard-shaped.
 - [ ] Copy behaviour is unchanged: all three representations still paste, and a
-      vector still publishes natively on macOS.
+      vector still publishes natively on macOS. Verify the last one against the
+      system clipboard, not through Qt's own reading of it.
 
 ### Blocked by
 
-None - needs a decision, not other slices.
+None - can start immediately.
 
 ## Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 
@@ -636,7 +641,8 @@ Four things Slice 2 surfaced in the figure backend and deliberately left alone.
 
 ## Behaviour change accepted in Slice 2
 
-Recorded because it changes what existing user code does.
+Accepted by the maintainer. Recorded because it changes what existing user code
+does.
 
 A hand-written `@hyde.figure` macro that rebuilds a figure **without clearing
 it** now raises on the second run, with a message naming the missing

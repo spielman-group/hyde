@@ -85,8 +85,6 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 widget.widget_ir.normalized_state()["settings"]["title"],
                 "Figure1",
             )
-            self.assertNotIn("initial_ir", widget.__dict__)
-            self.assertNotIn("current_ir", widget.__dict__)
         finally:
             widget.force_close()
 

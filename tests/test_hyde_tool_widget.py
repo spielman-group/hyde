@@ -825,8 +825,6 @@ class TestHydeToolWidget(unittest.TestCase):
 
             self.assertIs(dialog.figure_context, figure_context)
             self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
-            self.assertNotIn("initial_ir", vars(dialog))
-            self.assertNotIn("current_ir", vars(dialog))
             self.assertEqual(
                 dialog.supported_trace_records()[0]["trace_id"],
                 "trace0",

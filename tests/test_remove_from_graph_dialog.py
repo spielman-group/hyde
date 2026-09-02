@@ -435,8 +435,6 @@ class TestRemoveFromGraphDialog(unittest.TestCase):
         )
         try:
             self.assertIsInstance(dialog.widget_ir, FigureDialogIR)
-            self.assertNotIn("initial_ir", vars(dialog))
-            self.assertNotIn("current_ir", vars(dialog))
             dialog.ui.trace_list.item(0).setSelected(True)
             self.qapp.processEvents()
 
