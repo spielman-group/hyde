@@ -110,7 +110,7 @@ class Plugin(KernelCommands, HydePlugin):
             return False
         source = (
             FigureIR(figure_name=figure_context.figure_name())
-            .with_copy_graphics(clipboard_formats=clipboard_formats)
+            .with_copy_graphics(output_formats=clipboard_formats)
             .python_source()
         )
         label = self._copy_label(representation)

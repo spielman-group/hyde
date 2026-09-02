@@ -209,24 +209,24 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
   patch Python from imported figure IR rather than using a separate semantic
   figure-action transport.
 - Figure clipboard copy is a distinct `FigureIR` copy command rather than a save
-  with a null target, so both validations stay honest. It carries `dpi='figure'`,
-  matplotlib's own sentinel, which lets the kernel resolve DPI against the live
-  figure instead of the GUI mirroring kernel state.
+  with a null target, so both validations stay honest. It carries no DPI, and
+  lowers to matplotlib's own `dpi='figure'` sentinel, which lets the kernel
+  resolve DPI against the live figure instead of the GUI mirroring kernel state.
 - That copy command lowers to a `hyde.copy_figure(...)` call rather than plain
   matplotlib. The clipboard is GUI-owned and matplotlib cannot express it, which
   is precisely the case the Hyde-helper allowance above is for.
-- `FigureIR` currently carries six commands on one dataclass, and eight of its
+- `FigureIR` currently carries six commands on one dataclass, and seven of its
   fields apply to only the two export-shaped ones. `validate()` and
   `python_source()` each branch on the command, so every new command adds a
   matching pair of branches that must stay in sync, and `dpi` already means
-  either a positive integer or the `'figure'` sentinel depending on which
+  either a positive integer or "defer to the live figure" depending on which
   command holds it.
 
   This is deliberate for the commands that exist: they all recreate or act on
   one figure, and splitting now would cost more than it saves. Treat a seventh
   command as the trigger to stop widening it. At that point extract the
   export-shaped commands into their own IR that composes `FigureIR`, rather than
-  adding a ninth conditional field and a sixth pair of branches.
+  adding an eighth conditional field and a sixth pair of branches.
 - Emitted strings that could plausibly be reused outside Hyde should prefer standard
   matplotlib/Python. Hyde public helpers are acceptable in emitted update strings only
   when they are the necessary or clearer contract for a Hyde-owned operation, not as a

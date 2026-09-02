@@ -19,7 +19,7 @@ exercised.
 - [x] Slice 5: Report Only What Reached The Clipboard
 - [x] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 - [x] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
-- [ ] Slice 8: One Format Field On FigureIR
+- [x] Slice 8: One Format Field On FigureIR
 - [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
       — probe deleted; the version floor still waits on the upstream `v2.28.0` tag
 - [ ] Slice 10: Retire `current_ir` And Its Second Source Of Truth
@@ -469,11 +469,11 @@ mechanical fixes simply disappear with the field.
 
 ### Acceptance criteria
 
-- [ ] `FigureIR` has one format field, normalized in `__post_init__` and carried
+- [x] `FigureIR` has one format field, normalized in `__post_init__` and carried
       by `FigureIRDiff` and `debug_state`.
-- [ ] Save validates exactly one format; copy validates at least one.
-- [ ] The `'figure'` dpi sentinel no longer requires a string in an `int` field.
-- [ ] Emitted Python is unchanged for both save and copy.
+- [x] Save validates exactly one format; copy validates at least one.
+- [x] The `'figure'` dpi sentinel no longer requires a string in an `int` field.
+- [x] Emitted Python is unchanged for both save and copy.
 
 ### Blocked by
 

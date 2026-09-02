@@ -99,7 +99,7 @@ class SaveGraphicsDialog(HydeFileDialog):
         selected_format = self.selected_export_format()
         return FigureIR(figure_name=self.figure_name()).with_save_graphics(
             selected_path,
-            output_format="pdf" if selected_format is None else selected_format.key,
+            output_formats=("pdf" if selected_format is None else selected_format.key,),
             dpi=self.selected_dpi(),
             transparent=self.selected_transparent(),
             size_inches=self.selected_size_override_inches(),

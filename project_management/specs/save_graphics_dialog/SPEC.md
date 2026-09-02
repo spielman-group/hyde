@@ -266,9 +266,10 @@ hyde.copy_figure(fig, formats=('pdf',), dpi='figure')
 ```
 
 Copy is a distinct command from save rather than a save with a null target: copy
-carries no output path and save requires one, so separate commands keep both
-validations honest and give the `'figure'` DPI sentinel a home where it is the
-only valid value.
+carries no output path and save requires one, and copy carries no DPI while save
+requires a positive one, so separate commands keep both validations honest. The
+`'figure'` DPI sentinel above is emitted by the copy command's lowering, which
+is the one place it is the only thing DPI can mean.
 
 The emitted call is a Hyde helper rather than plain matplotlib because the
 clipboard is GUI-owned and matplotlib cannot express it. `IR-CONTROL.md` permits a

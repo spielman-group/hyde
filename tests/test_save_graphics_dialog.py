@@ -290,7 +290,7 @@ class TestFigureCopyCommand(unittest.TestCase):
     """
 
     def test_copy_lowers_to_a_hyde_clipboard_call_on_the_looked_up_figure(self):
-        source = FigureIR(figure_name="Graph12").with_copy_graphics(clipboard_formats=('pdf',)).python_source(log=False)
+        source = FigureIR(figure_name="Graph12").with_copy_graphics(output_formats=('pdf',)).python_source(log=False)
 
         self.assertEqual(
             source.splitlines(),
@@ -305,7 +305,7 @@ class TestFigureCopyCommand(unittest.TestCase):
             with self.subTest(output_format=output_format):
                 source = (
                     FigureIR(figure_name="Graph12")
-                    .with_copy_graphics(clipboard_formats=(output_format,))
+                    .with_copy_graphics(output_formats=(output_format,))
                     .python_source(log=False)
                 )
                 self.assertIn(f"formats=({output_format!r},)", source)
@@ -313,7 +313,7 @@ class TestFigureCopyCommand(unittest.TestCase):
     def test_copy_always_resolves_a_figure_name_to_look_up(self):
         # The emitted Python has to name a figure for hyde.get_figure, so an
         # absent name falls back to the default the save path uses too.
-        source = FigureIR().with_copy_graphics(clipboard_formats=('pdf',)).python_source(log=False)
+        source = FigureIR().with_copy_graphics(output_formats=('pdf',)).python_source(log=False)
 
         self.assertRegex(source.splitlines()[0], r"^fig = hyde\.get_figure\('.+'\)$")
 
@@ -322,22 +322,152 @@ class TestFigureCopyCommand(unittest.TestCase):
         # took the wrong branch.
         with self.assertRaises(ValueError):
             dataclass_replace(
-                FigureIR(figure_name="Graph12").with_copy_graphics(clipboard_formats=('pdf',)),
+                FigureIR(figure_name="Graph12").with_copy_graphics(output_formats=('pdf',)),
                 output_path="/tmp/Graph12.pdf",
             ).validate()
 
-    def test_save_still_rejects_the_figure_dpi_sentinel(self):
-        # The sentinel is valid only where the kernel is meant to resolve it.
+    def test_copy_emits_the_dpi_sentinel_that_the_kernel_resolves(self):
+        # The IR defers DPI; the sentinel is matplotlib's, and it belongs in
+        # the emitted call rather than in the IR's dpi field.
+        source = FigureIR(figure_name="Graph12").with_copy_graphics().python_source(log=False)
+
+        self.assertIn("dpi='figure'", source)
+
+    def test_copy_ignores_the_output_options_a_save_would_honour(self):
+        # A figure IR that has been used for a save carries a DPI, a
+        # transparency and a size; copying it must not smuggle them into the
+        # clipboard call.
+        source = (
+            FigureIR(
+                figure_name="Graph12",
+                dpi=450,
+                transparent=True,
+                size_inches=(6.0, 4.0),
+            )
+            .with_copy_graphics(output_formats=('pdf', 'png'))
+            .python_source(log=False)
+        )
+
+        self.assertEqual(
+            source.splitlines(),
+            [
+                "fig = hyde.get_figure('Graph12')",
+                "hyde.copy_figure(fig, formats=('pdf', 'png'), dpi='figure')",
+            ],
+        )
+
+    def test_save_rejects_a_deferred_dpi(self):
+        # Deferring DPI to the live figure is a copy's contract. A save lowers
+        # to savefig, which is given a concrete number.
         with self.assertRaises(ValueError):
             FigureIR(figure_name="Graph12").with_save_graphics(
-                "/tmp/Graph12.pdf", dpi="figure"
+                "/tmp/Graph12.pdf", dpi=None
             ).validate()
 
     def test_copy_does_not_emit_savefig_or_touch_figure_size(self):
-        source = FigureIR(figure_name="Graph12").with_copy_graphics(clipboard_formats=('pdf',)).python_source(log=False)
+        source = FigureIR(figure_name="Graph12").with_copy_graphics(output_formats=('pdf',)).python_source(log=False)
 
         self.assertNotIn("savefig", source)
         self.assertNotIn("set_size_inches", source)
+
+
+class TestFigureExportFormatValidation(unittest.TestCase):
+    """One format list serves both export commands, so each has to police it.
+
+    A save writes one file and a clipboard holds several representations of one
+    content, so the same field means "exactly one" on one command and "at least
+    one" on the other. Nothing else can tell a caller that the second format it
+    asked a save for will be dropped.
+    """
+
+    def save(self, path="/tmp/Graph12.pdf", **kwargs):
+        return FigureIR(figure_name="Graph12").with_save_graphics(path, **kwargs)
+
+    def copy(self, **kwargs):
+        return FigureIR(figure_name="Graph12").with_copy_graphics(**kwargs)
+
+    def test_save_emits_the_one_format_it_was_given(self):
+        for output_format in ("pdf", "png", "svg", "jpg"):
+            with self.subTest(output_format=output_format):
+                source = self.save(
+                    f"/tmp/Graph12.{output_format}", output_formats=(output_format,)
+                ).python_source(log=False)
+
+                self.assertIn(f"format={output_format!r}", source)
+
+    def test_save_rejects_more_than_one_format(self):
+        # Accepted before the two format fields were merged: the extra formats
+        # sat in the field only copy read, and the savefig dropped them.
+        with self.assertRaises(ValueError):
+            self.save(output_formats=("pdf", "png")).validate()
+
+    def test_save_rejects_no_format_at_all(self):
+        for empty in ((), ("",), ("  ",)):
+            with self.subTest(output_formats=empty):
+                with self.assertRaises(ValueError):
+                    self.save(output_formats=empty).validate()
+
+    def test_save_takes_a_bare_format_name_as_one_format(self):
+        # Not as a sequence of one-character formats.
+        source = self.save("/tmp/Graph12.png", output_formats="png").python_source(log=False)
+
+        self.assertIn("format='png'", source)
+
+    def test_copy_accepts_one_format_or_several(self):
+        for output_formats in (("pdf",), ("pdf", "png"), ("pdf", "png", "svg")):
+            with self.subTest(output_formats=output_formats):
+                source = self.copy(output_formats=output_formats).python_source(log=False)
+
+                self.assertIn(f"formats={tuple(output_formats)!r}", source)
+
+    def test_copy_rejects_no_format_at_all(self):
+        for empty in ((), ("",), ("  ",)):
+            with self.subTest(output_formats=empty):
+                with self.assertRaises(ValueError):
+                    self.copy(output_formats=empty).validate()
+
+    def test_formats_are_normalized_before_they_reach_the_emitted_call(self):
+        source = self.copy(output_formats=(" PDF ", "PNG")).python_source(log=False)
+
+        self.assertIn("formats=('pdf', 'png')", source)
+
+    def test_a_diff_still_emits_the_command_it_was_built_from(self):
+        # The diff carries the whole export state, formats included; a diff
+        # that dropped them would emit a copy of the wrong thing, or none.
+        base = FigureIR().with_title("Graph12").with_items(["trace_a"])
+
+        self.assertEqual(
+            base.current_diff(self.copy(output_formats=("pdf", "png"))).python_source(log=False),
+            "fig = hyde.get_figure('Graph12')\n"
+            "hyde.copy_figure(fig, formats=('pdf', 'png'), dpi='figure')",
+        )
+        self.assertEqual(
+            base.current_diff(
+                self.save("/tmp/Graph12.png", output_formats=("png",), dpi=450, transparent=True)
+            ).python_source(log=False),
+            "fig = hyde.get_figure('Graph12')\n"
+            "fig.savefig('/tmp/Graph12.png', format='png', dpi=450, transparent=True)",
+        )
+
+    def test_the_debug_report_names_the_formats_the_command_will_emit(self):
+        # The report exists so a human can read what an IR is about to do; a
+        # format it will not honour, or a missing one, makes it a lying report.
+        self.assertEqual(
+            self.copy(output_formats=("pdf", "png")).debug_state()["output_formats"],
+            ("pdf", "png"),
+        )
+        self.assertEqual(
+            self.save(output_formats=("png",)).debug_state()["output_formats"],
+            ("png",),
+        )
+        self.assertEqual(
+            FigureIR()
+            .with_title("Graph12")
+            .with_items(["trace_a"])
+            .current_diff(self.copy(output_formats=("pdf", "png")))
+            .debug_state()["output_formats"],
+            ("pdf", "png"),
+        )
 
 
 class TestFigureCopyEndToEnd(unittest.TestCase):
@@ -1695,7 +1825,7 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
             self.assertIsInstance(dialog.widget_ir, FigureIR)
             expected_state = FigureIR(figure_name=dialog.figure_name()).with_save_graphics(
                 dialog.selected_path(),
-                output_format=dialog.selected_format_key,
+                output_formats=(dialog.selected_format_key,),
                 dpi=dialog.selected_dpi(),
                 transparent=dialog.selected_transparent(),
                 size_inches=dialog.selected_size_override_inches(),

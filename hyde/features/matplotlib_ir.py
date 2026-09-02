@@ -48,6 +48,14 @@ def normalize_figure_number(value):
     return int(value)
 
 
+def normalize_output_formats(value):
+    # A lone string is one format, not a sequence of one-character formats.
+    formats = (value,) if isinstance(value, str) else tuple(value or ())
+    return tuple(
+        str(item).strip().lower() for item in formats if str(item).strip()
+    )
+
+
 def normalize_size_inches(value):
     if value in (None, ""):
         return None
@@ -181,11 +189,13 @@ class FigureIR(HydeIR):
     use_bound_values: bool = False
     creation_x_name: str | None = None
     output_path: str | None = None
-    output_format: str = "pdf"
-    # Copy carries several representations of the same figure; save writes one
-    # file, so it uses output_format above.
-    clipboard_formats: tuple[str, ...] = ()
-    dpi: int = 300
+    # One format for a save, which writes one file; several for a copy, because
+    # a clipboard holds several representations of one content and the
+    # receiving application picks the one it understands.
+    output_formats: tuple[str, ...] = ()
+    # None defers resolution to the live figure, which is what a copy wants:
+    # the kernel owns the figure, so the GUI does not mirror its DPI.
+    dpi: int | None = None
     transparent: bool = False
     size_inches: tuple[float, float] | None = None
 
@@ -199,9 +209,6 @@ class FigureIR(HydeIR):
             "copy_graphics",
         }
     )
-
-    # Passed through as `dpi` to defer resolution to the kernel's live figure.
-    FIGURE_DPI = "figure"
 
     def __post_init__(self):
         object.__setattr__(self, "figure_state", normalize_figure_state(self.figure_state))
@@ -222,23 +229,8 @@ class FigureIR(HydeIR):
         object.__setattr__(self, "use_bound_values", bool(self.use_bound_values))
         object.__setattr__(self, "creation_x_name", normalize_optional_text(self.creation_x_name))
         object.__setattr__(self, "output_path", normalize_optional_text(self.output_path))
-        object.__setattr__(self, "output_format", str(self.output_format or "pdf"))
-        object.__setattr__(
-            self,
-            "clipboard_formats",
-            tuple(
-                str(item).strip().lower()
-                for item in (self.clipboard_formats or ())
-                if str(item).strip()
-            ),
-        )
-        # 'figure' defers DPI resolution to the kernel's live figure; every
-        # other value is a concrete integer.
-        object.__setattr__(
-            self,
-            "dpi",
-            self.FIGURE_DPI if self.dpi == self.FIGURE_DPI else int(self.dpi),
-        )
+        object.__setattr__(self, "output_formats", normalize_output_formats(self.output_formats))
+        object.__setattr__(self, "dpi", None if self.dpi is None else int(self.dpi))
         object.__setattr__(self, "transparent", bool(self.transparent))
         object.__setattr__(self, "size_inches", normalize_size_inches(self.size_inches))
 
@@ -266,8 +258,7 @@ class FigureIR(HydeIR):
             "use_bound_values": self.use_bound_values,
             "creation_x_name": self.creation_x_name,
             "output_path": self.output_path,
-            "output_format": self.output_format,
-            "clipboard_formats": self.clipboard_formats,
+            "output_formats": self.output_formats,
             "dpi": self.dpi,
             "transparent": self.transparent,
             "size_inches": self.size_inches,
@@ -286,23 +277,19 @@ class FigureIR(HydeIR):
                 raise ValueError("Figure save_graphics requires figure_name.")
             if not self.output_path:
                 raise ValueError("Figure save_graphics requires output_path.")
-            if self.dpi == self.FIGURE_DPI or not isinstance(self.dpi, int):
-                raise ValueError("Figure save_graphics requires a positive integer dpi.")
-            if self.dpi <= 0:
+            # One file, so one format: a second format would be silently
+            # dropped by the savefig this lowers to.
+            if len(self.output_formats) != 1:
+                raise ValueError("Figure save_graphics requires exactly one output format.")
+            if self.dpi is None or self.dpi <= 0:
                 raise ValueError("Figure save_graphics requires a positive dpi.")
         if self.command == "copy_graphics":
             if not self.figure_name:
                 raise ValueError("Figure copy_graphics requires figure_name.")
-            if not self.clipboard_formats:
-                raise ValueError("Figure copy_graphics requires clipboard_formats.")
+            if not self.output_formats:
+                raise ValueError("Figure copy_graphics requires at least one output format.")
             if self.output_path:
                 raise ValueError("Figure copy_graphics does not take an output_path.")
-            if self.dpi != self.FIGURE_DPI and not (
-                isinstance(self.dpi, int) and self.dpi > 0
-            ):
-                raise ValueError(
-                    "Figure copy_graphics requires dpi='figure' or a positive integer."
-                )
         return self
 
     def normalized_state(self):
@@ -405,12 +392,12 @@ class FigureIR(HydeIR):
             use_bound_values=False,
         )
 
-    def with_copy_graphics(self, *, figure_name=None, clipboard_formats=("pdf",)):
+    def with_copy_graphics(self, *, figure_name=None, output_formats=("pdf",)):
         """Return an IR that copies the figure to the clipboard.
 
         Copy carries no output path and defers DPI to the kernel, so it is a
-        separate command rather than a save with a null target. It carries
-        several formats rather than one: a clipboard holds several
+        separate command rather than a save with a null target. It may carry
+        several formats where a save carries one: a clipboard holds several
         representations of the same content, and the receiving application
         picks the one it understands.
         """
@@ -426,9 +413,8 @@ class FigureIR(HydeIR):
             figure_number=None,
             use_bound_values=False,
             output_path=None,
-            output_format=None,
-            clipboard_formats=clipboard_formats,
-            dpi=self.FIGURE_DPI,
+            output_formats=output_formats,
+            dpi=None,
             transparent=False,
             size_inches=None,
         )
@@ -438,7 +424,7 @@ class FigureIR(HydeIR):
         output_path,
         *,
         figure_name=None,
-        output_format="pdf",
+        output_formats=("pdf",),
         dpi=300,
         transparent=False,
         size_inches=None,
@@ -455,7 +441,7 @@ class FigureIR(HydeIR):
             figure_number=None,
             use_bound_values=False,
             output_path=output_path,
-            output_format=output_format,
+            output_formats=output_formats,
             dpi=dpi,
             transparent=transparent,
             size_inches=size_inches,
@@ -1104,7 +1090,7 @@ class FigureIR(HydeIR):
         if self.command == "copy_graphics":
             return figure_graphics_copy_source(
                 self.figure_name,
-                clipboard_formats=self.clipboard_formats,
+                output_formats=self.output_formats,
                 dpi=self.dpi,
             )
         if self.command == "save_graphics":
@@ -1113,7 +1099,8 @@ class FigureIR(HydeIR):
                 figure_graphics_export_command_source(
                     self.figure_name,
                     self.output_path,
-                    output_format=self.output_format,
+                    # validate() has already held a save to exactly one format.
+                    output_format=self.output_formats[0],
                     dpi=self.dpi,
                     transparent=self.transparent,
                     size_inches=self.size_inches,
@@ -1161,8 +1148,7 @@ class FigureIRDiff(FigureIR, HydeIRDiff):
             use_bound_values=current_ir.use_bound_values,
             creation_x_name=current_ir.creation_x_name,
             output_path=current_ir.output_path,
-            output_format=current_ir.output_format,
-            clipboard_formats=current_ir.clipboard_formats,
+            output_formats=current_ir.output_formats,
             dpi=current_ir.dpi,
             transparent=current_ir.transparent,
             size_inches=current_ir.size_inches,

@@ -237,7 +237,7 @@ class TestGraphicsExportFormats(unittest.TestCase):
 
         figure_export = FigureIR(figure_name="Figure9").with_save_graphics(
             "/tmp/Figure9.png",
-            output_format="png",
+            output_formats=("png",),
             dpi=450,
             transparent=True,
             size_inches=(4.0, 2.5),
