@@ -1,4 +1,7 @@
+import json
 import os
+import subprocess
+import sys
 import tempfile
 import pathlib
 import types
@@ -1298,6 +1301,147 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
         self.assertTrue(plugin.copy_in_flight())
 
 
+def module_names_under(package_dir, package_name):
+    """Importable module names for the Python files under a package directory."""
+    names = set()
+    for path in package_dir.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        parts = path.relative_to(package_dir).with_suffix("").parts
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        names.add(".".join((package_name,) + parts))
+    return sorted(names)
+
+
+_GUI_START_UP_PYPLOT_PROBE = r"""
+import importlib
+import json
+import logging
+import os
+import sys
+
+PYPLOT = "matplotlib.pyplot"
+report = {"stages": [], "logged": [], "menus": {}, "plugins": [], "gui_modules": []}
+
+
+def observe(stage):
+    report["stages"].append([stage, PYPLOT in sys.modules])
+
+
+class CaptureErrors(logging.Handler):
+    # Every skip in the plugin framework is logged rather than raised: a plugin
+    # that will not import, a contribution that raises, a location nothing
+    # registered. Any of those would leave the menus half-built and the
+    # observation below vacuous, so they are reported as failures too.
+    def emit(self, record):
+        report["logged"].append(record.name + ": " + record.getMessage())
+
+
+logging.getLogger().addHandler(CaptureErrors(level=logging.ERROR))
+logging.getLogger().setLevel(logging.ERROR)
+
+observe("a clean interpreter")
+
+from qtutils.qt import QtWidgets
+
+import hyde.user_interface.main as gui_main
+from hyde.user_interface.shared.plugin import HydePluginManager
+
+observe("importing the GUI application")
+
+qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+manager = HydePluginManager(
+    plugin_package="hyde.user_interface.plugins",
+    plugins_dir=os.path.join(os.path.dirname(gui_main.__file__), os.pardir, "plugins"),
+)
+manager.discover_modules()
+manager.instantiate_plugins()
+report["plugins"] = sorted(manager.plugins)
+observe("importing and instantiating every GUI plugin")
+
+window = QtWidgets.QMainWindow()
+window.setMenuBar(QtWidgets.QMenuBar())
+window.menuFile = window.menuBar().addMenu("File")
+window.menuEdit = window.menuBar().addMenu("Edit")
+window.menuAnalysis = window.menuBar().addMenu("Analysis")
+window.menuWindow = window.menuBar().addMenu("Windows")
+window.menuFigure = QtWidgets.QMenu("Figure", window.menuBar())
+window.menuTable = QtWidgets.QMenu("Table", window.menuBar())
+window.mdiArea = QtWidgets.QMdiArea()
+window.setCentralWidget(window.mdiArea)
+
+
+class StubApp:
+    # Stands in for HydeApp so that HydeApp's own setup_plugins does the work.
+    # Which menu locations exist, and which plugins render what into them, then
+    # come from the product rather than from a list written here.
+    def __init__(self):
+        self.ui = window
+        self.plugin_manager = manager
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+    def build_plugin_services(self):
+        return gui_main.HydeApp.build_plugin_services(self)
+
+    def show_menu(self, location):
+        return gui_main.HydeApp.show_menu(self, location)
+
+    def hide_menu(self, location):
+        return gui_main.HydeApp.hide_menu(self, location)
+
+
+# Start-up launches the kernel once the menus are rendered. That is a different
+# process, and spyder_kernels has pyplot imported there before Hyde runs at all,
+# so this stops at the render.
+manager.setup_complete = lambda data: None
+app = StubApp()
+gui_main.HydeApp.setup_plugins(app)
+observe("building every start-up menu")
+
+for location, menu in sorted(app.menu_context.locations.items()):
+    entries = {}
+    for action in menu.actions():
+        submenu = action.menu()
+        if submenu is None:
+            entries.setdefault("", []).append(action.text())
+        else:
+            entries[submenu.title()] = [
+                child.text() for child in submenu.actions() if not child.isSeparator()
+            ]
+    report["menus"][location] = entries
+
+# The rest of the GUI process, whether or not start-up happens to reach it: a
+# window built later resolves a backend just as ruinously as one built at
+# start-up, and much of the GUI is imported lazily. The module list comes from
+# the filesystem, so none of it is read out of the code being guarded, and an
+# import that raises takes the whole probe down rather than being skipped.
+import hyde.user_interface as gui_package
+
+gui_dir = os.path.dirname(gui_package.__file__)
+gui_modules = set()
+for directory, subdirectories, filenames in os.walk(gui_dir):
+    subdirectories[:] = [name for name in subdirectories if name != "__pycache__"]
+    for filename in filenames:
+        if not filename.endswith(".py"):
+            continue
+        relative = os.path.relpath(os.path.join(directory, filename), gui_dir)
+        parts = relative[: -len(".py")].split(os.sep)
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        gui_modules.add(".".join(["hyde", "user_interface"] + parts))
+for module_name in sorted(gui_modules):
+    importlib.import_module(module_name)
+report["gui_modules"] = sorted(gui_modules)
+observe("importing every other GUI module")
+
+sys.stdout.write("PROBE_JSON " + json.dumps(report, default=str) + "\n")
+"""
+
+
 class TestGeneratedGraphicsFormatTable(unittest.TestCase):
     """Hyde ships a generated table of matplotlib's export formats rather than
     querying matplotlib at runtime, because that query imports pyplot and
@@ -1340,13 +1484,94 @@ class TestGeneratedGraphicsFormatTable(unittest.TestCase):
             f"copy offers formats that cannot be exported: {sorted(clipboard - exportable)}",
         )
 
-    def test_building_the_copy_menu_never_imports_pyplot(self):
-        # The whole reason the table is generated. A regression here would
-        # reintroduce a backend resolution in the GUI process at start-up.
-        source = pathlib.Path(
-            "hyde/user_interface/plugins/save_graphics_dialog/__init__.py"
-        ).read_text()
-        self.assertNotIn("runtime_graphics_export", source)
+    def test_the_gui_start_up_never_imports_pyplot(self):
+        """The whole reason the table is generated: importing pyplot resolves an
+        interactive backend, and the GUI process must not.
+
+        Observed in a subprocess because `sys.modules` in this process is no
+        evidence. Test modules here import pyplot at module scope, so it is
+        already present before the first test runs and a snapshot-and-compare
+        guard would pass whatever the product did.
+
+        Covers the GUI process only, up to the point its menus are built. The
+        kernel is a separate process where `spyder_kernels` sets
+        `IPKernelApp.matplotlib = "inline"`, so pyplot is pre-imported there and
+        this rule was never about it.
+        """
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        environment = dict(os.environ)
+        environment["QT_QPA_PLATFORM"] = "offscreen"
+        # Nothing may pre-decide the backend for the probe: MPLBACKEND changes
+        # what importing pyplot does, and the point is to watch a GUI process
+        # that has made no such arrangement.
+        environment.pop("MPLBACKEND", None)
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [str(repo_root)]
+            + ([environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else [])
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", _GUI_START_UP_PYPLOT_PROBE],
+            cwd=str(repo_root),
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        transcript = (
+            f"exit status {completed.returncode}\n"
+            f"--- stdout ---\n{completed.stdout}\n"
+            f"--- stderr ---\n{completed.stderr}"
+        )
+        reports = [
+            line[len("PROBE_JSON ") :]
+            for line in completed.stdout.splitlines()
+            if line.startswith("PROBE_JSON ")
+        ]
+        self.assertEqual(
+            1,
+            len(reports),
+            f"the start-up probe did not finish, so nothing was observed:\n{transcript}",
+        )
+        report = json.loads(reports[0])
+        stages = [(stage, reached) for stage, reached in report["stages"]]
+
+        self.assertEqual(
+            ("a clean interpreter", False),
+            stages[0],
+            f"a fresh interpreter already has pyplot, so this observes nothing:\n{stages}",
+        )
+        self.assertEqual(
+            [],
+            [stage for stage, reached in stages if reached],
+            "matplotlib.pyplot reached the GUI process, which resolves an "
+            f"interactive backend there:\n{stages}",
+        )
+
+        # The observation only means something if the menus really got built.
+        self.assertEqual([], report["logged"], f"the probe skipped work:\n{transcript}")
+        plugins_dir = repo_root / "hyde" / "user_interface" / "plugins"
+        self.assertEqual(
+            sorted(
+                entry.name
+                for entry in plugins_dir.iterdir()
+                if entry.is_dir() and entry.name != "__pycache__"
+            ),
+            report["plugins"],
+            f"the probe did not load every plugin:\n{transcript}",
+        )
+        for location in ("edit", "figure"):
+            self.assertTrue(
+                report["menus"].get(location, {}).get("Copy As"),
+                f"the {location} menu has no populated Copy As submenu, so "
+                f"nothing built the copy menu:\n{report['menus']}",
+            )
+        self.assertEqual(
+            module_names_under(
+                repo_root / "hyde" / "user_interface", "hyde.user_interface"
+            ),
+            report["gui_modules"],
+            f"the probe did not import every GUI module:\n{transcript}",
+        )
 
 
 class TestCopyAsSubmenu(unittest.TestCase):

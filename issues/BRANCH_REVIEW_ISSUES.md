@@ -23,7 +23,7 @@ exercised.
 - [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
       — probe deleted; the version floor still waits on the upstream `v2.28.0` tag
 - [x] Slice 10: Retire `current_ir` And Its Second Source Of Truth
-- [ ] Slice 11: Guard The Start-Up Pyplot Rule By Observation
+- [x] Slice 11: Guard The Start-Up Pyplot Rule By Observation
 - [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
 - [ ] Slice 13: Figure Backend Leftovers
 - [ ] Slice 14: Trivia, Second Bundle
@@ -685,12 +685,29 @@ The behavioural guard is three lines: snapshot `sys.modules`, build the menu,
 assert `matplotlib.pyplot` did not appear. Then decide whether that default
 argument should exist at all.
 
+Done as a subprocess instead, because a snapshot taken in this process observes
+nothing: `tests/test_curve_fit.py` imports pyplot at module scope, so in a
+one-process suite run it is in `sys.modules` before the first test starts.
+Measured, not assumed. `test_the_gui_start_up_never_imports_pyplot` runs a clean
+interpreter that imports the GUI application, discovers and instantiates every
+plugin, runs `HydeApp.setup_plugins` up to the menu render, and then imports
+every remaining `hyde.user_interface` module -- reporting per stage whether
+pyplot arrived, so a failure names the step that reached it. The kernel launch
+that follows the render is out of scope on purpose: that is a different process,
+and `spyder_kernels` has pyplot imported there before Hyde runs.
+
+`filetypes` is now a required argument.
+
 ### Acceptance criteria
 
-- [ ] The guard fails if any start-up path imports `matplotlib.pyplot`, however
+- [x] The guard fails if any start-up path imports `matplotlib.pyplot`, however
       it is reached.
-- [ ] Verified by deliberately adding such an import and watching it fail.
-- [ ] A caller cannot reach `runtime_graphics_export_filetypes()` by omitting an
+- [x] Verified by deliberately adding such an import and watching it fail.
+      Four locations: a module-level import in the menu-building plugin; a
+      call-time import routed through `matplotlib_features` while the menu is
+      built; a module-level import in a lazily-loaded GUI module the start-up
+      path never touches; and the landmine itself, re-armed and stepped on.
+- [x] A caller cannot reach `runtime_graphics_export_filetypes()` by omitting an
       argument.
 
 ### Blocked by

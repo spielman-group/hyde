@@ -83,13 +83,20 @@ def runtime_graphics_export_filetypes():
     return dict(getattr(canvas_type, "filetypes", {}) or {})
 
 
-def graphics_export_suffixes_for_format(format_key, filetypes=None):
+def graphics_export_suffixes_for_format(format_key, filetypes):
+    """Suffixes `format_key` may be written as, given a table of export formats.
+
+    `filetypes` is required. It used to default to
+    `runtime_graphics_export_filetypes()`, which resolves an interactive
+    backend, so a caller that omitted it did the one thing a GUI or start-up
+    path must never do -- and omitting an argument is not a decision anyone
+    makes deliberately. A caller with no table of its own wants
+    `GRAPHICS_EXPORT_FILETYPES`, and should say so.
+    """
     normalized_key = str(format_key or "").strip().lower()
     if not normalized_key:
         return ()
-    available_filetypes = (
-        runtime_graphics_export_filetypes() if filetypes is None else dict(filetypes)
-    )
+    available_filetypes = dict(filetypes)
     suffixes = [f".{normalized_key}"]
     for variant in GRAPHICS_EXPORT_SUFFIX_VARIANTS.get(normalized_key, ()):
         if variant in available_filetypes:
