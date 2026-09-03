@@ -17,10 +17,19 @@ from qtutils.qt import QtWidgets, QtGui
 
 # Framework error hooks
 splash.update_text('importing labscript mechanics')
-if os.environ.get("HYDE_DISABLE_LABSCRIPT_ERROR_DIALOGS") != "1":
+labscript_error_dialogs = (
+    os.environ.get("HYDE_DISABLE_LABSCRIPT_ERROR_DIALOGS") != "1"
+)
+if labscript_error_dialogs:
     import labscript_utils.excepthook
 from labscript_utils.setup_logging import setup_logging
-setup_logging(APPLICATION_NAME)
+logger = setup_logging(APPLICATION_NAME)
+if labscript_error_dialogs:
+    # What BLACS does immediately after setup_logging. Importing the excepthook
+    # installs the error dialog; handing it the logger is what also writes an
+    # uncaught exception to Hyde's log file, and redirects warnings.showwarning
+    # there. Without this Hyde shows the dialog and keeps no record of it.
+    labscript_utils.excepthook.set_logger(logger)
 from labscript_utils.ls_zprocess import ProcessTree
 
 splash.update_text('initializing ProcessTree')
