@@ -24,7 +24,7 @@ exercised.
       — probe deleted; the version floor still waits on the upstream `v2.28.0` tag
 - [x] Slice 10: Retire `current_ir` And Its Second Source Of Truth
 - [x] Slice 11: Guard The Start-Up Pyplot Rule By Observation
-- [ ] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
+- [x] Slice 12: Put The Callable `enabled` Contract Where The Key Is Documented
 - [x] Slice 13: Figure Backend Leftovers
 - [x] Slice 14: Trivia, Second Bundle
 - [x] Slice 15: Let The Feature-Module Guard See Re-Exports
@@ -813,10 +813,24 @@ override.
 
 ### Acceptance criteria
 
-- [ ] A callable `enabled` cannot silently render as permanently enabled.
-- [ ] The contract is documented where the key is documented.
-- [ ] If the framework changes, the labscript-utils change is a separate,
-      reviewable commit in that repository.
+- [x] A callable `enabled` cannot silently render as permanently enabled.
+      `MenuContext.render()` resolves it, coerces with `bool()`, and on a
+      raising callable disables that one action and logs — matching Hyde's
+      `resolve_menu_enabled` exactly, so Hyde can now delegate.
+- [x] The contract is documented where the key is documented, in the module
+      docstring published by the `:recursive:` autosummary, plus `render()`'s
+      own docstring since that is what a subclass overrides.
+- [x] If the framework changes, the labscript-utils change is a separate,
+      reviewable commit in that repository — `8883d89` on `Development` and
+      `c1aa0d0` on `Production`, one commit each, neither pushed. `master` is
+      untouched and does not carry `plugins.py` at all.
+
+### Still open, separately
+
+Hyde can now delete `resolve_menu_enabled` and delegate, but **cannot yet drop
+its `render` override**: its contributions also carry `group_order`, which the
+framework does not understand — it derives group ordering from sorted group
+names. That is a second drifted key, not part of this slice.
 
 ### Blocked by
 
