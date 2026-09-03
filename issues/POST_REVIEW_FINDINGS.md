@@ -16,6 +16,7 @@ file was filed on an agent's word alone.
 - [ ] Slice 5: Test Hygiene, Round Three
 - [ ] Slice 6: Stale Documentation Left By The Review
 - [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
+- [ ] Slice 8: Generate `plt.figure(name, clear=True)`
 
 ## Slice 1: `force_close` Does Not Close
 
@@ -459,3 +460,71 @@ None - can start immediately.
   bare, because labscript-utils' `logwarning` logs and then calls the original
   `showwarning`. BLACS behaves identically; this is the cost of the suite
   pattern, not a Hyde defect.
+
+## Slice 8: Generate `plt.figure(name, clear=True)`
+
+### Type
+
+`AFK`
+
+### What to build
+
+A rebuild-in-place already works, through matplotlib's own `clear` kwarg. What
+is wrong is only what Hyde writes and what it says.
+
+Measured against the current tree, with no code change:
+
+- `fig = plt.figure("G", clear=True)` inside a macro, run twice: same figure
+  object, one axes, data replaced (`[1,4,9]` → `[5,6,7]`), IR carrying one
+  subplot and one trace, `save_error` `None`. No exception.
+- A neighbour reached with plain `plt.figure("N0")` is **not** cleared: it kept
+  its own line plus the one the second macro drew, and that macro still built its
+  own distinct figure.
+
+So the two intents are already separable with no Hyde-specific divergence:
+`plt.figure(name, clear=True)` means *replace this figure*, plain
+`plt.figure(name)` means *reach this figure as it stands*. Both are plain
+matplotlib. `FigureHyde.clear()` resets `_hyde_ir` and `_hyde_command_log` and
+registers the figure with the build session, which is why the rebuild satisfies
+the create-exactly-one-figure guard without touching the guard.
+
+The maintainer's decision: **macros overwrite.** So:
+
+1. **The generator should emit one line, not two.**
+   `hyde/features/matplotlib_figure_state.py` currently emits
+   `fig = plt.figure(...)` and then appends `fig.clear()` as a separate
+   statement. Emit `clear=True` in the call instead. Generated source is what a
+   user reads and copies, so it should teach matplotlib's own idiom rather than
+   a two-line Hyde habit.
+
+   Watch the no-title case: with no figure args the generator emits
+   `plt.figure()`, which creates a *new* figure every call, so `clear=True`
+   there is harmless but meaningless. Decide whether to emit it anyway for
+   uniformity or omit it when there is no name, and say which.
+
+2. **The error message should name `clear=True`.**
+   `@hyde.figure functions must create exactly one figure. plt.figure(name)
+   hands back the figure that already exists rather than creating one, so call
+   fig.clear() to replace its contents, the way a saved Hyde figure macro does.`
+   Point it at `plt.figure(name, clear=True)`, which is both shorter and what
+   the generator will then emit. `fig.clear()` still works and should keep
+   working — this is about which one Hyde recommends.
+
+3. **Check the spec and any documented example** for the two-line idiom and
+   resync, since `project_management/specs/` describes generated figure source.
+
+### Acceptance criteria
+
+- [ ] Generated macro source calls `plt.figure(..., clear=True)` and contains no
+      separate `fig.clear()` line.
+- [ ] Re-running a generated macro replaces the figure's contents, verified by
+      execution on the emitted source rather than on a hand-written equivalent.
+- [ ] A macro written the old way, with an explicit `fig.clear()`, still works.
+- [ ] Neighbour drawing through plain `plt.figure(name)` is unchanged, and
+      `test_a_macro_may_draw_on_another_figure_while_building_its_own` passes
+      untouched.
+- [ ] The guard's message recommends `clear=True`.
+
+### Blocked by
+
+None - can start immediately. Independent of Slice 1, which touches teardown.
