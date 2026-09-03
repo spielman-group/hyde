@@ -110,15 +110,6 @@ class StatusMessageService:
         self.app.clear_status_message(label)
 
 
-class VisibleCommandNotificationService:
-    def __init__(self, app):
-        self._app = app
-
-    def on_command_executed(self, message):
-        handler = getattr(self._app, "on_visible_command_executed", None)
-        return None if handler is None else handler(message)
-
-
 class ProjectProceduresService:
     def __init__(self, app):
         self._app = app
@@ -234,9 +225,6 @@ class HydeApp:
             "emit_plugin_event": self.emit_plugin_event,
             "process_tree": self.process_tree,
             "project_procedures_service": ProjectProceduresService(self),
-            "visible_command_notification_service": (
-                VisibleCommandNotificationService(self)
-            ),
             "status_message_service": StatusMessageService(self),
             "get_current_project_dir": self.get_current_project_dir,
             "get_current_app_ir": self.get_current_app_ir,
@@ -639,24 +627,6 @@ class HydeApp:
                 QtWidgets.QMessageBox.information(self.ui, "Project Heal Complete", "\\n".join(errors))
             elif not success and errors:
                 QtWidgets.QMessageBox.warning(self.ui, "Project Heal Warnings", "\\n".join(errors))
-
-    @inmain_decorator()
-    def on_visible_command_executed(self, msg):
-        """A command run in the terminal reported back.
-
-        Only the quit flag is this lane's business. It used to end the project
-        operation too, from when the project commands and the quit were both
-        dispatched visibly and a failure here was that operation's failure;
-        every one of them now goes out hidden -- `execute_hidden` for a save or
-        a load, a correlated request for a dialog -- and reports through
-        `on_project_state_result` or the request's own reply. What reaches this
-        lane is what the user typed, a table append or a window macro, so
-        ending the project operation from here only ever took down a message
-        posted by something else.
-        """
-        content = msg.get("content", {})
-        if content.get("status") != "ok":
-            self._quit_command_sent = False
 
     def _mark_shutting_down(self):
         self.shutting_down = True

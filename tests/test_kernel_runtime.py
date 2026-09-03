@@ -1288,9 +1288,9 @@ class TestProjectOperationOwnsItsOwnStatusMessage(unittest.TestCase):
 
     The same rule Slice 3 gave the kernel-request lane, on the lane the shell
     drives. Driven over a real `QStatusBar` through the real entry points --
-    the begin a plugin calls, a project state result arriving, a kernel crash,
-    a terminal command reporting back -- because "has my message been replaced"
-    is a question only the status bar can answer.
+    the begin a plugin calls, a project state result arriving, a kernel crash
+    -- because "has my message been replaced" is a question only the status bar
+    can answer.
     """
 
     @classmethod
@@ -1303,51 +1303,6 @@ class TestProjectOperationOwnsItsOwnStatusMessage(unittest.TestCase):
         status_bar = QtWidgets.QStatusBar()
         self.addCleanup(status_bar.deleteLater)
         return ProjectLaneApp(status_bar), status_bar
-
-    def test_a_failing_terminal_command_leaves_an_unread_failure_showing(self):
-        """A typo in the terminal must not eat the reason something failed.
-
-        Any raising expression the user types reports a status that is not
-        `ok`, so this is as reachable as ordinary terminal use.
-        """
-        app, status_bar = self._app()
-        StatusMessageService(app).show_transient_message(
-            "Refreshing figure Figure1 failed: the kernel is gone"
-        )
-
-        HydeApp.on_visible_command_executed(app, {"content": {"status": "error"}})
-
-        self.assertEqual(
-            "Refreshing figure Figure1 failed: the kernel is gone",
-            status_bar.currentMessage(),
-        )
-
-    def test_a_failing_terminal_command_leaves_a_project_operation_running(self):
-        """The save is still in flight; nothing about it just failed."""
-        app, status_bar = self._app()
-        app.begin_project_operation("Saving Hyde project...")
-
-        HydeApp.on_visible_command_executed(app, {"content": {"status": "error"}})
-
-        self.assertEqual("Saving Hyde project...", status_bar.currentMessage())
-
-    def test_a_failing_terminal_command_still_clears_the_quit_flag(self):
-        """A quit that never took must not lock the application in."""
-        app, _ = self._app()
-        app._quit_command_sent = True
-
-        HydeApp.on_visible_command_executed(app, {"content": {"status": "error"}})
-
-        self.assertFalse(app._quit_command_sent)
-
-    def test_a_terminal_command_that_worked_leaves_the_quit_flag_alone(self):
-        """A quit in flight stays in flight while the kernel is still going."""
-        app, _ = self._app()
-        app._quit_command_sent = True
-
-        HydeApp.on_visible_command_executed(app, {"content": {"status": "ok"}})
-
-        self.assertTrue(app._quit_command_sent)
 
     def test_a_project_operation_clears_its_own_message_when_it_ends(self):
         app, status_bar = self._app()

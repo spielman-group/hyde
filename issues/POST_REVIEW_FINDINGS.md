@@ -19,7 +19,7 @@ file was filed on an agent's word alone.
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [ ] Slice 9: Retire The `figure_command` Feature
 - [x] Slice 10: The Project Lane Still Clears Messages It Did Not Post
-- [ ] Slice 11: Hyde Can Become Unquittable
+- [x] Slice 11: Hyde Can Become Unquittable
 
 ## Slice 1: `force_close` Does Not Close
 
@@ -951,6 +951,8 @@ branch, the status-bar call may simply not belong there.
 - [x] A real project operation still clears its own message when it ends.
 - [x] A kernel crash still clears whatever the project lane posted.
 - [x] `_quit_command_sent` is still reset when a visible command fails.
+      *(Retired by Slice 11: the quit now retracts its own record, and the
+      branch this pinned no longer exists.)*
 
 ### Blocked by
 
@@ -1096,13 +1098,115 @@ before the fact and never retracted.
 
 ### Acceptance criteria
 
-- [ ] A quit whose dispatch fails leaves the application still quittable, shown
+- [x] A quit whose dispatch fails leaves the application still quittable, shown
       by execution.
-- [ ] A quit that is genuinely in flight still refuses a second concurrent quit.
-- [ ] The window's close button still works after a failed quit.
-- [ ] A successful quit still shuts down exactly once.
-- [ ] `on_kernel_crashed` still resets the flag.
+- [x] A quit that is genuinely in flight still refuses a second concurrent quit.
+- [x] The window's close button still works after a failed quit.
+- [x] A successful quit still shuts down exactly once.
+- [x] `on_kernel_crashed` still resets the flag.
 
 ### Blocked by
 
 - Slice 10, which is done and kept the accidental escape hatch alive.
+
+### Landed
+
+The quit is observable, and the escape hatch is gone with the reason it
+existed.
+
+**What `execute_hidden` actually answers.** `Plugin.execute_frontend`
+(`kernel_runtime/__init__.py:524`) returns `False` when there is no
+`frontend_kernel_service` yet, when it is not `is_ready()`, and -- on the GUI
+thread -- when `FrontendKernelService.execute` hands back no `msg_id`, which is
+that same readiness check one layer down plus a client that declined the send.
+Off the GUI thread it returns `True` unconditionally, having only emitted a
+signal to marshal the call, so its `True` is not even a claim that anything was
+sent. None of it says the kernel *ran* the code. Startup is the reachable case:
+`is_ready()` is false until the readiness probe comes back, and the Quit item
+is enabled the whole time.
+
+**The quit is a reply-checked `request`, not a `KernelPayloadRequest`.** The
+narrow fix -- set the record only when the dispatch succeeds -- leaves a second
+wedge standing: a `hyde.quit()` that reaches the kernel and raises there. It
+raises whenever `hyde` is not in the user's namespace, which the user can
+arrange from the terminal, and a raise on the hidden lane is reported nowhere
+the app was listening. So `quit_application` now dispatches through
+`python_execution_service.request` and retracts the record in `on_quit_reply`
+unless the reply says the quit ran. `KernelPayloadRequest` is the wrong owner
+for it: that machinery exists for a command answered *twice*, where the reply
+and a separate payload race, and it is bound to a widget owner for its progress
+message, busy cursor and payload timeout. A quit has one answer and no payload,
+and the file plugin is not a widget. A plain `KernelRequest` is the whole need.
+
+**What is still not covered, and why.** A kernel that replies `ok` and then
+fails to deliver `QUIT_REQUESTED` -- `signal_quit_requested` swallows its own
+exceptions -- leaves Hyde up with a quit on the books. Covering it would need a
+timeout on the quit, and `KernelRequest` deliberately has none: the kernel runs
+one request at a time, so a quit issued behind the user's own long cell waits
+its turn, and a watchdog could not tell that from a lost one. It would trade a
+rare wedge for a quit that fires twice. The case already has a designed way
+out: Kill Kernel takes the kernel down, `_handle_kernel_crash` runs
+`on_kernel_crashed`, and that clears the record.
+
+**The visible-command lane is gone.** With the quit retracting its own record,
+`on_visible_command_executed` had nothing left to do -- Slice 10 had already
+established that every project command reports elsewhere, and kept the reset
+only because this defect made it a user's last way out. Keeping it now would be
+worse than dead: a typo in the terminal would clear a quit that is legitimately
+in flight and let a second one go out behind it. `HydeApp.on_visible_command_executed`,
+`VisibleCommandNotificationService`, the service entry and the
+`terminal.executed` connection in `python_terminal_tool` are all removed, and
+with them five tests that pinned the lane.
+
+Measured by driving the real entry points -- `quit_application`, `request_quit`,
+`HydeMainWindow.closeEvent` through `ui.close()`, `on_kernel_crashed` -- over a
+real `HydeMainWindow` and the real file plugin, with only the kernel stood in
+for:
+
+```
+1. A quit whose dispatch fails leaves Hyde quittable
+kernel not up, Quit chosen, kernel received         : []
+kernel up, Quit chosen again, kernel received       : ['hyde.quit()']
+
+2. A quit genuinely in flight refuses a second concurrent quit
+Quit, then Quit again with no reply yet             : ['hyde.quit()']
+
+3. The window's close button still works after a failed quit
+close button with no kernel, window visible         : True
+close button with no kernel, kernel received        : []
+close button again, kernel received                 : ['hyde.quit()']
+kernel ran the quit, window visible                 : False
+close button, then hyde.quit() raised, visible      : True
+close button again, kernel received                 : ['hyde.quit()', 'hyde.quit()']
+
+4. A successful quit still shuts down exactly once
+kernel received                                     : ['hyde.quit()']
+application_shutdown events                         : 1
+request_runtime_shutdown events                     : 1
+window visible                                      : False
+Quit chosen after the shutdown, kernel received     : ['hyde.quit()']
+
+5. on_kernel_crashed still resets the flag
+close button, kernel received                       : ['hyde.quit()']
+kernel crashed, close button again, received        : ['hyde.quit()', 'hyde.quit()']
+```
+
+The same probe on the shipped body, over the two entry points both revisions
+support, is the defect itself:
+
+```
+                                               before          after
+Quit chosen before the kernel was up         : []              []
+kernel up now, Quit chosen again             : []              ['hyde.quit()']
+close button, kernel received                : []              ['hyde.quit()']
+```
+
+`TestClosingHydeKeepsWorking` in `tests/test_file_dialog_plugin.py` holds the
+close-button half, through `ui.close()` rather than by calling
+`quit_application`, because the close button is what a user reaches for when
+the Quit item has stopped answering. Four of its five fail on the shipped body,
+as do three of the four plugin-level quit tests beside it. None of them asserts
+the flag: they assert that the kernel was asked, that the window closed, and
+that one quit produced one shutdown.
+
+Suite: 674 tests, OK (671 before; eight added, five removed with the lane).

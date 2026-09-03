@@ -125,6 +125,18 @@ class Plugin(HydePlugin):
         SaveCopyProjectDialog(self.services).exec()
 
     def quit_application(self, checked=False):
+        """Ask the kernel to bring Hyde down, once.
+
+        A quit already in flight is refused, because the kernel needs asking
+        only once and a second ask would tear down what the first is already
+        taking apart. That refusal is only correct while "in flight" means a
+        quit the kernel really has: it is recorded once the request is away and
+        retracted by `on_quit_reply` if the kernel says the quit did not run,
+        so a quit that never reached a kernel leaves Hyde as quittable as it
+        was. Dispatched blind, the record could never be retracted, and one
+        unlucky quit -- issued a moment before the kernel was ready -- would
+        refuse every quit and every close for the rest of the session.
+        """
         del checked
         if (
             self.services["get_shutting_down"]()
@@ -133,12 +145,25 @@ class Plugin(HydePlugin):
             return False
         app_ir = self.current_app_ir()
         quit_ir = app_ir.with_quit()
-        self.services["set_quit_command_sent"](True)
-        return bool(
-            self.services["python_execution_service"].execute_hidden(
-                app_ir.current_diff(quit_ir).python_source()
-            )
+        request = self.services["python_execution_service"].request(
+            app_ir.current_diff(quit_ir).python_source(),
+            on_finished=self.on_quit_reply,
         )
+        if request is None:
+            return False
+        self.services["set_quit_command_sent"](True)
+        return True
+
+    def on_quit_reply(self, request):
+        """The kernel answered the quit.
+
+        A quit that ran has already asked the GUI to come down, so it stays on
+        the books and the next quit is the second one this refuses. A quit that
+        raised, or one a dying kernel took with it, asked for nothing: forget
+        it, so the user can quit again.
+        """
+        if not request.ran():
+            self.services["set_quit_command_sent"](False)
 
     def get_event_handlers(self):
         return {

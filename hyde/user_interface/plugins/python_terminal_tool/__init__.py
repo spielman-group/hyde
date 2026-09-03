@@ -117,10 +117,5 @@ class Plugin(HydeToolWindowPlugin):
             initial_history=self.python_terminal_service.history_entries(),
             parent=container.ui.content_widget,
         )
-        visible_command_service = self.services.get(
-            "visible_command_notification_service"
-        )
-        if visible_command_service is not None:
-            terminal.executed.connect(visible_command_service.on_command_executed)
         container.mount_child_widget(terminal)
         return container
