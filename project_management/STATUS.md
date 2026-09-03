@@ -65,8 +65,13 @@ Behavior-level IR ownership cleanup remains later work.
   fallback strings.
 - Matplotlib figure state authority now lives under `hyde/features`, with
   figure-interactive support narrowed to plugin transport/window composition.
-  That move is not finished: `hyde/features/matplotlib_features.py` still carries
-  a second figure IR authority. See `issues/REFACTOR_STATUS.md`.
+  That move is finished: `FigureIRAuthority` in
+  `hyde/features/matplotlib_figure_state.py` is the single figure IR authority
+  for both processes, and the duplicate `FigureIRModel` in
+  `matplotlib_features.py` is gone along with `MatplotlibCodecView`,
+  `FigureIRCodec`, `FigureGraphicsExportCodec`, `FigureCodec` and
+  `FigurePatchCodec`. `MatplotlibCodec` keeps its multi-feature dispatch role
+  and routes `figure_ir` to the authority. See `issues/REFACTOR_STATUS.md`.
 - Figure dialogs now use an explicit `EditableFigureContext` adapter, with
   `FigureDialogIR` kept workflow-only and `HydeFigureDialogWidget` owned by
   plugin-local widget support.
