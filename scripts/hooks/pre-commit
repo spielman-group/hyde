@@ -4,4 +4,36 @@
 # runtime, so a stale table silently offers formats that may not exist.
 #
 # Install with: scripts/hooks/install
-python scripts/regenerate_graphics_formats.py --check || exit 1
+#
+# The check only means anything against the matplotlib Hyde itself imports, which
+# lives in the `labscript` conda environment Hyde runs in (see AGENTS.md). Bare
+# `python` is the wrong interpreter: on a conda setup it is the base environment,
+# whose matplotlib need not be the same version. So resolve the `labscript`
+# environment by name, beside the conda installation the `python` on PATH belongs
+# to -- a name and a relative layout, not one machine's absolute path. Set
+# HYDE_PYTHON to override, for a differently named environment or a non-conda
+# install.
+root=$(git rev-parse --show-toplevel) || exit 1
+
+interpreter=${HYDE_PYTHON:-}
+if [ -z "$interpreter" ]; then
+    conda_root=$(python -c 'import os, sys
+prefix = sys.prefix
+parent = os.path.dirname(prefix)
+print(os.path.dirname(parent) if os.path.basename(parent) == "envs" else prefix)' 2>/dev/null)
+    for candidate in "$conda_root/envs/labscript/bin/python" \
+                     "$conda_root/envs/labscript/python.exe"; do
+        if [ -n "$conda_root" ] && [ -x "$candidate" ]; then
+            interpreter=$candidate
+            break
+        fi
+    done
+fi
+
+if [ ! -x "$interpreter" ]; then
+    echo "pre-commit: cannot find the python of Hyde's \`labscript\` environment." >&2
+    echo "pre-commit: set HYDE_PYTHON to it and commit again." >&2
+    exit 1
+fi
+
+"$interpreter" "$root/scripts/regenerate_graphics_formats.py" --check || exit 1

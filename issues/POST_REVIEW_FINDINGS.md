@@ -15,7 +15,7 @@ file was filed on an agent's word alone.
 - [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
 - [x] Slice 5: Test Hygiene, Round Three
 - [ ] Slice 6: Stale Documentation Left By The Review
-- [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
+- [x] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [ ] Slice 9: Retire The `figure_command` Feature
 - [ ] Slice 12: A Kernel Signal That Cannot Be Delivered Says Nothing
@@ -759,14 +759,60 @@ required `PATH` — and say why.
 
 ### Acceptance criteria
 
-- [ ] The hook checks the table against the same matplotlib Hyde imports.
-- [ ] It does not hard-code a single machine's interpreter path.
-- [ ] A stale table still fails the hook, shown by regenerating against a
+- [x] The hook checks the table against the same matplotlib Hyde imports.
+- [x] It does not hard-code a single machine's interpreter path.
+- [x] A stale table still fails the hook, shown by regenerating against a
       deliberately different format list.
 
 ### Blocked by
 
 None - can start immediately.
+
+### Landed
+
+The hook resolves the `labscript` conda environment **by name**, beside the conda
+installation the `python` on PATH already belongs to:
+
+```
+conda_root=$(python -c '... sys.prefix, minus a trailing envs/<name> ...')
+interpreter=$conda_root/envs/labscript/bin/python
+```
+
+Why that and not the alternatives. The environment's *name* is already this
+repo's documented convention (`AGENTS.md`: "Run Hyde tests in the `labscript`
+conda environment"), so naming it in a tracked file adds no new fact and no
+machine-specific one; the only per-machine part, where conda itself is
+installed, is derived at run time. `conda run -n labscript` was rejected because
+it is not reliable here and costs seconds on every commit; an environment
+variable alone was rejected because its default would still have to be *some*
+interpreter, and a default of bare `python` is the defect being fixed. So
+`HYDE_PYTHON` exists as the override for a differently named environment or a
+non-conda install, not as the mechanism.
+
+When neither resolves, the hook fails with `set HYDE_PYTHON to it and commit
+again` rather than falling back to `python`. That is deliberate: a fallback to
+the wrong interpreter is exactly the silent staleness the hook exists to
+prevent, so it fails closed and says what to do.
+
+Also in passing: the hook now takes its paths from `git rev-parse
+--show-toplevel` instead of assuming the caller's working directory, so running
+it by hand from a subdirectory checks the same table git does.
+
+Demonstrated in both directions. Regenerating against a deliberately different
+format list (`avif` and `webp` dropped, `bmp` invented) makes both the direct
+run and a real `git commit` refuse:
+
+```
+STALE: matplotlib_graphics_formats.py does not match matplotlib 3.11.1. Run
+scripts/regenerate_graphics_formats.py
+```
+
+`scripts/regenerate_graphics_formats.py` restores the table -- `git diff` on it
+empty again -- and the hook reports `up to date against matplotlib 3.11.1` and
+exits 0. `sh -x` confirms the interpreter it picks is
+`.../envs/labscript/bin/python` and not the base-environment `python` first on
+PATH. `HYDE_PYTHON` pointing at a nonexistent path, and a `PATH` with no conda
+python on it, both produce the loud failure rather than a wrong answer.
 
 ## Findings recorded, deliberately not filed
 
