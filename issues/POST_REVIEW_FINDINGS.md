@@ -64,11 +64,114 @@ in which case it should close and the flag exists only to mark provenance for
 run", in which case the name is wrong and the caller in `clear()` wants
 something else.
 
+### What the investigation established
+
+Reported by the user as a regression: two figures open, switch to a project with
+none, the windows stay and the kernel terminal fills with
+`ValueError: Could not resolve first-class figure 'Figure1'.` from
+`hyde.get_figure(...)` + `hyde.refresh_figure(...)`.
+
+**It is not a regression.** `force_close` is identically broken on `master`:
+
+```python
+def force_close(self):                      # master
+    self._closing_from_kernel = True
+    self._kernel_close_in_progress = False
+    self.close_from_kernel()                # returns immediately on that flag
+```
+
+The `_closing_from_kernel` term in `close_from_kernel`'s guard arrived in
+`36a23e2`, which is contained in `master`. At the repo's first commit the guard
+tested only `self._closed`, so `force_close` worked then.
+
+What the branch changed is that the hole became **loud**. `master` and the
+branch's first six commits carry `@classmethod` twice on
+`MatplotlibCodec._range_lines`, which Python 3.13+ rejects as non-callable, so
+every figure snapshot raised `TypeError` in the GUI, no window ever received an
+IR, `tracked_names` stayed empty and refresh was gated off. `4442be8` re-pointed
+the codec at a correct copy, so IRs finally landed — and the always-broken
+teardown finally had live, namespace-tracking windows to orphan. Before: windows
+survived but were blank and silent. After: populated, and talking to the new
+kernel. Slices 7, 10 and 17 are cleared — identical behaviour either side of
+each.
+
+**Two independent causes, one per process.** Both must fail for the windows to
+survive:
+
+- **Kernel.** `hyde.load_project()` calls
+  `project_tools.clear_live_matplotlib_managers()`, which is `Gcf.figs.clear()`.
+  That bypasses `FigureManagerHyde.destroy()`, the only thing that emits the
+  close event, so the kernel forgets its figures without telling the GUI and
+  never closes the comms. Measured: `comm messages sent: []`,
+  `manager._destroyed: False`, versus `Gcf.destroy_all()` which sends
+  `{'event': 'close'}` then `{'event': 'comm_closed'}`. Unchanged since the
+  repo's first commit.
+- **GUI.** `force_close()` is a no-op and `clear()` then empties
+  `self.figures`.
+
+Symptom 2 is downstream of symptom 1: an orphaned window keeps its
+`namespace_view_service` subscription, because only `complete_interactive_close`
+→ `_disconnect_namespace_updates` drops it, and that never runs.
+
+**A kernel-only fix is not enough, and is racy.** In `load_project`,
+`signal_enter_no_project_state()` (→ `clear()`) runs *before*
+`clear_live_matplotlib_managers()`, and `clear()` poisons the comm-close route:
+it sets `_closing_from_kernel` on every window so `close_from_kernel` can never
+fire again, and empties `figures` so `close_figure` returns early. Measured: a
+late comm close after `clear()` leaves the subwindow open.
+
+Two corrected variants were verified by monkeypatching the probe, repo
+untouched — a corrected `force_close`, and a comm close arriving *before*
+`clear()`. Both fixed both symptoms with zero save prompts, so
+`is_close_complete()` correctly routes to `complete_interactive_close`.
+
+### The fix: three places, the first required
+
+1. **`FigureWindow.force_close()` — necessary and sufficient.** Set the flag,
+   then `settle_payload_requests()` — **all lanes, not just `"close"`**; there is
+   a live `"refresh"` lane — then actually close: the bound subwindow if there is
+   one, else `self.close()`.
+2. **`FigureWorkspaceService.clear()`.** `self.figures.clear()` is what makes the
+   failure unrecoverable. Let `_remove_figure` / `_on_subwindow_destroyed` retire
+   entries, or at least keep entries for windows that did not actually close, so
+   a late close still has something to act on.
+3. **`clear_live_matplotlib_managers()` (kernel).** Destroy the managers rather
+   than dropping the dict, so the GUI is told and the comms are closed. Not
+   sufficient alone, but it fixes a comm leak — one stranded comm per figure per
+   project switch — and stops `Gcf` and the GUI disagreeing about what exists.
+
+The same defect makes `on_kernel_crashed` leak identically: stale figure windows
+survive a kernel restart and refresh against the fresh kernel.
+
+### Why 126 passing tests missed it
+
+All ~20 `force_close()` call sites are `finally:` teardown and none asserts
+closure; several build a `FigureWindow` with no subwindow and no services, where
+`force_close` has nothing to close. `test_figure_comm_actions._figure_workspace()`
+sets `"get_shutting_down": lambda: True`, so those tests only ever reach the
+shutdown fast path.
+
+The test that should have caught it is
+`test_plugin_discards_pending_batched_payloads_when_workspace_is_cleared`, the
+only one driving `plugin.on_project_loaded(...)`. It fails twice over: it feeds a
+*pending* payload and clears it before the 0-ms flush timer fires, so no window
+is ever created; and it asserts `plugin.workspace.figures == {}`, which is **the
+bug's fingerprint rather than its absence** — `figures.clear()` makes that pass
+whether or not anything closed.
+
+A regression test needs an open, IR-bearing figure window,
+`get_shutting_down: False`, and assertions on `mdi_area.subWindowList()` plus
+"no command issued on the next namespace view" — never on `workspace.figures`.
+
 ### Acceptance criteria
 
 - [ ] `force_close()` leaves the window closed, shown by execution.
 - [ ] `FigureWorkspaceService.clear()` leaves no open figure window behind.
-- [ ] A test fails if `force_close()` stops closing.
+- [ ] A test fails if `force_close()` stops closing, asserting on
+      `mdi_area.subWindowList()` and on no command being issued for the next
+      namespace view — not on `workspace.figures`.
+- [ ] A kernel project switch closes the figure comms rather than stranding
+      them.
 - [ ] The kernel-initiated close path still works: a window closed by the kernel
       does not re-notify the kernel.
 
