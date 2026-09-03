@@ -256,7 +256,22 @@ Three pieces, all in `hyde/matplotlib_backend.py`.
    `add_subplot(*args)` is expected to do with more than one argument before
    collapsing it, rather than assuming the answer is `"111"`.
 
-3. **`MatplotlibCodec.tracked_names` may have no production caller.** Slice 17
+3. **A whole feature may be unreachable, not just one method.** Slice 8 found
+   that `FigureCommandModel._creation_lines`
+   (`hyde/features/matplotlib_features.py:502`, reached via
+   `MatplotlibCodec.state_to_python` for the `figure_command` feature) emits
+   `fig = plt.figure('Name')` with no clear and no `@hyde.figure` wrapper, and
+   its `state_to_macro_source` builds an undecorated macro. Slice 8 found no
+   production caller: `"figure_command"` appears only as the model's own
+   constants, and the new-graph dialog dispatches the FigureIR path instead —
+   its preview equals `widget_ir.python_source()`.
+
+   So establish the reachability of the `figure_command` feature as a whole,
+   not just the method below. If it is dead, it is a third spelling of
+   "recreate this figure" that would drift; if it is live, find what reaches it,
+   because its output disagrees with what Slice 8 just standardised.
+
+4. **`MatplotlibCodec.tracked_names` may have no production caller.** Slice 17
    removed what it believed was the last one and deliberately left the method,
    on the grounds that it is one arm of the codec's uniform feature-kind dispatch
    and its remaining test is a legitimate two-implementations-agree contract.
