@@ -479,8 +479,12 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
         callbacks = []
 
         class FakeSpyderComm:
+            def is_connected(self):
+                return True
+
             def request_namespace_view(self, callback):
                 callbacks.append(callback)
+                return True
 
         browser.spyder_comm = FakeSpyderComm()
         return browser, callbacks
@@ -555,6 +559,334 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
         self.assertEqual(len(callbacks), 0)
 
 
+class RecordingStatusMessageService:
+    """The shape of `hyde.user_interface.main.StatusMessageService`."""
+
+    def __init__(self):
+        self.transient_messages = []
+
+    def show_status_message(self, label):
+        del label
+
+    def show_transient_message(self, label):
+        self.transient_messages.append(label)
+
+    def clear_status_message(self):
+        return None
+
+
+class FakeJupyterComm:
+    """A comm of the shape `CommBase._register_comm` drives."""
+
+    def __init__(self, comm_id):
+        self.comm_id = comm_id
+        self.sent = []
+        self.closed = False
+
+    def on_msg(self, callback):
+        self._msg_callback = callback
+
+    def on_close(self, callback):
+        self._close_callback = callback
+
+    def send(self, data, buffers=None):
+        del buffers
+        self.sent.append(data)
+
+    def close(self):
+        self.closed = True
+
+
+class FakeCommManager:
+    def __init__(self):
+        self.comms = []
+
+    def new_comm(self, name):
+        del name
+        comm = FakeJupyterComm(f"comm-{len(self.comms)}")
+        self.comms.append(comm)
+        return comm
+
+
+class TestPythonVariablesRefreshRecovery(unittest.TestCase):
+    """A refresh whose answer never comes must not stall the tool forever.
+
+    These drive the real `SpyderFrontendComm` over a fake Jupyter comm, so a
+    lost callback is lost the way spyder-kernels loses one -- it pops the
+    waiting callback off its reply waitlist and routes the failure elsewhere --
+    rather than the way this file might imagine it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication(sys.argv)
+
+    def _make_browser(self, *, connect=True):
+        from hyde.user_interface.plugins.python_variables_tool import (
+            NamespaceFilterProxyModel,
+            SpyderFrontendComm,
+        )
+
+        comm_manager = FakeCommManager()
+        kernel_client = type(
+            "KernelClient",
+            (),
+            {
+                "comm_manager": comm_manager,
+                "session": type("Session", (), {"session": "browser-session"})(),
+            },
+        )()
+
+        browser = PythonVariables.__new__(PythonVariables)
+        QtWidgets.QWidget.__init__(browser)
+        self.status_service = RecordingStatusMessageService()
+        browser.services = {"status_message_service": self.status_service}
+        browser._closed = False
+        browser._execute_requests_in_flight = set()
+        browser._refresh_in_flight = False
+        browser._refresh_pending = False
+        browser._last_view = {}
+        browser.widget_ir = None
+        browser.kernel_client = kernel_client
+        browser.spyder_comm = SpyderFrontendComm(
+            kernel_client,
+            browser._on_comm_call_failed,
+        )
+        browser.ui = type("UI", (), {})()
+        browser.ui.infoPane = QtWidgets.QWidget(browser)
+        for box_name in (
+            "arraysCheckBox",
+            "variablesCheckBox",
+            "stringsCheckBox",
+            "infoCheckBox",
+        ):
+            box = QtWidgets.QCheckBox(browser)
+            box.setChecked(True)
+            setattr(browser.ui, box_name, box)
+        browser.model = QtGui.QStandardItemModel(0, 3, browser)
+        browser.proxy_model = NamespaceFilterProxyModel(browser)
+        browser.proxy_model.setSourceModel(browser.model)
+        browser.ui.treeView = QtWidgets.QTreeView(browser)
+        browser.ui.treeView.setModel(browser.proxy_model)
+        self.addCleanup(browser.deleteLater)
+        if connect:
+            browser.spyder_comm.open()
+        return browser, comm_manager
+
+    @staticmethod
+    def _pending_call_ids(comm_manager):
+        return [
+            message["content"]["call_id"]
+            for comm in comm_manager.comms
+            for message in comm.sent
+            if message["spyder_msg_type"] == "remote_call"
+            and message["content"]["call_name"] == "get_namespace_view"
+        ]
+
+    @staticmethod
+    def _answer(browser, comm_manager, call_id, *, view=None, error=None):
+        """Reply to a comm call the way the kernel replies to one."""
+        comm = comm_manager.comms[-1]
+        content = {
+            "call_id": call_id,
+            "call_name": "get_namespace_view",
+            "is_error": error is not None,
+            "call_return_value": (
+                {
+                    "call_name": "get_namespace_view",
+                    "call_id": call_id,
+                    "etype": "RuntimeError",
+                    "args": [error],
+                    "error_name": None,
+                    "tb": [],
+                }
+                if error is not None
+                else view
+            ),
+        }
+        browser.spyder_comm._comm_message(
+            {
+                "content": {
+                    "comm_id": comm.comm_id,
+                    "data": {
+                        "spyder_msg_type": "remote_call_reply",
+                        "content": content,
+                    },
+                },
+                "buffers": [],
+            }
+        )
+        process_events()
+
+    @staticmethod
+    def _scalar_view(value):
+        return {"val": {"type": "int", "python_type": "int", "view": str(value)}}
+
+    @staticmethod
+    def _shown_values(browser):
+        return {
+            browser.proxy_model.data(browser.proxy_model.index(row, 0)): (
+                browser.proxy_model.data(browser.proxy_model.index(row, 2))
+            )
+            for row in range(browser.proxy_model.rowCount())
+        }
+
+    def test_refresh_recovers_after_the_kernel_loses_a_callback(self):
+        browser, comm_manager = self._make_browser()
+
+        browser.refresh_namespace()
+        self._answer(
+            browser,
+            comm_manager,
+            self._pending_call_ids(comm_manager)[-1],
+            view=self._scalar_view(10),
+        )
+        self.assertEqual(self._shown_values(browser), {"val": "10"})
+
+        browser.refresh_namespace()
+        lost_call_id = self._pending_call_ids(comm_manager)[-1]
+        self._answer(
+            browser,
+            comm_manager,
+            lost_call_id,
+            error="get_namespace_view blew up in the kernel",
+        )
+        self.assertEqual(self._shown_values(browser), {"val": "10"})
+
+        browser.refresh_namespace()
+        process_events()
+        retry_call_ids = self._pending_call_ids(comm_manager)
+        self.assertNotIn(
+            lost_call_id,
+            retry_call_ids[2:],
+            "the tool never asked again after a lost callback",
+        )
+        self.assertEqual(len(retry_call_ids), 3)
+
+        self._answer(
+            browser,
+            comm_manager,
+            retry_call_ids[-1],
+            view=self._scalar_view(11),
+        )
+        self.assertEqual(self._shown_values(browser), {"val": "11"})
+
+    def test_a_lost_callback_says_why_the_refresh_failed(self):
+        browser, comm_manager = self._make_browser()
+
+        browser.refresh_namespace()
+        with self.assertLogs("hyde", level="WARNING") as captured:
+            self._answer(
+                browser,
+                comm_manager,
+                self._pending_call_ids(comm_manager)[-1],
+                error="the namespace view is not available",
+            )
+
+        self.assertEqual(len(self.status_service.transient_messages), 1)
+        reported = self.status_service.transient_messages[0]
+        self.assertIn("the namespace view is not available", reported)
+        self.assertIn("variables", reported.lower())
+        self.assertTrue(
+            any("the namespace view is not available" in line for line in captured.output),
+            captured.output,
+        )
+
+    def test_refresh_recovers_when_the_connection_closes_mid_request(self):
+        browser, comm_manager = self._make_browser()
+
+        browser.refresh_namespace()
+        self._answer(
+            browser,
+            comm_manager,
+            self._pending_call_ids(comm_manager)[-1],
+            view=self._scalar_view(10),
+        )
+        browser.refresh_namespace()
+        outstanding = len(self._pending_call_ids(comm_manager))
+
+        # The kernel closes the comm while the request is outstanding, so
+        # nothing is left that could carry the answer back.
+        browser.spyder_comm._comm_close(
+            {"content": {"comm_id": comm_manager.comms[-1].comm_id}}
+        )
+        browser.refresh_namespace()
+        process_events()
+        self.assertEqual(len(self._pending_call_ids(comm_manager)), outstanding)
+        self.assertEqual(len(self.status_service.transient_messages), 1)
+
+        browser.spyder_comm.close()
+        browser.spyder_comm.open()
+        browser.refresh_namespace()
+        process_events()
+        reconnected_call_ids = self._pending_call_ids(comm_manager)
+        self.assertEqual(len(reconnected_call_ids), outstanding + 1)
+
+        self._answer(
+            browser,
+            comm_manager,
+            reconnected_call_ids[-1],
+            view=self._scalar_view(12),
+        )
+        self.assertEqual(self._shown_values(browser), {"val": "12"})
+
+    def test_refresh_recovers_when_the_request_cannot_be_sent(self):
+        browser, comm_manager = self._make_browser(connect=False)
+
+        browser.refresh_namespace()
+        process_events()
+        self.assertEqual(self._pending_call_ids(comm_manager), [])
+        self.assertEqual(len(self.status_service.transient_messages), 1)
+
+        browser.spyder_comm.open()
+        browser.refresh_namespace()
+        process_events()
+        call_ids = self._pending_call_ids(comm_manager)
+        self.assertEqual(len(call_ids), 1)
+
+        self._answer(browser, comm_manager, call_ids[-1], view=self._scalar_view(7))
+        self.assertEqual(self._shown_values(browser), {"val": "7"})
+
+    def test_a_refresh_asked_for_while_one_is_in_flight_runs_once_more(self):
+        browser, comm_manager = self._make_browser()
+
+        browser.refresh_namespace()
+        browser.refresh_namespace()
+        browser.refresh_namespace()
+        process_events()
+        first_pass = self._pending_call_ids(comm_manager)
+        self.assertEqual(len(first_pass), 1)
+
+        self._answer(browser, comm_manager, first_pass[-1], view=self._scalar_view(1))
+        second_pass = self._pending_call_ids(comm_manager)
+        self.assertEqual(len(second_pass), 2)
+
+        self._answer(browser, comm_manager, second_pass[-1], view=self._scalar_view(2))
+        self.assertEqual(len(self._pending_call_ids(comm_manager)), 2)
+        self.assertEqual(self._shown_values(browser), {"val": "2"})
+        self.assertEqual(self.status_service.transient_messages, [])
+
+    def test_a_slow_refresh_is_left_to_wait_rather_than_abandoned(self):
+        browser, comm_manager = self._make_browser()
+
+        browser.refresh_namespace()
+        slow_call_id = self._pending_call_ids(comm_manager)[-1]
+
+        # The kernel is busy with the user's own cell. Time passing is not
+        # evidence of anything, so nothing may give up on the request.
+        for _ in range(6):
+            process_events(0.05)
+            browser.refresh_namespace()
+        self.assertEqual(len(self._pending_call_ids(comm_manager)), 1)
+        self.assertEqual(self.status_service.transient_messages, [])
+
+        self._answer(browser, comm_manager, slow_call_id, view=self._scalar_view(5))
+        self.assertEqual(self._shown_values(browser), {"val": "5"})
+        self.assertEqual(self.status_service.transient_messages, [])
+
+
 class TestPythonVariablesSharedClient(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -583,8 +915,9 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
                 self.session = type("Session", (), {"session": "terminal-session"})()
 
         class FakeSpyderComm:
-            def __init__(self, kernel_client):
+            def __init__(self, kernel_client, on_call_failed):
                 self.kernel_client = kernel_client
+                self.on_call_failed = on_call_failed
 
             def open(self):
                 return None
@@ -592,11 +925,15 @@ class TestPythonVariablesSharedClient(unittest.TestCase):
             def wait_until_ready(self, timeout=5):
                 return None
 
+            def is_connected(self):
+                return True
+
             def configure_namespace_view(self, settings):
                 self.settings = settings
 
             def request_namespace_view(self, callback):
                 callback({})
+                return True
 
             def close(self):
                 return None
@@ -734,8 +1071,9 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
                 self.iopub_channel = FakeChannel()
 
         class FakeSpyderComm:
-            def __init__(self, kernel_client):
+            def __init__(self, kernel_client, on_call_failed):
                 self.kernel_client = kernel_client
+                self.on_call_failed = on_call_failed
 
             def open(self):
                 return None
@@ -743,6 +1081,9 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
             def wait_until_ready(self, timeout=5):
                 del timeout
                 return None
+
+            def is_connected(self):
+                return True
 
             def configure_namespace_view(self, settings):
                 self.settings = dict(settings)
@@ -768,6 +1109,7 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
                         },
                     }
                 )
+                return True
 
             def close(self):
                 return None

@@ -31,7 +31,11 @@ exercised.
       — the re-export was already caught, unactionably, by the existing closure
       guard; the forked copy was not caught by any import rule, so it took a
       second name-collision guard
-- [ ] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
+- [x] Slice 16: Stop The Variables Tool Stalling On A Lost Callback
+      — `KernelPayloadRequest` was not reused: a comm request has one callback,
+      not a reply plus a payload, so its one clock has no legitimate moment to
+      start. The comm request got its own recovery, driven by evidence of loss
+      rather than by elapsed time
 - [ ] Slice 17: Settle The Orphaned `tracked_names` Payload Field
 - [ ] Slice 18: Make A Plugin That Fails To Load Visible
 - [ ] Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
@@ -1070,20 +1074,60 @@ refresh again.
 
 ### Acceptance criteria
 
-- [ ] A refresh whose callback never arrives is shown to stall the tool at
+- [x] A refresh whose callback never arrives is shown to stall the tool at
       `HEAD` — demonstrated by execution, with a later refresh returning early
       and the view staying stale.
-- [ ] After the fix, that same lost callback leaves the tool able to refresh
+- [x] After the fix, that same lost callback leaves the tool able to refresh
       again, and says why it failed.
-- [ ] A refresh that succeeds normally is unaffected, including the pending-
+- [x] A refresh that succeeds normally is unaffected, including the pending-
       refresh coalescing that already works.
-- [ ] Whether `KernelPayloadRequest` was reused or not is stated with the
+- [x] Whether `KernelPayloadRequest` was reused or not is stated with the
       reason.
 
 ### Blocked by
 
 None - can start immediately. Independent of Slices 8 and 10 to 15; touches a
 plugin none of them edit.
+
+### What was done
+
+Reproduced at `HEAD` by driving the real `SpyderFrontendComm` over a fake
+Jupyter comm. A refresh went out, the kernel answered it with an error reply,
+spyder-kernels popped the waiting callback off `_reply_waitlist` and routed the
+failure to `_async_error` — which printed and moved on. Three further
+`refresh_namespace()` calls then dispatched **zero** requests, the view kept
+showing the pre-failure values, and `_refresh_in_flight` was still set, with the
+comm still open and a kernel perfectly willing to answer. The same permanent
+stall was reproduced for a comm closed mid-request.
+
+`KernelPayloadRequest` was **not** reused. Its lifecycle is reply-then-payload:
+`_on_reply` arms `PAYLOAD_TIMEOUT_MS` only once the shell reply says the command
+ran, at which point the data is already in transit. A comm request has no
+separate reply — `RemoteCall` sends one message and exactly one comes back,
+either the payload or an error — so that clock has no moment at which it could
+legitimately start. Arming it at dispatch would be a fifth wall-clock timeout on
+a kernel that may be busy with the user's own cell, which is what this branch
+removed four of. Its `owner` contract is also `python_execution_service`-shaped
+(`dispatch` calls `request_command`), and this request rides Spyder's comm
+instead. What *was* reused is `KernelCommands.report_kernel_failure`, so the
+failure speaks with the same voice — log *and* status bar — as every other
+kernel-facing surface; `PythonVariables` mixes in `KernelCommands` the way both
+widget roots already do.
+
+Recovery therefore runs on **evidence of loss, never on elapsed time**. Lost is
+one of: the request never went out (`RemoteCall` silently drops a non-blocking
+call to a disconnected comm, so `request_namespace_view` now reports whether it
+dispatched); the kernel answered with an error, so spyder-kernels dropped the
+callback (`_async_error` now tells the widget instead of printing); or the comm
+that would carry the answer is gone, checked when the next refresh is asked for.
+Slow is everything else — comm open, send accepted, no error — and is left to
+wait indefinitely. A comm message genuinely lost in transit on a live comm is
+**not** distinguishable from slow, and is deliberately not covered: on this
+transport that distinction cannot be drawn, and a recovery that fired on a
+slow-but-healthy kernel would be worse than the stall.
+
+The coalescing was left in place as this surface's own concern, as in the figure
+and table windows.
 
 ## Slice 17: Settle The Orphaned `tracked_names` Payload Field
 

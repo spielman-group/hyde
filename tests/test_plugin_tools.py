@@ -725,8 +725,9 @@ class TestPluginTools(unittest.TestCase):
                 self.iopub_channel = FakeChannel()
 
         class FakeSpyderComm:
-            def __init__(self, kernel_client):
+            def __init__(self, kernel_client, on_call_failed):
                 self.kernel_client = kernel_client
+                self.on_call_failed = on_call_failed
 
             def open(self):
                 return None
@@ -734,6 +735,9 @@ class TestPluginTools(unittest.TestCase):
             def wait_until_ready(self, timeout=5):
                 del timeout
                 return None
+
+            def is_connected(self):
+                return True
 
             def configure_namespace_view(self, settings):
                 self.settings = dict(settings)
@@ -748,6 +752,7 @@ class TestPluginTools(unittest.TestCase):
                         }
                     }
                 )
+                return True
 
             def close(self):
                 return None
@@ -813,8 +818,9 @@ class TestPluginTools(unittest.TestCase):
                 self.iopub_channel = FakeChannel()
 
         class FakeSpyderComm:
-            def __init__(self, kernel_client):
+            def __init__(self, kernel_client, on_call_failed):
                 self.kernel_client = kernel_client
+                self.on_call_failed = on_call_failed
 
             def open(self):
                 return None
@@ -822,6 +828,9 @@ class TestPluginTools(unittest.TestCase):
             def wait_until_ready(self, timeout=5):
                 del timeout
                 return None
+
+            def is_connected(self):
+                return True
 
             def configure_namespace_view(self, settings):
                 self.settings = dict(settings)
@@ -836,6 +845,7 @@ class TestPluginTools(unittest.TestCase):
                         }
                     }
                 )
+                return True
 
             def close(self):
                 return None

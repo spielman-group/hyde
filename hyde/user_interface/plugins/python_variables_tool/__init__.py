@@ -7,8 +7,25 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 from spyder_kernels.comms.commbase import CommBase, CommError
 from hyde.features.base import is_eligible_for_numeric_series
 from hyde.features.hyde_ir import HydeAppIR
-from hyde.user_interface.base_hyde_widgets import HydeToolWidget
+from hyde.user_interface.base_hyde_widgets import (
+    NO_REASON_GIVEN,
+    HydeToolWidget,
+    KernelCommands,
+)
 from hyde.user_interface.shared.plugin import HydeToolWindowPlugin, HydeToolWindowService
+
+# The one comm call this tool makes with a callback, and so the only one whose
+# callback spyder-kernels can drop on the floor.
+NAMESPACE_VIEW_CALL = "get_namespace_view"
+# What the user is told a failed refresh was doing.
+REFRESH_DESCRIPTION = "Refreshing the Python variables view"
+# A namespace-view request is answered by exactly one comm message, so it is
+# lost only when something says so -- never because it is taking a while. The
+# kernel serves one request at a time, so a request queued behind the user's own
+# cell is slow rather than lost, and waiting is not failing. These are the ways
+# the comm says the answer is not coming.
+REQUEST_NOT_SENT = "the kernel connection would not take the request"
+REQUEST_CHANNEL_GONE = "the kernel connection closed before it answered"
 
 NAMESPACE_VIEW_SETTINGS = {
     "check_all": False,
@@ -25,14 +42,36 @@ NAMESPACE_VIEW_SETTINGS = {
 }
 
 
+def _describe_comm_error(error_wrapper):
+    """Pull a call name and a one-line reason out of a comm error.
+
+    `_async_error` is reached two ways and the shapes differ: spyder-kernels
+    hands over a `CommsErrorWrapper` when a reply comes back marked as an
+    error, and the kernel can also forward one as JSON through the registered
+    `_async_error` call handler.
+    """
+    if isinstance(error_wrapper, dict):
+        args = error_wrapper.get("args") or ()
+        reason = "; ".join(str(arg) for arg in args) or error_wrapper.get("etype")
+        return (
+            error_wrapper.get("call_name") or "a kernel comm call",
+            reason or NO_REASON_GIVEN,
+        )
+    return (
+        getattr(error_wrapper, "call_name", None) or "a kernel comm call",
+        str(error_wrapper) or NO_REASON_GIVEN,
+    )
+
+
 class SpyderFrontendComm(CommBase):
     """Minimal frontend wrapper for Spyder's `spyder_api` remote-call protocol."""
 
-    def __init__(self, kernel_client):
+    def __init__(self, kernel_client, on_call_failed):
         super().__init__()
         self.kernel_client = kernel_client
         self.comm = None
         self._is_ready = False
+        self._on_call_failed = on_call_failed
         self.register_call_handler("_comm_ready", self._comm_ready)
         self.register_call_handler("_async_error", self._async_error)
 
@@ -55,16 +94,34 @@ class SpyderFrontendComm(CommBase):
         if not self._is_ready:
             raise TimeoutError("Timed out waiting for Spyder comm readiness.")
 
+    def is_connected(self):
+        """True while a call sent now could still come back answered."""
+        return self.comm is not None and self.is_open(self.comm.comm_id)
+
     def request_namespace_view(self, callback):
-        if self.comm is None:
-            return
-        self.remote_call(
-            comm_id=self.comm.comm_id,
-            callback=callback,
-        ).get_namespace_view()
+        """Ask the kernel for the namespace view.
+
+        Returns False when the request did not go out, in which case `callback`
+        will never be called and the caller is waiting for nothing:
+        `RemoteCall` drops a non-blocking call to a disconnected comm without
+        raising, and a send can fail outright.
+        """
+        if not self.is_connected():
+            return False
+        try:
+            self.remote_call(
+                comm_id=self.comm.comm_id,
+                callback=callback,
+            ).get_namespace_view()
+        except Exception as exc:
+            self._on_call_failed(
+                NAMESPACE_VIEW_CALL, str(exc) or type(exc).__name__
+            )
+            return False
+        return True
 
     def configure_namespace_view(self, settings):
-        if self.comm is None:
+        if not self.is_connected():
             raise CommError("The comm is not connected.")
         self.remote_call(
             comm_id=self.comm.comm_id,
@@ -84,11 +141,17 @@ class SpyderFrontendComm(CommBase):
             raise TimeoutError(f"Timeout while waiting for '{call_name}' reply.")
 
     def _async_error(self, error_wrapper):
-        # Let unexpected kernel-side comm errors surface in stderr for now.
-        print(error_wrapper)
+        """A call failed on the other side, so its callback was dropped.
+
+        Overrides `CommBase._async_error`, which prints to stderr and moves on.
+        `_handle_remote_call_reply` pops the waiting callback and comes here
+        instead of calling it, so whoever was waiting on that callback hears
+        about the failure here or never hears about it at all.
+        """
+        self._on_call_failed(*_describe_comm_error(error_wrapper))
 
 
-class PythonVariables(HydeToolWidget):
+class PythonVariables(KernelCommands, HydeToolWidget):
     ui_filename = os.path.join("plugins", "python_variables_tool", "python_variables.ui")
     namespace_view_updated = QtCore.Signal(object)
 
@@ -122,7 +185,10 @@ class PythonVariables(HydeToolWidget):
                 "kernel_runtime_service."
             )
 
-        self.spyder_comm = SpyderFrontendComm(self.kernel_client)
+        self.spyder_comm = SpyderFrontendComm(
+            self.kernel_client,
+            self._on_comm_call_failed,
+        )
         self.kernel_client.iopub_channel.message_received.connect(self._handle_iopub_message)
 
         self.ui.arraysCheckBox.toggled.connect(self._on_view_state_changed)
@@ -147,10 +213,46 @@ class PythonVariables(HydeToolWidget):
         if self._closed:
             return
         if self._refresh_in_flight:
-            self._refresh_pending = True
+            if self.spyder_comm.is_connected():
+                # Coalesce: one more refresh once the outstanding one lands.
+                self._refresh_pending = True
+                return
+            # The comm that would have carried the answer is gone, so the
+            # outstanding request is lost rather than merely slow, and sending
+            # another down the same dead comm would be lost too.
+            self._abandon_refresh(REQUEST_CHANNEL_GONE)
             return
         self._refresh_in_flight = True
-        self.spyder_comm.request_namespace_view(self._on_namespace_view)
+        if not self.spyder_comm.request_namespace_view(self._on_namespace_view):
+            self._abandon_refresh(REQUEST_NOT_SENT)
+
+    @inmain_decorator()
+    def _on_comm_call_failed(self, call_name, reason):
+        """A comm call failed, so the callback it would have used is gone.
+
+        Every comm failure is reported; a failed namespace-view call also ends
+        the refresh that was waiting on that callback.
+        """
+        if call_name == NAMESPACE_VIEW_CALL:
+            self._abandon_refresh(reason)
+            return
+        self.report_kernel_failure(f"The kernel comm call {call_name}", reason)
+
+    def _abandon_refresh(self, reason):
+        """Stop waiting for an answer that is not coming, and say why.
+
+        Recovery on evidence, not a timeout. It runs only when something has
+        said the answer will never arrive: the request was refused, the kernel
+        answered with an error, or the comm that would carry the answer is
+        gone. A request that is only queued behind the user's own cell is slow,
+        not lost, and is left to wait for as long as the kernel needs -- there
+        is no clock here to abandon it.
+        """
+        if not self._refresh_in_flight:
+            return
+        self._refresh_in_flight = False
+        self._refresh_pending = False
+        self.report_kernel_failure(REFRESH_DESCRIPTION, reason)
 
     def _handle_iopub_message(self, msg):
         msg_type = msg["header"]["msg_type"]
