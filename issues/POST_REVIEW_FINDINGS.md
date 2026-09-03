@@ -9,7 +9,7 @@ file was filed on an agent's word alone.
 
 ## Progress Checklist
 
-- [ ] Slice 1: `force_close` Does Not Close
+- [x] Slice 1: `force_close` Does Not Close
 - [ ] Slice 2: Dead And Unreachable Code In The Figure Backend
 - [ ] Slice 3: Two Half-Finished Shutdown Paths
 - [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
@@ -166,15 +166,59 @@ A regression test needs an open, IR-bearing figure window,
 
 ### Acceptance criteria
 
-- [ ] `force_close()` leaves the window closed, shown by execution.
-- [ ] `FigureWorkspaceService.clear()` leaves no open figure window behind.
-- [ ] A test fails if `force_close()` stops closing, asserting on
+- [x] `force_close()` leaves the window closed, shown by execution.
+- [x] `FigureWorkspaceService.clear()` leaves no open figure window behind.
+- [x] A test fails if `force_close()` stops closing, asserting on
       `mdi_area.subWindowList()` and on no command being issued for the next
       namespace view — not on `workspace.figures`.
-- [ ] A kernel project switch closes the figure comms rather than stranding
+- [x] A kernel project switch closes the figure comms rather than stranding
       them.
-- [ ] The kernel-initiated close path still works: a window closed by the kernel
+- [x] The kernel-initiated close path still works: a window closed by the kernel
       does not re-notify the kernel.
+
+### Landed
+
+All three places, as filed.
+
+`force_close` no longer routes through `close_from_kernel`, whose guard returns
+on exactly the flag `force_close` sets. It settles every payload lane rather
+than `"close"` alone, then closes through `_close_without_kernel_round_trip`,
+the tail it now shares with `close_from_kernel` so neither can drift into
+promising a close it does not perform. Closing the inner widget alone leaves
+the MDI frame behind — measured — so the subwindow is closed in preference to
+it.
+
+`FigureWorkspaceService.clear()` retires entries the way `close_figure`
+already did, by asking whether the subwindow actually went, instead of
+emptying the registry over the top. Measured: `clear()` retires through
+`_remove_figure`, not through a blanket wipe. This half is defence in depth
+rather than a fix — with `force_close` corrected, no window survives for a
+late close to find — so it is guarded by its comment and by `close_figure`'s
+existing tests, not by a test of its own; reproducing "a window that refuses
+to close" needs a state the first fix removes.
+
+`clear_live_matplotlib_managers()` destroys each manager through
+`Gcf.destroy(manager)`, one at a time so a manager that cannot be destroyed
+does not keep the rest alive, and still clears `Gcf.figs` afterwards.
+Before: `comm messages sent: []`, `_destroyed: [False, False]`. After: the
+`close` and `comm_closed` pair per figure, `_destroyed: [True, True]`.
+
+Measured on two IR-bearing windows across `on_project_loaded` and
+`on_kernel_crashed`. Before: 2 subwindows, 2 namespace listeners, and two
+`hyde.get_figure(...)` + `hyde.refresh_figure(...)` commands on the next
+namespace view. After: none of any, and zero save prompts either way, because
+`is_close_complete()` routes `closeEvent` to `complete_interactive_close`.
+
+The guards are `test_loading_another_project_closes_the_open_figure_windows`,
+`test_kernel_crash_closes_the_open_figure_windows` and
+`test_project_switch_closes_the_kernel_side_figure_comms`. The first two fail
+against the shipped `force_close` and pass against the shipped
+`clear_live_matplotlib_managers`; the third does the reverse.
+`test_plugin_discards_pending_batched_payloads_when_workspace_is_cleared` now
+asserts on `mdi_area.subWindowList()` instead of `workspace.figures` — that
+test never created a window, so it passed either way, and the registry it was
+reading is the fingerprint the fix removes rather than anything the test was
+about.
 
 ### Blocked by
 

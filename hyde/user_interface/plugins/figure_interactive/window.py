@@ -404,15 +404,34 @@ class FigureWindow(HydeInteractiveWidget):
         )
         self.settle_payload_request("close")
         self._closing_from_kernel = True
+        self._close_without_kernel_round_trip()
+
+    def force_close(self):
+        """Close the window now, whoever asked, with no kernel round trip.
+
+        Teardown's verb: the workspace calls this when the project or the
+        kernel that owned the figure has gone, so there is nobody left to
+        confirm a close with. Every payload lane is settled rather than just
+        `"close"`, because a refresh in flight would otherwise outlive the
+        window it was for. Setting the kernel-close flag first is what makes
+        `closeEvent` take `complete_interactive_close`, so the user is never
+        asked to save a figure they did not close.
+
+        It cannot go through `close_from_kernel`, whose guard returns on
+        exactly that flag.
+        """
+        self._closing_from_kernel = True
+        self.settle_payload_requests()
+        self._close_without_kernel_round_trip()
+
+    def _close_without_kernel_round_trip(self):
+        # Both closers share this so neither can drift into promising a close
+        # it does not perform. The subwindow is closed in preference to the
+        # widget so the MDI frame goes with it.
         if self._subwindow is not None:
             self._subwindow.close()
         else:
             self.close()
-
-    def force_close(self):
-        self._closing_from_kernel = True
-        self.settle_payload_request("close")
-        self.close_from_kernel()
 
     def saveable_default_macro_name(self):
         if self.widget_ir is not None:

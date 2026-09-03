@@ -37,6 +37,7 @@ from hyde.features.matplotlib_features import (
 from hyde.features.hyde_ir import HydeAppIR
 from hyde.project_tools import (
     HYDE_MATPLOTLIB_BACKEND,
+    clear_live_matplotlib_managers,
     configure_gui_matplotlib_backend,
     is_excluded,
 )
@@ -1522,6 +1523,47 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             any("close payload" in message and "figure 3" in message for message in logs.output)
         )
 
+    def test_project_switch_closes_the_kernel_side_figure_comms(self):
+        from matplotlib._pylab_helpers import Gcf
+
+        sent = []
+
+        class FakeComm:
+            def __init__(self, figure_number):
+                self.figure_number = figure_number
+
+            def send(self, payload):
+                sent.append((self.figure_number, dict(payload)))
+
+            def close(self):
+                sent.append((self.figure_number, {"event": "comm_closed"}))
+
+        managers = []
+        for figure_number in (11, 12):
+            manager = FigureManagerHyde(FigureCanvasHyde(Figure()), figure_number)
+            manager._comm = FakeComm(figure_number)
+            Gcf.figs[figure_number] = manager
+            managers.append(manager)
+
+        try:
+            clear_live_matplotlib_managers()
+        finally:
+            for figure_number in (11, 12):
+                Gcf.figs.pop(figure_number, None)
+
+        # Forgetting the managers is not enough: unless each one is destroyed,
+        # its comm is stranded and the GUI is never told the figure has gone.
+        self.assertEqual(
+            sent,
+            [
+                (11, {"event": "close", "figure_number": 11}),
+                (11, {"event": "comm_closed"}),
+                (12, {"event": "close", "figure_number": 12}),
+                (12, {"event": "comm_closed"}),
+            ],
+        )
+        self.assertEqual([manager._destroyed for manager in managers], [True, True])
+
     @classmethod
     def setUpClass(cls):
         cls.qapp = QtWidgets.QApplication.instance()
@@ -2731,10 +2773,109 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             plugin.on_project_loaded(None)
             self.qapp.processEvents()
 
-            self.assertEqual(plugin.workspace.figures, {})
+            # The window list, not the registry: an emptied registry says
+            # nothing about whether a window was created or left behind.
+            self.assertEqual(mdi_area.subWindowList(), [])
         finally:
             plugin.workspace.clear()
             mdi_area.close()
+
+    def _workspace_with_open_figures(self, *titles):
+        """A plugin with real, IR-bearing figure windows open in an MDI area.
+
+        Teardown is what this builds for, so the windows have to be the kind
+        teardown has something to do with: bound to an MDI subwindow, carrying
+        an IR that tracks namespace names, and not shutting down.
+        """
+        mdi_area = QtWidgets.QMdiArea()
+        mdi_area.show()
+        namespace_service = FakeNamespaceViewService(
+            {
+                "delay": {"type": "ndarray", "view": "[0 1 2]"},
+                "fit_delay": {"type": "ndarray", "view": "[1 4 9]"},
+                "raw_delay": {"type": "ndarray", "view": "[1 2 3]"},
+            }
+        )
+        execution_service = FakeExecutionService()
+        save_window_dialog_service = self._FakeSaveWindowDialogService()
+        plugin = Plugin({})
+        plugin.services = {
+            "mdi_area": mdi_area,
+            "namespace_view_service": namespace_service,
+            "python_execution_service": execution_service,
+            "save_window_dialog_service": save_window_dialog_service,
+            "get_shutting_down": lambda: False,
+        }
+        for figure_number, title in enumerate(titles, start=1):
+            plugin._handle_figure_payload(
+                {
+                    "figure_number": figure_number,
+                    "title": title,
+                    "snapshot": {
+                        "is_first_class": True,
+                        "default_macro_name": title,
+                        "call_source": f"fig = plt.figure({title!r})",
+                        "figure_size": (320, 240),
+                        "figure_ir": figure_ir_from_live_state(
+                            self._live_state_with_title(title)
+                        ),
+                    },
+                }
+            )
+        self.qapp.processEvents()
+        workspace = types.SimpleNamespace(
+            plugin=plugin,
+            mdi_area=mdi_area,
+            namespace_service=namespace_service,
+            execution_service=execution_service,
+            save_window_dialog_service=save_window_dialog_service,
+        )
+        self.assertEqual(len(mdi_area.subWindowList()), len(titles))
+        for figure in plugin.workspace.figures.values():
+            self.assertTrue(figure.tracked_namespace_names())
+        return workspace
+
+    def _assert_no_command_on_next_namespace_view(self, workspace):
+        """A window that really closed has stopped listening.
+
+        An orphaned one keeps its namespace subscription and asks the kernel
+        to refresh a figure the kernel has forgotten, forever.
+        """
+        workspace.execution_service.hidden_calls.clear()
+        workspace.namespace_service.emit(
+            {
+                "delay": {"type": "ndarray", "view": "[0 1 2 3]"},
+                "fit_delay": {"type": "ndarray", "view": "[1 4 9 16]"},
+                "raw_delay": {"type": "ndarray", "view": "[1 2 3 4]"},
+            }
+        )
+        self.qapp.processEvents()
+        self.assertEqual(workspace.execution_service.hidden_calls, [])
+
+    def test_loading_another_project_closes_the_open_figure_windows(self):
+        workspace = self._workspace_with_open_figures("FigureA", "FigureB")
+        try:
+            workspace.plugin.on_project_loaded(None)
+            self.qapp.processEvents()
+
+            self.assertEqual(workspace.mdi_area.subWindowList(), [])
+            self._assert_no_command_on_next_namespace_view(workspace)
+            # Nobody asked to close these, so nobody is asked to save them.
+            self.assertEqual(workspace.save_window_dialog_service.calls, [])
+        finally:
+            workspace.mdi_area.close()
+
+    def test_kernel_crash_closes_the_open_figure_windows(self):
+        workspace = self._workspace_with_open_figures("FigureA", "FigureB")
+        try:
+            workspace.plugin.on_kernel_crashed(None)
+            self.qapp.processEvents()
+
+            self.assertEqual(workspace.mdi_area.subWindowList(), [])
+            self._assert_no_command_on_next_namespace_view(workspace)
+            self.assertEqual(workspace.save_window_dialog_service.calls, [])
+        finally:
+            workspace.mdi_area.close()
 
     def test_plugin_reports_session_restore_warnings_for_unsupported_figures(self):
         plugin = Plugin({})

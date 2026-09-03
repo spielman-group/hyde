@@ -248,10 +248,29 @@ def _detach_matplotlib_runtime(value):
 
 
 def clear_live_matplotlib_managers():
+    """Retire the kernel's figure managers, telling the GUI as it goes.
+
+    Dropping `Gcf.figs` would be enough for the kernel to forget its figures,
+    but `FigureManagerHyde.destroy()` is the only thing that emits a figure's
+    close event and closes its comm. Bypassing it strands one comm per figure
+    per project switch and leaves Gcf and the GUI disagreeing about which
+    figures exist.
+    """
     try:
         from matplotlib._pylab_helpers import Gcf
     except Exception:
         return
+    try:
+        managers = list(Gcf.figs.values())
+    except Exception:
+        managers = []
+    for manager in managers:
+        # One at a time, so a manager that cannot be destroyed does not keep
+        # the rest of them alive.
+        try:
+            Gcf.destroy(manager)
+        except Exception:
+            pass
     try:
         Gcf.figs.clear()
     except Exception:

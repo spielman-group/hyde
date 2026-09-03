@@ -78,9 +78,20 @@ class FigureWorkspaceService:
             self._remove_figure(figure_number)
 
     def clear(self):
-        for figure in list(self.figures.values()):
+        """Close the figures of a project or kernel that has gone.
+
+        Entries retire as their windows actually close -- here for a window
+        that closed at once, and through `_on_subwindow_destroyed` for a
+        deferred deletion. Emptying the registry outright would strand any
+        window that did not close: `close_figure` returns early on a missing
+        entry, so a close arriving afterwards would have nothing to act on and
+        the window could never be closed again.
+        """
+        for figure_number, figure in list(self.figures.items()):
+            subwindow = figure.parentWidget()
             figure.force_close()
-        self.figures.clear()
+            if subwindow is None or not subwindow.isVisible():
+                self._remove_figure(figure_number)
 
     def _remove_figure(self, figure_number):
         figures = getattr(self, "figures", None)
