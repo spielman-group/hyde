@@ -1881,7 +1881,17 @@ class FigureHyde(Figure):
             subplots = self._hyde_ir["layout"]["subplots"]
             if not subplots:
                 subplot_id = "subplot0"
-                subplot_code = "111" if len(args) == 1 else "111"
+                # "111" is not a default that a multi-argument add_subplot
+                # could improve on: it is the only code the IR admits.
+                # FigureIRAuthority.validate_state and
+                # FigureCommandModel.validate_state both raise on anything
+                # else, and regenerate_figure_from_ir replays the subplot as
+                # int(subplot["subplot_code"]), which no "2, 1, 1" spelling
+                # survives. A tracked fig.add_subplot(2, 1, 1) therefore
+                # records a layout it does not have; the fix for that is a
+                # multi-subplot IR, not a different string here, and the
+                # import path already warns that extra axes are dropped.
+                subplot_code = "111"
                 subplots.append(_default_subplot_state(subplot_id, subplot_code))
                 axis._hyde_subplot_id = subplot_id
                 self._record_command("add_subplot", f"ax = fig.add_subplot({subplot_code})")
@@ -1890,6 +1900,12 @@ class FigureHyde(Figure):
 
 @_Backend.export
 class _BackendHyde(_Backend):
+    # matplotlib treats a backend class as a namespace, never an instance:
+    # every member of `_Backend` is a classmethod or staticmethod, its
+    # `__init__` is `object.__init__`, and `_Backend.export` copies only the
+    # eight names it lists onto the module. So only classmethods belong here --
+    # an instance method would be unreachable, and the canvas already answers
+    # for `draw_idle`/`flush_events` through `FigureCanvasBase`.
     FigureCanvas = FigureCanvasHyde
     FigureManager = FigureManagerHyde
 
@@ -1899,12 +1915,6 @@ class _BackendHyde(_Backend):
         if figure_class in (None, Figure):
             kwargs["FigureClass"] = FigureHyde
         return super().new_figure_manager(num, *args, **kwargs)
-
-    def draw_idle(self):
-        self.draw()
-
-    def flush_events(self):
-        return
 
 
 FigureCanvas = FigureCanvasHyde

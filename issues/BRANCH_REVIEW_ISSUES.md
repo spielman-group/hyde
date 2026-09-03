@@ -1307,6 +1307,16 @@ the codec's surface rather than about this payload field. The kernel-side
 `FigureCommandModel.tracked_names` it delegates to is still live, via
 `state_to_macro_source`.
 
+> Forward note (`POST_REVIEW_FINDINGS.md` Slice 2): that separate judgement was
+> made, and it went the other way. Both `tracked_names` classmethods and
+> `FigureCommandModel.state_to_macro_source` are gone. The "uniform dispatch"
+> reading did not hold -- only two of the four matplotlib models had the method
+> -- and the "two-implementations-agree" test was comparing
+> `FigureIRAuthority.tracked_names` with a two-line forward to itself. The test
+> named above kept its surviving `state_to_python` half and is now
+> `test_lowering_matches_across_the_process_boundary`. The paragraph above is
+> left as it was written; nothing here changes what Slice 17 decided.
+
 ### Acceptance criteria
 
 - [x] `tracked_names` is either gone from the payload, or read by production

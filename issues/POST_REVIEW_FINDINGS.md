@@ -10,13 +10,14 @@ file was filed on an agent's word alone.
 ## Progress Checklist
 
 - [x] Slice 1: `force_close` Does Not Close
-- [ ] Slice 2: Dead And Unreachable Code In The Figure Backend
+- [x] Slice 2: Dead And Unreachable Code In The Figure Backend
 - [ ] Slice 3: Two Half-Finished Shutdown Paths
 - [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
 - [ ] Slice 5: Test Hygiene, Round Three
 - [ ] Slice 6: Stale Documentation Left By The Review
 - [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
+- [ ] Slice 9: Retire The `figure_command` Feature
 
 ## Slice 1: `force_close` Does Not Close
 
@@ -281,12 +282,115 @@ Three pieces, all in `hyde/matplotlib_backend.py`.
 
 ### Acceptance criteria
 
-- [ ] `draw_idle`/`flush_events` are deleted, or moved to the class that can
+- [x] `draw_idle`/`flush_events` are deleted, or moved to the class that can
       actually receive them, with the reason stated.
-- [ ] No conditional with identical branches remains in the backend.
-- [ ] `MatplotlibCodec.tracked_names` is either shown to have a production caller
+- [x] No conditional with identical branches remains in the backend.
+- [x] `MatplotlibCodec.tracked_names` is either shown to have a production caller
       or removed with its test.
-- [ ] Figure creation, refresh, close and copy all still work.
+- [x] Figure creation, refresh, close and copy all still work.
+
+### Landed
+
+**Item 1 was a deletion, not a canvas fix.** Three separate reasons, measured
+against matplotlib 3.11.1. `_Backend` carries zero plain functions -- every
+member is a `classmethod`, a `staticmethod` or a class attribute, and
+`_Backend.__init__ is object.__init__` -- so matplotlib uses the class as a
+namespace and never instantiates it. `_Backend.export` copies exactly eight
+names onto the backend module and neither `draw_idle` nor `flush_events` is
+among them, confirmed live: after `matplotlib.use("module://hyde...")`,
+`hasattr(hyde.matplotlib_backend, "draw_idle")` is `False`. And the canvas does
+not want them: `FigureCanvasHyde` already answers `draw_idle` through
+`FigureCanvasBase.draw_idle`, which routes to `self.draw` and so to Hyde's own
+override and `manager._push_draw()` -- measured, one push per call. Moving the
+dead body across would have been a regression, because the base version wraps
+the draw in the `_is_idle_drawing` re-entrancy guard that the dead one lacked;
+and `FigureCanvasBase.flush_events` is already a documented no-op returning
+`None`, which is what the dead body did. `flush_events` has no production
+caller at all.
+
+`canvas.draw_idle()` does, though -- five of them in the backend
+(`remove_traces_from_figure`, `abandon_figure_build_session`,
+`regenerate_figure_from_ir` twice, `apply_figure_action`) and both source
+generators emit `fig.canvas.draw_idle()` into the Python they produce -- and
+nothing pinned that it reaches the window. That is why a
+`draw_idle` on a class that cannot receive it read as harmless. The guard is
+`test_an_idle_redraw_request_pushes_the_figure_to_its_window`; give
+`FigureCanvasHyde` a `draw_idle` that calls `FigureCanvasBase.draw` directly
+and it fails on `_push_draw` called 0 times.
+
+**Item 2: `"111"` is not a default, it is the only admissible value.** The
+equal branches were not masking a multi-argument spelling. `subplot_code` is
+validated against exactly `"111"` in two places -- `FigureIRAuthority`
+(`matplotlib_figure_state.py:195`) and `FigureCommandModel`
+(`matplotlib_features.py:479`) both raise on anything else -- and
+`regenerate_figure_from_ir` replays the subplot as
+`figure.add_subplot(int(subplot["subplot_code"]))`, which no `"2, 1, 1"`
+survives. So emitting the matplotlib-correct multi-arg code would have made
+the next `figure_snapshot_payload` raise rather than fix anything. What the
+collapse leaves standing is a real defect, recorded in the comment: a tracked
+`fig.add_subplot(2, 1, 1)` records a layout the figure does not have. The fix
+for that is a multi-subplot IR, not a different string at that line, and the
+import path already warns that extra axes are dropped. An AST sweep confirms
+zero identical-branch conditionals -- ternary or `if`/`else` -- remain anywhere
+under `hyde/`, not just at the named line.
+
+**Items 3 and 4, measured together.** Both are reachability questions, so both
+were answered by running the whole 657-test suite in one process with
+`FigureCommandModel`'s classmethods, `MatplotlibCodec._feature_kind`,
+`MatplotlibCodec.tracked_names` and `figure_ir_from_live_state` wrapped in
+recorders that log the nearest calling frame inside the repo. Every single hit
+came from a `tests/` frame. Not one production frame reached any of them.
+
+Slice 17's reading of `MatplotlibCodec.tracked_names` is **refuted twice**. It
+has no production caller: across 657 tests it was called exactly once, from
+`test_lowering_and_tracked_names_match_across_the_process_boundary`. And the
+"two implementations agree" contract does not exist -- the codec method's whole
+body is `return model.tracked_names(...)`, so the assertion compared
+`FigureIRAuthority.tracked_names` with a two-line forward to itself and could
+not fail unless the forward were edited. Nor was it an arm of a uniform
+dispatch: `tracked_names` is not on `FeatureCodec`, no other codec has it, and
+only two of the four matplotlib models implemented it, so the "uniform" arm
+raised `AttributeError` for the patch and export kinds. Deleted, with the
+`tracked_names` half of its test; the `state_to_python` half stays, because
+that forward *is* production-live (`figure_snapshot_payload`), and the test is
+renamed `test_lowering_matches_across_the_process_boundary` to say what it now
+covers.
+
+**The `figure_command` feature is production-dead as a whole**, confirming
+Slice 8. `"figure_command"` is named nowhere outside `matplotlib_features.py`'s
+own constants, five test files and this backlog -- not in a spec, a template, a
+session TOML or any other data file. The 13 production `MatplotlibCodec` call
+sites all pass figure IR, explicitly or through `_hyde_ir`, which is
+`FigureIRAuthority.default_state()`. Every `_feature_kind` fall-through to
+`figure_command` in the suite came from `figure_ir_from_live_state`, which is
+itself production-dead: a fixture builder living in a production module, called
+only by tests. `FigureCommandModel.state_to_macro_source` was never called by
+*anything*, test included.
+
+That last one was the drift hazard item 3 named -- an undecorated macro, a
+third spelling of "recreate this figure" -- so it is deleted, and
+`FigureCommandModel.tracked_names` with it, since it existed only to name that
+macro's parameters. `MatplotlibCodec.state_to_macro_source` now raises
+`NotImplementedError` for the kind, which is the honest answer.
+
+Removing the rest of `FigureCommandModel` was **deliberately not done here**.
+The model is still the codec's fallback normalizer -- `_feature_kind` returns
+`figure_command` for any unrecognised state, which
+`test_matplotlib_codec_rejects_the_ambiguous_figure_feature_name` pins on
+purpose -- so removing it is a redesign of that fallback plus a rehoming of
+`figure_ir_from_live_state` and its roughly sixty fixture uses across five test
+files. That is a slice, not a deletion; filed as Slice 9.
+
+Beyond the suite, one figure was driven end to end through the real backend:
+built by a `@hyde.figure` macro, snapshotted, refreshed against a changed
+namespace, regenerated straight from its IR, copied to the clipboard in two
+formats, and closed. 33 checks, all passing -- IR one subplot with
+`subplot_code` `"111"`, command log `add_subplot` then `plot`, `save_error`
+`None`, `call_source` and the recreation source both asking
+`plt.figure('DelayGraph', clear=True)`, y data going `[1, 4, 9]` to
+`[5, 6, 7]` on refresh, a `COPY_TO_CLIPBOARD_REQUEST` carrying rendered PDF and
+PNG bytes, and the figure gone from `Gcf` and from `_iter_windowed_figures()`
+after the close.
 
 ### Blocked by
 
@@ -642,3 +746,70 @@ plain `plt.figure(name)` reaches one as it stands.
 ### Blocked by
 
 None - can start immediately. Independent of Slice 1, which touches teardown.
+
+## Slice 9: Retire The `figure_command` Feature
+
+### Type
+
+`AFK`
+
+### What to build
+
+Slice 2 established, by running the whole 657-test suite in one process with
+recorders on `FigureCommandModel`'s classmethods,
+`MatplotlibCodec._feature_kind`, `MatplotlibCodec.tracked_names` and
+`figure_ir_from_live_state`, that **every** entry into the `figure_command`
+feature comes from a `tests/` frame. Not one production frame reaches it. The
+sweep covered the whole tree, not just `.py`, with explicit paths for the
+gitignored material: `"figure_command"` is named nowhere outside
+`hyde/features/matplotlib_features.py`'s own constants, five test files and
+this backlog -- no spec, template, session TOML or other data file.
+
+Slice 2 removed the two members with zero callers anywhere,
+`FigureCommandModel.state_to_macro_source` and the
+`FigureCommandModel.tracked_names` that only fed it. What remains is dead in
+production but load-bearing for tests, so retiring it is a refactor rather than
+a deletion:
+
+1. **`FigureCommandModel` is still the codec's fallback normalizer.**
+   `MatplotlibCodec._feature_kind` returns `figure_command` for any state it
+   cannot otherwise classify, and
+   `test_matplotlib_codec_rejects_the_ambiguous_figure_feature_name` pins that
+   on purpose -- its comment says an unrecognised kind must fall through rather
+   than be rejected, so that a plausible-looking `"figure"` is caught. Deciding
+   what the fallback should be instead is the design question this slice has to
+   answer. `figure_ir` is the obvious candidate; raising is the other.
+
+2. **`figure_ir_from_live_state` (`matplotlib_features.py:715`) is a test
+   fixture living in a production module.** It takes a `figure_command` state
+   and returns a figure IR, and all of its callers are tests -- roughly sixty
+   uses across `test_matplotlib_features.py`, `test_figure_comm_actions.py`,
+   `test_axis_edit_dialog.py`, `test_trace_edit_dialog.py` and
+   `test_remove_from_graph_dialog.py`. Those fixtures want a terse way to say
+   "a figure IR with these traces", not a `figure_command` state; rehoming that
+   shorthand into the tests is most of the work.
+
+3. **`FigureCommandModel._creation_lines` still emits the drifted spelling.**
+   `fig = plt.figure('Name')` with no clear and no `@hyde.figure` wrapper,
+   asserted by `test_matplotlib_figure_lowerers_emit_only_matplotlib_python`,
+   which Slice 8 deliberately left alone. Once the feature goes, so does that
+   arm of the test.
+
+4. **`MatplotlibCodec.state_to_macro_source` has no production caller either**
+   -- checked while confirming item 4 -- and after Slice 2 its only remaining
+   behaviour for a `figure_command` state is to raise. Its one test
+   (`test_graphics_export_macro_source_raises_not_implemented`) exercises the
+   export kind. Settle it in the same pass rather than leaving a second dead
+   public method behind.
+
+### Acceptance criteria
+
+- [ ] The codec has one spelling of "recreate this figure", not two.
+- [ ] `_feature_kind`'s fallback for an unclassifiable state is a deliberate,
+      stated choice, and its guard still fails for the ambiguous `"figure"`.
+- [ ] No production module holds a function whose only callers are tests.
+- [ ] Figure creation, refresh, close and copy all still work.
+
+### Blocked by
+
+Slice 2, which is done. Independent of Slices 3-7.

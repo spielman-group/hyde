@@ -461,16 +461,12 @@ class TestFigureIRAuthorityIsShared(unittest.TestCase):
             FigureIRAuthority.validate_state(figure_ir),
         )
 
-    def test_lowering_and_tracked_names_match_across_the_process_boundary(self):
+    def test_lowering_matches_across_the_process_boundary(self):
         figure_ir = self._live_figure_ir()
 
         self.assertEqual(
             MatplotlibCodec.state_to_python(figure_ir),
             FigureIRAuthority.state_to_python(figure_ir),
-        )
-        self.assertEqual(
-            tuple(MatplotlibCodec.tracked_names(figure_ir)),
-            tuple(FigureIRAuthority.tracked_names(figure_ir)),
         )
 
     def test_axis_edits_lower_identically_across_the_process_boundary(self):
@@ -1297,6 +1293,27 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertEqual(manager.num, 3)
         self.assertTrue(manager._ready_to_push)
         comm_cls.assert_not_called()
+
+    def test_an_idle_redraw_request_pushes_the_figure_to_its_window(self):
+        """`canvas.draw_idle()` is how Hyde gets redrawn pixels to the GUI.
+
+        Five places in the backend redraw a figure that way -- trace removal,
+        the failed-macro rewind, IR regeneration twice, and figure actions --
+        and both source generators emit
+        `fig.canvas.draw_idle()` into the Python they produce. The canvas
+        answers with the inherited `FigureCanvasBase.draw_idle`, which routes
+        through `FigureCanvasHyde.draw` and so through the manager's push.
+        Nothing pinned that chain, so a `draw_idle` placed on a class that
+        cannot receive it looked harmless.
+        """
+        figure = Figure()
+        canvas = FigureCanvasHyde(figure)
+        manager = FigureManagerHyde(canvas, 3)
+
+        with patch.object(manager, "_push_draw") as push_draw:
+            canvas.draw_idle()
+
+        push_draw.assert_called_once_with()
 
     def test_set_window_title_does_not_push_draw(self):
         figure = Figure()

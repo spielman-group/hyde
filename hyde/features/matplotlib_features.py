@@ -525,16 +525,6 @@ class FigureCommandModel:
         return lines
 
     @classmethod
-    def tracked_names(cls, state):
-        normalized = cls.normalize_state(state)
-        settings = normalized["settings"]
-        names = []
-        if settings["x_name"] and normalized["items"]:
-            names.append(settings["x_name"])
-        names.extend(normalized["items"])
-        return tuple(ordered_unique(names))
-
-    @classmethod
     def state_to_python(cls, state, context=None):
         del context
         normalized = cls.validate_state(state)
@@ -545,18 +535,14 @@ class FigureCommandModel:
             return f"plt.close({normalized['settings']['figure_number']})"
         raise ValueError(f"Unsupported figure command: {command!r}.")
 
-    @classmethod
-    def state_to_macro_source(cls, state, macro_name, context=None):
-        del context
-        normalized = cls.validate_state(state)
-        parameters = list(cls.tracked_names(normalized))
-        body_lines = macro_ready_lines(cls._creation_lines(normalized))
-        body = "\n".join(f"    {line}" for line in body_lines)
-        return (
-            f"def {macro_name}({', '.join(parameters)}):\n"
-            f"{body}\n"
-            "    return fig\n"
-        )
+    # No `state_to_macro_source` here on purpose. A recreation macro for a
+    # figure is `FigureIR`'s to emit -- decorated, and asking plt.figure to
+    # clear. This model's version was undecorated, had no caller anywhere,
+    # and would have been a third spelling of "recreate this figure" free to
+    # drift from the other two. `MatplotlibCodec.state_to_macro_source` now
+    # raises NotImplementedError for this feature kind, which is the honest
+    # answer. `tracked_names` went with it: it existed only to name that
+    # macro's parameters.
 
 
 class MatplotlibCodec(FeatureCodec):
@@ -619,11 +605,11 @@ class MatplotlibCodec(FeatureCodec):
             context=context,
         )
 
-    @classmethod
-    def tracked_names(cls, state):
-        feature_kind = cls._feature_kind(state)
-        model = cls._model_for_feature(feature_kind)
-        return model.tracked_names(cls._delegate_state(feature_kind, state))
+    # No `tracked_names` arm here either. It read as one of the codec's
+    # uniform per-feature-kind forwards, but only two of the four models ever
+    # had the method, and the one production answer to "which names does this
+    # figure watch?" is `FigureIR.tracked_names()`, which goes straight to
+    # `FigureIRAuthority`.
 
     @classmethod
     def _normalize_subplot(cls, subplot, index):
