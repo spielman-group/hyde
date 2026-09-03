@@ -42,7 +42,14 @@ exercised.
       does not already carry, and would have made the ordering hazard live.
       There was a fourth assertion site the filing missed,
       `test_figure_comm_actions.py:422`
-- [ ] Slice 18: Make A Plugin That Fails To Load Visible
+- [x] Slice 18: Make A Plugin That Fails To Load Visible
+      — no product decision was needed: the suite already has a mechanism for a
+      caught failure that must still reach the user, `raise_exception_in_thread`
+      into `labscript_utils.excepthook`, which BLACS and lyse both use and Hyde
+      used nowhere. Following it made the change small. The one place Hyde had
+      to choose was the missing `Plugin` attribute, which became a warning
+      rather than an error because a helper package beside the plugins is a
+      legitimate thing to find
 - [ ] Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
 
 ## How to work these
@@ -1301,8 +1308,38 @@ the codec's surface rather than about this payload field. The kernel-side
 
 ### Type
 
-`HITL` — the decision is a product one: how loudly should Hyde fail when part
-of itself does not load.
+`AFK` — filed as `HITL` asking what the user should see. The maintainer
+resolved it by pointing at the existing pattern: Hyde follows the labscript
+suite, and BLACS already uses plugins. There was no product decision to make,
+only research to do.
+
+The pattern the suite already has, with evidence:
+
+- `labscript_utils/plugins.py` reports every swallowed plugin failure through
+  `self.logger` and nothing else — `discover_modules`, `instantiate_plugins`,
+  `setup_plugins`, `_get_contributions`, `setup_complete`. Its module docstring
+  states the reason: "Import or instantiation failures are logged and skipped so
+  one broken plugin does not stop the application from starting."
+- The suite's mechanism for a *caught* failure that must still reach the user is
+  `zprocess.raise_exception_in_thread` (`zprocess/zprocess/utils.py:112`), which
+  re-raises on a new thread so that the exception reaches `sys.excepthook`
+  without unwinding the caller. `labscript_utils.excepthook` replaces
+  `sys.excepthook` with one that opens an error window in a subprocess
+  (`labscript_utils/excepthook/__init__.py:64`, `tk_exception.py`).
+- BLACS uses it for a device tab that will not instantiate
+  (`blacs/blacs/__main__.py:270`); lyse for its shot-add and analysis loops
+  (`lyse/lyse/filebox.py:911` and `:955`), with the comment "Keep this incoming
+  loop running at all costs, but make the otherwise uncaught exception visible
+  to the user"; runmanager in four places. Hyde used it nowhere.
+- So the surface is not a new one. It is the suite's error window, reached the
+  way the suite reaches it. Hyde already installs the excepthook
+  (`hyde/__main__.py:20`) for its own uncaught exceptions.
+- Hyde's in-app log pane cannot be the surface, and this is structural rather
+  than a choice: it is itself a plugin, and `HydeApp.__init__` connects the
+  logger to it only after every plugin has already loaded.
+- No first-party/third-party distinction exists in the suite, so none was
+  invented. It is not needed: raising on another thread preserves the tolerance
+  the framework was built for by construction.
 
 ### What to build
 
@@ -1325,22 +1362,56 @@ building Slice 11's guard, whose disk-vs-discovered comparison covers it only
 inside that test).
 
 The swallowing is partly the host's design — one bad plugin must not stop the
-app — so this is not simply "raise instead". The question is what the user
-should see. Options worth weighing: a visible notice naming the plugins that
-failed; a status-bar or log-pane surface for start-up failures; failing loudly
-only for Hyde's own first-party plugins while still tolerating third-party ones;
-or leaving it as is and documenting the diagnostic path.
+app — so this is not simply "raise instead".
 
-Whoever takes this should decide the product behaviour first, then implement.
+### What was done
+
+Small, because the suite already had the mechanism. `report_plugin_failure` in
+`hyde/user_interface/shared/plugin.py` logs as before and then hands the failure
+to `zprocess.raise_exception_in_thread` as a `HydePluginFailure` carrying the
+original traceback, so the user gets the suite's error window naming the plugin
+and why it broke while start-up carries on.
+
+The plugin host has no seam for "report a failure" other than its logger, so its
+logger is the seam: `HydePluginManager` and `HydeMenuContext` wrap the logger
+they are given in `VisibleFailureLogger`, which delegates everything unchanged
+except `error`/`exception`/`critical`. That covers every swallow site in one
+place — import, instantiation, contributions, menu rendering, and
+`setup_complete`'s setup activities, which is the kernel launch. `HydeApp`'s
+`emit_plugin_event` calls the same helper directly, which covers the tool
+windows built from a `kernel_ready` handler.
+
+Warnings are deliberately not escalated, following the host's own level
+convention: a warning records something odd, an error records a plugin that is
+not working. That is what the missing `Plugin` attribute became — a warning, not
+an error, because `test_plugin_manager_discovers_only_plugin_packages` documents
+a package without a `Plugin` as a legitimate helper rather than a defect.
 
 ### Acceptance criteria
 
-- [ ] A first-party plugin that raises on import produces something the user can
-      see, or a written decision that it should not.
-- [ ] A plugin directory with no `Plugin` attribute is at least logged.
-- [ ] One bad third-party plugin still does not prevent Hyde from starting.
-- [ ] The kernel-launch case is covered by whatever surface is chosen, since
-      that is the failure that motivated it.
+- [x] A first-party plugin that raises on import produces something the user can
+      see, or a written decision that it should not. Driven for real with
+      `labscript_utils.excepthook` installed as `hyde/__main__.py` installs it,
+      with the dialog subprocess captured rather than opened: a plugin whose
+      `__init__.py` imports a missing module produced an error window titled
+      "Unhandled exception in <script>", headed `HydePluginFailure: Could not
+      import plugin 'figure_export'. Skipping. Original exception was:
+      ModuleNotFoundError: No module named 'nonexistent_module_xyz'`, with the
+      plugin's own traceback frame in the body.
+- [x] A plugin directory with no `Plugin` attribute is at least logged. Now a
+      warning naming the package; verified by observation, and by removing the
+      log line and watching the guard fail.
+- [x] One bad third-party plugin still does not prevent Hyde from starting. The
+      mechanism preserves this by construction — the exception is raised on
+      another thread, so nothing unwinds the caller. Verified: alongside a
+      plugin that raises `ImportError` on import, the sound plugin beside it was
+      still discovered and instantiated, and alongside a `start_runtime`
+      activity that raises, the neighbouring plugin still completed its own
+      setup.
+- [x] The kernel-launch case is covered by whatever surface is chosen, since
+      that is the failure that motivated it. It is the same surface: a
+      `start_runtime` setup activity that raises is reported through the host's
+      logger, so it now reaches the error window. Verified by execution.
 
 ### Related, found while doing Slice 16
 
@@ -1356,9 +1427,14 @@ whatever surface this slice chooses for start-up failures should cover it: a
 tool that vanished because a five-second handshake expired is exactly the
 failure a user cannot diagnose.
 
+Covered. The tool is built from a `kernel_ready` event handler, and
+`HydeApp.emit_plugin_event` was the one swallow site outside the plugin host, so
+it now reports through the same helper. A handler that raises `TimeoutError`
+puts that timeout in the error window rather than leaving an absent tool.
+
 ### Blocked by
 
-None - can start immediately, but needs the product decision above first.
+None.
 
 ## Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
 

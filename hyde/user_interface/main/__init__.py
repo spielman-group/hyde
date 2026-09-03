@@ -27,6 +27,7 @@ from hyde.user_interface.shared.plugin import (
     blank_window_icon,
     finalize_subwindow_state,
     outdated_tool_window_session_keys,
+    report_plugin_failure,
 )
 
 class PersistentSubwindowFilter(QtCore.QObject):
@@ -377,8 +378,14 @@ class HydeApp:
             try:
                 handler(payload)
             except Exception:
-                logger.exception(
-                    "Plugin event handler failed for '%s'.", name
+                # `kernel_ready` builds the tool windows that wait for a
+                # kernel, so a handler that raises here is a window that never
+                # appears - the same invisible failure as a plugin that would
+                # not import, and reported the same way.
+                report_plugin_failure(
+                    logger,
+                    "Plugin event handler failed for '%s'.",
+                    name,
                 )
         return payload
 

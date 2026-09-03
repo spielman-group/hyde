@@ -1,7 +1,9 @@
 import logging
 import os
+import shutil
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -2018,6 +2020,258 @@ class TestPluginTools(unittest.TestCase):
             ),
             "fit_signal_2",
         )
+
+
+class TestStartUpFailuresReachTheUser(unittest.TestCase):
+    """One bad plugin must not stop Hyde, but it must not be invisible either.
+
+    The plugin host catches a plugin that will not load and reports it through
+    its logger, which is why a broken plugin used to leave a Hyde that looked
+    merely featureless. The suite's answer for a caught failure that still has
+    to reach the user is to re-raise it on another thread, so that it arrives
+    at the interpreter's uncaught-exception hook - the hook
+    `labscript_utils.excepthook` replaces with one that opens an error window.
+    These watch that hook, which is the surface, and check that the start-up
+    which swallowed the failure carried on regardless.
+
+    Nothing here reads Hyde's own plugin directory: the plugins are written by
+    the test, so what is asserted is what the code does with a broken plugin
+    rather than what today's plugins happen to be.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def setUp(self):
+        self.reported = []
+        self._reported = threading.Event()
+
+        def capture(args):
+            self.reported.append(args)
+            self._reported.set()
+
+        original = threading.excepthook
+        threading.excepthook = capture
+        self.addCleanup(setattr, threading, "excepthook", original)
+
+        # The logger HydeApp gives the plugin host, and the one
+        # `emit_plugin_event` reaches for by name.
+        self.records = []
+        handler = logging.Handler()
+        handler.emit = self.records.append
+        logger = logging.getLogger("hyde")
+        logger.addHandler(handler)
+        self.addCleanup(logger.removeHandler, handler)
+        self.addCleanup(setattr, logger, "propagate", logger.propagate)
+        self.addCleanup(setattr, logger, "level", logger.level)
+        logger.propagate = False
+        logger.setLevel(logging.DEBUG)
+        self.logger = logger
+
+    def shown_to_the_user(self):
+        """What the uncaught-exception hook was handed, once it arrives."""
+        self._reported.wait(10)
+        return ["%s: %s" % (r.exc_type.__name__, r.exc_value) for r in self.reported]
+
+    def nothing_shown_to_the_user(self):
+        """The same, for a case that should show nothing.
+
+        Absence can only be read after giving a report the chance to arrive,
+        so this waits briefly. The wait is this test's synchronisation, not a
+        deadline the product observes.
+        """
+        self._reported.wait(0.5)
+        return ["%s: %s" % (r.exc_type.__name__, r.exc_value) for r in self.reported]
+
+    def logged(self):
+        return [record.getMessage() for record in self.records]
+
+    def write_plugin_package(self, sources):
+        """A plugin package on disk, built from ``{name: module source}``."""
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        # Unique per test: an importable name is cached in `sys.modules`, so a
+        # reused one would hand a later test the earlier test's plugins.
+        package = Path(directory) / f"probe_plugins_{Path(directory).name}"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        for name, source in sources.items():
+            plugin_dir = package / name
+            plugin_dir.mkdir()
+            (plugin_dir / "__init__.py").write_text(source, encoding="utf-8")
+        sys.path.insert(0, directory)
+        self.addCleanup(sys.path.remove, directory)
+        return HydePluginManager(
+            plugin_package=package.name,
+            plugins_dir=str(package),
+            logger=self.logger,
+        )
+
+    def test_a_plugin_that_raises_on_import_is_put_in_front_of_the_user(self):
+        manager = self.write_plugin_package(
+            {
+                "sound": "class Plugin:\n    def __init__(self, settings):\n        pass\n",
+                "broken": "raise ValueError('this plugin is broken on purpose')\n",
+            }
+        )
+
+        manager.discover_modules()
+        manager.instantiate_plugins()
+
+        shown = self.shown_to_the_user()
+        self.assertEqual(1, len(shown), shown)
+        self.assertIn("broken", shown[0])
+        self.assertIn("this plugin is broken on purpose", shown[0])
+
+    def test_a_bad_plugin_does_not_stop_the_rest_of_hyde_loading(self):
+        manager = self.write_plugin_package(
+            {
+                "third_party": "raise ImportError('no such thing')\n",
+                "sound": (
+                    "class Plugin:\n"
+                    "    def __init__(self, settings):\n"
+                    "        self.loaded = True\n"
+                ),
+            }
+        )
+
+        manager.discover_modules()
+        plugins = manager.instantiate_plugins()
+
+        self.assertEqual(["sound"], sorted(plugins))
+        self.assertTrue(plugins["sound"].loaded)
+
+    def test_a_package_that_exports_no_plugin_is_recorded(self):
+        manager = self.write_plugin_package({"shared_helpers": "VALUE = 1\n"})
+
+        self.assertEqual({}, manager.discover_modules())
+
+        self.assertTrue(
+            any("shared_helpers" in message for message in self.logged()),
+            self.logged(),
+        )
+
+    def test_a_package_that_exports_no_plugin_is_not_shown_as_a_failure(self):
+        """A helper package beside the plugins is not a broken plugin.
+
+        `test_plugin_manager_discovers_only_plugin_packages` documents that a
+        package without a `Plugin` is a legitimate thing to find here, so it is
+        recorded and not put in front of the user.
+        """
+        manager = self.write_plugin_package({"shared_helpers": "VALUE = 1\n"})
+
+        manager.discover_modules()
+
+        self.assertEqual([], self.nothing_shown_to_the_user())
+
+    def test_a_start_up_activity_that_fails_is_put_in_front_of_the_user(self):
+        """The failure that motivated this: a kernel that never started.
+
+        Hyde starts its kernel from a plugin setup activity, so a kernel launch
+        that raises was caught by the host and only logged - which is how Hyde
+        once came up looking normal with no kernel behind it.
+        """
+        manager = self.write_plugin_package(
+            {
+                "runtime": (
+                    "class Plugin:\n"
+                    "    def __init__(self, settings):\n"
+                    "        pass\n"
+                    "    def get_setup_activities(self):\n"
+                    "        return [{\n"
+                    "            'name': 'start_runtime',\n"
+                    "            'priority': 20,\n"
+                    "            'action': self.start_runtime,\n"
+                    "        }]\n"
+                    "    def start_runtime(self, data=None):\n"
+                    "        raise RuntimeError('the kernel would not start')\n"
+                ),
+                "sound": (
+                    "class Plugin:\n"
+                    "    def __init__(self, settings):\n"
+                    "        self.set_up = False\n"
+                    "    def get_setup_activities(self):\n"
+                    "        return [{\n"
+                    "            'name': 'setup',\n"
+                    "            'priority': 10,\n"
+                    "            'action': self.setup,\n"
+                    "        }]\n"
+                    "    def setup(self, data=None):\n"
+                    "        self.set_up = True\n"
+                ),
+            }
+        )
+        manager.discover_modules()
+        plugins = manager.instantiate_plugins()
+
+        manager.setup_complete({})
+
+        shown = self.shown_to_the_user()
+        self.assertEqual(1, len(shown), shown)
+        self.assertIn("start_runtime", shown[0])
+        self.assertIn("the kernel would not start", shown[0])
+        # Still tolerated: the plugin beside it finished its own setup.
+        self.assertTrue(plugins["sound"].set_up)
+
+    def test_a_tool_window_that_fails_to_open_is_put_in_front_of_the_user(self):
+        """The variables tool's five-second kernel handshake, generalised.
+
+        `PythonVariables.__init__` waits for the kernel and raises
+        `TimeoutError` when the handshake expires, from a `kernel_ready` event
+        handler. On a slow machine that used to mean the tool simply was not
+        there.
+        """
+        manager = self.write_plugin_package(
+            {
+                "variables": (
+                    "class Plugin:\n"
+                    "    def __init__(self, settings):\n"
+                    "        pass\n"
+                    "    def get_event_handlers(self):\n"
+                    "        return {'kernel_ready': self.on_kernel_ready}\n"
+                    "    def on_kernel_ready(self, data):\n"
+                    "        raise TimeoutError('the kernel handshake expired')\n"
+                ),
+            }
+        )
+        manager.discover_modules()
+        manager.instantiate_plugins()
+        app = make_plugin_host(manager)
+
+        payload = HydeApp.emit_plugin_event(app, "kernel_ready")
+
+        self.assertEqual({}, payload)
+        shown = self.shown_to_the_user()
+        self.assertEqual(1, len(shown), shown)
+        self.assertIn("kernel_ready", shown[0])
+        self.assertIn("the kernel handshake expired", shown[0])
+
+    def test_a_menu_entry_a_plugin_could_not_place_is_put_in_front_of_the_user(self):
+        """A plugin whose menu entry is rejected has half loaded.
+
+        Its action is silently missing from the menu bar, which is the same
+        featureless-looking Hyde as a plugin that never imported.
+        """
+        window = QtWidgets.QMainWindow()
+        window.setMenuBar(QtWidgets.QMenuBar())
+        context = HydeMenuContext(logger=self.logger)
+        context.register_location("file", window.menuBar().addMenu("File"))
+        context.add(
+            "sound",
+            {"location": "nowhere", "name": "Play"},
+            {"services": {}},
+        )
+
+        context.render()
+
+        shown = self.shown_to_the_user()
+        self.assertEqual(1, len(shown), shown)
+        self.assertIn("sound", shown[0])
+        self.assertIn("nowhere", shown[0])
+
 
 if __name__ == "__main__":
     unittest.main()

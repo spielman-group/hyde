@@ -1,6 +1,8 @@
 import importlib
 import logging
 import os
+import sys
+import traceback
 
 from labscript_utils.plugins import (
     DEFAULT_PRIORITY,
@@ -10,6 +12,7 @@ from labscript_utils.plugins import (
     PluginManager,
 )
 from qtutils.qt import QtCore, QtGui, QtWidgets
+from zprocess import raise_exception_in_thread
 
 from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
@@ -20,6 +23,81 @@ SETUP_PRIORITY_PLUGIN_SETUP = DEFAULT_SETUP_PRIORITY + 10
 # services and completed ordinary setup, including output-window creation.
 SETUP_PRIORITY_RUNTIME_START = DEFAULT_SETUP_PRIORITY + 20
 _TOOL_WINDOW_STATES = frozenset({"hidden", "visible", "minimized", "maximized"})
+
+
+class HydePluginFailure(RuntimeError):
+    """Names a part of Hyde that did not load, in the report the user sees."""
+
+
+def report_plugin_failure(logger, message, *args):
+    """Log a swallowed plugin failure, and put it in front of the user.
+
+    labscript-utils' ``PluginManager`` catches a plugin that will not import,
+    instantiate, contribute or complete its setup activities, and reports it
+    through its logger rather than raising, so that one bad plugin cannot stop
+    the application. That trade is deliberate and this keeps it. What it does
+    not keep is the silence: in a windowed application the log alone is not a
+    report. Hyde's log pane is itself a plugin, and ``HydeApp.__init__``
+    connects the logger to it only after every plugin has already loaded, so a
+    plugin that failed on the way up leaves an application that looks merely
+    featureless.
+
+    The suite's answer to exactly this - carry on, but let the user see it - is
+    ``zprocess.raise_exception_in_thread``: BLACS uses it for a device tab that
+    will not instantiate (``blacs/blacs/__main__.py:270``), lyse for its shot
+    and analysis loops (``lyse/lyse/filebox.py:911`` and ``:955``), runmanager
+    for its queue and submission threads. Raising on another thread reaches
+    ``labscript_utils.excepthook``, which Hyde already installs
+    (``hyde/__main__.py:20``), without unwinding the caller - so the failure
+    becomes an error window while the start-up that swallowed it carries on.
+    """
+    formatted = message % args if args else message
+    exception_class, exception, exception_traceback = sys.exc_info()
+    if exception is None:
+        logger.error(formatted)
+        headline = formatted
+    else:
+        logger.exception(formatted)
+        # The dialog's headline is this message, and its body is the traceback
+        # below. Naming the original exception here means the headline alone
+        # says which plugin broke and why.
+        original = "".join(
+            traceback.format_exception_only(exception_class, exception)
+        ).strip()
+        headline = f"{formatted} Original exception was: {original}"
+    raise_exception_in_thread(
+        (HydePluginFailure, HydePluginFailure(headline), exception_traceback)
+    )
+
+
+class VisibleFailureLogger:
+    """A logger whose error reports are also shown to the user.
+
+    The plugin host has no seam for "report a failure" other than its logger,
+    so this is the seam. Everything else is delegated unchanged, including
+    warnings: the host's own level convention is that a warning describes
+    something odd worth recording and an error describes a plugin that is not
+    working, and only the latter is worth interrupting the user for.
+    """
+
+    def __init__(self, logger):
+        self.logger = logger
+
+    def __getattr__(self, name):
+        return getattr(self.logger, name)
+
+    def error(self, message, *args, **kwargs):
+        del kwargs
+        report_plugin_failure(self.logger, message, *args)
+
+    exception = error
+    critical = error
+
+    def log(self, level, message, *args, **kwargs):
+        if level >= logging.ERROR:
+            report_plugin_failure(self.logger, message, *args)
+        else:
+            self.logger.log(level, message, *args, **kwargs)
 
 
 class NullConfig:
@@ -52,7 +130,7 @@ class HydePluginManager(PluginManager):
             config=NullConfig(),
             config_section="hyde/user_interface",
             default_plugins=(),
-            logger=logger or logging.getLogger(__name__),
+            logger=VisibleFailureLogger(logger or logging.getLogger(__name__)),
         )
 
     def discover_modules(self):
@@ -69,6 +147,16 @@ class HydePluginManager(PluginManager):
                 )
                 continue
             if not hasattr(module, "Plugin"):
+                # A package under the plugins directory that exports no Plugin
+                # is not evidence of breakage - a shared helper package is a
+                # legitimate reason - so this is recorded rather than shown,
+                # which is the difference between a warning and an error here.
+                # Upstream leaves it to fail in instantiate_plugins as an
+                # unexplained AttributeError; saying so plainly is better.
+                self.logger.warning(
+                    "Package '%s' under the plugins directory exports no "
+                    "Plugin. Not loading it as a plugin." % module_name
+                )
                 continue
             modules[module_name] = module
 
@@ -489,7 +577,13 @@ class HydeMenuContext(MenuContext):
     """Hyde-local menu context that retains rendered QAction objects."""
 
     def __init__(self, icon_factory=None, logger=None):
-        super().__init__(icon_factory=icon_factory, logger=logger)
+        # A rejected menu contribution is a plugin that half loaded: its menu
+        # entry is simply not there. Reported the same way as one that would
+        # not import at all.
+        super().__init__(
+            icon_factory=icon_factory,
+            logger=VisibleFailureLogger(logger or logging.getLogger(__name__)),
+        )
         self._actions = {}
         self._grouped_contributions = {}
         self._group_orders = {}
