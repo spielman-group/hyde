@@ -186,7 +186,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             macro = widget.macro_source("Graph0")
 
             self.assertIn("@hyde.figure(window_pos=(10, 20))", macro)
-            self.assertIn("fig = plt.figure('Figure1')", macro)
+            self.assertIn("fig = plt.figure('Figure1', clear=True)", macro)
         finally:
             widget.close()
 
@@ -228,7 +228,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             self.assertEqual(widget.window_handle(), "Figure7")
             self.assertIn("def Figure7(delay, fit_delay, raw_delay):", source)
             self.assertIn("Figure7(delay, fit_delay, raw_delay)", source)
-            self.assertIn("fig = plt.figure('Figure7')", source)
+            self.assertIn("fig = plt.figure('Figure7', clear=True)", source)
             self.assertIn(
                 "ax.plot(delay, fit_delay, label='fit_delay')",
                 source,
@@ -289,8 +289,8 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             macro = widget.macro_source("Figure0")
             source = widget.session_restore_source()
 
-            self.assertIn("fig = plt.figure('Figure1', figsize=(5.0, 3.0))", macro)
-            self.assertIn("fig = plt.figure('Figure1', figsize=(5.0, 3.0))", source)
+            self.assertIn("fig = plt.figure('Figure1', figsize=(5.0, 3.0), clear=True)", macro)
+            self.assertIn("fig = plt.figure('Figure1', figsize=(5.0, 3.0), clear=True)", source)
         finally:
             widget.close()
 
@@ -353,9 +353,9 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 subwindow.windowTitle(),
                 "Figure0: fit_delay: fit_delay vs delay, raw_delay: raw_delay vs delay [Unsupported Feature]",
             )
-            self.assertIn("fig = plt.figure('Figure7')", macro)
+            self.assertIn("fig = plt.figure('Figure7', clear=True)", macro)
             self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
-            self.assertIn("fig = plt.figure('Figure7')", source)
+            self.assertIn("fig = plt.figure('Figure7', clear=True)", source)
             self.assertIn("ax.plot(delay, raw_delay, label='raw_delay')", source)
         finally:
             widget.force_close()
@@ -461,7 +461,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
                 source,
             )
             self.assertIn("def Figure7(delay, fit_delay, raw_delay):", source)
-            self.assertIn("fig = plt.figure('Figure7')", source)
+            self.assertIn("fig = plt.figure('Figure7', clear=True)", source)
         finally:
             widget.force_close()
             mdi_area.close()

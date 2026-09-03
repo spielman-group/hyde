@@ -655,12 +655,19 @@ class FigureIRAuthority:
             figure_args.append(repr(title))
         if figsize is not None and figsize != default_settings.get("figsize"):
             figure_args.append(f"figsize={figsize!r}")
-        lines = [f"fig = plt.figure({', '.join(figure_args)})" if figure_args else "fig = plt.figure()"]
         # A named figure that still exists comes back from plt.figure() with
         # its old contents, and this source replaces a figure rather than
-        # drawing over it. FigureHyde.clear() empties the figure's Hyde
-        # bookkeeping with it, so what follows is stamped as a first draw.
-        lines.append("fig.clear()")
+        # drawing over it. matplotlib's own clear kwarg says exactly that in
+        # one line, and it calls FigureHyde.clear(), which empties the
+        # figure's Hyde bookkeeping with it so what follows is stamped as a
+        # first draw. Generated source is read and copied, so it spells the
+        # intent the way matplotlib does.
+        #
+        # An unnamed plt.figure() constructs a new figure on every call, so
+        # there is never a previous one to replace and nothing to clear.
+        if figure_args:
+            figure_args.append("clear=True")
+        lines = [f"fig = plt.figure({', '.join(figure_args)})"]
         for figure_opaque in normalized["opaque_nodes"]:
             if figure_opaque["source"]:
                 lines.extend(figure_opaque["source"].splitlines())

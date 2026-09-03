@@ -433,8 +433,9 @@ def finalize_figure_build_session(session, result):
         raise ValueError(
             "@hyde.figure functions must create exactly one figure. "
             "plt.figure(name) hands back the figure that already exists "
-            "rather than creating one, so call fig.clear() to replace its "
-            "contents, the way a saved Hyde figure macro does."
+            "rather than creating one, so ask for plt.figure(name, "
+            "clear=True) to replace its contents, the way a saved Hyde "
+            "figure macro does."
         )
     if len(created) != 1:
         raise ValueError("@hyde.figure functions must create exactly one figure.")

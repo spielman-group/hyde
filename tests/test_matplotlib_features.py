@@ -226,7 +226,7 @@ class TestGraphicsExportFormats(unittest.TestCase):
 
         figure_command = current_ir.python_source(log=False)
         self.assertIn("@hyde.figure(register=False)", figure_command)
-        self.assertIn("fig = plt.figure('DelayGraph')", figure_command)
+        self.assertIn("fig = plt.figure('DelayGraph', clear=True)", figure_command)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_command)
 
         patch_source = current_ir.current_diff(
@@ -368,7 +368,7 @@ class TestFigureCodec(unittest.TestCase):
         self.assertIn("def _hyde_figure(delay, fit_delay, raw_delay):", source)
         self.assertIn("_hyde_figure(delay, fit_delay, raw_delay)", source)
         self.assertIn("del _hyde_figure", source)
-        self.assertIn("fig = plt.figure('DelayGraph')", source)
+        self.assertIn("fig = plt.figure('DelayGraph', clear=True)", source)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", source)
         self.assertIn("ax.plot(delay, raw_delay, label='raw_delay')", source)
         self.assertIsInstance(figure_ir.current_diff(), FigureIRDiff)
@@ -401,7 +401,7 @@ class TestFigureCodec(unittest.TestCase):
 
         self.assertIn("@hyde.figure", macro)
         self.assertIn("def Graph0(delay, fit_delay):", macro)
-        self.assertIn("fig = plt.figure('DelayGraph')", macro)
+        self.assertIn("fig = plt.figure('DelayGraph', clear=True)", macro)
         self.assertIn("ax = fig.add_subplot(111)", macro)
         self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", macro)
 
@@ -1184,7 +1184,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         payload = figure_snapshot_payload(figure, 1)
 
         self.assertEqual(payload["figure_ir"]["settings"]["figsize"], (5.0, 3.0))
-        self.assertIn("fig = plt.figure('Graph0', figsize=(5.0, 3.0))", payload["call_source"])
+        self.assertIn("fig = plt.figure('Graph0', figsize=(5.0, 3.0), clear=True)", payload["call_source"])
 
     def test_snapshot_payload_includes_kernel_defaults_and_omits_matching_default_output(self):
         plt = self._configure_hyde_pyplot()
@@ -2682,7 +2682,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         session_source = plugin.get_session_restore_source()
 
         self.assertIn("FigureA(delay, fit_delay, raw_delay)", session_source)
-        self.assertIn("fig = plt.figure('FigureA')", session_source)
+        self.assertIn("fig = plt.figure('FigureA', clear=True)", session_source)
 
         plugin.workspace.close_figure(1)
         self.qapp.processEvents()

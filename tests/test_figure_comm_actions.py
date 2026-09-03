@@ -80,10 +80,10 @@ class TestFigureCommActions(unittest.TestCase):
             3.25,
         )
 
-    def _saved_recreation_macro(self, plt):
-        """Hyde's own saved macro for a figure built at the prompt.
+    def _saved_recreation_source(self, plt):
+        """Hyde's own saved source for a figure built at the prompt.
 
-        Taking the macro from Hyde rather than writing one that resembles it
+        Taking the source from Hyde rather than writing one that resembles it
         is the whole point: what breaks a re-run is a line Hyde emits.
         """
 
@@ -102,6 +102,10 @@ class TestFigureCommActions(unittest.TestCase):
             figure_defaults=payload["figure_defaults"],
         ).recreation_function_source("Graph0", register=False)
         plt.close("all")
+        return source
+
+    def _saved_recreation_macro(self, plt):
+        source = self._saved_recreation_source(plt)
         namespace = {"hyde": hyde, "plt": plt, "np": np}
         exec(compile(source, "<session.py>", "exec"), namespace)
         return namespace["Graph0"]
@@ -149,6 +153,47 @@ class TestFigureCommActions(unittest.TestCase):
         drawn = [payload for payload in pushed if payload["event"] == "draw"]
         self.assertTrue(drawn, "the re-run pushed no drawing to Hyde")
         self.assertIsNone(drawn[-1]["snapshot"]["save_error"])
+
+    def test_a_saved_recreation_macro_asks_plt_figure_to_clear(self):
+        """A rebuild is matplotlib's own kwarg, not a two-line Hyde habit.
+
+        Generated source is what a user reads and copies, so it asks
+        plt.figure for a figure already emptied instead of emptying one
+        afterwards. Running the emitted source twice has to leave the figure
+        holding the second run's trace and nothing else.
+        """
+        plt = self._configure_pyplot()
+        source = self._saved_recreation_source(plt)
+
+        self.assertEqual(
+            ["fig = plt.figure('Graph0', clear=True)"],
+            [line.strip() for line in source.splitlines() if "plt.figure(" in line],
+        )
+        self.assertNotIn("fig.clear()", source)
+
+        namespace = {"hyde": hyde, "plt": plt, "np": np}
+        exec(compile(source, "<session.py>", "exec"), namespace)
+        macro = namespace["Graph0"]
+
+        first = macro([1.0, 4.0, 9.0])
+        again = macro([5.0, 6.0, 7.0])
+        payload = figure_snapshot_payload(again, again.canvas.manager.num)
+
+        self.assertIs(first, again)
+        self.assertEqual(1, len(again.axes), "the second run stacked another axes")
+        self.assertEqual(
+            [[5.0, 6.0, 7.0]],
+            [list(line.get_ydata()) for line in again.axes[0].lines],
+            "the second run drew over the first instead of replacing it",
+        )
+        self.assertIsNone(payload["save_error"])
+        self.assertEqual(
+            [1],
+            [
+                len(subplot["traces"])
+                for subplot in payload["figure_ir"]["layout"]["subplots"]
+            ],
+        )
 
     def test_a_re_run_figure_can_still_be_saved_as_a_macro(self):
         """A figure Hyde cannot snapshot is a figure the user cannot save.

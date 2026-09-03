@@ -16,7 +16,7 @@ file was filed on an agent's word alone.
 - [ ] Slice 5: Test Hygiene, Round Three
 - [ ] Slice 6: Stale Documentation Left By The Review
 - [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
-- [ ] Slice 8: Generate `plt.figure(name, clear=True)`
+- [x] Slice 8: Generate `plt.figure(name, clear=True)`
 
 ## Slice 1: `force_close` Does Not Close
 
@@ -559,15 +559,70 @@ The maintainer's decision: **macros overwrite.** So:
 
 ### Acceptance criteria
 
-- [ ] Generated macro source calls `plt.figure(..., clear=True)` and contains no
+- [x] Generated macro source calls `plt.figure(..., clear=True)` and contains no
       separate `fig.clear()` line.
-- [ ] Re-running a generated macro replaces the figure's contents, verified by
+- [x] Re-running a generated macro replaces the figure's contents, verified by
       execution on the emitted source rather than on a hand-written equivalent.
-- [ ] A macro written the old way, with an explicit `fig.clear()`, still works.
-- [ ] Neighbour drawing through plain `plt.figure(name)` is unchanged, and
+- [x] A macro written the old way, with an explicit `fig.clear()`, still works.
+- [x] Neighbour drawing through plain `plt.figure(name)` is unchanged, and
       `test_a_macro_may_draw_on_another_figure_while_building_its_own` passes
       untouched.
-- [ ] The guard's message recommends `clear=True`.
+- [x] The guard's message recommends `clear=True`.
+
+### Landed
+
+Nothing about the mechanism moved. `FigureIRAuthority.state_to_python` appends
+`clear=True` to the `plt.figure(...)` arguments instead of appending a second
+`fig.clear()` statement, and the guard's refusal names
+`plt.figure(name, clear=True)`.
+
+**The no-title case: omitted.** With no figure arguments the generator emits
+`plt.figure()`, which constructs a new figure on every call, so there is never
+a previous one to replace. matplotlib's `clear` means "if the figure already
+exists, clear it", and a figure identified by nothing cannot already exist, so
+the kwarg would be inert noise in source a user reads and copies. This is not a
+behaviour change either: `FigureHyde.clear()` on a figure `__init__` has just
+built resets an IR that is already empty and re-registers a figure the session
+already holds — `register_figure` is identity-guarded. First-class figures
+always carry a name (`set_label` refuses an empty one), so they always get
+`clear=True`; the bare `plt.figure()` shape belongs to untitled IR previews.
+
+Confirmed rather than assumed, against the installed matplotlib 3.11.1:
+`pyplot.figure` ends with `if clear: manager.canvas.figure.clear()`, so
+`clear=True` reaches `FigureHyde.clear()` — the same path an explicit
+`fig.clear()` takes, which is why the create-exactly-one-figure guard did not
+have to change.
+
+Measured by executing Hyde's own emitted source, generated from a figure built
+at the prompt and run twice. Before, the emitted body opened
+`fig = plt.figure('Graph0')` / `fig.clear()`; after, `fig = plt.figure('Graph0',
+clear=True)` and no `fig.clear()` line. Both revisions rebuild identically: same
+figure object across the two runs, one axes, `[1.0, 4.0, 9.0]` replaced by
+`[5.0, 6.0, 7.0]`, IR carrying one subplot and one trace, `save_error` `None`.
+No `Unknown live subplot id`. The neighbour case is untouched: `N0` reached with
+plain `plt.figure("N0")` keeps its own line plus the one `N1` drew, and `N1`
+still builds its own distinct figure.
+
+The guards are
+`test_a_saved_recreation_macro_asks_plt_figure_to_clear`, which takes the source
+from Hyde, pins the one-line call, and executes it twice, and
+`test_the_guard_names_a_spelling_that_rebuilds_the_figure`, which runs a macro
+spelled the way the refusal recommends and then reads the refusal. Each fails
+against its shipped half — the first on the two-line emission, the second on the
+old message — and the rebuild half of the second passes either way, because
+`clear=True` always worked. `test_a_re_run_updates_the_figure_it_rebuilds` still
+covers the old explicit `fig.clear()` spelling, untouched.
+
+Twelve assertions on emitted source in `test_matplotlib_features.py` and
+`test_figure_window_session_save.py` gained `clear=True`. Two that read like
+they belong to this generator do not, and were left alone: the `figure_command`
+codec's create source (`MatplotlibCodec.state_to_python` for that feature) and
+`figure_call_source`, which describes a figure Hyde owns no IR for and cannot
+save as a macro.
+
+`specs/figure_window/SPEC.md` now shows the emitted call and states the two
+meanings side by side: `plt.figure(name, clear=True)` replaces a figure,
+plain `plt.figure(name)` reaches one as it stands.
 
 ### Blocked by
 

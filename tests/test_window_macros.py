@@ -596,6 +596,44 @@ class TestFigureDecorator(unittest.TestCase):
             [list(line.get_ydata()) for line in again.axes[0].lines],
         )
 
+    def test_the_guard_names_a_spelling_that_rebuilds_the_figure(self):
+        """A macro that reached a figure without replacing it needs a way out.
+
+        The refusal names one, so the named spelling has to be a spelling the
+        guard then accepts: plt.figure(name, clear=True) replaces the figure's
+        contents and claims it for this run, in the one call.
+        """
+        plt = self._configure_pyplot()
+
+        @hyde.figure(register=False)
+        def Graph0(y):
+            fig = plt.figure("Graph0", clear=True)
+            ax = fig.add_subplot(111)
+            ax.plot(y, label="y")
+            return fig
+
+        first = Graph0([1.0, 2.0, 3.0])
+        again = Graph0([4.0, 5.0, 6.0])
+
+        self.assertIs(first, again)
+        self.assertEqual(1, len(again.axes), "the second run stacked another axes")
+        hyde.refresh_figure(again, use_bound_values=True)
+        self.assertEqual(
+            [[4.0, 5.0, 6.0]],
+            [list(line.get_ydata()) for line in again.axes[0].lines],
+        )
+
+        @hyde.figure(register=False)
+        def DrawsOnly(y):
+            fig = plt.figure("Graph0")
+            fig.axes[0].plot(y, label="z")
+            return fig
+
+        with self.assertRaises(ValueError) as caught:
+            DrawsOnly([7.0, 8.0, 9.0])
+
+        self.assertIn("clear=True", str(caught.exception))
+
 
 class TestDecoratedProcedureRegistries(unittest.TestCase):
     def setUp(self):

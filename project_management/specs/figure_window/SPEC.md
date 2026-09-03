@@ -39,7 +39,12 @@ Hyde generates table and figure subwindow names through one shared naming path.
 Figures use the `Figure` prefix and tables use the `Table` prefix.
 
 For first-class figures, this stable `objectName()` is also the base user-facing
-figure name used in recreation source, for example `plt.figure("Figure0")`.
+figure name used in recreation source, for example
+`plt.figure("Figure0", clear=True)`. Recreation source names the figure and asks
+matplotlib to clear it in the one call, so re-running a saved figure macro
+replaces that figure's contents instead of drawing over them. Plain
+`plt.figure("Figure0")` keeps its other meaning: reaching a figure as it stands,
+which is how one macro draws on a neighbouring figure.
 When figure creation requests a preferred figure name, Hyde accepts it if it is free;
 otherwise Hyde falls forward to the next available figure name and rewrites the live
 kernel figure label plus saved recreation source to that resolved stable name.
