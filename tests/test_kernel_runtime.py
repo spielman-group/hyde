@@ -17,6 +17,7 @@ from hyde.execution.comms import FIGURE_COMM_TARGET
 from hyde.user_interface.plugins.figure_interactive.matplotlib_support import (
     register_auxiliary_figure_comm_sink,
 )
+from hyde.user_interface.plugins.file import Plugin as FilePlugin
 from hyde.user_interface.main import HydeApp, StatusMessageService
 from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.kernel_runtime import (
@@ -833,18 +834,24 @@ class TestRuntimeArchitecture(unittest.TestCase):
     def test_kernel_runtime_plugin_contributes_kill_kernel_file_action(self):
         plugin = KernelRuntimePlugin({})
 
-        self.assertEqual(
-            plugin.get_menu_contributions(),
-            [
-                {
-                    "location": "file",
-                    "group": "application",
-                    "order": 110,
-                    "name": "Kill Kernel",
-                    "action": plugin.kill_kernel,
-                },
-            ],
-        )
+        contributions = plugin.get_menu_contributions()
+
+        self.assertEqual(len(contributions), 1)
+        contribution = contributions[0]
+        self.assertEqual(contribution["location"], "file")
+        self.assertEqual(contribution["name"], "Kill Kernel")
+        self.assertEqual(contribution["action"], plugin.kill_kernel)
+        # Killing the kernel belongs with Quit rather than with the project or
+        # save actions, which is what puts a separator above it. Read off the
+        # file plugin's own contribution rather than spelled out here: the group
+        # name is an internal ordering key, and what matters is that these two
+        # agree on it.
+        quit_groups = {
+            other["group"]
+            for other in FilePlugin({}).get_menu_contributions()
+            if other["name"] == "Quit"
+        }
+        self.assertEqual({contribution["group"]}, quit_groups)
 
     def test_kernel_runtime_plugin_kill_kernel_terminates_running_process(self):
         calls = []

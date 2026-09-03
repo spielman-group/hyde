@@ -1523,6 +1523,144 @@ class TestPluginTools(unittest.TestCase):
         popup_menu.actions()[0].trigger()
         self.assertEqual(triggered, ["figure"])
 
+    def rendered_entries(self, menu):
+        """One menu's entries in order, separators included."""
+        return [
+            "---" if action.isSeparator() else action.text()
+            for action in menu.actions()
+        ]
+
+    def render_grouped_contributions(self, contributions):
+        main_window = QtWidgets.QMainWindow()
+        context = HydeMenuContext()
+        context.register_location("figure", QtWidgets.QMenu("Figure", main_window))
+        context.contributions = list(contributions)
+        context.render()
+        return self.rendered_entries(context.locations["figure"])
+
+    def test_menu_groups_order_by_name_not_by_the_order_they_are_contributed(self):
+        # Plugins are discovered with os.listdir(), so the order they contribute
+        # in is a property of the machine. Menu layout must not be: when group
+        # order came from first contribution, reversing that listing moved Quit
+        # and Kill Kernel to the top of the File menu.
+        entries = {
+            "10_early": "Alpha",
+            "20_middle": "Beta",
+            "30_late": "Gamma",
+        }
+
+        def contributions(groups):
+            return [
+                (
+                    "plugin_%s" % group,
+                    {
+                        "location": "figure",
+                        "group": group,
+                        "order": 10,
+                        "name": entries[group],
+                        "action": lambda: None,
+                    },
+                )
+                for group in groups
+            ]
+
+        as_named = self.render_grouped_contributions(
+            contributions(("10_early", "20_middle", "30_late"))
+        )
+        reversed_arrival = self.render_grouped_contributions(
+            contributions(("30_late", "10_early", "20_middle"))
+        )
+
+        self.assertEqual(as_named, ["Alpha", "---", "Beta", "---", "Gamma"])
+        self.assertEqual(as_named, reversed_arrival)
+
+    def test_submenu_sits_in_the_group_its_first_entry_names(self):
+        # A submenu takes its position among its parent's entries from its first
+        # entry, so that entry's group has to be read against the parent's
+        # groups. Read against the submenu's own -- where it is usually the only
+        # group, and so the first one -- Copy As landed at the top of the Figure
+        # menu instead of beside Copy.
+        entries = self.render_grouped_contributions(
+            [
+                (
+                    "controls",
+                    {
+                        "location": "figure",
+                        "group": "10_controls",
+                        "order": 10,
+                        "name": "Modify Axis...",
+                        "action": lambda: None,
+                    },
+                ),
+                (
+                    "export",
+                    {
+                        "location": "figure",
+                        "group": "20_export",
+                        "order": 10,
+                        "name": "Copy",
+                        "action": lambda: None,
+                    },
+                ),
+                (
+                    "export",
+                    {
+                        "location": "figure",
+                        "path": ("Copy As",),
+                        "group": "20_export",
+                        "order": 20,
+                        "name": "Vector",
+                        "action": lambda: None,
+                    },
+                ),
+            ]
+        )
+
+        self.assertEqual(entries, ["Modify Axis...", "---", "Copy", "Copy As"])
+
+    def test_windows_menu_order_survives_a_reordered_plugin_discovery(self):
+        # Six plugins across three separator groups, so the Windows menu is the
+        # one whose layout a changed discovery order would scramble.
+        plugin_classes = {
+            "python_terminal_tool": PythonTerminalPlugin,
+            "logging_tool": LoggingPlugin,
+            "procedure_browser_tool": ProcedureBrowserPlugin,
+            "python_variables_tool": PythonVariablesPlugin,
+            "figure_interactive": FigurePlugin,
+            "table_interactive": TablePlugin,
+        }
+        names = list(plugin_classes)
+
+        def render(order):
+            manager = HydePluginManager(
+                plugin_package="unused", plugins_dir="unused"
+            )
+            manager.plugins = {
+                name: plugin_classes[name]({}) for name in order
+            }
+            app = make_plugin_host(manager)
+            HydeApp.setup_plugins(app)
+            return self.rendered_entries(app.ui.menuWindow)
+
+        self.assertEqual(
+            render(names),
+            [
+                "Python Terminal",
+                "Logging",
+                "Procedures",
+                "Python Variables",
+                "---",
+                "New Figure...",
+                "---",
+                "New Table...",
+                # Appended by the macro plugins themselves after the context has
+                # rendered, so they follow every contributed group.
+                "Graph Macros",
+                "Table Macros",
+            ],
+        )
+        self.assertEqual(render(names), render(list(reversed(names))))
+
     def test_callable_enabled_gates_menu_action_from_a_live_precondition(self):
         # Menus render once at startup, so a static `enabled` flag can only ever
         # describe the state at launch. Figure actions need to reflect whether a

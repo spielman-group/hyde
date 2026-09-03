@@ -189,7 +189,7 @@ class Plugin(HydePlugin):
         return [
             {
                 "location": "window",
-                "group": "figures",
+                "group": "20_figures",
                 "order": 30,
                 "name": "New Figure...",
                 "action": self.show_new_figure_dialog,

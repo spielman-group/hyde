@@ -24,16 +24,15 @@ class Plugin(KernelCommands, HydePlugin):
     # Where the Copy As submenu is contributed, and the group it joins in each
     # location so it sits beside that location's Copy entry.
     COPY_AS_LOCATIONS = (
-        ("edit", "clipboard", 0),
-        ("figure", "figure_export", 100),
+        ("edit", "10_clipboard"),
+        ("figure", "20_figure_export"),
     )
 
     def get_menu_contributions(self):
         return [
             {
                 "location": "figure",
-                "group": "figure_export",
-                "group_order": 100,
+                "group": "20_figure_export",
                 "order": 10,
                 "name": "Save Graphics...",
                 "action": self.show_save_graphics_dialog,
@@ -41,8 +40,7 @@ class Plugin(KernelCommands, HydePlugin):
             },
             {
                 "location": "figure",
-                "group": "figure_export",
-                "group_order": 100,
+                "group": "20_figure_export",
                 "order": 20,
                 "name": "Copy",
                 "action": self.copy_active_figure,
@@ -50,8 +48,7 @@ class Plugin(KernelCommands, HydePlugin):
             },
             {
                 "location": "edit",
-                "group": "clipboard",
-                "group_order": 0,
+                "group": "10_clipboard",
                 "order": 0,
                 "name": "Copy",
                 "action": self.copy_active_figure,
@@ -64,16 +61,17 @@ class Plugin(KernelCommands, HydePlugin):
     def _copy_as_contributions(self):
         # Declared into both locations because the figure context menu
         # re-renders the whole `figure` location, and into the same group as
-        # Copy so the submenu sits beside it.
+        # Copy -- a submenu takes its position among its parent's entries from
+        # its first entry's group, so naming the group Copy is in is what puts
+        # Copy As beside it rather than up among the figure controls.
         contributions = []
         for index, item in enumerate(graphics_clipboard_representations()):
-            for location, group, group_order in self.COPY_AS_LOCATIONS:
+            for location, group in self.COPY_AS_LOCATIONS:
                 contributions.append(
                     {
                         "location": location,
                         "path": ("Copy As",),
                         "group": group,
-                        "group_order": group_order,
                         "order": 30 + index,
                         "name": item.display_label,
                         "action": partial(

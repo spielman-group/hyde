@@ -10,7 +10,7 @@ class Plugin(HydePlugin):
         return [
             {
                 "location": "figure",
-                "group": "figure_controls",
+                "group": "10_figure_controls",
                 "order": 0,
                 "name": "Remove from Graph...",
                 "action": self.show_remove_from_graph_dialog,

@@ -65,8 +65,10 @@ class Plugin(HydePlugin):
     def get_menu_contributions(self):
         return [
             {
+                # Separator groups within a location order by group name, so
+                # the name carries a leading ordinal.
                 "location": "window",
-                "group": "example",
+                "group": "40_example",
                 "order": 20,
                 "name": "New Example...",
                 "action": self.open_example_window,

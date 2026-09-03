@@ -9,15 +9,16 @@ class Plugin(HydePlugin):
     """Dialog surface.
 
     Menu entries come from `get_menu_contributions()`. Valid `location` values
-    are `file`, `window`, `analysis`, `table`, and `figure`.
+    are `file`, `window`, `analysis`, `table`, and `figure`. Separator groups
+    within a location order by group name, so the name carries a leading
+    ordinal.
     """
 
     def get_menu_contributions(self):
         return [
             {
                 "location": "analysis",
-                "group": "example",
-                "group_order": 100,
+                "group": "10_example",
                 "order": 10,
                 "name": "Example Dialog...",
                 "action": self.show_example_dialog,

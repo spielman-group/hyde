@@ -421,7 +421,7 @@ class Plugin(HydePlugin):
         return [
             {
                 "location": "file",
-                "group": "application",
+                "group": "30_application",
                 "order": 110,
                 "name": "Kill Kernel",
                 "action": self.kill_kernel,

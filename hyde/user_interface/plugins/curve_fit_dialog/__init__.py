@@ -75,7 +75,7 @@ class Plugin(HydePlugin):
         return [
             {
                 "location": "analysis",
-                "group": "analysis_tools",
+                "group": "10_analysis_tools",
                 "order": 10,
                 "name": "Curve Fit...",
                 "action": self.show_curve_fit_dialog,

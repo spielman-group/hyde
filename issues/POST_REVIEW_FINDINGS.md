@@ -12,7 +12,7 @@ file was filed on an agent's word alone.
 - [x] Slice 1: `force_close` Does Not Close
 - [x] Slice 2: Dead And Unreachable Code In The Figure Backend
 - [x] Slice 3: Two Half-Finished Shutdown Paths
-- [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
+- [x] Slice 4: `group_order`, The Other Drifted Contribution Key
 - [ ] Slice 13: The Last Unquittable Path, And The Eighth Sender
 - [x] Slice 5: Test Hygiene, Round Three
 - [x] Slice 6: Stale Documentation Left By The Review
@@ -548,16 +548,88 @@ they sort correctly. That would need no framework change at all.
 
 ### Acceptance criteria
 
-- [ ] Either the framework understands explicit group ordering, or Hyde no longer
+- [x] Either the framework understands explicit group ordering, or Hyde no longer
       needs `group_order`, or the override is documented as permanent with the
       reason.
-- [ ] Hyde's menu order is unchanged for the user, whichever route is taken.
-- [ ] If `resolve_menu_enabled` can now be deleted and delegated, that happens
+- [x] Hyde's menu order is unchanged for the user, whichever route is taken.
+- [x] If `resolve_menu_enabled` can now be deleted and delegated, that happens
       here.
 
 ### Blocked by
 
 - Slice 12 of `BRANCH_REVIEW_ISSUES.md`, which is done.
+
+### Landed
+
+**No framework change. `group_order` was inert.** Every value Hyde gave the key
+reproduced the order sorted group names already produce: rendering the real
+plugin set through the base `MenuContext` differs from Hyde's rendering in
+exactly two menus, File and Windows -- and neither of those declared
+`group_order` at all. The Figure menu, the only place the key carried a
+non-default value, comes out the same either way. So extending the shared
+contract would have bought a key with no remaining use.
+
+**What the key was actually holding up was a Hyde-local bug.** It arrived in
+`f124378`, the commit that made submenus interleave with actions, and that is
+all it ever did. `_submenu_sort_key` gives a submenu the position of its first
+entry, but resolved that entry's group against the *submenu's own* path. A
+submenu is usually the only thing in its own first group, so its key came out as
+group zero and it sorted to the top of whatever the parent's first group is.
+Setting `group_order` to the same literal on both paths forced the two indices
+to agree. Dropping the key without fixing the lookup moves Copy As from beside
+Copy up among the figure controls -- measured. The lookup now resolves against
+the parent path, which is the menu the submenu is being placed in, and a group
+the parent has no entry in sorts last rather than first.
+
+**Group names are internal keys, so they can carry the ordinal.** They are never
+displayed -- a group only decides ordering and where `addSeparator()` goes --
+and never persisted; the `tool_windows` in `session.toml` is an unrelated TOML
+section. Hyde's groups are now `10_project`, `20_save`, `30_application` and so
+on, and `HydeMenuContext.render` orders groups by name, which is the framework's
+rule and its stated reason.
+
+**That fixed a live defect.** Hyde's fallback ordered groups by first
+contribution, and contributions arrive in `os.listdir()` order over the plugins
+directory. `file` and `kernel_runtime` both contribute to the `application`
+group, so which of them was listed first decided where it sat: with the listing
+reversed, the shipped code puts **Quit and Kill Kernel at the top of the File
+menu** and scrambles the Windows menu. After the change the rendered menus are
+identical under both listings.
+
+**The override stays, and now says why.** `enabled` and `group_order` were not
+the only blockers; they were not even the main ones. `HydeMenuContext.render`
+exists for four things the base renderer has no notion of, all load-bearing:
+rendered actions are retained for `lookup_action`; the computed grouping is
+retained rather than consumed, which is how `build_popup_menu` renders the same
+contributions again into the figure and table right-click menus; `aboutToShow`
+is wired to `refresh_enabled_states`; and submenus interleave with actions. Its
+docstring records this.
+
+`resolve_menu_enabled` cannot be delegated either, and its docstring now says
+why: the framework resolves `enabled` inline in `render()` and reports a raising
+precondition through the context's logger, which in Hyde is
+`VisibleFailureLogger` -- so a persistently broken precondition would put an
+error dialog in front of the user on every menu open, and this runs on every
+`aboutToShow` and every subwindow activation.
+
+Before and after, the full rendered structure of all six menus -- every group,
+item, separator, shortcut and enabled state -- is byte-identical. The only
+change in the dump is the diagnostic group table, whose names gained their
+ordinals.
+
+Three tests in `tests/test_plugin_tools.py`: groups order by name and not by
+arrival, the Windows menu renders the same under a reversed plugin order, and a
+submenu sits in the group its first entry names. All three fail against the
+behaviour they replace. `test_kernel_runtime.py` no longer pins the whole
+contribution dict -- it reads the group Quit is in off the file plugin, so the
+requirement it states is that the two agree rather than how they spell it.
+
+Judgement call: renaming the `file` and `window` groups was not strictly needed
+to drop the key, since those never carried it. It is here because leaving them
+would have left the File menu's layout a function of the machine, which fails
+the "unchanged for the user" criterion in every sense but the local one.
+
+Suite: 680 tests, OK (677 before; three added).
 
 ## Slice 5: Test Hygiene, Round Three
 

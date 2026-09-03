@@ -410,7 +410,9 @@ class HydeToolWindowPlugin(HydePlugin):
     window_title = None
     menu_name = None
     window_size = None
-    menu_group = "tool_windows"
+    # Menu groups order by name, so the name carries the ordinal. See
+    # `HydeMenuContext.render`.
+    menu_group = "10_tool_windows"
     menu_order = DEFAULT_PRIORITY
     creation_policy = "lazy"
     restore_on_project_loaded = False
@@ -561,6 +563,14 @@ def resolve_menu_enabled(enabled):
     A contribution may declare `enabled` as a callable so that its state tracks
     a live precondition, such as whether a first-class figure is active. Menus
     are rendered once, so a static flag can only describe the state at launch.
+
+    The framework understands callable `enabled` too, but resolves it inline in
+    `MenuContext.render()` and reports a raising precondition through the
+    context's logger. Hyde cannot delegate to that: this runs again on every
+    `aboutToShow` and every subwindow activation, and Hyde's context logger is
+    `VisibleFailureLogger`, so a precondition that keeps raising would put an
+    error dialog in front of the user every time a menu opened. Silence is the
+    right level for something re-evaluated that often.
     """
     if not callable(enabled):
         return bool(enabled)
@@ -610,23 +620,31 @@ class HydeMenuContext(MenuContext):
             return (path,)
         return tuple(path)
 
+    def _group_index(self, location, path, group):
+        """Where `group` sits among the groups of one menu.
+
+        A group that menu has no entry in sorts after every group it does have.
+        That is the case of a submenu whose entries name a group its parent menu
+        does not use: there is no position among the parent's groups for it to
+        take, so it goes last rather than silently taking the first one's.
+        """
+        group_orders = self._group_orders.get(
+            (location, self._normalized_path(path)), {}
+        )
+        return group_orders.get(group, len(group_orders))
+
     def _sorted_contributions(self, location, path):
         key = (location, self._normalized_path(path))
         contributions = self._grouped_contributions.get(key, [])
-        group_orders = self._group_orders.get(key, {})
         return sorted(
             contributions,
             key=lambda item: (
-                group_orders[item[1].get("group", None)],
+                self._group_index(location, path, item[1].get("group", None)),
                 item[1].get("order", DEFAULT_PRIORITY),
                 item[0],
                 item[1]["name"],
             ),
         )
-
-    def _group_order_of(self, location, path, contribution):
-        group_orders = self._group_orders.get((location, self._normalized_path(path)), {})
-        return group_orders[contribution.get("group", None)]
 
     def _submenu_sort_key(self, location, submenu_path):
         """Where a submenu sits among its parent's entries.
@@ -635,7 +653,15 @@ class HydeMenuContext(MenuContext):
         of its first entry. Without this a submenu lands wherever it happened to
         be created, which for a location that also has plain actions means the
         top of the menu regardless of intent.
+
+        The group is resolved against the *parent* menu's groups, because that
+        is the menu the submenu is being placed in. Resolving it against the
+        submenu's own groups compares an index counted over one menu with
+        indices counted over another: a submenu is usually the only thing in its
+        own path's first group, so its key came out as group zero and it landed
+        at the top of whatever the parent's first group is.
         """
+        parent_path = submenu_path[:-1]
         best = None
         for current_location, path in self._grouped_contributions:
             if current_location != location:
@@ -643,11 +669,10 @@ class HydeMenuContext(MenuContext):
             if path[: len(submenu_path)] != submenu_path:
                 continue
             for plugin_name, contribution in self._sorted_contributions(location, path):
-                group_orders = self._group_orders.get(
-                    (location, self._normalized_path(path)), {}
-                )
                 candidate = (
-                    group_orders[contribution.get("group", None)],
+                    self._group_index(
+                        location, parent_path, contribution.get("group", None)
+                    ),
                     contribution.get("order", DEFAULT_PRIORITY),
                     plugin_name,
                     contribution["name"],
@@ -699,7 +724,9 @@ class HydeMenuContext(MenuContext):
             entries = [
                 (
                     (
-                        self._group_order_of(location, path, contribution),
+                        self._group_index(
+                            location, path, contribution.get("group", None)
+                        ),
                         contribution.get("order", DEFAULT_PRIORITY),
                         plugin_name,
                         contribution["name"],
@@ -764,9 +791,37 @@ class HydeMenuContext(MenuContext):
         return popup_menu
 
     def render(self):
+        """Render every collected contribution into its registered location.
+
+        Groups order by name, which is the framework's rule and the reason no
+        contribution here carries an ordering key of its own: a group name is an
+        internal key, never shown to anyone and never persisted, so Hyde's
+        groups are named with a leading ordinal and the sort puts them in the
+        intended order. The alternative -- ordering groups by the order they
+        were first contributed -- makes the File menu's layout a function of
+        `os.listdir()` over the plugins directory, which is to say a function of
+        the machine: reverse that listing and Quit moves to the top of the File
+        menu.
+
+        This overrides the base renderer permanently, and not over any key a
+        contribution carries. It exists for four things the base has no notion
+        of, all of them load-bearing for Hyde:
+
+        * rendered actions are retained, so `lookup_action` can hand a plugin
+          its own menu item to enable, rename or check;
+        * the computed grouping is retained rather than consumed, so
+          `build_popup_menu` can render the same contributions again into a
+          fresh menu -- which is how the figure and table right-click menus are
+          built;
+        * `aboutToShow` is wired to `refresh_enabled_states`, so a callable
+          precondition is re-read each time a menu opens rather than once at
+          start-up;
+        * submenus interleave with actions by `_submenu_sort_key` instead of
+          being appended after their parent's own entries.
+        """
         self._actions = {}
         grouped = {}
-        group_orders = {}
+        groups_by_key = {}
 
         for plugin_name, contribution in self.contributions:
             if not isinstance(contribution, dict):
@@ -799,20 +854,20 @@ class HydeMenuContext(MenuContext):
             path = self._normalized_path(contribution.get("path", ()))
 
             key = (location, path)
-            group = contribution.get("group", None)
-            if key not in group_orders:
-                group_orders[key] = {}
-            if group not in group_orders[key]:
-                explicit_group_order = contribution.get("group_order", None)
-                if explicit_group_order is None:
-                    group_orders[key][group] = len(group_orders[key])
-                else:
-                    group_orders[key][group] = int(explicit_group_order)
-
+            groups_by_key.setdefault(key, set()).add(contribution.get("group", None))
             grouped.setdefault(key, []).append((plugin_name, contribution))
 
         self._grouped_contributions = grouped
-        self._group_orders = group_orders
+        # An ungrouped contribution sorts first, then the rest by name.
+        self._group_orders = {
+            key: {
+                group: index
+                for index, group in enumerate(
+                    sorted(groups, key=lambda group: (group is not None, str(group)))
+                )
+            }
+            for key, groups in groups_by_key.items()
+        }
 
         self._live_enabled = {}
         for name, menu in self.locations.items():

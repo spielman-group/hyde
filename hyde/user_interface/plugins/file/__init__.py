@@ -27,7 +27,7 @@ class Plugin(HydePlugin):
         return [
             {
                 "location": "file",
-                "group": "project",
+                "group": "10_project",
                 "order": 10,
                 "name": "New...",
                 "shortcut": "Ctrl+N",
@@ -35,7 +35,7 @@ class Plugin(HydePlugin):
             },
             {
                 "location": "file",
-                "group": "project",
+                "group": "10_project",
                 "order": 20,
                 "name": "Load...",
                 "shortcut": "Ctrl+O",
@@ -43,14 +43,14 @@ class Plugin(HydePlugin):
             },
             {
                 "location": "file",
-                "group": "project",
+                "group": "10_project",
                 "order": 30,
                 "name": "Heal Project...",
                 "action": self.heal_project,
             },
             {
                 "location": "file",
-                "group": "save",
+                "group": "20_save",
                 "order": 10,
                 "name": "Save",
                 "shortcut": "Ctrl+S",
@@ -58,21 +58,21 @@ class Plugin(HydePlugin):
             },
             {
                 "location": "file",
-                "group": "save",
+                "group": "20_save",
                 "order": 20,
                 "name": "Save As...",
                 "action": self.save_project_as,
             },
             {
                 "location": "file",
-                "group": "save",
+                "group": "20_save",
                 "order": 30,
                 "name": "Save a Copy...",
                 "action": self.save_project_copy,
             },
             {
                 "location": "file",
-                "group": "application",
+                "group": "30_application",
                 "order": 100,
                 "name": "Quit",
                 "shortcut": "Ctrl+Q",

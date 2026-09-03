@@ -11,7 +11,7 @@ class Plugin(HydePlugin):
         return [
             {
                 "location": "figure",
-                "group": "figure_controls",
+                "group": "10_figure_controls",
                 "order": 10,
                 "name": "Modify Data Appearance...",
                 "action": self.show_trace_appearance_dialog,
@@ -19,7 +19,7 @@ class Plugin(HydePlugin):
             },
             {
                 "location": "figure",
-                "group": "figure_controls",
+                "group": "10_figure_controls",
                 "order": 20,
                 "name": "Modify Axis...",
                 "action": self.show_axis_edit_dialog,

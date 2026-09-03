@@ -211,14 +211,14 @@ class Plugin(HydePlugin):
         return [
             {
                 "location": "window",
-                "group": "tables",
+                "group": "30_tables",
                 "order": 20,
                 "name": "New Table...",
                 "action": self.show_new_table_dialog,
             },
             {
                 "location": "table",
-                "group": "table",
+                "group": "10_table",
                 "order": 10,
                 "name": "Delete Selected Data",
                 "action": self.delete_selected_data,
