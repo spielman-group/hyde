@@ -73,7 +73,9 @@ class KernelPayloadRequest:
         self._owner = owner
         self._on_failed = on_failed
         self._announce_progress = bool(announce_progress)
-        self._progress_shown = False
+        # The message this request posted, so settling takes down its own and
+        # not whatever happens to be in the status bar by then.
+        self._progress_message = None
         self._busy_cursor_shown = False
         self._settled = False
         self._payload_timer = _single_shot_timer(self._on_payload_timeout)
@@ -88,7 +90,7 @@ class KernelPayloadRequest:
             return False
         if self._announce_progress:
             self._busy_timer.start(int(self._owner.BUSY_CURSOR_DELAY_MS))
-            self._progress_shown = self._owner.show_kernel_progress(
+            self._progress_message = self._owner.show_kernel_progress(
                 f"{self.description}..."
             )
         return True
@@ -124,9 +126,9 @@ class KernelPayloadRequest:
         for timer in (self._payload_timer, self._busy_timer, self._hold_timer):
             timer.stop()
         self._release_busy_cursor()
-        if self._progress_shown:
-            self._progress_shown = False
-            self._owner.clear_kernel_progress()
+        if self._progress_message is not None:
+            message, self._progress_message = self._progress_message, None
+            self._owner.clear_kernel_progress(message)
         self._owner.drop_payload_request(self)
 
     def _show_busy_cursor(self):
@@ -256,17 +258,29 @@ class KernelCommands:
         return lanes
 
     def show_kernel_progress(self, text):
-        """Say a command is still running. Returns True if anyone heard."""
+        """Say a command is still running.
+
+        Returns the message posted, to be handed back to
+        `clear_kernel_progress` once the request is over, or None when there is
+        no status bar to post to.
+        """
         service = self.services.get("status_message_service")
         if service is None:
-            return False
+            return None
         service.show_status_message(text)
-        return True
+        return text
 
-    def clear_kernel_progress(self):
+    def clear_kernel_progress(self, message):
+        """Take down `message`, unless something has since replaced it.
+
+        The status bar is one slot shared by every surface, so a request that
+        announced itself owns its own message and nothing else. An unrelated
+        message posted while the request was in flight -- another surface's
+        failure, a project operation -- outlives it.
+        """
         service = self.services.get("status_message_service")
         if service is not None:
-            service.clear_status_message()
+            service.clear_status_message(message)
 
     def report_kernel_failure(self, description, reason):
         """One voice for every kernel command failure: the log and the user.
@@ -380,8 +394,17 @@ class HydeToolWidget(QtWidgets.QWidget):
     def close_policy(self):
         return "hide"
 
+    def has_shut_down(self):
+        """Whether `shutdown` has run: the one answer to "is this widget done".
+
+        A subclass with its own teardown reads this rather than keeping a
+        second flag, so `allows_subwindow_close` and the subclass cannot
+        disagree about whether the widget is finished.
+        """
+        return self._shutdown_requested
+
     def allows_subwindow_close(self):
-        if self._shutdown_requested:
+        if self.has_shut_down():
             return True
         get_shutting_down = self.service("get_shutting_down")
         if callable(get_shutting_down) and get_shutting_down():
@@ -419,6 +442,18 @@ class HydeToolWidget(QtWidgets.QWidget):
         return subwindow
 
     def shutdown(self):
+        """Let go of what the widget holds, once.
+
+        Idempotent, because `allows_subwindow_close` calls it on every close
+        event once the application is going down, and a widget that is done
+        should not hand its child a second shutdown.
+
+        A subclass with its own teardown must call up: this is where the widget
+        stops insisting its window persist, both by answering
+        `has_shut_down` and by taking the close filter off.
+        """
+        if self.has_shut_down():
+            return
         self._shutdown_requested = True
         child = self.mounted_child
         if child is not None and hasattr(child, "shutdown"):

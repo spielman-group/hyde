@@ -23,7 +23,7 @@ from hyde.user_interface.base_hyde_widgets import (
     HydeToolWidget,
     KernelCommands,
 )
-from hyde.user_interface.main import HydeApp
+from hyde.user_interface.main import HydeApp, StatusMessageService
 from hyde.features.matplotlib_ir import FigureIR
 import hyde.user_interface as ui_package
 from hyde.user_interface.shared.core import HydeIR
@@ -156,7 +156,7 @@ class RecordingStatusMessageService:
     def __init__(self):
         self.held = []
         self.transient = []
-        self.cleared = 0
+        self.cleared = []
 
     def show_status_message(self, label):
         self.held.append(label)
@@ -164,8 +164,8 @@ class RecordingStatusMessageService:
     def show_transient_message(self, label):
         self.transient.append(label)
 
-    def clear_status_message(self):
-        self.cleared += 1
+    def clear_status_message(self, label):
+        self.cleared.append(label)
 
 
 class PayloadAwaitingSurface(KernelCommands):
@@ -1380,3 +1380,105 @@ class TestKernelPayloadRequestLifecycle(unittest.TestCase):
 
         self.assertEqual([], status.transient)
         self.assertEqual([], surface.picked_up)
+
+
+class TestKernelProgressOwnsItsOwnStatusMessage(unittest.TestCase):
+    """A request may retract the message it posted, and nothing else.
+
+    The status bar is one slot every surface writes to, so "has my message
+    been replaced" is a question only the status bar can answer. These drive a
+    real `QStatusBar` through the real `StatusMessageService`, and end requests
+    through the real settle path rather than by reaching for the clear helper.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def setUp(self):
+        while QtWidgets.QApplication.overrideCursor() is not None:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _surface(self):
+        """A surface whose status messages go to a real status bar."""
+        status_bar = QtWidgets.QStatusBar()
+        self.addCleanup(status_bar.deleteLater)
+        app = type("DummyApp", (), {})()
+        app.ui = type("DummyUi", (), {"statusbar": status_bar})()
+        app.show_status_message = lambda label: HydeApp.show_status_message(app, label)
+        app.show_transient_status_message = (
+            lambda label, timeout_ms: HydeApp.show_transient_status_message(
+                app, label, timeout_ms
+            )
+        )
+        app.clear_status_message = lambda label: HydeApp.clear_status_message(
+            app, label
+        )
+        execution = RecordingExecutionService()
+        surface = PayloadAwaitingSurface(
+            {
+                "python_execution_service": execution,
+                "status_message_service": StatusMessageService(app),
+            }
+        )
+        return surface, execution, status_bar
+
+    def test_a_request_clears_the_message_it_posted_when_it_settles(self):
+        surface, _, status_bar = self._surface()
+
+        surface.ask(description="Closing figure 7 in the kernel", announce=True)
+        self.assertEqual(
+            "Closing figure 7 in the kernel...", status_bar.currentMessage()
+        )
+
+        surface.settle_payload_request("answer")
+
+        self.assertEqual("", status_bar.currentMessage())
+
+    def test_a_message_posted_by_something_else_survives_the_request(self):
+        """A refresh fires on every namespace update, so a short announced
+        request can be in flight whenever anything else has something to
+        say."""
+        surface, _, status_bar = self._surface()
+        elsewhere = PayloadAwaitingSurface(dict(surface.services))
+
+        surface.ask(description="Copying figure as Vector", announce=True)
+        elsewhere.report_kernel_failure(
+            "Refreshing figure Figure1", "the kernel is gone"
+        )
+        surface.settle_payload_request("answer")
+
+        self.assertEqual(
+            "Refreshing figure Figure1 failed: the kernel is gone",
+            status_bar.currentMessage(),
+        )
+
+    def test_the_reason_a_request_failed_outlives_the_request(self):
+        """`fail` settles before it reports, so the report is what the user is
+        left looking at."""
+        surface, execution, status_bar = self._surface()
+
+        surface.ask(description="Copying figure as Vector", announce=True)
+        execution.answer_last(KernelRequest.RAISED, "MemoryError: too big")
+
+        self.assertEqual(
+            "Copying figure as Vector failed: MemoryError: too big",
+            status_bar.currentMessage(),
+        )
+
+    def test_an_outcome_reported_after_the_request_ends_is_left_showing(self):
+        """A copy settles its request and then says what it put on the
+        clipboard. The settling must not take the outcome down with it."""
+        surface, _, status_bar = self._surface()
+
+        surface.ask(description="Copying figure as Vector", announce=True)
+        surface.settle_payload_request("answer")
+        surface.services["status_message_service"].show_transient_message(
+            "Copied figure to the clipboard as PDF."
+        )
+
+        self.assertEqual(
+            "Copied figure to the clipboard as PDF.", status_bar.currentMessage()
+        )

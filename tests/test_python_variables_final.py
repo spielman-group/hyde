@@ -21,6 +21,7 @@ from qtutils.qt import QtWidgets, QtCore, QtGui
 
 from hyde.paths import HYDE_DIR, KERNEL_LAUNCHER
 from hyde.features.hyde_ir import HydeAppIR
+from hyde.user_interface.main import HydeApp
 from hyde.user_interface.shared.plugin import HydeMDIContext
 from hyde.user_interface.plugins.python_variables_tool import (
     Plugin as PythonVariablesPlugin,
@@ -308,7 +309,7 @@ class TestPythonVariablesSelectionRules(unittest.TestCase):
         browser = PythonVariables.__new__(PythonVariables)
         QtWidgets.QWidget.__init__(browser)
         browser.services = {}
-        browser._closed = False
+        browser._shutdown_requested = False
         browser._last_view = dict(metadata_by_name)
         browser.ui = type("UI", (), {})()
         browser.ui.treeView = QtWidgets.QTreeView(browser)
@@ -465,7 +466,7 @@ class TestPythonVariablesRefreshTracking(unittest.TestCase):
         browser = PythonVariables.__new__(PythonVariables)
         QtWidgets.QWidget.__init__(browser)
         browser.services = {}
-        browser._closed = False
+        browser._shutdown_requested = False
         browser._execute_requests_in_flight = set()
         browser._refresh_in_flight = False
         browser._refresh_pending = False
@@ -571,7 +572,8 @@ class RecordingStatusMessageService:
     def show_transient_message(self, label):
         self.transient_messages.append(label)
 
-    def clear_status_message(self):
+    def clear_status_message(self, label):
+        del label
         return None
 
 
@@ -643,7 +645,7 @@ class TestPythonVariablesRefreshRecovery(unittest.TestCase):
         QtWidgets.QWidget.__init__(browser)
         self.status_service = RecordingStatusMessageService()
         browser.services = {"status_message_service": self.status_service}
-        browser._closed = False
+        browser._shutdown_requested = False
         browser._execute_requests_in_flight = set()
         browser._refresh_in_flight = False
         browser._refresh_pending = False
@@ -1050,6 +1052,136 @@ class TestPythonVariablesService(unittest.TestCase):
         self.assertEqual(snapshot["arr"]["view"], ["[1 2 3]"])
 
 
+class FakeIOPubChannel(QtCore.QObject):
+    message_received = QtCore.Signal(object)
+
+
+class FakeNamespaceKernelClient:
+    def __init__(self):
+        self.iopub_channel = FakeIOPubChannel()
+
+
+class FakeAnsweringSpyderComm:
+    """A comm that answers a namespace-view request before it returns.
+
+    `PythonVariables.__init__` opens a comm and asks for the namespace, so
+    building the real widget needs an answer rather than a real kernel.
+    """
+
+    def __init__(self, kernel_client, on_call_failed):
+        self.kernel_client = kernel_client
+        self.on_call_failed = on_call_failed
+
+    def open(self):
+        return None
+
+    def wait_until_ready(self, timeout=5):
+        del timeout
+        return None
+
+    def is_connected(self):
+        return True
+
+    def configure_namespace_view(self, settings):
+        self.settings = dict(settings)
+
+    def request_namespace_view(self, callback):
+        callback(
+            {
+                "arr": {
+                    "type": "ndarray",
+                    "python_type": "ndarray",
+                    "numpy_type": "Array",
+                    "view": "[1 2 3]",
+                },
+                "scalar": {
+                    "type": "int",
+                    "python_type": "int",
+                    "view": "7",
+                },
+                "text": {
+                    "type": "str",
+                    "python_type": "str",
+                    "view": "'hello'",
+                },
+            }
+        )
+        return True
+
+    def close(self):
+        return None
+
+
+def make_variables_plugin(qapp):
+    """The real plugin, in a real MDI area, over a comm that answers at once."""
+    mdi_area = QtWidgets.QMdiArea()
+    mdi_area.show()
+    qapp.processEvents()
+    context = HydeMDIContext(mdi_area)
+
+    plugin = PythonVariablesPlugin({})
+    plugin.services = {
+        "mdi_context": context,
+        "kernel_runtime_service": type(
+            "KernelRuntimeService",
+            (),
+            {"kernel_client": lambda _self: FakeNamespaceKernelClient()},
+        )(),
+    }
+    context.add(
+        "python_variables_tool",
+        plugin.get_ui_contributions()[0],
+        {"services": plugin.services},
+    )
+    return plugin, mdi_area, FakeAnsweringSpyderComm
+
+
+class TestPythonVariablesWindowClose(unittest.TestCase):
+    """A tool window that has been shut down must let go of its window.
+
+    Tool windows persist by turning a close into a hide, so a shut-down widget
+    that still insisted on that would leave a window the user cannot close and
+    whose contents will never update again.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication(sys.argv)
+
+    def test_a_shut_down_variables_tool_lets_its_window_close(self):
+        plugin, mdi_area, fake_comm = make_variables_plugin(self.qapp)
+        dummy_app = type("DummyApp", (), {"_subwindow_filters": []})()
+        try:
+            with patch(
+                "hyde.user_interface.plugins.python_variables_tool.SpyderFrontendComm",
+                fake_comm,
+            ):
+                widget = plugin.ensure_mdi_widget("python_variables_tool")
+            subwindow = plugin.mdi_subwindow("python_variables_tool")
+            HydeApp.configure_persistent_subwindow(dummy_app, subwindow)
+            subwindow.show()
+            self.qapp.processEvents()
+
+            # While the tool is live its window persists: a close hides it.
+            self.assertFalse(subwindow.close())
+            self.qapp.processEvents()
+            self.assertFalse(subwindow.isVisible())
+
+            subwindow.show()
+            self.qapp.processEvents()
+            widget.shutdown()
+
+            self.assertTrue(subwindow.close())
+            self.qapp.processEvents()
+            self.assertFalse(subwindow.isVisible())
+        finally:
+            plugin.destroy_mdi_widget("python_variables_tool")
+            mdi_area.deleteLater()
+            self.qapp.processEvents()
+
+
 class TestPythonVariablesSessionPersistence(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1058,77 +1190,7 @@ class TestPythonVariablesSessionPersistence(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication(sys.argv)
 
     def _make_plugin(self):
-        mdi_area = QtWidgets.QMdiArea()
-        mdi_area.show()
-        self.qapp.processEvents()
-        context = HydeMDIContext(mdi_area)
-
-        class FakeChannel(QtCore.QObject):
-            message_received = QtCore.Signal(object)
-
-        class FakeKernelClient:
-            def __init__(self):
-                self.iopub_channel = FakeChannel()
-
-        class FakeSpyderComm:
-            def __init__(self, kernel_client, on_call_failed):
-                self.kernel_client = kernel_client
-                self.on_call_failed = on_call_failed
-
-            def open(self):
-                return None
-
-            def wait_until_ready(self, timeout=5):
-                del timeout
-                return None
-
-            def is_connected(self):
-                return True
-
-            def configure_namespace_view(self, settings):
-                self.settings = dict(settings)
-
-            def request_namespace_view(self, callback):
-                callback(
-                    {
-                        "arr": {
-                            "type": "ndarray",
-                            "python_type": "ndarray",
-                            "numpy_type": "Array",
-                            "view": "[1 2 3]",
-                        },
-                        "scalar": {
-                            "type": "int",
-                            "python_type": "int",
-                            "view": "7",
-                        },
-                        "text": {
-                            "type": "str",
-                            "python_type": "str",
-                            "view": "'hello'",
-                        },
-                    }
-                )
-                return True
-
-            def close(self):
-                return None
-
-        plugin = PythonVariablesPlugin({})
-        plugin.services = {
-            "mdi_context": context,
-            "kernel_runtime_service": type(
-                "KernelRuntimeService",
-                (),
-                {"kernel_client": lambda _self: FakeKernelClient()},
-            )(),
-        }
-        context.add(
-            "python_variables_tool",
-            plugin.get_ui_contributions()[0],
-            {"services": plugin.services},
-        )
-        return plugin, mdi_area, FakeSpyderComm
+        return make_variables_plugin(self.qapp)
 
     def test_view_state_round_trips_through_widget_session_hooks(self):
         plugin, mdi_area, fake_comm = self._make_plugin()

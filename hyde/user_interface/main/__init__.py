@@ -100,8 +100,14 @@ class StatusMessageService:
         """
         self.app.show_transient_status_message(label, self.TRANSIENT_MS)
 
-    def clear_status_message(self):
-        self.app.clear_status_message()
+    def clear_status_message(self, label):
+        """Take down `label`, unless something has since replaced it.
+
+        A caller may only retract the message it posted. The status bar is one
+        slot, so clearing it outright would take down whatever a longer-lived
+        or later operation has put there.
+        """
+        self.app.clear_status_message(label)
 
 
 class VisibleCommandNotificationService:
@@ -458,7 +464,12 @@ class HydeApp:
     def show_transient_status_message(self, label, timeout_ms):
         self.ui.statusbar.showMessage(str(label), int(timeout_ms))
 
-    def clear_status_message(self):
+    def clear_status_message(self, label):
+        # The status bar itself is the only record of who is showing: whoever
+        # posted last won the one slot, whether or not it came through
+        # StatusMessageService.
+        if self.ui.statusbar.currentMessage() != str(label):
+            return
         self.ui.statusbar.clearMessage()
 
     def begin_project_operation(self, label):

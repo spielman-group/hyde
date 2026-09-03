@@ -165,7 +165,6 @@ class PythonVariables(KernelCommands, HydeToolWidget):
         self._execute_requests_in_flight = set()
         self._refresh_in_flight = False
         self._refresh_pending = False
-        self._closed = False
 
         self.model = QtGui.QStandardItemModel(0, 3)
         self.model.setHorizontalHeaderLabels(["Name", "Type", "Value"])
@@ -210,7 +209,7 @@ class PythonVariables(KernelCommands, HydeToolWidget):
         self.refresh_namespace()
 
     def refresh_namespace(self):
-        if self._closed:
+        if self.has_shut_down():
             return
         if self._refresh_in_flight:
             if self.spyder_comm.is_connected():
@@ -285,7 +284,7 @@ class PythonVariables(KernelCommands, HydeToolWidget):
     def _on_namespace_view(self, view):
         self._refresh_in_flight = False
         self._apply_namespace_view(view or {})
-        if self._refresh_pending and not self._closed:
+        if self._refresh_pending and not self.has_shut_down():
             self._refresh_pending = False
             QtCore.QTimer.singleShot(0, self.refresh_namespace)
 
@@ -311,9 +310,12 @@ class PythonVariables(KernelCommands, HydeToolWidget):
         )
 
     def shutdown(self):
-        if self._closed:
+        # Up first: the base is what tells the window it may close for real
+        # now, and what records that this widget is done. A second flag here
+        # would let the two disagree.
+        if self.has_shut_down():
             return
-        self._closed = True
+        super().shutdown()
         try:
             self.kernel_client.iopub_channel.message_received.disconnect(
                 self._handle_iopub_message

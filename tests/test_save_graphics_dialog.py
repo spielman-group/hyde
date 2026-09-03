@@ -67,7 +67,7 @@ def make_plugin_host(plugin_manager):
     app.emit_plugin_event = lambda name, data=None: (name, data)
     app.show_status_message = lambda label: label
     app.show_transient_status_message = lambda label, timeout_ms: label
-    app.clear_status_message = lambda: None
+    app.clear_status_message = lambda label: None
     app.process_tree = object()
     app.show_plugin_window = lambda key: key
     app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
@@ -246,7 +246,7 @@ def make_copy_plugin(messages=None):
         plugin.services["status_message_service"] = types.SimpleNamespace(
             show_status_message=messages.append,
             show_transient_message=messages.append,
-            clear_status_message=lambda: None,
+            clear_status_message=lambda label: None,
         )
     return plugin
 
@@ -808,7 +808,7 @@ class TestCopyFeedback(unittest.TestCase):
             "status_message_service": types.SimpleNamespace(
                 show_status_message=lambda text: messages.append(text),
                 show_transient_message=lambda text: messages.append(text),
-                clear_status_message=lambda: messages.append(None),
+                clear_status_message=lambda label: messages.append(None),
             ),
         }
         return plugin, messages
@@ -1076,7 +1076,7 @@ class TestCopyLifecycleAcrossTwoChannels(unittest.TestCase):
             "status_message_service": types.SimpleNamespace(
                 show_status_message=lambda text: shown.append(("holds", text)),
                 show_transient_message=lambda text: shown.append(("fades", text)),
-                clear_status_message=lambda: None,
+                clear_status_message=lambda label: None,
             ),
         }
 

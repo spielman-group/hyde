@@ -11,7 +11,7 @@ file was filed on an agent's word alone.
 
 - [x] Slice 1: `force_close` Does Not Close
 - [x] Slice 2: Dead And Unreachable Code In The Figure Backend
-- [ ] Slice 3: Two Half-Finished Shutdown Paths
+- [x] Slice 3: Two Half-Finished Shutdown Paths
 - [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
 - [ ] Slice 5: Test Hygiene, Round Three
 - [ ] Slice 6: Stale Documentation Left By The Review
@@ -419,15 +419,95 @@ None - can start immediately.
 
 ### Acceptance criteria
 
-- [ ] One answer to "has this widget shut down", used by
+- [x] One answer to "has this widget shut down", used by
       `allows_subwindow_close()`.
-- [ ] A message posted by something else survives an announced request
+- [x] A message posted by something else survives an announced request
       completing.
-- [ ] The status bar is still cleared when the request that posted it settles.
+- [x] The status bar is still cleared when the request that posted it settles.
 
 ### Blocked by
 
 None - can start immediately.
+
+### Landed
+
+**Item 1: `allows_subwindow_close()` was returning the wrong answer, and the
+other half of the base's shutdown promise never fired either.** Measured on the
+shipped code, against a `HydeToolWidget` that overrides nothing as the control:
+
+```
+PlainTool        allows_close after shutdown=True  own filter swallows close=False
+PythonVariables  allows_close after shutdown=False own filter swallows close=True
+```
+
+So a shut-down variables tool insisted on persisting: `close_policy()` is
+`"hide"`, `_shutdown_requested` was never set, and because `super().shutdown()`
+was never called the `PersistentToolWindowFilter` was never removed either.
+Both of the base's escape hatches were shut. `_closed` gated the refresh paths,
+which is why nothing had noticed.
+
+**`_closed` is gone; the base's flag is the one answer,** reached through a new
+`HydeToolWidget.has_shut_down()`. Keeping `_closed` and calling `super()` would
+have left the two flags in place, which the slice ruled out; the base's flag is
+the one `allows_subwindow_close` reads and the one the base sets, so the
+subclass reads it rather than shadowing it. `refresh_namespace` and
+`_on_namespace_view` now ask `has_shut_down()` too, so the widget answers "am I
+done" exactly once. `HydeToolWidget.shutdown()` is now idempotent, which it had
+to become: `allows_subwindow_close` calls it on every close event once the
+application is going down, and it was handing the mounted child a fresh
+shutdown each time.
+
+The symptom is latent rather than live in this tree, and that is worth writing
+down: the one production path that shuts a tool widget down without quitting is
+`on_kernel_crashed` -> `destroy_mdi_widget`, and `HydeMDIContext.destroy`
+removes the subwindow *before* it calls `shutdown()`, so no close event reaches
+the widget while it is in the wrong state. It is a wrong answer waiting for a
+caller, not a bug the user can currently reach.
+`tests/test_python_variables_final.py::TestPythonVariablesWindowClose` pins the
+observable through the real plugin, a real `QMdiSubWindow` and both close
+filters: it fails on the shipped code with `subwindow.close()` returning False.
+
+`figure_interactive` and `table_interactive` keep their own `_closed`. Those are
+`HydeInteractiveWidget`s with a separate two-phase close (`is_close_complete`,
+kernel confirmation) and no `_shutdown_requested` of their own, so there is no
+second answer to unify there.
+
+**Item 2: a message now carries who posted it.** `show_kernel_progress` returns
+the message it posted rather than a bool, the request keeps it as
+`_progress_message`, and `settle()` hands it back to
+`clear_kernel_progress(message)`. The decision itself is in `HydeApp`, which
+owns the status bar: it clears only if `statusbar.currentMessage()` still equals
+the label handed in. That reads the surface rather than a private ledger, so it
+also covers writers that never went through `StatusMessageService` -- the
+shell's own project-operation messages included. `StatusMessageService` and
+`HydeApp.clear_status_message` both take the label now, which is the honest
+consequence: the only way to clear the bar is to name what you are retracting.
+
+Outcomes and failures were checked in both directions, since the whole risk of
+this change is on that side. Every consumer already settles before it speaks --
+`_fail_copy` and the success path both call `_end_copy()` and then
+`_outcome_message(...)`, and `KernelPayloadRequest.fail` settles before
+`report_kernel_failure` -- so the clear happens first and the message that
+replaces it is never touched. Measured end to end over a real `QStatusBar`:
+
+```
+in flight, bar shows        : 'Copying figure as Vector...'
+another surface reports     : 'Refreshing figure Figure1 failed: the kernel is gone'
+copy settles, bar still     : 'Refreshing figure Figure1 failed: the kernel is gone'
+
+in flight, bar shows        : 'Closing figure 7 in the kernel...'
+settled, bar shows          : ''
+
+kernel refused it, bar shows: 'Copying figure as Vector failed: MemoryError: too big'
+```
+
+`TestKernelProgressOwnsItsOwnStatusMessage` in `tests/test_hyde_tool_widget.py`
+holds all four of those, driving the real `StatusMessageService` over a real
+`QStatusBar` and ending requests through `settle` rather than by calling the
+clear helper. Only the "survives" one fails on the old unconditional clear; the
+other three are there to catch a fix that eats outcomes.
+
+Suite: 663 tests, OK (658 before).
 
 ## Slice 4: `group_order`, The Other Drifted Contribution Key
 
