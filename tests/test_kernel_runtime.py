@@ -17,7 +17,7 @@ from hyde.execution.comms import FIGURE_COMM_TARGET
 from hyde.user_interface.plugins.figure_interactive.matplotlib_support import (
     register_auxiliary_figure_comm_sink,
 )
-from hyde.user_interface.main import HydeApp
+from hyde.user_interface.main import HydeApp, StatusMessageService
 from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.kernel_runtime import (
     FrontendKernelService,
@@ -1233,6 +1233,188 @@ class TestRuntimeArchitecture(unittest.TestCase):
                 ("request_runtime_shutdown", {}),
             ],
         )
+
+
+class FakeSplash:
+    def __init__(self):
+        self.hidden = 0
+
+    def hide(self):
+        self.hidden += 1
+
+
+class FakeMainWindow:
+    """A window that is nothing but the one status bar every writer shares."""
+
+    def __init__(self, status_bar):
+        self.statusbar = status_bar
+        self.shown = 0
+
+    def show(self):
+        self.shown += 1
+
+
+class ProjectLaneApp(HydeApp):
+    """A `HydeApp` whose status bar is real and whose kernel is not.
+
+    Subclassed rather than faked so that everything the paths under test do to
+    the status bar is HydeApp's own code; only what they reach for past the bar
+    -- the plugin host, the project state -- is stood in for.
+    """
+
+    def __init__(self, status_bar):
+        self.ui = FakeMainWindow(status_bar)
+        self.splash = FakeSplash()
+        self.argv = []
+        self.shutting_down = False
+        self._startup_complete = False
+        self._quit_command_sent = False
+        self._project_operation_message = None
+        self.events = []
+
+    def emit_plugin_event(self, name, data=None):
+        self.events.append((name, data))
+
+    def enter_no_project_state(self):
+        # Records what the bar was showing at the time, so a test can see the
+        # in-flight message an operation posted before anything took it down.
+        self.events.append(
+            ("enter_no_project_state", self.ui.statusbar.currentMessage())
+        )
+
+
+class TestProjectOperationOwnsItsOwnStatusMessage(unittest.TestCase):
+    """A project operation may retract the message it posted, and nothing else.
+
+    The same rule Slice 3 gave the kernel-request lane, on the lane the shell
+    drives. Driven over a real `QStatusBar` through the real entry points --
+    the begin a plugin calls, a project state result arriving, a kernel crash,
+    a terminal command reporting back -- because "has my message been replaced"
+    is a question only the status bar can answer.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QtWidgets.QApplication.instance()
+        if cls.qapp is None:
+            cls.qapp = QtWidgets.QApplication([])
+
+    def _app(self):
+        status_bar = QtWidgets.QStatusBar()
+        self.addCleanup(status_bar.deleteLater)
+        return ProjectLaneApp(status_bar), status_bar
+
+    def test_a_failing_terminal_command_leaves_an_unread_failure_showing(self):
+        """A typo in the terminal must not eat the reason something failed.
+
+        Any raising expression the user types reports a status that is not
+        `ok`, so this is as reachable as ordinary terminal use.
+        """
+        app, status_bar = self._app()
+        StatusMessageService(app).show_transient_message(
+            "Refreshing figure Figure1 failed: the kernel is gone"
+        )
+
+        HydeApp.on_visible_command_executed(app, {"content": {"status": "error"}})
+
+        self.assertEqual(
+            "Refreshing figure Figure1 failed: the kernel is gone",
+            status_bar.currentMessage(),
+        )
+
+    def test_a_failing_terminal_command_leaves_a_project_operation_running(self):
+        """The save is still in flight; nothing about it just failed."""
+        app, status_bar = self._app()
+        app.begin_project_operation("Saving Hyde project...")
+
+        HydeApp.on_visible_command_executed(app, {"content": {"status": "error"}})
+
+        self.assertEqual("Saving Hyde project...", status_bar.currentMessage())
+
+    def test_a_failing_terminal_command_still_clears_the_quit_flag(self):
+        """A quit that never took must not lock the application in."""
+        app, _ = self._app()
+        app._quit_command_sent = True
+
+        HydeApp.on_visible_command_executed(app, {"content": {"status": "error"}})
+
+        self.assertFalse(app._quit_command_sent)
+
+    def test_a_terminal_command_that_worked_leaves_the_quit_flag_alone(self):
+        """A quit in flight stays in flight while the kernel is still going."""
+        app, _ = self._app()
+        app._quit_command_sent = True
+
+        HydeApp.on_visible_command_executed(app, {"content": {"status": "ok"}})
+
+        self.assertTrue(app._quit_command_sent)
+
+    def test_a_project_operation_clears_its_own_message_when_it_ends(self):
+        app, status_bar = self._app()
+        app.begin_project_operation("Creating Hyde project...")
+        self.assertEqual("Creating Hyde project...", status_bar.currentMessage())
+
+        HydeApp.on_project_state_result(
+            app, {"operation": "new", "success": True, "errors": []}
+        )
+
+        self.assertEqual("", status_bar.currentMessage())
+
+    def test_a_project_operation_ending_leaves_a_message_that_replaced_it(self):
+        """The result arrives after a figure close has already spoken.
+
+        The operation's own message is long gone by then, so clearing the bar
+        would take down the close's outcome instead.
+        """
+        app, status_bar = self._app()
+        app.begin_project_operation("Saving Hyde project...")
+        StatusMessageService(app).show_transient_message(
+            "Closing figure Figure1 failed: the kernel is gone"
+        )
+
+        HydeApp.on_project_state_result(
+            app, {"operation": "save", "success": False, "errors": []}
+        )
+
+        self.assertEqual(
+            "Closing figure Figure1 failed: the kernel is gone",
+            status_bar.currentMessage(),
+        )
+
+    def test_a_kernel_crash_clears_what_the_project_lane_posted(self):
+        """No result is coming for an operation whose kernel died."""
+        app, status_bar = self._app()
+        app.begin_project_operation("Loading Hyde project...")
+
+        with patch("hyde.user_interface.main.QtWidgets.QMessageBox.warning"):
+            HydeApp.on_kernel_crashed(app)
+
+        self.assertEqual(
+            ("enter_no_project_state", "Loading Hyde project..."), app.events[0]
+        )
+        self.assertEqual("", status_bar.currentMessage())
+
+    def test_startup_takes_down_its_own_connecting_message(self):
+        """Startup posts a message like any other operation, and owns it.
+
+        With no project on the command line there is nothing to load, so the
+        connecting message is the last thing showing and has to go.
+        """
+        app, status_bar = self._app()
+
+        HydeApp.finalize_startup(app)
+
+        self.assertEqual(
+            [
+                ("kernel_ready", {}),
+                (
+                    "enter_no_project_state",
+                    "Connecting to Jupyter Kernel Socket...",
+                ),
+            ],
+            app.events,
+        )
+        self.assertEqual("", status_bar.currentMessage())
 
 
 if __name__ == "__main__":

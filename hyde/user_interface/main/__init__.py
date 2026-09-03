@@ -170,6 +170,7 @@ class HydeApp:
         self._runtime_shutdown = False
         self._close_ready = False
         self._quit_command_sent = False
+        self._project_operation_message = None
         self._startup_complete = False
         self._session_restore_presentation_deferred = False
         self._session_restore_tool_windows = {}
@@ -473,16 +474,28 @@ class HydeApp:
         self.ui.statusbar.clearMessage()
 
     def begin_project_operation(self, label):
-        self.set_project_status_message(label)
+        """Post `label` for an operation that is under way, and remember it.
 
-    def set_project_status_message(self, label):
-        self.ui.statusbar.showMessage(label)
-
-    def clear_project_status_message(self):
-        self.ui.statusbar.clearMessage()
+        At most one project operation is in flight, and the call sites that end
+        one -- a state result arriving, a kernel crash -- hold no handle to it,
+        so the app keeps the label on their behalf. This is the project lane's
+        answer to what a `KernelPayloadRequest` keeps for itself.
+        """
+        self._project_operation_message = str(label)
+        self.show_status_message(label)
 
     def end_project_operation(self):
-        self.clear_project_status_message()
+        """Take down the operation's own message, unless it has been replaced.
+
+        Same posting and retracting verbs as every other writer, so both lanes
+        decide by the same rule: a caller may only retract what it posted.
+        Nothing to retract once the operation's message is spoken for, and
+        nothing to retract when no operation was ever begun.
+        """
+        label, self._project_operation_message = self._project_operation_message, None
+        if label is None:
+            return
+        self.clear_status_message(label)
 
     def request_quit(self, checked=False):
         del checked
@@ -546,7 +559,7 @@ class HydeApp:
                 self.splash.hide()
                 self._startup_complete = True
                 startup_project = self.resolve_startup_project()
-            self.set_project_status_message("Connecting to Jupyter Kernel Socket...")
+            self.begin_project_operation("Connecting to Jupyter Kernel Socket...")
             self.emit_plugin_event("kernel_ready", {})
             self.enter_no_project_state()
             if startup_project is not None:
@@ -555,7 +568,7 @@ class HydeApp:
                     lambda path=startup_project: self._load_startup_project(path),
                 )
             else:
-                self.clear_project_status_message()
+                self.end_project_operation()
         except Exception:
             import traceback
             traceback.print_exc()
@@ -629,10 +642,21 @@ class HydeApp:
 
     @inmain_decorator()
     def on_visible_command_executed(self, msg):
+        """A command run in the terminal reported back.
+
+        Only the quit flag is this lane's business. It used to end the project
+        operation too, from when the project commands and the quit were both
+        dispatched visibly and a failure here was that operation's failure;
+        every one of them now goes out hidden -- `execute_hidden` for a save or
+        a load, a correlated request for a dialog -- and reports through
+        `on_project_state_result` or the request's own reply. What reaches this
+        lane is what the user typed, a table append or a window macro, so
+        ending the project operation from here only ever took down a message
+        posted by something else.
+        """
         content = msg.get("content", {})
         if content.get("status") != "ok":
             self._quit_command_sent = False
-            self.end_project_operation()
 
     def _mark_shutting_down(self):
         self.shutting_down = True

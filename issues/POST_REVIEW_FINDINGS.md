@@ -18,7 +18,7 @@ file was filed on an agent's word alone.
 - [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [ ] Slice 9: Retire The `figure_command` Feature
-- [ ] Slice 10: The Project Lane Still Clears Messages It Did Not Post
+- [x] Slice 10: The Project Lane Still Clears Messages It Did Not Post
 
 ## Slice 1: `force_close` Does Not Close
 
@@ -945,12 +945,99 @@ branch, the status-bar call may simply not belong there.
 
 ### Acceptance criteria
 
-- [ ] A failing terminal command does not clear a status message posted by
+- [x] A failing terminal command does not clear a status message posted by
       something else, shown by execution.
-- [ ] A real project operation still clears its own message when it ends.
-- [ ] A kernel crash still clears whatever the project lane posted.
-- [ ] `_quit_command_sent` is still reset when a visible command fails.
+- [x] A real project operation still clears its own message when it ends.
+- [x] A kernel crash still clears whatever the project lane posted.
+- [x] `_quit_command_sent` is still reset when a visible command fails.
 
 ### Blocked by
 
 - Slice 3, which is done and provides the pattern.
+
+### Landed
+
+Both halves: the lane learned Slice 3's rule, and the status-bar call is gone
+from `on_visible_command_executed` because the prior question has an answer.
+
+**The status-bar call does not belong in that branch, on the archaeology.** The
+branch was written when the commands it watched were the project lane's own.
+`eed9916` introduced it alongside
+
+```python
+def _load_startup_project(self, path):
+    self.begin_project_operation("Loading Hyde project...")
+    self.execute_command(format_load_project_command(path), visible=True)
+```
+
+and `22339c0` added the `_quit_command_sent = False` line to the same branch
+next to `request_quit` doing `self.execute_command(format_quit_command(),
+visible=True)`. A non-`ok` reply on the visible lane genuinely *was* that
+operation's or that quit's own failure, and nothing else would have retracted
+the progress message. Every one of those dispatches is now hidden --
+`execute_hidden` for a save or a load, a correlated request for a project
+dialog, whose `ok_dispatch_mode()` is `"hidden"` -- and reports through
+`on_project_state_result` or the request's own reply. What still reaches the
+visible lane is what the user typed, a table append (`table_interactive`, the
+one `ok_dispatch_mode() == "visible"`) and a window macro; none of them posts a
+project message, so the call could only ever take down something else's. Making
+it conditional would have kept a call that has nothing to name.
+
+`_quit_command_sent = False` stays -- it is the branch's remaining purpose, and
+with the quit now hidden it is the only reset a user can reach besides a kernel
+crash -- and is pinned in both directions.
+
+**The lane names what it retracts, through the same decision as the kernel
+lane.** `begin_project_operation` remembers the label it posted and
+`end_project_operation` hands that label to `HydeApp.clear_status_message`, the
+method Slice 3 gave the rule to; both lanes post through `show_status_message`
+and retract through `clear_status_message`, so "has my message been replaced" is
+answered once, by the status bar, and not twice. The label lives on the app
+because at most one project operation is in flight and the call sites that end
+one -- a state result arriving, a kernel crash -- hold no handle to it, where a
+`KernelPayloadRequest` can keep its own. `set_project_status_message` and
+`clear_project_status_message` are gone: the first duplicated
+`show_status_message` and the second was the unconditional clear, and
+`finalize_startup` now begins and ends its connecting message like any other
+operation instead of posting one nobody owns.
+
+Measured over a real `QStatusBar`, driving the real entry points:
+
+```
+something else posted                    : 'Refreshing figure Figure1 failed: the kernel is gone'
+after a typo in the terminal, bar still  : 'Refreshing figure Figure1 failed: the kernel is gone'
+
+save in flight, bar shows                : 'Saving Hyde project...'
+after a typo in the terminal, bar still  : 'Saving Hyde project...'
+
+in flight, bar shows                     : 'Creating Hyde project...'
+state result arrived, bar shows          : ''
+
+a figure close spoke first               : 'Closing figure Figure1 failed: the kernel is gone'
+state result arrived, bar still          : 'Closing figure Figure1 failed: the kernel is gone'
+
+in flight, bar shows                     : 'Loading Hyde project...'
+kernel crashed, bar shows                : ''
+
+quit sent, then a command failed         : _quit_command_sent=False
+quit sent, then a command worked         : _quit_command_sent=True
+
+mid-startup, bar showed                  : 'Connecting to Jupyter Kernel Socket...'
+startup finished, bar shows              : ''
+```
+
+`TestProjectOperationOwnsItsOwnStatusMessage` in `tests/test_kernel_runtime.py`
+holds all of those. It subclasses `HydeApp` over a real `QStatusBar` so that
+everything the paths do to the bar is the real code, and ends operations
+through `on_project_state_result`, `on_kernel_crashed` and
+`on_visible_command_executed` rather than by reaching for a clear helper. Three
+of the eight fail on the old unconditional clear -- the two "a failing terminal
+command leaves ... showing" and "a project operation ending leaves a message
+that replaced it"; the other five are regression guards that pass in both
+directions, so a later fix cannot start leaving messages stuck instead.
+
+No test fake needed changing: `begin_project_operation` and
+`end_project_operation` keep their signatures, and the two methods that were
+deleted had no callers outside `main/__init__.py`.
+
+Suite: 671 tests, OK (663 before).
