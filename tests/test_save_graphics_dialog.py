@@ -25,7 +25,6 @@ from hyde.features.matplotlib_features import (
     graphics_export_formats,
 )
 from hyde.user_interface.main import HydeApp
-from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
@@ -44,61 +43,35 @@ from hyde.user_interface.plugins.save_graphics_dialog.dialogs import (
     SaveGraphicsDialog,
 )
 from hyde.user_interface.shared.plugin import HydePluginManager
+from tests.plugin_host_fakes import make_plugin_host
 
 
-def make_plugin_host(plugin_manager):
-    main_window = QtWidgets.QMainWindow()
-    main_window.setMenuBar(QtWidgets.QMenuBar())
-    main_window.menuFile = main_window.menuBar().addMenu("File")
-    main_window.menuEdit = main_window.menuBar().addMenu("Edit")
-    main_window.menuAnalysis = main_window.menuBar().addMenu("Analysis")
-    main_window.menuWindow = main_window.menuBar().addMenu("Windows")
-    main_window.menuFigure = QtWidgets.QMenu("Figure", main_window.menuBar())
-    main_window.menuTable = QtWidgets.QMenu("Table", main_window.menuBar())
-    main_window.menuBar().addMenu(main_window.menuFigure)
-    main_window.menuBar().addMenu(main_window.menuTable)
-    main_window.mdiArea = QtWidgets.QMdiArea()
-    main_window.setCentralWidget(main_window.mdiArea)
+def make_copy_host(figure_context, kernel):
+    """A host whose figure and copy plugins are set up over `figure_context`.
 
-    app = type("DummyApp", (), {})()
-    app.ui = main_window
-    app.plugin_manager = plugin_manager
-    app.configure_persistent_subwindow = lambda subwindow: None
-    app.emit_plugin_event = lambda name, data=None: (name, data)
-    app.show_status_message = lambda label: label
-    app.show_transient_status_message = lambda label, timeout_ms: label
-    app.clear_status_message = lambda label: None
-    app.process_tree = object()
-    app.show_plugin_window = lambda key: key
-    app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
-    app.get_current_app_ir = lambda: HydeAppIR(current_project_dir=None)
-    app.lookup_menu_action = lambda location, name, path=(): (
-        None
-        if getattr(app, "menu_context", None) is None
-        else app.menu_context.lookup_action(location, name, path=path)
-    )
-    app.show_menu = lambda location: HydeApp.show_menu(app, location)
-    app.hide_menu = lambda location: HydeApp.hide_menu(app, location)
-    app.popup_menu = lambda location, global_pos: HydeApp.popup_menu(
-        app, location, global_pos
-    )
-    app.get_current_project_dir = lambda: None
-    app.get_shutting_down = lambda: False
-    app.set_shutting_down = lambda value: value
-    app.get_quit_command_sent = lambda: False
-    app.set_quit_command_sent = lambda value: value
-    app.begin_project_operation = lambda label: label
-    app.project_target_needs_confirmation = lambda path: False
-    app.confirm_overwrite_project = lambda path: False
-    app.begin_shutdown_from_close_event = lambda: None
-    app.finalize_quit = lambda: None
-    app.on_kernel_ready = lambda: None
-    app.on_kernel_crashed = lambda: None
-    app.enter_no_project_state = lambda: None
-    app.activate_project = lambda project_dir: project_dir
-    app.on_project_state_result = lambda data: data
-    app.request_gui_quit = lambda: None
-    return app
+    Returns the host and the copy plugin, which a test that starts a copy
+    through the menus needs in order to settle it again.
+
+    `figure_context` is a one-element list so a test can put a figure there, or
+    take it away, after the menus have been built -- which is what the enabled
+    state of a copy entry follows.
+    """
+    manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
+    save_graphics = SaveGraphicsPlugin({})
+    manager.plugins = {
+        "figure": FigurePlugin({}),
+        "save_graphics_dialog": save_graphics,
+    }
+    app = make_plugin_host(manager)
+    HydeApp.setup_plugins(app)
+    for plugin in manager.plugins.values():
+        services = getattr(plugin, "services", None)
+        if isinstance(services, dict):
+            services["figure_context_service"] = types.SimpleNamespace(
+                active_editable_figure=lambda: figure_context[0]
+            )
+            services["python_execution_service"] = kernel
+    return app, save_graphics
 
 
 def make_active_figure_window(mdi_area, services, *, title="Figure0"):
@@ -511,8 +484,6 @@ class TestFigureCopyEndToEnd(unittest.TestCase):
         self.assertEqual([], kernel.executed)
 
     def test_rendered_bytes_from_the_kernel_reach_the_clipboard_as_pdf(self):
-        import base64
-
         plugin = make_copy_plugin()
         plugin.copy_active_figure(representation="vector")
         rendered = b"%PDF-1.4 fake pdf bytes"
@@ -597,30 +568,12 @@ class TestEditMenuCopy(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
-    def _host_with_figure(self, figure_context):
-        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        self.save_graphics = SaveGraphicsPlugin({})
-        manager.plugins = {
-            "figure": FigurePlugin({}),
-            "save_graphics_dialog": self.save_graphics,
-        }
-        app = make_plugin_host(manager)
-        HydeApp.setup_plugins(app)
-        for plugin in manager.plugins.values():
-            services = getattr(plugin, "services", None)
-            if isinstance(services, dict):
-                services["figure_context_service"] = types.SimpleNamespace(
-                    active_editable_figure=lambda: figure_context[0]
-                )
-                services["python_execution_service"] = self.kernel
-        return app
-
     def setUp(self):
         self.kernel = FakeKernelRequests()
 
     def test_edit_menu_exists_and_carries_copy_with_the_platform_shortcut(self):
         figure_context = [None]
-        app = self._host_with_figure(figure_context)
+        app, _ = make_copy_host(figure_context, self.kernel)
 
         self.assertTrue(hasattr(app.ui, "menuEdit"))
         self.assertEqual("Edit", app.ui.menuEdit.title())
@@ -633,7 +586,7 @@ class TestEditMenuCopy(unittest.TestCase):
         )
 
     def test_edit_menu_appears_after_file_in_the_menu_bar(self):
-        app = self._host_with_figure([None])
+        app, _ = make_copy_host([None], self.kernel)
         titles = [
             action.menu().title()
             for action in app.ui.menuBar().actions()
@@ -644,7 +597,7 @@ class TestEditMenuCopy(unittest.TestCase):
 
     def test_edit_copy_needs_an_active_figure(self):
         figure_context = [None]
-        app = self._host_with_figure(figure_context)
+        app, _ = make_copy_host(figure_context, self.kernel)
         copy_action = app.menu_context.lookup_action("edit", "Copy")
 
         app.menu_context.refresh_enabled_states()
@@ -656,12 +609,12 @@ class TestEditMenuCopy(unittest.TestCase):
 
     def test_edit_copy_emits_the_same_command_as_the_figure_menu_entry(self):
         figure_context = [make_save_graphics_context(title="Graph12")]
-        app = self._host_with_figure(figure_context)
+        app, save_graphics = make_copy_host(figure_context, self.kernel)
         app.menu_context.refresh_enabled_states()
 
         app.menu_context.lookup_action("edit", "Copy").trigger()
         from_edit = list(self.kernel.executed)
-        settle_copy(self.save_graphics, self.kernel)
+        settle_copy(save_graphics, self.kernel)
 
         self.kernel.executed.clear()
         app.menu_context.lookup_action("figure", "Copy").trigger()
@@ -693,8 +646,6 @@ class TestCopyPgfAsText(unittest.TestCase):
             cls.qapp = QtWidgets.QApplication([])
 
     def test_pgf_reaches_the_clipboard_as_latex_source(self):
-        import base64
-
         plugin = make_copy_plugin()
         plugin.copy_active_figure(representation="latex")
         latex = b"\\begingroup%\n\\makeatletter%\n\\begin{pgfpicture}%"
@@ -705,10 +656,18 @@ class TestCopyPgfAsText(unittest.TestCase):
         self.assertTrue(mime_data.hasText())
         self.assertIn("pgfpicture", mime_data.text())
 
-    def test_pgf_payload_carries_no_image_representation(self):
+    def test_a_pgf_copy_offers_no_image_to_qt_or_the_platform(self):
+        """Neither of the two readers gets a picture out of a pgf copy.
+
+        Another Qt application reads the MIME types; everything else reads the
+        platform's own pasteboard, which `hasImage` answers for. A copy that
+        withheld the image from only one of them would still paste as a picture
+        somewhere.
+        """
         payload = clipboard_mime_data([("pgf", b"\\begin{pgfpicture}")])
 
         self.assertTrue(payload.mime_data.hasText())
+        self.assertFalse(payload.mime_data.hasImage())
         for image_type in ("image/png", "application/pdf", "image/svg+xml"):
             self.assertNotIn(image_type, payload.mime_data.formats())
 
@@ -763,11 +722,10 @@ class TestClipboardPayloadRepresentations(unittest.TestCase):
                     f"a {output_format} copy cannot be pasted outside Qt",
                 )
 
-    def test_a_pgf_copy_carries_no_image_the_platform_could_paste(self):
-        payload = clipboard_mime_data([("pgf", b"\\begin{pgfpicture}")])
-
-        self.assertFalse(payload.mime_data.hasImage())
-        self.assertTrue(payload.mime_data.hasText())
+    # The pgf counterpart to the test above -- a copy with no image either
+    # reader could paste -- is TestCopyPgfAsText's
+    # test_a_pgf_copy_offers_no_image_to_qt_or_the_platform, in the class whose
+    # subject is why pgf withholds it.
 
     def test_a_pdf_copy_is_pasteable_by_a_png_only_consumer(self):
         plugin = make_copy_plugin()
@@ -921,9 +879,7 @@ class TestCopyFeedback(unittest.TestCase):
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
 
     def test_the_cursor_is_never_left_busy_after_a_completed_copy(self):
-        import base64
-
-        plugin, _ = self._plugin_with_status()
+        plugin, messages = self._plugin_with_status()
         # Take the slow path: the cursor a lingering copy puts up, held long
         # enough that only completing the copy can take it down again.
         plugin.BUSY_CURSOR_DELAY_MS = 0
@@ -932,17 +888,12 @@ class TestCopyFeedback(unittest.TestCase):
         for _ in range(3):
             self.qapp.processEvents()
         self.assertIsNotNone(QtWidgets.QApplication.overrideCursor())
-        plugin.on_kernel_message(
-            {
-                "task": "COPY_TO_CLIPBOARD_REQUEST",
-                "data": {
-                    "payload_base64": base64.b64encode(b"%PDF fake").decode("ascii"),
-                    "output_format": "pdf",
-                    "is_text": False,
-                },
-            }
-        )
+        plugin.on_kernel_message(copy_payload((b"%PDF fake", "pdf")))
 
+        # The copy really did complete -- the cursor is restored on every path,
+        # so a failed copy would satisfy the rest of this test while leaving its
+        # named subject unexercised.
+        self.assertIn("Copied figure to the clipboard as Vector.", messages)
         self.assertIsNone(QtWidgets.QApplication.overrideCursor())
         self.assertFalse(plugin.copy_in_flight())
 
@@ -1591,24 +1542,6 @@ class TestCopyAsSubmenu(unittest.TestCase):
     def setUp(self):
         self.kernel = FakeKernelRequests()
 
-    def _host(self, figure_context):
-        manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        self.save_graphics = SaveGraphicsPlugin({})
-        manager.plugins = {
-            "figure": FigurePlugin({}),
-            "save_graphics_dialog": self.save_graphics,
-        }
-        app = make_plugin_host(manager)
-        HydeApp.setup_plugins(app)
-        for plugin in manager.plugins.values():
-            services = getattr(plugin, "services", None)
-            if isinstance(services, dict):
-                services["figure_context_service"] = types.SimpleNamespace(
-                    active_editable_figure=lambda: figure_context[0]
-                )
-                services["python_execution_service"] = self.kernel
-        return app
-
     def _submenu_labels(self, menu):
         for action in menu.actions():
             submenu = action.menu()
@@ -1623,21 +1556,21 @@ class TestCopyAsSubmenu(unittest.TestCase):
         republishes the image rather than the encoding, so offering a dozen of
         them was offering choices with no consequence.
         """
-        app = self._host([None])
+        app, _ = make_copy_host([None], self.kernel)
 
         self.assertEqual(
             ["Vector", "Image", "LaTeX"], self._submenu_labels(app.ui.menuEdit)
         )
 
     def test_copy_as_appears_in_the_figure_context_menu(self):
-        app = self._host([None])
+        app, _ = make_copy_host([None], self.kernel)
         popup = app.menu_context.build_popup_menu("figure", parent=app.ui)
 
         self.assertEqual(["Vector", "Image", "LaTeX"], self._submenu_labels(popup))
 
     def test_each_copy_as_entry_emits_its_own_format(self):
         figure_context = [make_save_graphics_context(title="Graph12")]
-        app = self._host(figure_context)
+        app, save_graphics = make_copy_host(figure_context, self.kernel)
         app.menu_context.refresh_enabled_states()
 
         for item in graphics_clipboard_representations():
@@ -1655,11 +1588,11 @@ class TestCopyAsSubmenu(unittest.TestCase):
                     ],
                     self.kernel.executed,
                 )
-                settle_copy(self.save_graphics, self.kernel, item.output_formats[0])
+                settle_copy(save_graphics, self.kernel, item.output_formats[0])
 
     def test_copy_as_entries_need_an_active_figure(self):
         figure_context = [None]
-        app = self._host(figure_context)
+        app, _ = make_copy_host(figure_context, self.kernel)
 
         app.menu_context.refresh_enabled_states()
         action = app.menu_context.lookup_action("edit", "Image", path=("Copy As",))
@@ -1756,10 +1689,9 @@ class TestSaveGraphicsPlugin(unittest.TestCase):
 
     def test_save_graphics_action_opens_dialog_for_active_figure(self):
         manager = HydePluginManager(plugin_package="unused", plugins_dir="unused")
-        self.save_graphics = SaveGraphicsPlugin({})
         manager.plugins = {
             "figure": FigurePlugin({}),
-            "save_graphics_dialog": self.save_graphics,
+            "save_graphics_dialog": SaveGraphicsPlugin({}),
         }
         app = make_plugin_host(manager)
         HydeApp.setup_plugins(app)

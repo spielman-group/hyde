@@ -19,13 +19,12 @@ from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.matplotlib_backend import figure_snapshot_payload
 from hyde.user_interface.main import HydeApp
-from hyde.features.hyde_ir import HydeAppIR
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
 from hyde.user_interface.plugins.figure_control_dialog.trace_edit_dialog import (
     TraceAppearanceDialog,
 )
 from hyde.user_interface.plugins.figure_interactive import Plugin as FigurePlugin
-from hyde.features.matplotlib_ir import FigureIR, FigureIRDiff
+from hyde.features.matplotlib_ir import FigureIRDiff
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.remove_from_graph_dialog import Plugin as RemoveFromGraphPlugin
 from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
@@ -34,6 +33,7 @@ from hyde.user_interface.plugins.remove_from_graph_dialog.dialogs import (
 from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_IR import FigureDialogIR
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
+from tests.plugin_host_fakes import make_plugin_host
 
 
 _DEFAULT_FIGURE_IR = object()
@@ -62,61 +62,6 @@ class FakeVisibleTerminalService:
     def execute_visible(self, code):
         self.visible_calls.append(str(code))
         return True
-
-
-def make_plugin_host(plugin_manager):
-    main_window = QtWidgets.QMainWindow()
-    main_window.setMenuBar(QtWidgets.QMenuBar())
-    main_window.menuFile = main_window.menuBar().addMenu("File")
-    main_window.menuEdit = main_window.menuBar().addMenu("Edit")
-    main_window.menuAnalysis = main_window.menuBar().addMenu("Analysis")
-    main_window.menuWindow = main_window.menuBar().addMenu("Windows")
-    main_window.menuFigure = QtWidgets.QMenu("Figure", main_window.menuBar())
-    main_window.menuTable = QtWidgets.QMenu("Table", main_window.menuBar())
-    main_window.menuBar().addMenu(main_window.menuFigure)
-    main_window.menuBar().addMenu(main_window.menuTable)
-    main_window.mdiArea = QtWidgets.QMdiArea()
-    main_window.setCentralWidget(main_window.mdiArea)
-
-    app = type("DummyApp", (), {})()
-    app.ui = main_window
-    app.plugin_manager = plugin_manager
-    app.configure_persistent_subwindow = lambda subwindow: None
-    app.emit_plugin_event = lambda name, data=None: (name, data)
-    app.show_status_message = lambda label: label
-    app.show_transient_status_message = lambda label, timeout_ms: label
-    app.clear_status_message = lambda label: None
-    app.process_tree = object()
-    app.show_plugin_window = lambda key: key
-    app.build_plugin_services = lambda: HydeApp.build_plugin_services(app)
-    app.get_current_app_ir = lambda: HydeAppIR(current_project_dir=None)
-    app.lookup_menu_action = lambda location, name, path=(): (
-        None
-        if getattr(app, "menu_context", None) is None
-        else app.menu_context.lookup_action(location, name, path=path)
-    )
-    app.show_menu = lambda location: HydeApp.show_menu(app, location)
-    app.hide_menu = lambda location: HydeApp.hide_menu(app, location)
-    app.popup_menu = lambda location, global_pos: HydeApp.popup_menu(
-        app, location, global_pos
-    )
-    app.get_current_project_dir = lambda: None
-    app.get_shutting_down = lambda: False
-    app.set_shutting_down = lambda value: value
-    app.get_quit_command_sent = lambda: False
-    app.set_quit_command_sent = lambda value: value
-    app.begin_project_operation = lambda label: label
-    app.project_target_needs_confirmation = lambda path: False
-    app.confirm_overwrite_project = lambda path: False
-    app.begin_shutdown_from_close_event = lambda: None
-    app.finalize_quit = lambda: None
-    app.on_kernel_ready = lambda: None
-    app.on_kernel_crashed = lambda: None
-    app.enter_no_project_state = lambda: None
-    app.activate_project = lambda project_dir: project_dir
-    app.on_project_state_result = lambda data: data
-    app.request_gui_quit = lambda: None
-    return app
 
 
 def make_live_state(title="Figure0", items=("trace_a", "trace_b")):

@@ -13,7 +13,7 @@ file was filed on an agent's word alone.
 - [x] Slice 2: Dead And Unreachable Code In The Figure Backend
 - [x] Slice 3: Two Half-Finished Shutdown Paths
 - [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
-- [ ] Slice 5: Test Hygiene, Round Three
+- [x] Slice 5: Test Hygiene, Round Three
 - [ ] Slice 6: Stale Documentation Left By The Review
 - [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
@@ -595,16 +595,103 @@ Use the test-cleanup skill.
 
 ### Acceptance criteria
 
-- [ ] No test's name claims a subject the test does not exercise.
-- [ ] The duplicate pgf assertion exists once.
-- [ ] No unused import remains in the touched test modules.
-- [ ] The suite's coverage of copy feedback is unchanged in substance.
+- [x] No test's name claims a subject the test does not exercise.
+- [x] The duplicate pgf assertion exists once.
+- [x] No unused import remains in the touched test modules.
+- [x] The suite's coverage of copy feedback is unchanged in substance.
 
 ### Blocked by
 
 None - can start immediately. Item 1 touches
 `tests/test_save_graphics_dialog.py`, so sequence it against any other slice
 editing that file.
+
+### Landed
+
+All four filed items, plus the two later slices added.
+
+**Item 1: the cursor test now completes a copy, and says so.** It takes
+`copy_payload` like every other completed copy in the module, and asserts
+`Copied figure to the clipboard as Vector.` before it reads the cursor. That
+assertion is the subject: feeding the flat legacy shape back in fails on it with
+`['Copying figure as Vector...', None, 'Could not copy the figure to the
+clipboard.']`, which is the failed copy the test used to be quietly making.
+`test_a_failed_render_does_not_confirm_success` keeps the flat shape, where it is
+the point, and the cursor after a *failed* copy stays covered by
+`test_a_rendered_copy_whose_data_never_arrives_reports_failure`,
+`test_a_render_that_raises_reports_what_the_kernel_said`,
+`test_a_copy_fails_when_the_kernel_goes_away` and
+`test_a_reply_naming_an_unpasteable_format_settles_the_request`.
+
+**Item 2: the pgf duplicate is one test.** `TestCopyPgfAsText` now holds
+`test_a_pgf_copy_offers_no_image_to_qt_or_the_platform`, which makes both
+observations the two tests made separately -- no image MIME type, which is what
+another Qt application reads, and `hasImage()` false, which is what the platform
+pasteboard reads. Nothing was dropped; the copy in
+`TestClipboardPayloadRepresentations` is gone, with a comment where it was
+pointing at its replacement, because its positive counterpart
+(`test_a_copy_carries_an_image_the_platform_can_republish`) lives there.
+
+**Item 3: four unused imports, not one.** `FigureIR` in
+`tests/test_remove_from_graph_dialog.py`, and two local `import base64`
+statements in `tests/test_save_graphics_dialog.py` that no longer had a caller.
+Consolidating the host stub retired `HydeAppIR` from five more modules.
+
+**Item 4: consolidated, because the duplication was six copies of a real
+interface rather than a fixture with options.** `make_plugin_host` was defined
+in six test modules -- four byte-identical, `test_curve_fit`'s differing in two
+lines and `test_plugin_tools`'s in three. Every attribute it sets names an
+actual `HydeApp` method, all thirty checked against the class, so it is a fake
+of a contract and not a per-test shape. The copies had already drifted:
+`get_procedures_init` existed in one of the six, so a plugin asking its host for
+procedures worked in one module's tests and not another's.
+
+`tests/plugin_host_fakes.py` holds it once, with **one** keyword --
+`menu_class`, for the recording menus `test_plugin_tools` needs -- and five of
+the six callers pass nothing. The two divergences are now one visible line each
+in the module that wants them, rather than a buried edit in a 53-line copy:
+`test_plugin_tools` wraps it to pass `menu_class=RecordingMenu`, and
+`test_curve_fit` wraps it to rebind `emit_plugin_event` to the real bus.
+`get_current_app_ir` reads `app.get_current_project_dir()` in the shared body,
+which is what `test_curve_fit` had diverged to do and is identical for the rest
+because they all leave that accessor returning `None`.
+
+Within `tests/test_save_graphics_dialog.py`, `TestEditMenuCopy._host_with_figure`
+and `TestCopyAsSubmenu._host` were the same seventeen lines twice; they are now
+`make_copy_host(figure_context, kernel)`, which returns the host and the copy
+plugin instead of assigning it onto the test case.
+
+Net: 396 lines out of the test modules, 71 back in, 87 in the shared module.
+
+**Item 5: the `_quit_command_sent` pin is gone, and the overlap was measured
+rather than assumed.** Removing `self._quit_command_sent = False` from
+`HydeApp.on_kernel_crashed` fails
+`test_the_close_button_still_closes_after_the_kernel_crashed` --
+`[('hyde.quit()', True)] != [('hyde.quit()', True), ('hyde.quit()', True)]`, the
+close button refusing to answer -- alongside the pin, so the behavioural test
+covers the same ground and says why it matters.
+`test_on_kernel_crashed_resets_shell_state_without_runtime_restart` keeps
+everything else it was asserting (the project dropped, the operation ended, the
+crash event, the warning, no restart) and now names where the quit half lives.
+
+**Item 6: two more leftovers, both in files already open.**
+`test_begin_shutdown_from_close_event_emits_shutdown_events_once` no longer
+asserts `_runtime_shutdown`; the assertion below it -- two calls, one set of
+events -- is what the guard is for, and Slice 11's
+`test_a_quit_that_landed_shuts_hyde_down_once` holds the same rule through a
+real close event. `ProjectLaneApp.__init__` no longer sets
+`_quit_command_sent`: Slice 10 needed it to drive
+`on_visible_command_executed`, which Slice 11 deleted, and nothing that class
+exercises reads it.
+
+Left alone: `table._closed` in `tests/test_table_features.py`, which Slice 3
+explicitly kept -- `table_interactive` has its own two-phase close and no
+`_shutdown_requested` to unify with -- and `browser._shutdown_requested = False`
+in `tests/test_python_variables_final.py`, which is a fixture set on a stub, not
+an assertion.
+
+Suite: 673 tests, OK (674 before). The one test is the pgf duplicate, folded
+into its twin.
 
 ## Slice 6: Stale Documentation Left By The Review
 

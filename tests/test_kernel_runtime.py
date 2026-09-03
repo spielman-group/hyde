@@ -1191,10 +1191,16 @@ class TestRuntimeArchitecture(unittest.TestCase):
         self.assertIn("python:\nprint('alpha')", output)
 
     def test_on_kernel_crashed_resets_shell_state_without_runtime_restart(self):
+        """A crash drops the project and says so, and asks for no restart.
+
+        That it also takes down a quit in flight is
+        `test_the_close_button_still_closes_after_the_kernel_crashed` in
+        `tests/test_file_dialog_plugin.py`, which asks the window to close
+        afterwards rather than reading the record.
+        """
         calls = []
         dummy_app = type("DummyApp", (), {})()
         dummy_app.shutting_down = False
-        dummy_app._quit_command_sent = True
         dummy_app.ui = object()
         dummy_app.enter_no_project_state = lambda: calls.append(("no_project",))
         dummy_app.end_project_operation = lambda: calls.append(("end",))
@@ -1203,7 +1209,6 @@ class TestRuntimeArchitecture(unittest.TestCase):
         with patch("hyde.user_interface.main.QtWidgets.QMessageBox.warning") as warning:
             HydeApp.on_kernel_crashed(dummy_app)
 
-        self.assertFalse(dummy_app._quit_command_sent)
         self.assertEqual(
             calls,
             [
@@ -1224,7 +1229,8 @@ class TestRuntimeArchitecture(unittest.TestCase):
         HydeApp.begin_shutdown_from_close_event(dummy_app)
         HydeApp.begin_shutdown_from_close_event(dummy_app)
 
-        self.assertTrue(dummy_app._runtime_shutdown)
+        # Two calls, one set of events: what the guard is for, asked of the
+        # events rather than of the flag that holds it.
         self.assertEqual(
             calls,
             [
@@ -1268,7 +1274,6 @@ class ProjectLaneApp(HydeApp):
         self.argv = []
         self.shutting_down = False
         self._startup_complete = False
-        self._quit_command_sent = False
         self._project_operation_message = None
         self.events = []
 
