@@ -331,10 +331,9 @@ def abandon_figure_build_session(session):
 
     Drawing on a neighbouring figure is deliberate, and when the macro
     succeeds that trace belongs to the neighbour from then on. A macro that
-    raised said nothing, so the neighbour goes back to the figure it was:
-    otherwise a run that ended in an error still moves another figure's
-    recreation state, and nothing later says which trace came from a macro
-    that failed.
+    raised said nothing, so the trace it drew comes back off: otherwise a run
+    that ended in an error still moves another figure's recreation state, and
+    nothing later says which trace came from a macro that failed.
 
     Three things come back, and each is here for its own reason:
 
@@ -346,6 +345,23 @@ def abandon_figure_build_session(session):
       leaves the IR alone if it cannot read the live figure back, and a macro
       can leave a neighbour in exactly that state, so the snapshot is the
       only thing left. It looks redundant on the healthy path; it is not.
+
+    The traces are the whole scope, and the neighbour keeps everything else
+    the failed macro did to it. Only the recorded lines come off the live
+    figure, and the IR is then re-derived from whatever artists remain, so a
+    legend, a title, an axis limit, or a scatter or image artist survives: a
+    macro that calls `ax.legend(["a", "b"])` on a neighbour and then raises
+    leaves `legend: true` in that subplot's IR even though its appended trace
+    is gone. That asymmetry is deliberate, not an unfinished rewind. Undoing
+    arbitrary live matplotlib mutations means tracking every artist a macro
+    can create and every property it can set across the whole matplotlib
+    surface, and the narrower alternative -- holding the neighbour's IR at its
+    pre-macro projection until something legitimately redraws it -- makes the
+    IR and the live figure disagree on purpose, which is what deriving the one
+    from the other exists to prevent. The residue is on screen where the user
+    can see it, and a failed macro is already an error they have to act on, so
+    it is accepted. Read a stray legend on a neighbour as this rewind's
+    documented limit rather than as a bug to fix here.
 
     The figure the macro was building is left as it stands. Its live artists
     cannot be put back -- a rebuild starts by clearing the figure -- so

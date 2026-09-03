@@ -303,6 +303,12 @@ class TestFigureCommActions(unittest.TestCase):
         a second figure built the same way from the same data and never
         touched, so what to expect comes from an independent figure rather
         than from the one under test.
+
+        The comparison is of the recreation log, which is as far as the claim
+        goes. Non-trace mutations a failed macro made to a neighbour -- a
+        legend, a title, an axis limit -- are deliberately not rewound, so the
+        two figures are not required to agree on everything;
+        `abandon_figure_build_session` says why.
         """
         plt = self._configure_pyplot()
 

@@ -50,7 +50,7 @@ exercised.
       to choose was the missing `Plugin` attribute, which became a warning
       rather than an error because a helper package beside the plugins is a
       legitimate thing to find
-- [ ] Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
+- [x] Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
 
 ## How to work these
 
@@ -1440,8 +1440,10 @@ None.
 
 ### Type
 
-`HITL` — the two ways to close it are both substantial, and which one is right
-is a design decision.
+`HITL`, and **resolved by decision rather than by implementation.** Asked which
+of the two closures to build, the maintainer's answer was: neither — keep the
+status quo. So no behaviour changed; what landed is the documentation the third
+acceptance criterion asks for.
 
 ### What to build
 
@@ -1484,14 +1486,30 @@ they must act on. Decide the intended behaviour first.
 
 ### Acceptance criteria
 
-- [ ] The intended behaviour for a neighbour's non-trace mutations after a
+- [x] The intended behaviour for a neighbour's non-trace mutations after a
       failed macro is written down, with the reasoning.
-- [ ] If they are to be undone, a failed macro leaves the neighbour's IR and its
-      live figure agreeing with their pre-macro state, verified for at least a
-      legend, an axis limit, and a non-line artist.
-- [ ] If they are to be kept, the rewind's scope is documented so the next
+- [ ] ~~If they are to be undone~~ — not chosen; the maintainer kept the status
+      quo, so nothing was undone.
+- [x] If they are to be kept, the rewind's scope is documented so the next
       reader does not mistake the asymmetry for a bug.
-- [ ] Drawing on a neighbour from a macro that *succeeds* keeps working.
+- [x] Drawing on a neighbour from a macro that *succeeds* keeps working —
+      unchanged, and the suite is unmoved at 652 tests.
+
+### Outcome
+
+`abandon_figure_build_session`'s docstring now states the limit as deliberate
+and gives the mechanism behind it, because the asymmetry was misread twice
+during this review — once as a missing fix, once as redundant code. A figure's
+IR is a projection of its live artists, re-derived on every publish, so what the
+rewind removes from the live figure stays removed, what it writes into the IR is
+discarded, and the IR snapshot matters only in the window where the read-back
+raises. The traces are the whole scope; a legend, title, axis limit or non-line
+artist survives, and that residue is accepted — it is on screen where the user
+can see it, and a failed macro is already an error they must act on.
+
+No test was added, deliberately. A test asserting that the legend *is* left
+behind would pin an accepted limitation as a contract, and would become an
+obstacle rather than a guard if this decision is ever revisited.
 
 ### Blocked by
 
