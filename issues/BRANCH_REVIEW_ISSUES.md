@@ -20,7 +20,7 @@ exercised.
 - [x] Slice 6: Move Clipboard Policy Into The Figure Export Plugin
 - [x] Slice 7: One Owner For The Request-Then-Await-Payload Lifecycle
 - [x] Slice 8: One Format Field On FigureIR
-- [ ] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
+- [x] Slice 9: Declare The zprocess Requirement, And Delete The Runtime Probe
       — probe deleted; the version floor still waits on the upstream `v2.28.0` tag
 - [x] Slice 10: Retire `current_ir` And Its Second Source Of Truth
 - [x] Slice 11: Guard The Start-Up Pyplot Rule By Observation
@@ -595,21 +595,34 @@ not part of a versioning fix.
       Measured against a checkout of the `v2.27.1` tag, the last release before
       the heartbeat options existed: `TypeError: ProcessTree.subprocess() got an
       unexpected keyword argument 'heartbeat_interval'`.
-- [ ] `pyproject.toml` declares `zprocess>=2.28.0` in place of `>=2.18.0`.
+- [x] `pyproject.toml` declares `zprocess>=2.28.0` in place of `>=2.18.0`.
 - [x] A `ProcessTree` whose `subprocess` forwards `**kwargs` does not prevent
       startup.
 
 ### Blocked by
 
-**One upstream action, which only the maintainer can take:** tag `v2.28.0` on
-zprocess's `Production` and push the tag, then reinstall the editable zprocess
-so its `.dist-info` reports `2.28.0` rather than the frozen `2.27.0.dev19`.
+**Done, in both halves.**
 
-Deleting the probe is not blocked by that and can land first — the probe is
-currently refusing to start a working kernel, so removing it is the urgent
-half. The floor is only honest once the tag exists, so if the tag has not
-happened yet, land the deletion and leave `pyproject.toml` for a follow-up
-rather than declaring a floor nothing satisfies.
+The probe deletion landed first, in "Stop guessing zprocess's version from a
+function signature".
+
+The upstream action then happened: the maintainer authorized an annotated tag,
+so zprocess carries **`v2.28.0+ibs`** on `5da28e4` — a PEP 440 *local version*,
+which is the mechanism for "a local variant of 2.28.0" rather than an upstream
+release. It parses, it sorts above plain `2.28.0`, and it satisfies `>=2.28.0`,
+so the floor works while the version string still says whose build it is.
+`Production` and `PermissiveHeartBeat` are the same commit, so one tag covers
+both; zprocess has no `Development` branch. Note `local_scheme =
+"no-local-version"` strips setuptools-scm's *generated* `+g<hash>` but preserves
+a local segment carried by the tag itself, which is why this works at all.
+
+The maintainer then reinstalled the editable zprocess, so the stale
+`.dist-info` caught up from `2.27.0.dev19` to `2.28.0+ibs`. Verified against the
+live environment: every declared dependency resolves, `zprocess>=2.28.0` is
+satisfied by the installed `2.28.0+ibs`, and upstream `2.27.1` — the release
+that lacks the heartbeat options — does not satisfy it. The declaration finally
+discriminates the working install from the broken one, which `>=2.18.0` never
+did.
 
 **Status: the deletion has landed; the floor has not.** As of 2026-09-02 the
 zprocess tags stop at `v2.27.1` (`git describe` → `v2.27.1-2-g5da28e4`), so
