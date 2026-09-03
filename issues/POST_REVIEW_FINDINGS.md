@@ -19,6 +19,7 @@ file was filed on an agent's word alone.
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [ ] Slice 9: Retire The `figure_command` Feature
 - [x] Slice 10: The Project Lane Still Clears Messages It Did Not Post
+- [ ] Slice 11: Hyde Can Become Unquittable
 
 ## Slice 1: `force_close` Does Not Close
 
@@ -1041,3 +1042,67 @@ No test fake needed changing: `begin_project_operation` and
 deleted had no callers outside `main/__init__.py`.
 
 Suite: 671 tests, OK (663 before).
+
+## Slice 11: Hyde Can Become Unquittable
+
+### Type
+
+`AFK`
+
+### What to build
+
+A failed quit dispatch permanently refuses every later quit, **including the
+window's close button**, and the only escapes are a kernel crash or a raising
+terminal command.
+
+`Plugin.quit_application` (`hyde/user_interface/plugins/file/__init__.py:128`):
+
+```python
+if self.services["get_shutting_down"]() or self.services["get_quit_command_sent"]():
+    return False
+...
+self.services["set_quit_command_sent"](True)      # set BEFORE the dispatch
+return bool(self.services["python_execution_service"].execute_hidden(...))
+```
+
+The flag goes up *before* the command is dispatched, and `execute_hidden`
+answers only "was this handed off", not "did it run". So if the dispatch returns
+`False` because the kernel is not ready, or the kernel never acts on the
+command, the flag stays `True` for the life of the session and the first branch
+refuses everything afterwards.
+
+`HydeMainWindow.closeEvent` (`hyde/user_interface/main/__init__.py:148`) routes
+the close button through `self.app.request_quit()` when not already shutting
+down, and that reaches the same refused path — so the window will not close
+either. The application stops responding to both Quit and the close box, with no
+message.
+
+The only resets are `on_kernel_crashed` (`main/__init__.py:587`) and the
+visible-command branch (`:659`). Slice 10 kept that second one deliberately;
+this slice is why it mattered. Typing an expression that raises in the terminal
+is currently a user's way out of an unquittable Hyde, which is not a design.
+
+The shape of the fix: set the flag only on a **successful** dispatch, and make
+the quit observable rather than fire-and-forget, so a quit that never lands does
+not wedge the application. `FrontendKernelService.request` already provides the
+correlated form, and the branch's Slice 7 made `KernelPayloadRequest` the one
+owner for request-then-await lifecycles — but a quit is not a payload request,
+so decide whether it wants that machinery or simply a reply-checked request, and
+say which.
+
+Do not remove the guard itself: refusing a *second concurrent* quit while one is
+genuinely in flight is correct. The defect is that "in flight" is recorded
+before the fact and never retracted.
+
+### Acceptance criteria
+
+- [ ] A quit whose dispatch fails leaves the application still quittable, shown
+      by execution.
+- [ ] A quit that is genuinely in flight still refuses a second concurrent quit.
+- [ ] The window's close button still works after a failed quit.
+- [ ] A successful quit still shuts down exactly once.
+- [ ] `on_kernel_crashed` still resets the flag.
+
+### Blocked by
+
+- Slice 10, which is done and kept the accidental escape hatch alive.
