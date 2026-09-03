@@ -18,6 +18,7 @@ file was filed on an agent's word alone.
 - [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [ ] Slice 9: Retire The `figure_command` Feature
+- [ ] Slice 10: The Project Lane Still Clears Messages It Did Not Post
 
 ## Slice 1: `force_close` Does Not Close
 
@@ -893,3 +894,63 @@ a deletion:
 ### Blocked by
 
 Slice 2, which is done. Independent of Slices 3-7.
+
+## Slice 10: The Project Lane Still Clears Messages It Did Not Post
+
+### Type
+
+`AFK`
+
+### What to build
+
+Slice 3 made the kernel-request lane name what it retracts: a progress message
+is cleared only if the status bar still shows that exact label. The **project**
+lane was not changed and has the same bug on a far more reachable path.
+
+`HydeApp.clear_project_status_message()` (`hyde/user_interface/main/__init__.py:481`)
+still calls `statusbar.clearMessage()` unconditionally, and
+`end_project_operation()` (`:484`) is called from three places — including
+`on_visible_command_executed` (`:635`):
+
+```python
+def on_visible_command_executed(self, msg):
+    content = msg.get("content", {})
+    if content.get("status") != "ok":
+        self._quit_command_sent = False
+        self.end_project_operation()
+```
+
+So **any** visible terminal command whose status is not `ok` wipes the status
+bar. A typo, a `NameError`, any raising expression the user types clears
+whatever is showing: a kernel failure they have not read, or a live progress
+message from a copy or a figure close still in flight. It fires even when no
+project operation was ever begun.
+
+This is a plausible contributor to what the maintainer observed while testing —
+status-bar messages disappearing faster than they could be read. The progress
+message being replaced by its outcome is correct and expected; this is a second,
+unrelated mechanism that eats messages, and it is driven by ordinary terminal
+use.
+
+The fix is the shape Slice 3 already put in place for the kernel lane: a caller
+names the label it is retracting, and the clear is a no-op if the bar has moved
+on. `begin_project_operation(label)` already knows the label it posted, so the
+end can name it.
+
+Consider also whether `end_project_operation()` should fire at all from
+`on_visible_command_executed`. Its two other call sites are a kernel crash and
+the completion of an actual project operation; a failing terminal command is
+neither. If the `_quit_command_sent = False` reset is the real purpose of that
+branch, the status-bar call may simply not belong there.
+
+### Acceptance criteria
+
+- [ ] A failing terminal command does not clear a status message posted by
+      something else, shown by execution.
+- [ ] A real project operation still clears its own message when it ends.
+- [ ] A kernel crash still clears whatever the project lane posted.
+- [ ] `_quit_command_sent` is still reset when a visible command fails.
+
+### Blocked by
+
+- Slice 3, which is done and provides the pattern.
