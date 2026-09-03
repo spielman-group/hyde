@@ -1883,8 +1883,7 @@ class FigureHyde(Figure):
                 subplot_id = "subplot0"
                 # "111" is not a default that a multi-argument add_subplot
                 # could improve on: it is the only code the IR admits.
-                # FigureIRAuthority.validate_state and
-                # FigureCommandModel.validate_state both raise on anything
+                # FigureIRAuthority.validate_state raises on anything
                 # else, and regenerate_figure_from_ir replays the subplot as
                 # int(subplot["subplot_code"]), which no "2, 1, 1" spelling
                 # survives. A tracked fig.add_subplot(2, 1, 1) therefore

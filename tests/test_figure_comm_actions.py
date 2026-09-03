@@ -13,10 +13,10 @@ except ModuleNotFoundError as exc:
     raise unittest.SkipTest("matplotlib is required") from exc
 
 from hyde.matplotlib_backend import apply_figure_action, figure_snapshot_payload
-from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
+from tests.figure_ir_fixtures import figure_ir_with_traces
 
 
 class TestFigureCommActions(unittest.TestCase):
@@ -35,20 +35,11 @@ class TestFigureCommActions(unittest.TestCase):
         if pyplot is not None:
             pyplot.close("all")
 
-    def _live_state_with_title(self, title):
-        return figure_ir_from_live_state(
-            {
-                "feature": "figure_command",
-                "settings": {
-                    "command": "create",
-                    "title": title,
-                    "x_name": "delay",
-                    "subplot_code": "111",
-                    "figsize": None,
-                },
-                "items": ["fit_delay", "raw_delay"],
-                "ui": {},
-            }
+    def _figure_ir_with_title(self, title):
+        return figure_ir_with_traces(
+            title,
+            x_name="delay",
+            items=("fit_delay", "raw_delay"),
         )
 
     def _configure_pyplot(self):
@@ -572,7 +563,7 @@ class TestFigureCommActions(unittest.TestCase):
             },
         )
         try:
-            figure_ir = self._live_state_with_title("Figure0")
+            figure_ir = self._figure_ir_with_title("Figure0")
             window.update_payload(
                 {
                     "figure_number": 7,

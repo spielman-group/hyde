@@ -7,7 +7,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from qtutils.qt import QtWidgets
 
 from tests.kernel_fakes import KernelRequestRecorder
-from hyde.features.matplotlib_features import figure_ir_from_live_state
 from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.user_interface.main import HydeApp
 from hyde.user_interface.plugins.figure_control_dialog import Plugin as FigureControlPlugin
@@ -24,6 +23,7 @@ from hyde.user_interface.plugins.figure_control_dialog.figure_dialog_IR import (
 )
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
 from hyde.user_interface.shared.plugin import HydePluginManager
+from tests.figure_ir_fixtures import figure_ir_with_traces
 from tests.plugin_host_fakes import make_plugin_host
 
 
@@ -49,23 +49,8 @@ class FakeVisibleTerminalService:
         return True
 
 
-def make_live_state(title="Figure0", items=("trace_a", "trace_b")):
-    return {
-        "feature": "figure_command",
-        "settings": {
-            "command": "create",
-            "title": title,
-            "x_name": "x",
-            "subplot_code": "111",
-            "figsize": None,
-        },
-        "items": list(items),
-        "ui": {},
-    }
-
-
 def make_figure_ir():
-    figure_ir = figure_ir_from_live_state(make_live_state())
+    figure_ir = figure_ir_with_traces()
     subplot = figure_ir["layout"]["subplots"][0]
     subplot["axes"]["x"].update(
         {
@@ -186,7 +171,7 @@ def make_figure_ir():
 
 
 def make_figure_defaults():
-    defaults = figure_ir_from_live_state(make_live_state())
+    defaults = figure_ir_with_traces()
     subplot = defaults["layout"]["subplots"][0]
     subplot["axes"]["x"].update(
         {

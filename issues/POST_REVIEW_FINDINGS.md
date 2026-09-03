@@ -17,7 +17,7 @@ file was filed on an agent's word alone.
 - [x] Slice 6: Stale Documentation Left By The Review
 - [x] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
-- [ ] Slice 9: Retire The `figure_command` Feature
+- [x] Slice 9: Retire The `figure_command` Feature
 - [ ] Slice 12: A Kernel Signal That Cannot Be Delivered Says Nothing
 - [x] Slice 10: The Project Lane Still Clears Messages It Did Not Post
 - [x] Slice 11: Hyde Can Become Unquittable
@@ -1100,15 +1100,103 @@ a deletion:
 
 ### Acceptance criteria
 
-- [ ] The codec has one spelling of "recreate this figure", not two.
-- [ ] `_feature_kind`'s fallback for an unclassifiable state is a deliberate,
+- [x] The codec has one spelling of "recreate this figure", not two.
+- [x] `_feature_kind`'s fallback for an unclassifiable state is a deliberate,
       stated choice, and its guard still fails for the ambiguous `"figure"`.
-- [ ] No production module holds a function whose only callers are tests.
-- [ ] Figure creation, refresh, close and copy all still work.
+- [x] No production module holds a function whose only callers are tests.
+- [x] Figure creation, refresh, close and copy all still work.
 
 ### Blocked by
 
 Slice 2, which is done. Independent of Slices 3-7.
+
+### Landed
+
+`FigureCommandModel` is gone, and with it `_creation_lines` and the drifted
+`fig = plt.figure('Name')` it emitted. `matplotlib_features.py` went 1179 ->
+984 lines; `matplotlib_ir.py` and `base.py` were not touched, so the codec's
+one remaining spelling of "recreate this figure" is `FigureIR`'s, which Slice 8
+standardised. The suite is 673 tests, OK, before and after -- the same count,
+because nothing was deleted from it.
+
+**The fallback is `figure_ir`, not a raise, and the decision was forced by a
+live bug rather than taste.** The one production expression that can reach the
+fallback is
+`MatplotlibCodec.validate_state(getattr(figure, "_hyde_ir", None))` in
+`_import_first_class_figure_ir` (`matplotlib_backend.py:1197`), which is
+written to tolerate a figure that has no IR yet and then reads `["layout"]` off
+the answer. A `figure_command` state has no `layout`, so importing a live
+figure Hyde had not seen before raised `KeyError: 'layout'` -- executed against
+the shipped revision on a plain `matplotlib.figure.Figure` with one axes and
+one line. It now returns an empty figure IR and the import succeeds. Raising
+instead would have turned that defensive `getattr(..., None)` into a hard error
+and bought nothing: a patch and a graphics export are both operations *on* an
+existing figure and both announce themselves, by name or by the settings
+sniffed just above, so what is left when neither matches is a figure. The
+fallback names the only remaining candidate rather than guessing among several.
+
+**The ambiguity guard is unchanged in what it asserts and still load-bearing.**
+`test_matplotlib_codec_rejects_the_ambiguous_figure_feature_name` still expects
+`ValueError` matching `"Ambiguous matplotlib feature"` for
+`{"feature": "figure", ...}`. What it protects is not the retired kind: it is
+the permissiveness of the fallback itself. `"figure"` names none of the three
+surviving kinds and is a prefix of all of them, so without the guard it would
+be silently classified rather than corrected. Keeping the fallback permissive
+is what keeps the guard necessary; a raising fallback would have made it
+redundant and free to rot. The message now recommends the three real names, and
+the test's comment says `figure_ir` where it said `figure_command`.
+
+**`figure_ir_from_live_state` is rehomed as `figure_ir_with_traces` in
+`tests/figure_ir_fixtures.py` (39 lines), beside `kernel_fakes.py` and
+`plugin_host_fakes.py` rather than inside either** -- it is not a fake of a
+collaborator, it is a real figure IR. It composes the production builder,
+`FigureIR().with_title().with_x_name().with_items()`, so it cannot drift from
+the IR production emits; a hand-shaped dict could, and would have taken sixty
+tests with it. Byte-equality with the retired function was checked over the
+seven argument shapes the call sites use, including no traces and a null
+`x_name`, before any call site moved.
+
+It absorbed a seventh near-copy the slice did not know about:
+`test_figure_window_session_save.py` had already invented the same fixture
+independently, spelled `FigureIR().with_title().with_x_name().with_items()
+.normalized_state()` under the misleading name `_live_state_with_title`. That
+it converged on the same composition is the strongest evidence the shape is
+right.
+
+**`MatplotlibCodec.state_to_macro_source` is deleted rather than rewritten.**
+No model this codec dispatches to has the method -- Slice 2 removed the last
+one -- so the override could only ever end in its own `hasattr` "not supported"
+branch, which is exactly what `FeatureCodec.state_to_macro_source` already
+says. `test_graphics_export_macro_source_raises_not_implemented` still passes,
+now against the base, and still pins the same contract: the matplotlib codec
+does not generate recreation macros.
+
+Every production file shrank and no test file grew:
+
+| file | before | after |
+| --- | --- | --- |
+| `hyde/features/matplotlib_features.py` | 1179 | 984 |
+| `hyde/matplotlib_backend.py` | 1921 | 1920 |
+| `tests/test_matplotlib_features.py` | 3140 | 3086 |
+| `tests/test_figure_comm_actions.py` | 776 | 767 |
+| `tests/test_axis_edit_dialog.py` | 702 | 687 |
+| `tests/test_trace_edit_dialog.py` | 616 | 601 |
+| `tests/test_remove_from_graph_dialog.py` | 642 | 627 |
+| `tests/test_figure_window_session_save.py` | 467 | 457 |
+| `tests/figure_ir_fixtures.py` | - | 39 |
+
+Beyond the suite, one figure was driven end to end through the real backend:
+built by a `@hyde.figure(register=False)` macro over namespace arrays,
+snapshotted, refreshed against a changed `fit_delay`, regenerated from its own
+IR, round-tripped through its emitted macro source, copied to the clipboard in
+two formats, resized and closed. 52 checks, 0 failures. The refresh picked up
+the changed array and left the untouched trace alone; the emitted macro reused
+the one window rather than opening a second; the copy handed one
+`COPY_TO_CLIPBOARD_REQUEST` to the GUI carrying PDF and PNG bytes; the name
+stopped resolving after the close. The last four checks cover the fallback
+itself: `validate_state(None)` yields a `figure_ir` state carrying a `layout`,
+the ambiguous `"figure"` is still rejected, and the import that used to raise
+`KeyError` now succeeds.
 
 ## Slice 10: The Project Lane Still Clears Messages It Did Not Post
 

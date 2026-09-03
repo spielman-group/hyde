@@ -398,156 +398,8 @@ class FigurePatchModel:
         )
 
 
-class FigureCommandModel:
-    feature_name = "figure_command"
-    _valid_commands = {
-        "create",
-        "close",
-    }
-
-    @classmethod
-    def default_state(cls):
-        return {
-            "feature": cls.feature_name,
-            "settings": {
-                "command": "create",
-                "title": None,
-                "x_name": None,
-                "figsize": None,
-                "subplot_code": "111",
-                "figure_number": None,
-                "figure_name": None,
-                "use_bound_values": False,
-            },
-            "items": [],
-            "ui": {},
-        }
-
-    @classmethod
-    def normalize_state(cls, state):
-        normalized = copy.deepcopy(cls.default_state())
-        if state:
-            normalized["feature"] = state.get("feature", normalized["feature"])
-            settings = state.get("settings", {})
-            if isinstance(settings, dict):
-                normalized["settings"].update(settings)
-            normalized["items"] = [str(item) for item in state.get("items", []) if str(item)]
-            ui = state.get("ui", {})
-            normalized["ui"] = dict(ui) if isinstance(ui, dict) else {}
-
-        settings = normalized["settings"]
-        settings["command"] = str(settings.get("command", "create"))
-        title = settings.get("title")
-        settings["title"] = None if title in (None, "") else str(title)
-        x_name = settings.get("x_name")
-        settings["x_name"] = None if x_name in (None, "") else str(x_name)
-        figsize = settings.get("figsize")
-        if figsize in (None, ""):
-            settings["figsize"] = None
-        else:
-            if not isinstance(figsize, (list, tuple)) or len(figsize) != 2:
-                raise ValueError("Figure figsize must be a length-2 sequence.")
-            settings["figsize"] = (float(figsize[0]), float(figsize[1]))
-        settings["subplot_code"] = str(settings.get("subplot_code", "111"))
-        figure_number = settings.get("figure_number")
-        settings["figure_number"] = (
-            None if figure_number in (None, "") else int(figure_number)
-        )
-        figure_name = settings.get("figure_name")
-        settings["figure_name"] = (
-            None if figure_name in (None, "") else str(figure_name)
-        )
-        settings["use_bound_values"] = bool(settings.get("use_bound_values", False))
-        return normalized
-
-    @classmethod
-    def validate_state(cls, state):
-        normalized = cls.normalize_state(state)
-        if normalized["feature"] != cls.feature_name:
-            raise ValueError(f"Expected feature={cls.feature_name!r}.")
-
-        settings = normalized["settings"]
-        command = settings["command"]
-        if command not in cls._valid_commands:
-            raise ValueError(f"Unsupported figure command: {command!r}.")
-
-        if settings["figsize"] is not None:
-            if settings["figsize"][0] <= 0 or settings["figsize"][1] <= 0:
-                raise ValueError("Figure figsize values must be positive.")
-        if command == "close" and not settings["figure_number"]:
-            raise ValueError(f"Figure command {command!r} requires a figure number.")
-        if settings["subplot_code"] != "111":
-            raise ValueError("Initial Hyde figure editing only supports subplot code '111'.")
-        return normalized
-
-    @classmethod
-    def update_state(cls, state, action):
-        normalized = cls.normalize_state(state)
-        action_type = action.get("type")
-
-        if action_type == "set_command":
-            normalized["settings"]["command"] = action["command"]
-        elif action_type == "set":
-            set_path(normalized, action["path"], action["value"])
-        elif action_type == "clear":
-            set_path(normalized, action["path"], None)
-        elif action_type == "replace_items":
-            normalized["items"] = list(action.get("items", []))
-        else:
-            raise ValueError(f"Unsupported figure action: {action_type!r}.")
-
-        return cls.normalize_state(normalized)
-
-    @classmethod
-    def _creation_lines(cls, normalized):
-        settings = normalized["settings"]
-        title = settings["title"]
-        x_name = settings["x_name"]
-        figsize = settings["figsize"]
-        y_names = list(normalized["items"])
-
-        figure_args = []
-        if title:
-            figure_args.append(repr(title))
-        if figsize is not None:
-            figure_args.append(f"figsize={figsize!r}")
-        lines = [f"fig = plt.figure({', '.join(figure_args)})"] if figure_args else ["fig = plt.figure()"]
-        lines.append(f"ax = fig.add_subplot({settings['subplot_code']})")
-        for y_name in y_names:
-            if x_name:
-                lines.append(f"ax.plot({x_name}, {y_name}, label={y_name!r})")
-            else:
-                lines.append(f"ax.plot({y_name}, label={y_name!r})")
-        if len(y_names) > 1:
-            lines.append("ax.legend()")
-        lines.append("fig.show()")
-        lines.append("fig.canvas.draw_idle()")
-        return lines
-
-    @classmethod
-    def state_to_python(cls, state, context=None):
-        del context
-        normalized = cls.validate_state(state)
-        command = normalized["settings"]["command"]
-        if command == "create":
-            return "\n".join(cls._creation_lines(normalized))
-        if command == "close":
-            return f"plt.close({normalized['settings']['figure_number']})"
-        raise ValueError(f"Unsupported figure command: {command!r}.")
-
-    # No `state_to_macro_source` here on purpose. A recreation macro for a
-    # figure is `FigureIR`'s to emit -- decorated, and asking plt.figure to
-    # clear. This model's version was undecorated, had no caller anywhere,
-    # and would have been a third spelling of "recreate this figure" free to
-    # drift from the other two. `MatplotlibCodec.state_to_macro_source` now
-    # raises NotImplementedError for this feature kind, which is the honest
-    # answer. `tracked_names` went with it: it existed only to name that
-    # macro's parameters.
-
-
 class MatplotlibCodec(FeatureCodec):
     feature_name = "matplotlib"
-    figure_command_feature = "figure_command"
     figure_ir_feature = "figure_ir"
     figure_patch_feature = FigurePatchModel.feature_name
     figure_graphics_export_feature = FigureGraphicsExportModel.feature_name
@@ -591,25 +443,15 @@ class MatplotlibCodec(FeatureCodec):
         model = cls._model_for_feature(feature_kind)
         return model.state_to_python(cls._delegate_state(feature_kind, state), context=context)
 
-    @classmethod
-    def state_to_macro_source(cls, state, macro_name, context=None):
-        feature_kind = cls._feature_kind(state)
-        model = cls._model_for_feature(feature_kind)
-        if not hasattr(model, "state_to_macro_source"):
-            raise NotImplementedError(
-                f"{model.__name__} does not support macro source generation."
-            )
-        return model.state_to_macro_source(
-            cls._delegate_state(feature_kind, state),
-            macro_name,
-            context=context,
-        )
-
-    # No `tracked_names` arm here either. It read as one of the codec's
-    # uniform per-feature-kind forwards, but only two of the four models ever
-    # had the method, and the one production answer to "which names does this
-    # figure watch?" is `FigureIR.tracked_names()`, which goes straight to
-    # `FigureIRAuthority`.
+    # No `state_to_macro_source` or `tracked_names` arm here. Both read as
+    # more of the uniform per-feature-kind forwards above, but no model this
+    # codec dispatches to has either method, so the forward could only ever
+    # end in its own "not supported" branch -- which is what
+    # `FeatureCodec.state_to_macro_source` already says, without the
+    # indirection. A recreation macro for a figure is `FigureIR`'s to emit,
+    # decorated and asking `plt.figure` to clear; the one production answer to
+    # "which names does this figure watch?" is `FigureIR.tracked_names()`,
+    # which goes straight to `FigureIRAuthority`.
 
     @classmethod
     def _normalize_subplot(cls, subplot, index):
@@ -633,12 +475,14 @@ class MatplotlibCodec(FeatureCodec):
         if candidate in (None, "") and isinstance(state, dict):
             candidate = state.get("feature")
         if candidate == "figure":
+            # Still rejected, and still for the reason it always was: the
+            # fallback below is permissive, so a plausible-looking "figure"
+            # would be silently classified rather than corrected. It names
+            # none of the three kinds and is a prefix of all of them.
             raise ValueError(
-                "Ambiguous matplotlib feature 'figure'; use 'figure_command' or "
-                "'figure_ir'."
+                "Ambiguous matplotlib feature 'figure'; use 'figure_ir', "
+                "'figure_patch' or 'figure_graphics_export'."
             )
-        if candidate == cls.figure_command_feature:
-            return cls.figure_command_feature
         if candidate == cls.figure_ir_feature:
             return cls.figure_ir_feature
         if candidate == cls.figure_patch_feature:
@@ -656,24 +500,21 @@ class MatplotlibCodec(FeatureCodec):
                 for key in ("output_path", "output_format", "dpi", "transparent", "size_inches")
             ):
                 return cls.figure_graphics_export_feature
-            if any(
-                key in settings
-                for key in (
-                    "command",
-                    "x_name",
-                    "subplot_code",
-                    "figure_number",
-                    "figure_name",
-                    "use_bound_values",
-                )
-            ) or "items" in state:
-                return cls.figure_command_feature
-        return cls.figure_command_feature
+        # `figure_ir`, deliberately, and not a raise. A patch and a graphics
+        # export are both operations *on* an existing figure and both announce
+        # themselves -- by name, or by the settings sniffed above. Figure IR is
+        # the base kind: what is left when neither of those matches is a
+        # figure. Concretely, the one production expression that reaches here
+        # is `validate_state(getattr(figure, "_hyde_ir", None))` in
+        # `matplotlib_backend._import_first_class_figure_ir`, which is written
+        # to tolerate a figure that has no IR yet and then reads `["layout"]`
+        # off the answer. Raising would break that caller; the retired
+        # `figure_command` fallback used to hand it a state with no `layout`
+        # at all, so it raised `KeyError` instead of importing the figure.
+        return cls.figure_ir_feature
 
     @classmethod
     def _model_for_feature(cls, feature_kind):
-        if feature_kind == cls.figure_command_feature:
-            return FigureCommandModel
         if feature_kind == cls.figure_ir_feature:
             return FigureIRAuthority
         if feature_kind == cls.figure_patch_feature:
@@ -696,42 +537,6 @@ class MatplotlibCodec(FeatureCodec):
         normalized = copy.deepcopy(state)
         normalized["feature"] = feature_kind
         return normalized
-
-
-def figure_ir_from_live_state(state):
-    normalized = MatplotlibCodec.validate_state(state)
-    title = normalized["settings"]["title"]
-    subplot = {
-        "id": "subplot0",
-        "subplot_code": normalized["settings"]["subplot_code"],
-        "title": None,
-        "xlabel": None,
-        "ylabel": None,
-        "x_limits": None,
-        "y_limits": None,
-        "legend": len(normalized["items"]) > 1,
-        "traces": [],
-        "opaque_nodes": [],
-    }
-    for index, y_name in enumerate(normalized["items"]):
-        subplot["traces"].append(
-            {
-                "id": f"trace{index}",
-                "kind": "line",
-                "x_source": (
-                    None
-                    if not normalized["settings"]["x_name"]
-                    else {"kind": "name", "value": normalized["settings"]["x_name"]}
-                ),
-                "y_source": {"kind": "name", "value": y_name},
-                "kwargs": {"label": y_name},
-            }
-        )
-    ir = MatplotlibCodec.default_state(feature=MatplotlibCodec.figure_ir_feature)
-    ir["settings"]["title"] = title
-    ir["settings"]["figsize"] = normalized["settings"]["figsize"]
-    ir["layout"]["subplots"] = [subplot]
-    return MatplotlibCodec.validate_state(ir)
 
 
 def figure_ir_append_trace(figure_ir, trace):

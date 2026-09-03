@@ -5,6 +5,7 @@ from qtutils.qt import QtWidgets
 from hyde.user_interface.base_hyde_widgets import HydeToolWidget
 from hyde.features.matplotlib_ir import FigureIR
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
+from tests.figure_ir_fixtures import figure_ir_with_traces
 
 
 class TestFigureWindowSessionSave(unittest.TestCase):
@@ -14,23 +15,12 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         if cls.qapp is None:
             cls.qapp = QtWidgets.QApplication([])
 
-    def _live_state_with_title(self, title):
-        return (
-            FigureIR()
-            .with_title(title)
-            .with_x_name("delay")
-            .with_items(["fit_delay", "raw_delay"])
-            .normalized_state()
-        )
-
-    def _live_state_with_title_and_figsize(self, title, figsize):
-        return (
-            FigureIR()
-            .with_title(title)
-            .with_x_name("delay")
-            .with_items(["fit_delay", "raw_delay"])
-            .with_figsize(*figsize)
-            .normalized_state()
+    def _figure_ir(self, title, *, figsize=None):
+        return figure_ir_with_traces(
+            title,
+            x_name="delay",
+            items=("fit_delay", "raw_delay"),
+            figsize=figsize,
         )
 
     def test_figure_window_inherits_shared_shell(self):
@@ -42,7 +32,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
             widget.update_payload(
                 {
                     "figure_number": 1,
-                    "snapshot": {"figure_ir": self._live_state_with_title("Figure0")},
+                    "snapshot": {"figure_ir": self._figure_ir("Figure0")},
                 }
             )
 
@@ -67,7 +57,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         chose, so restating it in the macro would pin the figure to whatever
         style was in force the day it was saved.
         """
-        figure_ir = self._live_state_with_title("Figure0")
+        figure_ir = self._figure_ir("Figure0")
         figure_ir["layout"]["subplots"][0]["traces"][0]["kwargs"]["color"] = "#123456"
         chosen = FigureWindow(figure_number=1)
         inherited = FigureWindow(figure_number=2)
@@ -101,8 +91,8 @@ class TestFigureWindowSessionSave(unittest.TestCase):
 
     def test_figure_window_tracks_live_figure_ir_in_widget_ir_from_backend_payloads(self):
         widget = FigureWindow(figure_number=1)
-        first_ir = self._live_state_with_title("Figure0")
-        second_ir = self._live_state_with_title("Figure1")
+        first_ir = self._figure_ir("Figure0")
+        second_ir = self._figure_ir("Figure1")
         try:
             widget.update_payload(
                 {
@@ -169,7 +159,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setWidget(widget)
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = self._live_state_with_title("Figure0")
+        figure_ir = self._figure_ir("Figure0")
         try:
             widget.update_payload(
                 {
@@ -198,7 +188,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = self._live_state_with_title("Graph0")
+        figure_ir = self._figure_ir("Graph0")
         try:
             widget.update_payload(
                 {
@@ -273,7 +263,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setWidget(widget)
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = self._live_state_with_title_and_figsize("Figure0", (5.0, 3.0))
+        figure_ir = self._figure_ir("Figure0", figsize=(5.0, 3.0))
         try:
             widget.update_payload(
                 {
@@ -329,7 +319,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow = mdi_area.addSubWindow(widget)
         subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
-        figure_ir = self._live_state_with_title("Figure0")
+        figure_ir = self._figure_ir("Figure0")
         try:
             widget.update_payload(
                 {
@@ -398,7 +388,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow = mdi_area.addSubWindow(widget)
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = self._live_state_with_title("Figure0")
+        figure_ir = self._figure_ir("Figure0")
         try:
             widget.update_payload(
                 {
@@ -437,7 +427,7 @@ class TestFigureWindowSessionSave(unittest.TestCase):
         subwindow.setObjectName("Figure7")
         widget.bind_subwindow(subwindow)
         subwindow.setGeometry(10, 20, 300, 240)
-        figure_ir = self._live_state_with_title("Graph0")
+        figure_ir = self._figure_ir("Graph0")
         try:
             widget.update_payload(
                 {

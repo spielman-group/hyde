@@ -27,7 +27,6 @@ from hyde.matplotlib_backend import (
 from hyde.features.matplotlib_features import (
     MatplotlibCodec,
     FigureGraphicsExportModel,
-    figure_ir_from_live_state,
     figure_graphics_export_command_source,
     figure_patch_source,
     graphics_output_options,
@@ -53,6 +52,7 @@ from hyde.features.matplotlib_figure_state import FigureIRAuthority
 from hyde.features.matplotlib_ir import FigureIR, FigureIRDiff
 from hyde.user_interface.plugins.figure_interactive.window import FigureWindow
 from hyde.user_interface.plugins.kernel_runtime import KernelRequest
+from tests.figure_ir_fixtures import figure_ir_with_traces
 from tests.kernel_fakes import KernelRequestRecorder
 from hyde.user_interface.shared.core import log_hyde_dispatch_debug
 from hyde.user_interface.plugins.figure_interactive.context import EditableFigureContext
@@ -117,8 +117,9 @@ class FakeShell:
 class TestGraphicsExportFormats(unittest.TestCase):
     def test_matplotlib_codec_rejects_the_ambiguous_figure_feature_name(self):
         # Not migration scaffolding: unrecognised feature kinds fall through to
-        # figure_command, so a plausible-looking "figure" would silently lower
-        # as the wrong kind rather than being rejected.
+        # figure_ir, so a plausible-looking "figure" would silently lower as
+        # the wrong kind rather than being rejected. "figure" is a prefix of
+        # all three kinds the codec knows and names none of them.
         with self.assertRaisesRegex(ValueError, "Ambiguous matplotlib feature"):
             MatplotlibCodec.validate_state(
                 {
@@ -144,35 +145,18 @@ class TestGraphicsExportFormats(unittest.TestCase):
             )
 
     def test_matplotlib_figure_lowerers_emit_only_matplotlib_python(self):
-        figure_command = MatplotlibCodec.state_to_python(
-            {
-                "feature": "figure_command",
-                "settings": {
-                    "command": "create",
-                    "title": "DelayGraph",
-                    "x_name": "delay",
-                    "subplot_code": "111",
-                },
-                "items": ["fit_delay"],
-            }
+        figure_ir = figure_ir_with_traces(
+            "DelayGraph",
+            x_name="delay",
+            items=("fit_delay",),
         )
-        self.assertNotIn("@hyde", figure_command)
-        self.assertNotIn("hyde.", figure_command)
-        self.assertIn("fig = plt.figure('DelayGraph')", figure_command)
-        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_command)
 
-        figure_ir = figure_ir_from_live_state(
-            {
-                "feature": "figure_command",
-                "settings": {
-                    "command": "create",
-                    "title": "DelayGraph",
-                    "x_name": "delay",
-                    "subplot_code": "111",
-                },
-                "items": ["fit_delay"],
-            }
-        )
+        figure_create = MatplotlibCodec.state_to_python(figure_ir)
+        self.assertNotIn("@hyde", figure_create)
+        self.assertNotIn("hyde.", figure_create)
+        self.assertIn("fig = plt.figure('DelayGraph', clear=True)", figure_create)
+        self.assertIn("ax.plot(delay, fit_delay, label='fit_delay')", figure_create)
+
         target_ir = MatplotlibCodec.update_state(
             figure_ir,
             {
@@ -432,19 +416,11 @@ class TestFigureIRAuthorityIsShared(unittest.TestCase):
     """
 
     def _live_figure_ir(self):
-        return figure_ir_from_live_state(
-            {
-                "feature": "figure_command",
-                "settings": {
-                    "command": "create",
-                    "title": "DelayGraph",
-                    "x_name": "delay",
-                    "subplot_code": "111",
-                    "figsize": (5.0, 3.0),
-                },
-                "items": ["fit_delay", "raw_delay"],
-                "ui": {},
-            }
+        return figure_ir_with_traces(
+            "DelayGraph",
+            x_name="delay",
+            items=("fit_delay", "raw_delay"),
+            figsize=(5.0, 3.0),
         )
 
     def test_default_state_matches_across_the_process_boundary(self):
@@ -677,36 +653,11 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         return pyplot
 
-    def _live_state(self):
-        return {
-            "feature": "figure_command",
-            "settings": {
-                "command": "create",
-                "title": "DelayGraph",
-                "x_name": "delay",
-                "subplot_code": "111",
-                "figsize": None,
-            },
-            "items": ["fit_delay", "raw_delay"],
-            "ui": {},
-        }
-
-    def _live_state_with_title(self, title):
-        return {
-            "feature": "figure_command",
-            "settings": {
-                "command": "create",
-                "title": title,
-                "x_name": "delay",
-                "subplot_code": "111",
-                "figsize": None,
-            },
-            "items": ["fit_delay", "raw_delay"],
-            "ui": {},
-        }
+    def _figure_ir(self, title="DelayGraph", *, x_name="delay", items=("fit_delay", "raw_delay")):
+        return figure_ir_with_traces(title, x_name=x_name, items=items)
 
     def test_figure_ir_trace_style_edit_preserves_broader_line2d_kwargs(self):
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         updated = FigureIRAuthority.update_state(
             figure_ir,
@@ -751,9 +702,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIn("markeredgewidth=2.0", source)
 
     def test_trace_style_patch_does_not_remove_hidden_legend_when_visibility_is_unchanged(self):
-        source_ir = figure_ir_from_live_state(
-            self._live_state_with_title("FigureA")
-        )
+        source_ir = self._figure_ir("FigureA")
         source_ir["layout"]["subplots"][0]["traces"] = [
             source_ir["layout"]["subplots"][0]["traces"][0]
         ]
@@ -781,9 +730,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertNotIn("ax.get_legend()", source)
 
     def test_figure_patch_source_keeps_remove_only_trace_edits_package_pure(self):
-        source_ir = figure_ir_from_live_state(
-            self._live_state_with_title("FigureA")
-        )
+        source_ir = self._figure_ir("FigureA")
         target_ir = FigureIRAuthority.update_state(
             source_ir,
             {
@@ -802,7 +749,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
     def test_figure_ir_diff_lowers_remove_only_trace_edits_through_hyde_helper(self):
         opening_ir = FigureIR(
-            figure_state=figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+            figure_state=self._figure_ir("FigureA")
         )
         updated_ir = opening_ir.remove_traces(("trace0",))
 
@@ -815,7 +762,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertNotIn("_hyde_line.remove()", source)
 
     def test_figure_ir_axis_edit_surface_lowers_axis_state_to_python(self):
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         with_bottom_hidden = FigureIRAuthority.update_state(
             figure_ir,
@@ -945,7 +892,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIn("ax.axhline(0, linestyle='--', linewidth=2.0, color='#654321')", source)
 
     def test_figure_ir_lowers_partial_axis_ranges_and_resolved_side_state_to_python(self):
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         with_top_layer = FigureIRAuthority.update_state(
             figure_ir,
@@ -1001,7 +948,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertNotIn("ax.set_position(", source)
 
     def test_figure_ir_lowers_subplot_margins_to_python(self):
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         updated = FigureIRAuthority.update_state(
             figure_ir,
@@ -1031,7 +978,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         )
 
     def test_default_diff_lowering_omits_blank_label_visibility_until_explicitly_hidden(self):
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         defaults = _figure_defaults_snapshot(figure_ir)
 
         source = FigureIRAuthority.state_to_python(
@@ -1058,7 +1005,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         self.assertIn("ax.xaxis.label.set_visible(False)", hidden_source)
 
     def test_set_axis_label_action_does_not_hide_blank_label_artist(self):
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         cleared = FigureIRAuthority.update_state(
             figure_ir,
@@ -1616,7 +1563,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 {
                     "figure_number": 1,
                     "snapshot": {
-                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "figure_ir": self._figure_ir(),
                         "live_state": None,
                     },
                 }
@@ -1669,7 +1616,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 {
                     "figure_number": 1,
                     "snapshot": {
-                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "figure_ir": self._figure_ir(),
                         "live_state": None,
                     },
                 }
@@ -1702,15 +1649,13 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 "python_execution_service": execution,
             },
         )
-        frozen_state = self._live_state()
-        frozen_state["settings"]["x_name"] = None
-        frozen_state["items"] = []
+        frozen_ir = self._figure_ir(x_name=None, items=())
         try:
             widget.update_payload(
                 {
                     "figure_number": 1,
                     "snapshot": {
-                        "figure_ir": figure_ir_from_live_state(frozen_state),
+                        "figure_ir": frozen_ir,
                         "live_state": None,
                     },
                 }
@@ -1746,7 +1691,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 {
                     "figure_number": 1,
                     "snapshot": {
-                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "figure_ir": self._figure_ir(),
                         "live_state": None,
                     },
                 }
@@ -1804,7 +1749,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 {
                     "figure_number": 1,
                     "snapshot": {
-                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "figure_ir": self._figure_ir(),
                         "live_state": None,
                     },
                 }
@@ -1846,7 +1791,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                 {
                     "figure_number": 1,
                     "snapshot": {
-                        "figure_ir": figure_ir_from_live_state(self._live_state()),
+                        "figure_ir": self._figure_ir(),
                         "live_state": None,
                     },
                 }
@@ -2206,7 +2151,10 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                     "is_first_class": False,
                     "call_source": "fig = plt.figure('FigureA')",
                     "figure_size": (320, 240),
-                    "live_state": self._live_state_with_title("FigureA"),
+                    # A `live_state` key is the retired second-class bridge.
+                    # Even carrying a valid figure IR it must not open a
+                    # window, because the payload is not first-class.
+                    "live_state": self._figure_ir("FigureA"),
                 },
             }
         )
@@ -2229,7 +2177,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         workspace.open_or_update_figure(
             {
@@ -2268,7 +2216,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         workspace.open_or_update_figure(
             {
                 "figure_number": 1,
@@ -2300,7 +2248,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         with self.assertRaises(KeyError):
             workspace.open_or_update_figure(
@@ -2331,7 +2279,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         workspace.open_or_update_figure(
             {
@@ -2371,7 +2319,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
         image.fill(QtCore.Qt.white)
         buffer = QtCore.QBuffer()
@@ -2428,7 +2376,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
         image.fill(QtCore.Qt.white)
         buffer = QtCore.QBuffer()
@@ -2475,7 +2423,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
         image.fill(QtCore.Qt.white)
         buffer = QtCore.QBuffer()
@@ -2528,7 +2476,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
 
         workspace.open_or_update_figure(
             {
@@ -2564,7 +2512,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
             "get_shutting_down": lambda: False,
         }
         workspace = FigureWorkspaceService(plugin)
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         image = QtGui.QImage(320, 240, QtGui.QImage.Format_RGB32)
         image.fill(QtCore.Qt.white)
         buffer = QtCore.QBuffer()
@@ -2624,7 +2572,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin.services = {
             "python_execution_service": FakeExecutionService(),
         }
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
         plugin.services.update(
@@ -2670,7 +2618,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin.services = {
             "python_execution_service": FakeExecutionService(),
         }
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
         plugin.services.update(
@@ -2711,7 +2659,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin = Plugin({})
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
@@ -2765,7 +2713,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin = Plugin({})
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
@@ -2833,9 +2781,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
                         "default_macro_name": title,
                         "call_source": f"fig = plt.figure({title!r})",
                         "figure_size": (320, 240),
-                        "figure_ir": figure_ir_from_live_state(
-                            self._live_state_with_title(title)
-                        ),
+                        "figure_ir": self._figure_ir(title),
                     },
                 }
             )
@@ -2898,7 +2844,7 @@ class TestFigureBackendSnapshot(unittest.TestCase):
         plugin = Plugin({})
         mdi_area = QtWidgets.QMdiArea()
         mdi_area.show()
-        figure_ir = figure_ir_from_live_state(self._live_state_with_title("FigureA"))
+        figure_ir = self._figure_ir("FigureA")
         plugin.services = {
             "mdi_area": mdi_area,
             "namespace_view_service": FakeNamespaceViewService(),
