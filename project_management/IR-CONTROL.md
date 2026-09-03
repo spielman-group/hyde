@@ -215,8 +215,9 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
 - That copy command lowers to a `hyde.copy_figure(...)` call rather than plain
   matplotlib. The clipboard is GUI-owned and matplotlib cannot express it, which
   is precisely the case the Hyde-helper allowance above is for.
-- `FigureIR` currently carries six commands on one dataclass, and seven of its
-  fields apply to only the two export-shaped ones. `validate()` and
+- `FigureIR` currently carries six commands on one dataclass, and five of its
+  fourteen fields are read only by the two export-shaped ones: `output_path`,
+  `output_formats`, `dpi`, `transparent` and `size_inches`. `validate()` and
   `python_source()` each branch on the command, so every new command adds a
   matching pair of branches that must stay in sync, and `dpi` already means
   either a positive integer or "defer to the live figure" depending on which
@@ -226,7 +227,7 @@ If a feature needs reconstruction, it may define its own import/metadata decode 
   one figure, and splitting now would cost more than it saves. Treat a seventh
   command as the trigger to stop widening it. At that point extract the
   export-shaped commands into their own IR that composes `FigureIR`, rather than
-  adding an eighth conditional field and a sixth pair of branches.
+  adding a sixth export-only field and another pair of branches.
 - Emitted strings that could plausibly be reused outside Hyde should prefer standard
   matplotlib/Python. Hyde public helpers are acceptable in emitted update strings only
   when they are the necessary or clearer contract for a Hyde-owned operation, not as a

@@ -14,7 +14,7 @@ file was filed on an agent's word alone.
 - [x] Slice 3: Two Half-Finished Shutdown Paths
 - [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
 - [x] Slice 5: Test Hygiene, Round Three
-- [ ] Slice 6: Stale Documentation Left By The Review
+- [x] Slice 6: Stale Documentation Left By The Review
 - [x] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [ ] Slice 9: Retire The `figure_command` Feature
@@ -722,14 +722,94 @@ into its twin.
 
 ### Acceptance criteria
 
-- [ ] No tracked document points at a file or attribute that no longer exists
+- [x] No tracked document points at a file or attribute that no longer exists
       without saying so.
-- [ ] `IR-CONTROL.md`'s counts match the code, or say what they count.
-- [ ] Completed slices' decisions are not rewritten, only annotated.
+- [x] `IR-CONTROL.md`'s counts match the code, or say what they count.
+- [x] Completed slices' decisions are not rewritten, only annotated.
 
 ### Blocked by
 
 None - can start immediately.
+
+### Landed
+
+**Item 2 first, because it decides the other two.** What the sentence counts is
+`FigureIR` fields that only the two export-shaped commands read, and there are
+**five**: `output_path`, `output_formats`, `dpi`, `transparent` and
+`size_inches`. Established by reading `validate()` and `_python_source()` --
+outside `__post_init__` normalization and `debug_state`, which touch every field
+regardless of command, each of those five is read only under the
+`save_graphics` or `copy_graphics` arm. `figure_name` is shared with `refresh`,
+`figure_number` belongs to `close`, and `creation_x_name`/`use_bound_values`
+belong to `create`/`refresh`, so none of them counts. The sentence now names the
+five and gives the denominator (fourteen fields, six commands), so the next
+reader can re-check it instead of decrementing it again.
+
+Its forward reference is fixed the same way. "An eighth conditional field and a
+sixth pair of branches" was two counts, one wrong and one unverifiable:
+`validate()` branches on four commands and `_python_source()` on six, so there
+is no count of "pairs" to increment. It now reads "a sixth export-only field and
+another pair of branches" -- the field count is checkable, and the branch claim
+is the design point it was always making.
+
+`IR-CONTROL.md` is rewritten rather than annotated, deliberately: it is a
+present-tense control document, and its own Revision Rule says Hyde does not
+keep superseded guidance as a parallel truth.
+
+**Items 1 and 3, annotated not rewritten.** Three forward notes in
+`BRANCH_REVIEW_ISSUES.md`, in the style that file already established at Slice
+17:
+
+- Slice 6's rationale, which placed the clipboard beside "the `clipboard.py` and
+  `copy_request.py` that are already there". The note says Slice 7 deleted the
+  module with `FigureCopyRequest`, and confirms the destination it settled did
+  land -- `clipboard.py` and `clipboard_platform.py` are both under
+  `save_graphics_dialog/` now.
+- Slice 2, where `_hyde_source_artifact` and `_hyde_ast_artifact` appear in the
+  prose and in an acceptance criterion that is still unticked. The note says
+  Slice 13 item 2 removed both, and that `_hyde_bound_values` and
+  `_hyde_defaults` still exist, so the rule that criterion states still has
+  subjects.
+- Slice 3, found by the sweep rather than filed: item 9 names
+  `copy_request.py:45` for the same deleted module, and items 3, 4 and 5 name
+  `clipboard_formats`.
+
+**The sweep.** All thirteen candidate names, plus the moved clipboard symbols
+(`clipboard_platform`, `GRAPHICS_CLIPBOARD_MIME_TYPES`,
+`GRAPHICS_CLIPBOARD_REPRESENTATIONS`) and `FigureCopyRequest`, searched across
+every tracked `.md` under `project_management/` and `issues/` with `git grep`,
+which sees tracked files whatever `.gitignore` says. Nothing under any
+`_source/` was read, quoted or referenced.
+
+Two hits looked stale and are not:
+
+- `specs/IPC_PROTOCOL.md:233` documents `output_format` inside a clipboard
+  payload's `representations` list. That is the live wire key, still built at
+  `hyde/execution/ipc.py:69` and read at
+  `save_graphics_dialog/__init__.py:208`; the field Slice 8 removed was
+  `FigureIR.output_format`, a different thing with the same name.
+- `REFACTOR_STATUS.md:172` calls `MatplotlibCodec.state_to_macro_source` "the
+  surviving public surface". It survives, at
+  `hyde/features/matplotlib_features.py:595`. Only
+  `FigureCommandModel.state_to_macro_source` is gone, and Slice 17's existing
+  forward note already says so.
+
+Left alone as already self-saying: every remaining hit sits in a record whose
+own subject is the removal -- `apply_figure_state` and `_hyde_building` under
+Slice 13, `current_ir` under Slice 10 ("Retire `current_ir`", with a ticked
+"`current_ir` is gone"), `_closed` and the project status-message pair under
+this file's Slices 1, 10 and 11, and the removed-symbol names in test-cleanup
+records that exist to say they went.
+
+Also swept, and clean: every `.py` path named in a present-tense document
+(`project_management/**`, `AGENTS.md`, `README.md`) resolves in the tree today,
+and none of those documents names a symbol this branch removed. `widget_ir`
+appears throughout them and is current -- it is Slice 10's replacement for
+`current_ir`.
+
+Suite: 673 tests, OK. Documentation only; no test added, and none needed --
+a test that grepped documents for symbol names would be the structural
+assertion this project excludes.
 
 ## Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 

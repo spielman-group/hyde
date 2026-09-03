@@ -186,6 +186,14 @@ over the figure's stored session, but that is the same ownership question as the
 adoption fallback: which session is authoritative while a macro runs. Decide
 both together.
 
+> Forward note (`POST_REVIEW_FINDINGS.md` Slice 6): `_hyde_source_artifact` and
+> `_hyde_ast_artifact`, named above and in the third criterion below, no longer
+> exist. Slice 13 item 2 of this file established that nothing in the product
+> read either one -- only a test asserted they were non-`None` -- and removed
+> both. `_hyde_bound_values` and `_hyde_defaults` are still assigned on that
+> path, so the rule the criterion states still has subjects. The text above is
+> left as it was written; nothing here changes what Slice 2 decided.
+
 ### Acceptance criteria
 
 - [ ] A macro that creates nothing and returns nothing does not adopt a live
@@ -252,6 +260,13 @@ Ten mechanical fixes with no design decision between them. Land as one change.
     `matplotlib_figure_schema.py`, `apply_figure_state` in `matplotlib_backend.py`,
     and the unused names imported into `matplotlib_features.py`. Confirm each is
     genuinely unreferenced before removing it.
+
+> Forward note (`POST_REVIEW_FINDINGS.md` Slice 6): `copy_request.py`, named in
+> item 9, no longer exists. Slice 7 of this file collapsed the
+> request-then-await-payload lifecycle into `KernelPayloadRequest` and deleted
+> the module, so item 9's unread `label` went with it. Items 3, 4 and 5 name
+> `clipboard_formats`, which Slice 8 replaced with `output_formats` as it said
+> it would.
 
 ### Acceptance criteria
 
@@ -380,6 +395,14 @@ and `copy_request.py` that are already there.
 Both files were misplaced by reasoning about a table and terminal copy that do
 not exist. When they arrive they will make their own decision; the rule is to
 place authority where it is used now.
+
+> Forward note (`POST_REVIEW_FINDINGS.md` Slice 6): `copy_request.py` was there
+> when this was written and is not there now. Slice 7 collapsed the
+> request-then-await-payload lifecycle into `KernelPayloadRequest`
+> (`base_hyde_widgets.py`) and deleted the module with `FigureCopyRequest`. The
+> destination this slice settled is unchanged and the move landed: `clipboard.py`
+> and `clipboard_platform.py` both sit in `save_graphics_dialog/` today. The
+> reasoning above is left as it was written.
 
 ### Acceptance criteria
 
