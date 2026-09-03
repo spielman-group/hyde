@@ -13,6 +13,7 @@ file was filed on an agent's word alone.
 - [x] Slice 2: Dead And Unreachable Code In The Figure Backend
 - [x] Slice 3: Two Half-Finished Shutdown Paths
 - [ ] Slice 4: `group_order`, The Other Drifted Contribution Key
+- [ ] Slice 13: The Last Unquittable Path, And The Eighth Sender
 - [x] Slice 5: Test Hygiene, Round Three
 - [x] Slice 6: Stale Documentation Left By The Review
 - [x] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
@@ -1636,3 +1637,71 @@ Left alone as out of scope: `_executing_request_id`'s empty-string fallback and
 genuinely raise inside it.
 
 Suite: 677 tests, OK (673 before; four added).
+
+## Slice 13: The Last Unquittable Path, And The Eighth Sender
+
+### Type
+
+`AFK`
+
+### What to build
+
+Two follow-ons from Slice 12, which its author raised rather than widening its
+own scope.
+
+**1. A lost `QUIT_REQUESTED` still wedges Hyde.** Slice 11 made the quit
+*command* observable: the GUI retracts its quit record unless the reply says
+`hyde.quit()` ran. Slice 12 made an undelivered signal *visible* in the log. But
+the two do not meet. If the kernel runs `hyde.quit()` successfully and the
+`QUIT_REQUESTED` signal is then lost, the reply still says the command **ran** —
+so `_quit_command_sent` is never retracted, and Hyde refuses every later Quit
+and every window close, exactly as before Slice 11.
+
+Slice 12's author identified the fix and declined it as a public-contract change
+beyond that slice's criteria: **`hyde.quit()` should raise when a present
+channel refuses the quit signal.** That makes `request.ran()` false, which
+retracts the record through the machinery Slice 11 already built. Note the
+distinction Slice 12 established — a *present channel that failed* is a fault,
+while *no channel at all* is expected and silent — so a `hyde.quit()` called
+outside a Hyde-managed kernel must still not raise.
+
+Check what else calls `hyde.quit()` before changing its contract, and whether
+anything treats it as best-effort.
+
+**2. An eighth sender, outside `ipc.py`.**
+`recreation_registry.publish_registry` (`hyde/recreation_registry.py:149`) is
+still `except Exception: pass`, and its `try` also wraps `serialize_registry`,
+which can genuinely raise — so a serialisation bug and an undeliverable message
+are swallowed by the same handler and neither is reported. Give it the treatment
+Slice 12 gave the other seven, and separate the two failure modes: a
+serialisation failure is a bug in Hyde, not a delivery problem.
+
+### Also worth settling in the same pass
+
+Slice 12 found two documentation defects while establishing the above. Neither is
+urgent, both are cheap:
+
+- **`hyde.create_table`'s docstring says `column_widths : sequence of int`.**
+  Every producer and consumer treats it as `{name: width}`
+  (`normalize_table_column_widths`), and an actual sequence would have raised
+  inside the old silent `except` and opened no table. So the documented type has
+  never worked.
+- **`push_table_data` in a no-channel process** now raises its documented
+  `RuntimeError` instead of an `AttributeError` — an improvement Slice 12 made
+  as a side effect. Confirm the docstring matches what it now does.
+
+### Acceptance criteria
+
+- [ ] A `hyde.quit()` whose `QUIT_REQUESTED` is lost leaves Hyde quittable,
+      shown by execution through the real quit path.
+- [ ] A `hyde.quit()` outside a Hyde-managed kernel still does not raise.
+- [ ] A successful quit still shuts down exactly once, and a quit genuinely in
+      flight still refuses a second.
+- [ ] `publish_registry` reports a delivery failure and a serialisation failure
+      differently, and neither is silent.
+- [ ] `hyde.create_table`'s documented `column_widths` type matches what the
+      code accepts.
+
+### Blocked by
+
+- Slices 11 and 12, both done.
