@@ -732,7 +732,8 @@ None - can start immediately.
 
 ### Type
 
-`HITL`
+`AFK` — was `HITL`; the maintainer resolved it by choosing to extend the
+framework.
 
 ### What to build
 
@@ -743,14 +744,65 @@ Hyde subclasses does `action.setEnabled(enabled)` on the raw value
 (`labscript-utils/labscript_utils/plugins.py:1053`) and documents `enabled` as a
 plain action property (line 353).
 
-A bound method is truthy, so any Hyde contribution rendered through the base path
-becomes permanently enabled — including copy actions that must be disabled
-without an active figure, whose shortcuts would then fire on nothing.
-`HydeMenuContext.render` fully overrides `render` today, so this is latent.
+**Correction, measured.** This slice originally said a bound method is truthy, so
+a contribution rendered through the base path becomes permanently enabled. That
+is wrong under the real binding. Verified against PyQt6:
 
-Needs a decision, and it is cross-repo: extend the framework's contract and its
-documentation, or keep the extension in Hyde and make the base path unreachable
-by construction rather than by coincidence.
+```
+setEnabled(bound method) -> TypeError: setEnabled(self, a0: bool): argument 1 has unexpected type 'method'
+setEnabled(lambda)       -> TypeError: ... unexpected type 'function'
+setEnabled(False)        -> accepted
+```
+
+So the latent failure is louder than described: it raises out of
+`MenuContext.render()` and aborts the whole menu build, rather than silently
+enabling a copy action whose shortcut then fires on nothing. The truthy reading
+holds only for a duck-typed stand-in like the framework tests' `FakeAction`.
+That *strengthens* the case that no other application can have depended on the
+current behaviour — none could have shipped it. `HydeMenuContext.render` fully
+overrides `render` today, which is why Hyde never hits it.
+
+**Resolved by the maintainer: extend the labscript-utils framework**, on its
+`Development` and `Production` branches only — never `master`.
+
+Impact assessed across all thirteen local suite repositories before deciding,
+and the change is safe. `enabled` exists in exactly one place, `MenuContext.render()`;
+the legacy `MenuBuilder.create_menu()` has no notion of it. **BLACS — the
+reference the maintainer named — never reaches that path at all**: it imports
+only `MenuBuilder` and `PluginManager`, never registers a `menus` context, and
+never constructs a `MenuContext`, so `render()` is unreachable from it. Swept
+all refs of every repo including `PluginRefactor`: no consumer outside Hyde
+passes `enabled` at all, let alone a callable, and nothing reads it back except
+Hyde's own `refresh_enabled_states`, which reads the contribution dict rather
+than the framework's local.
+
+Three things shape the implementation:
+
+- **Adopt Hyde's exception policy in the framework.** `MenuContext.render()` has
+  no `try/except` around its per-contribution loop, so an `enabled` that raises
+  propagates out and leaves the action's state unset. Hyde's
+  `resolve_menu_enabled` deliberately catches and returns `False`, on the
+  reasoning that a broken precondition should disable an action rather than take
+  the menu down. If the framework does not adopt the same policy, Hyde can never
+  delete its own resolver and delegate, because the two would disagree on the
+  failure path.
+- **Resolve into a local; do not write the resolved value back into the
+  contribution dict.** Hyde stores the raw callable for
+  `refresh_enabled_states`, and mutating the dict would break re-rendering.
+- **The framework's existing tests do not need changing.** They pass
+  `enabled: False` and omit the key, both non-callable, so the new branch never
+  fires — confirmed by patching a copy of `plugins.py` in memory and running the
+  labscript-utils suite against it, 31/31 unchanged. The callable case needs a
+  *new* test.
+
+Note the docstring update is real published API documentation, not a comment:
+`docs/source/api/index.rst` autosummaries `labscript_utils` with `:recursive:`.
+
+Also worth knowing for any follow-up: `enabled` is not the only drifted key.
+Hyde's contributions carry `group_order`, which the framework does not
+understand — it derives group ordering from sorted group names. So this
+extension is necessary but not sufficient for Hyde to drop its `render`
+override.
 
 ### Acceptance criteria
 
