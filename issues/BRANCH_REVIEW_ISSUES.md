@@ -1234,6 +1234,20 @@ Whoever takes this should decide the product behaviour first, then implement.
 - [ ] The kernel-launch case is covered by whatever surface is chosen, since
       that is the failure that motivated it.
 
+### Related, found while doing Slice 16
+
+`SpyderFrontendComm.wait_until_ready(timeout=5)` is a wall-clock timeout on
+kernel readiness that raises `TimeoutError` from inside
+`PythonVariables.__init__`. `HydeToolWindowPlugin` would surface that as a
+failed widget construction — which, given this slice's subject, means the
+variables tool silently does not appear on a slow machine.
+
+It is a startup handshake rather than a request, so it is not one of the four
+wall-clock timeouts this branch removed, and Slice 16 deliberately left it. But
+whatever surface this slice chooses for start-up failures should cover it: a
+tool that vanished because a five-second handshake expired is exactly the
+failure a user cannot diagnose.
+
 ### Blocked by
 
 None - can start immediately, but needs the product decision above first.
