@@ -18,6 +18,7 @@ file was filed on an agent's word alone.
 - [ ] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [ ] Slice 9: Retire The `figure_command` Feature
+- [ ] Slice 12: A Kernel Signal That Cannot Be Delivered Says Nothing
 - [x] Slice 10: The Project Lane Still Clears Messages It Did Not Post
 - [x] Slice 11: Hyde Can Become Unquittable
 
@@ -1210,3 +1211,62 @@ the flag: they assert that the kernel was asked, that the window closed, and
 that one quit produced one shutdown.
 
 Suite: 674 tests, OK (671 before; eight added, five removed with the lane).
+
+## Slice 12: A Kernel Signal That Cannot Be Delivered Says Nothing
+
+### Type
+
+`AFK`
+
+### What to build
+
+`hyde/execution/ipc.py` carries **nine** bare `except Exception` blocks across
+seven senders. A signal the kernel cannot deliver to the GUI fails with no log
+line anywhere, in either process.
+
+Found while doing Slice 11, which named it the last remaining unquittable path.
+Slice 11 made the quit *command* observable — the GUI now learns if
+`hyde.quit()` did not run — but this is the other direction: the kernel
+successfully running `hyde.quit()` and then failing to tell the GUI.
+
+The consequence is ordered badly. `hyde.quit()` (`hyde/__init__.py:485`) calls
+`signal_enter_no_project_state()` **before** `signal_quit_requested()`. So a
+swallowed quit signal leaves the GUI having already dropped its project and
+still running — worse than not having tried.
+
+### The swallowing is deliberate, and the fix must respect that
+
+One of the blocks states the reason: *"Silently fail if running outside a
+Hyde-managed kernel."* These functions are reachable when `hyde` is imported
+with no parent message channel at all — a plain IPython, a script, a test — and
+doing nothing is correct there. So this is **not** "log everything".
+
+Separate the two cases: *there is no channel*, which is expected and silent, and
+*there is a channel and the send failed*, which is a fault and must be logged
+against the `hyde` logger. Establish how to tell them apart by reading
+`put_parent_message` and whatever it depends on, rather than catching narrower
+exception types and hoping.
+
+### One sender is explicitly out of scope
+
+**`signal_copy_to_clipboard` must be left exactly as it is.** The maintainer
+ruled on this directly earlier in the branch: it is unrelated and was
+deliberately left alone, and it is not to be "fixed to match". Do not touch it,
+and do not include it in any sweep that rewrites the others.
+
+### Acceptance criteria
+
+- [ ] A send that fails while a parent channel exists is logged, with the signal
+      named, shown by execution.
+- [ ] A call with no parent channel at all is still silent, shown by execution —
+      importing `hyde` outside a Hyde kernel must not start logging errors.
+- [ ] `signal_copy_to_clipboard` is byte-identical afterwards.
+- [ ] A swallowed quit signal is no longer invisible: the failure is in the log
+      even though the GUI never hears the signal.
+- [ ] The ordering in `hyde.quit()` is either changed so the project is not
+      dropped before the quit is known to be deliverable, or the reason it must
+      stay is written down.
+
+### Blocked by
+
+- Slice 11, which is done and established this as the residual path.
