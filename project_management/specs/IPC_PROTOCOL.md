@@ -125,7 +125,10 @@ GUI behavior:
 - leave only `New Project`, `Load Project`, `Logging`, and `Quit` active
 
 #### `['QUIT_REQUESTED', None]`
-Sent when the kernel has already entered Hyde's inert state and requests that the GUI begin application shutdown.
+Sent when `hyde.quit()` asks the GUI to begin application shutdown. It travels alone:
+the GUI's own close path clears the project, so `ENTER_NO_PROJECT_STATE` is not sent
+ahead of it, where it would cost the user their project even when the quit behind it
+cannot be delivered.
 
 GUI behavior:
 - route into the normal main-window close path

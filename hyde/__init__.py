@@ -470,6 +470,15 @@ def load_project(path=None):
 def quit():
     """Request an orderly Hyde shutdown.
 
+    Notes
+    -----
+    The shutdown request travels alone. Asking the GUI to drop its project
+    ahead of it costs the user that project whenever the quit behind it cannot
+    be delivered, leaving a Hyde with no project and still running. Nothing is
+    lost by not asking: a GUI that takes the quit tears its own project down
+    through its close path, and a GUI that never hears it keeps the project it
+    still has.
+
     Returns
     -------
     None
@@ -482,7 +491,6 @@ def quit():
         Raised outside GUI mode to exit the current interpreter immediately.
     """
     if HYDE_GUI:
-        signal_enter_no_project_state()
         signal_quit_requested()
         return None
     raise SystemExit(0)

@@ -18,7 +18,7 @@ file was filed on an agent's word alone.
 - [x] Slice 7: The Pre-Commit Hook Runs The Wrong Interpreter
 - [x] Slice 8: Generate `plt.figure(name, clear=True)`
 - [x] Slice 9: Retire The `figure_command` Feature
-- [ ] Slice 12: A Kernel Signal That Cannot Be Delivered Says Nothing
+- [x] Slice 12: A Kernel Signal That Cannot Be Delivered Says Nothing
 - [x] Slice 10: The Project Lane Still Clears Messages It Did Not Post
 - [x] Slice 11: Hyde Can Become Unquittable
 
@@ -1557,17 +1557,82 @@ and do not include it in any sweep that rewrites the others.
 
 ### Acceptance criteria
 
-- [ ] A send that fails while a parent channel exists is logged, with the signal
+- [x] A send that fails while a parent channel exists is logged, with the signal
       named, shown by execution.
-- [ ] A call with no parent channel at all is still silent, shown by execution —
+- [x] A call with no parent channel at all is still silent, shown by execution —
       importing `hyde` outside a Hyde kernel must not start logging errors.
-- [ ] `signal_copy_to_clipboard` is byte-identical afterwards.
-- [ ] A swallowed quit signal is no longer invisible: the failure is in the log
+- [x] `signal_copy_to_clipboard` is byte-identical afterwards.
+- [x] A swallowed quit signal is no longer invisible: the failure is in the log
       even though the GUI never hears the signal.
-- [ ] The ordering in `hyde.quit()` is either changed so the project is not
+- [x] The ordering in `hyde.quit()` is either changed so the project is not
       dropped before the quit is known to be deliverable, or the reason it must
       stay is written down.
 
 ### Blocked by
 
 - Slice 11, which is done and established this as the residual path.
+
+### Landed
+
+**The two cases are told apart by the channel, not by the exception.**
+`put_parent_message` already returns without raising when `_parent_tree()` is
+None, so the swallowing could never have been catching "outside a Hyde-managed
+kernel" -- and `_parent_tree` never returned None for that case anyway. Read
+against zprocess: `ProcessTree.__init__` sets `self.to_parent = None`, and only
+`_connect_to_parent` puts a `WriteQueue` there, so `to_parent` is the channel
+and the attribute always exists. The shipped guard asked `hasattr`, which is
+true of every process tree, so a plain interpreter got a top-level tree back
+and `put_parent_message` died on `None.put(...)`. Measured on the shipped body:
+`to_parent value: None`, `hasattr to_parent: True`,
+`put_parent_message raised: AttributeError 'NoneType' object has no attribute
+'put'`. The silence outside a kernel was an `AttributeError` landing in a bare
+`except`, not a decision. `_parent_tree` now answers with the channel
+(`getattr(tree, "to_parent", None) is None`), and treats a tree that cannot be
+built at all as the same answer -- only the top-level construction path reads
+labconfig, because a kernel child's instance is already built by
+`connect_to_parent()`.
+
+So `_report_undelivered_signal(signal)` asks one question -- is there a channel
+-- and stays silent when there is none. Six senders name their lost signal
+through it: `OPEN_TABLE_REQUEST`, `APPEND_TABLE_REQUEST`,
+`ENTER_NO_PROJECT_STATE`, `ACTIVATE_PROJECT`, `QUIT_REQUESTED`,
+`PROJECT_STATE_RESULT`. The report lives in the senders rather than in
+`put_parent_message` so that `signal_copy_to_clipboard`, which shares that
+helper, keeps its behaviour as well as its bytes: sha256 of the function is
+`157aed07...` before and after, and the function does not appear in the diff.
+
+**The logger is `hyde`, as every other Hyde module uses.** The kernel calls
+`setup_logging('hyde-kernel')`, which configures that name and not `hyde`, so a
+`hyde` record in the kernel has no handler of its own and reaches the user
+through `logging.lastResort` on the kernel's stderr -- which `HydeApp` spawns
+the kernel with redirected into the GUI's logging window
+(`output_redirection_port` from `runtime_output_service`). Measured in a
+kernel-shaped process with no logging configured: the error and its traceback
+arrive on stderr, naming `QUIT_REQUESTED`.
+
+**The quit no longer spends the project first.** `hyde.quit()` sends
+`QUIT_REQUESTED` alone. Nothing depended on the drop going first: a GUI that
+takes the quit sets `shutting_down`, closes, and `begin_shutdown_from_close_event`
+stops the project watcher itself; there is no save-on-quit to lose; and
+`RuntimeHelper.mainloop` returns the moment it takes the quit, so anything
+queued behind it is never read -- a reordered `ENTER_NO_PROJECT_STATE` would be
+provably dead, while the shipped one landed whether or not the quit behind it
+did. Project-owned windows also come down more quietly this way: they check
+`get_shutting_down()` and skip the kernel round-trip a no-project state would
+have made them attempt. `IPC_PROTOCOL.md` no longer describes the old
+precondition.
+
+Four tests in `tests/test_kernel_ipc.py`, driving the real senders: a refused
+send names its signal (over all six, and none of them raises), a process with
+no channel logs nothing at all (both shapes -- a tree that never connected, and
+no tree), a `hyde.quit()` the GUI never hears is in the log, and a quit asks for
+the shutdown before anything else. Eight assertions fail on the shipped body,
+including `Lists differ: ['ENTER_NO_PROJECT_STATE'] != ['QUIT_REQUESTED']`.
+
+Left alone as out of scope: `_executing_request_id`'s empty-string fallback and
+`push_table_data`'s per-name `np.asanyarray` fallback are not sends, and
+`recreation_registry.publish_registry` is a sender outside this file. Its own
+`except Exception: pass` still swallows, though `serialize_registry` can
+genuinely raise inside it.
+
+Suite: 677 tests, OK (673 before; four added).

@@ -1,7 +1,10 @@
+import logging
 import sys
 
 import numpy as np
 
+
+LOGGER = logging.getLogger("hyde")
 
 _ProcessTree = None
 
@@ -15,12 +18,49 @@ def enable_process_tree_ipc():
 
 
 def _parent_tree():
+    """The process tree holding this process's channel to its parent, if any.
+
+    A `ProcessTree` always has a `to_parent` attribute; it stays None until the
+    process connects to a parent, which only a Hyde-managed kernel child does.
+    So the question "is there a GUI to talk to" is answered by the channel
+    itself, not by whether the attribute exists. Asking for the tree at all can
+    fail in a process that never connected, because building the top-level one
+    reads labconfig; a kernel child cannot reach that path, since its instance
+    was built by `connect_to_parent()`. Every one of those means the same thing
+    here: no parent channel.
+    """
     if _ProcessTree is None:
         return None
-    tree = _ProcessTree.instance()
-    if tree is None or not hasattr(tree, "to_parent"):
+    try:
+        tree = _ProcessTree.instance()
+    except Exception:
+        return None
+    if getattr(tree, "to_parent", None) is None:
         return None
     return tree
+
+
+def _report_undelivered_signal(signal):
+    """Say that `signal` did not reach the GUI process.
+
+    Call from an exception handler, so the traceback travels with it.
+
+    Silent when there is no parent channel: `hyde` is importable in a plain
+    IPython, a script, or a test, where there is no GUI to tell and nothing has
+    gone wrong. A channel that is there and would not take the message is a
+    fault, and the kernel names the signal it lost -- otherwise the GUI simply
+    never hears it and neither process says why.
+
+    The kernel configures `hyde-kernel` rather than `hyde`, so this reaches the
+    user as the kernel's stderr, which the GUI redirects into its logging
+    window. That is why it is worth an error rather than a debug line.
+    """
+    if _parent_tree() is None:
+        return
+    LOGGER.exception(
+        "Hyde could not deliver the %s signal to the GUI process.",
+        signal,
+    )
 
 
 def put_parent_message(message):
@@ -104,8 +144,7 @@ def signal_open_table(
             },
         ])
     except Exception:
-        # Silently fail if running outside a Hyde-managed kernel.
-        pass
+        _report_undelivered_signal("OPEN_TABLE_REQUEST")
 
 
 def signal_append_table(names, *, name):
@@ -118,7 +157,7 @@ def signal_append_table(names, *, name):
             },
         ])
     except Exception:
-        pass
+        _report_undelivered_signal("APPEND_TABLE_REQUEST")
 
 
 def signal_enter_no_project_state():
@@ -126,7 +165,7 @@ def signal_enter_no_project_state():
     try:
         put_parent_message(["ENTER_NO_PROJECT_STATE", None])
     except Exception:
-        return
+        _report_undelivered_signal("ENTER_NO_PROJECT_STATE")
 
 
 def signal_activate_project(path):
@@ -134,7 +173,7 @@ def signal_activate_project(path):
     try:
         put_parent_message(["ACTIVATE_PROJECT", {"path": path}])
     except Exception:
-        return
+        _report_undelivered_signal("ACTIVATE_PROJECT")
 
 
 def signal_quit_requested():
@@ -142,7 +181,7 @@ def signal_quit_requested():
     try:
         put_parent_message(["QUIT_REQUESTED", None])
     except Exception:
-        return
+        _report_undelivered_signal("QUIT_REQUESTED")
 
 
 def push_table_data(names, request_id):
@@ -196,4 +235,4 @@ def publish_project_state_result(operation, path, success=True, errors=None, obj
             },
         ])
     except Exception:
-        pass
+        _report_undelivered_signal("PROJECT_STATE_RESULT")
