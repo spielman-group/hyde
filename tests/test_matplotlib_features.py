@@ -1108,7 +1108,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
         payload = figure_snapshot_payload(figure, 1)
 
-        self.assertEqual(payload["tracked_names"], ["x", "y"])
+        # The names the window watches are the ones it reads back off the
+        # shipped IR, so that is what the kernel has to have described.
+        self.assertEqual(FigureIR.from_snapshot(payload).tracked_names(), ("x", "y"))
         self.assertIsNone(payload["live_state"])
         self.assertEqual(payload["figure_ir"]["settings"]["title"], "Graph0")
         self.assertEqual(
@@ -1272,8 +1274,9 @@ class TestFigureBackendSnapshot(unittest.TestCase):
 
             payload = figure_snapshot_payload(figure, 1)
 
-            self.assertEqual(payload["tracked_names"], [])
             self.assertIsNone(payload["live_state"])
+            # The values are frozen into the recreation, not referred to by the
+            # names they happen to sit under, so nothing adopts `fit_delay`.
             self.assertIn("ax.plot(np.array([1, 4, 9])", payload["call_source"])
         finally:
             for name, value in previous_values.items():

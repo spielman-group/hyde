@@ -184,12 +184,15 @@ class TestFigureCommActions(unittest.TestCase):
         macro([1.0, 4.0, 9.0])
         again = macro([2.0, 5.0, 10.0])
         payload = figure_snapshot_payload(again, again.canvas.manager.num)
-        source = FigureIR(
+        figure_ir = FigureIR(
             figure_state=payload["figure_ir"],
             figure_defaults=payload["figure_defaults"],
-        ).recreation_function_source("Graph0", register=False)
+        )
+        source = figure_ir.recreation_function_source("Graph0", register=False)
 
-        self.assertEqual(["y"], payload["tracked_names"])
+        # Losing the parameter loses the tracking with it: the window watches
+        # exactly the names it reads back off this IR.
+        self.assertEqual(("y",), figure_ir.tracked_names())
         self.assertIn("def Graph0(y):", source)
         self.assertNotIn("np.array(", source)
 
@@ -419,7 +422,6 @@ class TestFigureCommActions(unittest.TestCase):
 
         self.assertFalse(payload["is_first_class"])
         self.assertIsNone(payload.get("figure_ir"))
-        self.assertEqual([], payload["tracked_names"])
         with self.assertRaises(ValueError):
             hyde.get_figure("Plain")
 

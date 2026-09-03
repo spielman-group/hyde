@@ -36,7 +36,12 @@ exercised.
       not a reply plus a payload, so its one clock has no legitimate moment to
       start. The comm request got its own recovery, driven by evidence of loss
       rather than by elapsed time
-- [ ] Slice 17: Settle The Orphaned `tracked_names` Payload Field
+- [x] Slice 17: Settle The Orphaned `tracked_names` Payload Field
+      — removed. The field was derived kernel-side from the very `figure_ir`
+      shipped beside it, so reading it would have bought no authority the IR
+      does not already carry, and would have made the ordering hazard live.
+      There was a fourth assertion site the filing missed,
+      `test_figure_comm_actions.py:422`
 - [ ] Slice 18: Make A Plugin That Fails To Load Visible
 - [ ] Slice 19: A Failed Macro Still Leaves Non-Trace Mutations On A Neighbour
 
@@ -1174,16 +1179,67 @@ Decide which way it goes, and say why:
 Removal looks right, but the decision belongs to whoever holds the IPC protocol
 in view; state the reasoning either way.
 
+**Settled: removed.** The premises were re-verified first. No reader exists
+anywhere — the payload crosses the comm whole, and both consumers of the
+`snapshot` dict read named keys only (`figure_interactive/__init__.py` and
+`window.py`), while `FigureIR.from_snapshot` reads four keys and not this one.
+Nothing in `project_management/` mentions the field, gitignored `_source/`
+included. There were **four** assertion sites, not three: the filing missed
+`test_figure_comm_actions.py:422`.
+
+The two candidate divergences were then separated by execution, and only one is
+real:
+
+- **The read-back-fails path does not diverge.** On the Slice 13 path
+  (`line.set_data(np.zeros((2,3)), ...)`),
+  `_refresh_first_class_figure_metadata` sets the import warning and returns
+  without replacing `figure._hyde_ir`, and `figure_snapshot_payload` then
+  derives *both* the shipped `figure_ir` and the `tracked_names` list from that
+  one stale IR. Driven for real, both said `y`. They go stale together, which is
+  self-consistent: the figure keeps refreshing on the last names Hyde could
+  read.
+- **The ordering hazard is the only divergence, and keeping the field is what
+  would arm it.** With `state_to_python` forced to raise on a figure whose IR
+  tracks `y`, the payload shipped `tracked_names: []` beside a `figure_ir` the
+  GUI still reads `('y',)` off. A GUI reading the field would have had a figure
+  that reports nothing and never refreshes — the Slice 10 defect exactly, moved
+  across the process boundary where it is harder to see. Removal retires it: the
+  `try` no longer guards anything whose loss is silent.
+
+So the field bought no authority the IR does not already carry, and its only
+possible effect was to contradict it.
+
+Left alone deliberately, as a consequence outside this slice: the removed line
+was the last production caller of `MatplotlibCodec.tracked_names`
+(`hyde/features/matplotlib_features.py:623`), so that classmethod is now
+reached only from
+`test_matplotlib_features.py::test_lowering_and_tracked_names_match_across_the_process_boundary`.
+It is not part of the `FeatureCodec` ABC, but it is one arm of the codec's
+uniform feature-kind dispatch and its test is a legitimate
+two-implementations-agree contract, so removing it is a separate judgement about
+the codec's surface rather than about this payload field. The kernel-side
+`FigureCommandModel.tracked_names` it delegates to is still live, via
+`state_to_macro_source`.
+
 ### Acceptance criteria
 
-- [ ] `tracked_names` is either gone from the payload, or read by production
-      code — not produced-and-ignored.
-- [ ] If removed, the ordering hazard at `matplotlib_backend.py:777-785` goes
-      with it or is stated as moot.
-- [ ] The three tests assert tracked names the GUI acts on, or are removed with
-      the field.
-- [ ] Figure refresh on a namespace change still works, and a figure that tracks
-      nothing still does not refresh.
+- [x] `tracked_names` is either gone from the payload, or read by production
+      code — not produced-and-ignored. Gone from both payload branches.
+- [x] If removed, the ordering hazard at `matplotlib_backend.py:777-785` goes
+      with it or is stated as moot. Gone with it.
+- [x] The three tests assert tracked names the GUI acts on, or are removed with
+      the field. Two now assert `FigureIR.tracked_names()` — the window's own
+      call — and both were confirmed to fail when that call is sabotaged. The
+      other two lines were dropped as second statements of an assertion already
+      in the same test (`figure_ir is None` for a figure Hyde does not
+      describe; the frozen `np.array(...)` literal for a second-class figure
+      that did not adopt the namespace names it happened to be plotted from).
+- [x] Figure refresh on a namespace change still works, and a figure that tracks
+      nothing still does not refresh. Verified by execution, not by the suite
+      alone: a real `@hyde.figure` payload from the real backend drove a real
+      `FigureWindow`, which reported `('y',)` and issued exactly one
+      `hyde.refresh_figure` when `y` changed; a figure built from a literal
+      reported `()` and issued none.
 
 ### Blocked by
 

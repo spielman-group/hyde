@@ -831,13 +831,11 @@ def figure_snapshot_payload(figure, number):
             figure._hyde_defaults = figure_defaults
         call_source = None
         save_error = getattr(figure, "_hyde_import_warning", None)
-        tracked_names = []
         try:
             call_source = MatplotlibCodec.state_to_python(
                 normalized_figure_ir,
                 context={"figure_defaults": figure_defaults},
             )
-            tracked_names = list(MatplotlibCodec.tracked_names(normalized_figure_ir))
         except Exception as exc:
             save_error = save_error or str(exc)
         payload = {
@@ -847,7 +845,6 @@ def figure_snapshot_payload(figure, number):
             "figure_size": tuple(
                 int(value * figure.dpi) for value in figure.get_size_inches()
             ),
-            "tracked_names": tracked_names,
             "live_state": None,
             "figure_ir": normalized_figure_ir,
             "figure_defaults": figure_defaults,
@@ -868,7 +865,6 @@ def figure_snapshot_payload(figure, number):
         "figure_size": tuple(
             int(value * figure.dpi) for value in figure.get_size_inches()
         ),
-        "tracked_names": [],
         "live_state": None,
         "hyde_metadata": hyde_metadata,
         "is_first_class": False,
